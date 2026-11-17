@@ -87,7 +87,7 @@ class AnnotationPanel(QWidget):
         # the part of the ROI that is measured: a frame range and a z range
         from .roi_ranges import RangePanel
         self.ranges = RangePanel(window)
-        layout.addWidget(CollapsibleSection("frames and z", self.ranges, expanded=False))
+        layout.addWidget(CollapsibleSection("ranges", self.ranges, expanded=False))
 
         for key in range(10):
             shortcut = QShortcut(QKeySequence(str(key)), window)

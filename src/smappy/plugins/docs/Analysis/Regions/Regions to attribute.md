@@ -34,9 +34,9 @@ What you said of the ROIs reaches the table the same way.  Only ROIs ticked
 *use* are written, so a `roi_id` of 0 or above is "in a used ROI" (-1 is
 none): a filter on it
 keeps the tracks or sites you kept and drops the rest, for any plugin that
-runs on the view afterwards.  An ROI's frame range and z range (set under
-*frames and z* in the ROI manager's *annotate*) are part of what it holds,
-so a localization outside them gets -1 too.  And each list of keywords
+runs on the view afterwards.  An ROI's ranges (set under
+*ranges* in the ROI manager's *annotate*: frames, z or any attribute) are
+part of what it holds, so a localization outside them gets -1 too.  And each list of keywords
 becomes an attribute, `<list>_keyword`, holding the keyword's place in its list
 -- with the lists *quality: good, bad*, `quality_keyword` is 1 on the
 localizations of the ROIs called *good* and 2 on the *bad* ones.  With

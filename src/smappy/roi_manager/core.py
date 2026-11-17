@@ -106,6 +106,41 @@ def changes_table(step) -> bool:
         return bool(getattr(step.plugin, "changes_locs", False))
 
 
+#: shapes a run may draw over its region, and how many points in all: a
+#: picture to look at, so a few thousand are plenty
+OVERLAY_KINDS = ("line", "points", "circle")
+MAX_OVERLAY_POINTS = 5000
+
+
+def overlay_shapes(shapes) -> List[Dict[str, Any]]:
+    """`Result.overlays` checked and made plain: each a known kind with
+    finite ``points`` (``(n, 2)``, nm), a circle a positive ``radius``, an
+    optional ``label``.  A wrong one is refused, naming what is wrong, as a
+    value that is not a number is: an overlay is a promise of a picture."""
+    out, total = [], 0
+    for k, shape in enumerate(shapes):
+        kind = shape.get("kind") if isinstance(shape, dict) else None
+        if kind not in OVERLAY_KINDS:
+            raise ValueError(f"overlay {k} is {kind!r}: one of {', '.join(OVERLAY_KINDS)}")
+        p = np.asarray(shape.get("points", []), dtype=float).reshape(-1, 2)
+        if not len(p) or not np.isfinite(p).all():
+            raise ValueError(f"overlay {k} ({kind}) needs finite points, [[x, y], ...] in nm")
+        plain: Dict[str, Any] = {"kind": kind, "points": p.tolist()}
+        if kind == "circle":
+            r = float(shape.get("radius", 0) or 0)
+            if not np.isfinite(r) or r <= 0:
+                raise ValueError(f"overlay {k} (circle) needs a positive radius")
+            plain["radius"] = r
+        if shape.get("label"):
+            plain["label"] = str(shape["label"])
+        total += len(p)
+        out.append(plain)
+    if total > MAX_OVERLAY_POINTS:
+        raise ValueError(f"the overlays have {total} points; at most "
+                         f"{MAX_OVERLAY_POINTS}: they are a picture over the ROI")
+    return out
+
+
 def region_entry(result, plugin=None, keep: bool = False) -> Dict:
     """What one run in one region stores: its `Result.values`, a number
     each, and its `Result.arrays`.
@@ -129,6 +164,9 @@ def region_entry(result, plugin=None, keep: bool = False) -> Dict:
                             "number: put it in Result.arrays")
         values[name] = value
     entry = {"values": values}
+    overlays = overlay_shapes(getattr(result, "overlays", None) or [])
+    if overlays:
+        entry["overlays"] = overlays
     if result.arrays:
         entry["arrays"] = {name: np.asarray(a).tolist()
                            for name, a in result.arrays.items()}
@@ -164,11 +202,18 @@ class ROI:
     # `annotations` is
     lines: dict = field(default_factory=dict)
     # the structure's orientation in degrees, ``atan2(dy, dx)`` as a line's
-    # (`line_angle_length`): an annotation, 0 until turned, which the
-    # project uses only while it rotates its ROIs (`ROIProject.rotate`) --
-    # then the ROI is shown and measured in its own frame (`SiteFrame`).
-    # SMAP's ``rotationpos`` line
+    # (`line_angle_length`), 0 until set: the ROI's own frame (`SiteFrame`),
+    # which every measurement in it gets (`SITE_X`), whether or not the
+    # project shows it turned (`ROIProject.rotate`).  SMAP's ``rotationpos``
+    # line
     angle: float = 0.0
+    # who set which of its properties, ``{property: who}``: "hand" in the ROI
+    # manager, or the method that measured it (a segmenter, *ROIs from results*),
+    # so a method run again can leave what was corrected by hand alone --
+    # "angle" now; frame and z ranges, lines and keywords set from results
+    # later.  A property not in it was never set.  Replaced, never edited
+    # in place (`copy_rois`): use `source` and `set_source`
+    set_by: dict = field(default_factory=dict)
     use: bool = True
     comment: str = ""
     origin: dict = field(default_factory=lambda: {"method": "manual"})
@@ -180,19 +225,44 @@ class ROI:
     # ``{column: id}``, keeps only the rows with that id -- a track, a
     # cluster; with ``spatial`` off the shape takes no part and the id alone
     # decides, since a shape drawn round one track also takes in every track
-    # that crosses it.  ``frames`` and ``z`` are ``[low, high]``, inclusive,
-    # either end None for open, the whole None for all: a frame range and a
-    # z range kept with the ROI, so what is measured in it is that part.
+    # that crosses it.  ``ranges``, ``{attribute: [low, high]}``, inclusive,
+    # either end None for open, an attribute not in it all of it: the part
+    # of the ROI that is measured -- frames and z most often, any attribute
+    # of the table (``time_s`` for MINFLUX, ``sigma_nm``) as well.  Replaced,
+    # never edited in place (`copy_rois`)
     ids: dict = field(default_factory=dict)
     spatial: bool = True
-    frames: Optional[list] = None
-    z: Optional[list] = None
+    ranges: dict = field(default_factory=dict)
+
+    # the two ranges most ROIs have, by the names they had before any
+    # attribute could have one: ``roi.frames`` is ``roi.ranges["frame"]``
+    @property
+    def frames(self) -> Optional[list]:
+        return self.ranges.get(FRAME_RANGE)
+
+    @frames.setter
+    def frames(self, bounds) -> None:
+        self.set_range(FRAME_RANGE, bounds)
+
+    @property
+    def z(self) -> Optional[list]:
+        return self.ranges.get(Z_RANGE)
+
+    @z.setter
+    def z(self, bounds) -> None:
+        self.set_range(Z_RANGE, bounds)
+
+    def set_range(self, column: str, bounds) -> None:
+        """One attribute's range, ``[low, high]``; None removes it (all of
+        it).  A new dict, so that a copy an undo keeps is not changed."""
+        bounds = value_range(bounds, f"{column} range")
+        others = {k: v for k, v in self.ranges.items() if k != column}
+        self.ranges = {**others, column: bounds} if bounds is not None else others
 
     @property
     def narrowed(self) -> bool:
         """Is anything but the shape part of its membership?"""
-        return bool(self.ids) or not self.spatial or self.frames is not None \
-            or self.z is not None
+        return bool(self.ids) or not self.spatial or bool(self.ranges)
 
     def region(self, shape: str, size_nm: float, angle: float = 0.0) -> Region:
         """This ROI's shape: its own polygon, or the project's ``shape`` of
@@ -202,6 +272,17 @@ class ROI:
         square with the structure (`Region.site`): the project's to say,
         since only a project that rotates its ROIs turns it."""
         return Region.site(self.center, shape, size_nm, self.polygon, angle, self.ellipse)
+
+    def source(self, prop: str) -> str:
+        """Who set ``prop`` (`set_by`): "hand", a method's name, or "" for
+        never set."""
+        return str((self.set_by or {}).get(prop, ""))
+
+    def set_source(self, prop: str, who: str) -> None:
+        """Note who set ``prop``; "" forgets it.  A new dict, so that a copy
+        an undo keeps is not changed with it."""
+        others = {k: v for k, v in (self.set_by or {}).items() if k != prop}
+        self.set_by = {**others, prop: str(who)} if who else others
 
     @classmethod
     def from_dict(cls, saved: dict) -> "ROI":
@@ -227,9 +308,21 @@ class ROI:
             roi.angle = normal_angle(saved["angle"])
         elif DIRECTION in lines:
             roi.angle = normal_angle(line_angle_length(lines[DIRECTION])[0])
+        # an angle from before its origin was kept was set by hand: here, or
+        # as SMAP's rotation line -- never to be overwritten by a method
+        roi.set_by = {str(k): str(v) for k, v in (roi.set_by or {}).items() if v}
+        if roi.angle and "angle" not in roi.set_by:
+            roi.set_source("angle", "hand")
         roi.ids = id_values(roi.ids)
-        roi.frames = value_range(roi.frames, "frame range")
-        roi.z = value_range(roi.z, "z range")
+        # files from before any attribute could have a range carry two
+        ranges = {str(k): v for k, v in (roi.ranges or {}).items()}
+        if saved.get("frames") is not None:
+            ranges.setdefault(FRAME_RANGE, saved["frames"])
+        if saved.get("z") is not None:
+            ranges.setdefault(Z_RANGE, saved["z"])
+        roi.ranges = {}
+        for column, bounds in ranges.items():
+            roi.set_range(column, bounds)
         if not roi.spatial and not roi.ids:
             raise ValueError("an ROI that is not a shape needs an id")
         return roi
@@ -274,7 +367,7 @@ def narrow(roi: "ROI", locs, rows: np.ndarray) -> np.ndarray:
         if column not in locs:
             return rows[:0]
         keep &= np.asarray(locs[column])[rows] == value
-    for column, bounds in (("frame", roi.frames), ("z_nm", roi.z)):
+    for column, bounds in roi.ranges.items():
         if bounds is None or column not in locs:
             continue
         v = np.asarray(locs[column])[rows]
@@ -322,6 +415,24 @@ class ROIStep:
     rois: Dict[str, "ROI"]
 
 
+# the attributes of the two ranges every project starts with (`ROI.ranges`)
+FRAME_RANGE, Z_RANGE = "frame", "z_nm"
+DEFAULT_RANGES = [FRAME_RANGE, Z_RANGE]
+
+
+def range_kind(column: str) -> str:
+    """How a range's attribute is drawn: ``"bars"``, the localizations
+    counted over it, for a time or an id, where each value has many; or
+    ``"dots"``, the attribute against the position, for a measured quantity
+    such as z or sigma, where a band is set by looking at where the points
+    lie."""
+    name = str(column).lower()
+    if name in ("frame", "time", "time_s", "tim", "tid", "id") or name.endswith("_id") \
+            or name.startswith("time"):
+        return "bars"
+    return "dots"
+
+
 # The line a new project offers.  Before an ROI had an angle it was called
 # ``direction``; the angle took that role, and a line is now only a line
 LINE = "line"
@@ -334,6 +445,20 @@ def range_text(bounds, unit: str = "") -> str:
     """``[low, high]`` as ``low-high``, an open end left blank."""
     lo, hi = (("" if b is None else f"{b:g}") for b in bounds)
     return f"{lo}\u2013{hi}{unit}"
+
+
+def range_name(column: str) -> str:
+    """How a range is named in a sentence: frames, z, or the attribute."""
+    return {FRAME_RANGE: "frames", Z_RANGE: "z range"}.get(column, f"{column} range")
+
+
+def range_description(column: str, bounds) -> str:
+    """``frames 3-10``, ``z 20-60 nm``, ``time_s 1.5-``."""
+    if column == FRAME_RANGE:
+        return "frames " + range_text(bounds)
+    if column == Z_RANGE:
+        return "z " + range_text(bounds, " nm")
+    return f"{column} " + range_text(bounds)
 
 
 def normal_angle(value) -> float:
@@ -613,6 +738,9 @@ class ROIProject:
             k: list(v) for k, v in DEFAULT_ANNOTATION_LISTS.items()}
         # the names a line is drawn under (`ROI.lines`)
         self.line_names: List[str] = [LINE]
+        # the attributes the ROI manager offers ranges of (*ranges*), in
+        # order; an ROI keeps a range of one taken out of the list
+        self.range_columns: List[str] = list(DEFAULT_RANGES)
         # The per-region steps, a `chain.Block`: what the steps window edits
         # and runs, and what the ROI manager measures an ROI with.  It
         # travels with the project because the columns of a results table
@@ -641,8 +769,9 @@ class ROIProject:
         self.size_nm, self.shape = size, shape
 
     def set_rotate(self, on: bool) -> None:
-        """Show and measure the ROIs in their own frames, or not.  Not an
-        edit of the ROIs (nothing to undo): their angles stay either way."""
+        """Show the ROIs turned to their angles, and turn the shared square
+        with each, or not.  Not an edit of the ROIs (nothing to undo): their
+        angles, and the frame they are measured in, stay either way."""
         self.rotate = bool(on)
 
     @property
@@ -653,24 +782,30 @@ class ROIProject:
         return self.rotate or any(r.angle for r in self.rois.values())
 
     def site_angle(self, roi) -> float:
-        """The angle an ROI is shown and measured at: its own while the
-        project rotates, else 0."""
+        """The angle an ROI is *shown* at, and the shared square turned by:
+        its own while the project rotates, else 0.  What is measured in it
+        is in its own frame either way (`frame`)."""
         return float(roi.angle) if self.rotate else 0.0
 
     def frame(self, roi) -> SiteFrame:
-        """The ROI's own frame (`SiteFrame`): its centre, and its angle while
-        the project rotates -- the frame the ROI manager shows it in."""
-        return SiteFrame(roi.center, self.site_angle(roi))
+        """The ROI's own frame (`SiteFrame`): its centre and its angle,
+        whether or not the project shows it turned.  A plugin that wants
+        the structure's axes reads them (`SITE_X`) and cannot be fed the
+        wrong ones by an unticked *rotate*; an ROI never turned has angle 0,
+        and its frame is the file's axes about its centre."""
+        return SiteFrame(roi.center, float(roi.angle))
 
-    def set_angle(self, roi_id, angle) -> None:
-        """Turn an ROI: its orientation, in degrees.  Undoable; its results
-        go out of date only while the project rotates (`geometry`)."""
+    def set_angle(self, roi_id, angle, by: str = "hand") -> None:
+        """Turn an ROI: its orientation, in degrees, and who set it
+        (`ROI.set_by`).  Undoable; its results go out of date, since it
+        is the frame they are measured in (`geometry`)."""
         roi = self.rois[roi_id]
         angle = normal_angle(angle)
-        if angle == roi.angle:
+        if angle == roi.angle and by == roi.source("angle"):
             return
         with self.edit(f"Turn ROI {roi.number}"):
             roi.angle = angle
+            roi.set_source("angle", by)
 
     def set_tiles(self, size_nm):
         """Cover each file with a grid of squares this wide; 0 turns it off."""
@@ -731,9 +866,10 @@ class ROIProject:
         step = self.history.redo(self.rois)
         return step.label if step else None
 
-    def annotate(self, roi_id, name: str, keyword: Optional[str]) -> None:
+    def annotate(self, roi_id, name: str, keyword: Optional[str], by: str = "hand") -> None:
         """Give an ROI ``keyword`` from list ``name``; None or "" clears it.
-        Undoable, as any edit of the ROIs."""
+        Undoable, as any edit of the ROIs; ``by`` who did (`ROI.set_by`,
+        ``keyword:<list>``)."""
         roi = self.rois[roi_id]
         if keyword and keyword not in self.annotation_lists.get(name, ()):
             raise ValueError(f"{keyword!r} is not in the list {name!r}")
@@ -744,6 +880,7 @@ class ROIProject:
             if keyword:
                 annotations[name] = keyword
             roi.annotations = annotations        # replaced: see `copy_rois`
+            roi.set_source(f"keyword:{name}", by)
 
     def set_annotation_lists(self, lists: Dict[str, List[str]]) -> None:
         """New keyword lists.  An ROI keeps its keywords even where a list no
@@ -751,21 +888,36 @@ class ROIProject:
         annotation -- and they show until it is given another."""
         self.annotation_lists = {str(k): [str(w) for w in v] for k, v in lists.items()}
 
+    def set_range_columns(self, names) -> None:
+        """The attributes the ROI manager offers ranges of, in order, each
+        once; none at all is the default two."""
+        out: List[str] = []
+        for name in names:
+            name = str(name).strip()
+            if name and name not in out:
+                out.append(name)
+        self.range_columns = out or list(DEFAULT_RANGES)
+
     def set_line_names(self, names: List[str]) -> None:
         """New line names.  An ROI keeps a line whose name went, as it keeps
         a keyword whose list went."""
         self.line_names = parse_line_names(",".join(str(n) for n in names))
 
-    def set_ranges(self, roi_ids, frames=..., z=...) -> None:
-        """Set the frame range and/or the z range of these ROIs, in one undo
-        step; ``...`` leaves one as it is, None clears it (all frames, all
-        z).  What is measured in an ROI is that part of it, so its results
-        go out of date."""
-        frames = frames if frames is ... else value_range(frames, "frame range")
-        z = z if z is ... else value_range(z, "z range")
+    def set_ranges(self, roi_ids, frames=..., z=..., ranges=None, by: str = "hand") -> None:
+        """Set ranges of these ROIs, in one undo step: ``ranges``,
+        ``{attribute: [low, high] or None}``, and ``frames`` / ``z`` as
+        shorthands for the ``frame`` and ``z_nm`` ones (``...`` leaves one as
+        it is).  None clears a range (all of it).  What is measured in an
+        ROI is that part of it, so its results go out of date.  ``by`` is
+        who did (`ROI.set_by`, ``range:<attribute>``)."""
+        wanted = dict(ranges or {})
+        if frames is not ...:
+            wanted[FRAME_RANGE] = frames
+        if z is not ...:
+            wanted[Z_RANGE] = z
+        wanted = {str(c): value_range(b, f"{c} range") for c, b in wanted.items()}
         roi_ids = [i for i in roi_ids if i in self.rois]
-        what = " and ".join(n for n, v in (("frames", frames), ("z range", z))
-                            if v is not ...)
+        what = " and ".join(range_name(c) for c in wanted)
         if not roi_ids or not what:
             return
         label = (f"Set {what} of ROI {self.rois[roi_ids[0]].number}" if len(roi_ids) == 1
@@ -773,13 +925,13 @@ class ROIProject:
         with self.edit(label):
             for roi_id in roi_ids:
                 roi = self.rois[roi_id]
-                if frames is not ...:
-                    roi.frames = frames
-                if z is not ...:
-                    roi.z = z
+                for column, bounds in wanted.items():
+                    roi.set_range(column, bounds)
+                    roi.set_source(f"range:{column}", by)
 
-    def set_line(self, roi_id, name: str, line) -> None:
-        """Draw the line ``name`` of an ROI; None removes it.  Undoable."""
+    def set_line(self, roi_id, name: str, line, by: str = "hand") -> None:
+        """Draw the line ``name`` of an ROI; None removes it.  Undoable;
+        ``by`` who did (`ROI.set_by`, ``line:<name>``)."""
         roi = self.rois[roi_id]
         line = None if line is None else line_points(line)
         if roi.lines.get(name) == line:
@@ -790,6 +942,7 @@ class ROIProject:
             if line is not None:
                 lines[name] = line
             roi.lines = lines                     # replaced: see `copy_rois`
+            roi.set_source(f"line:{name}", by if line is not None else "")
 
     def reverse_line(self, roi_id, name: str) -> bool:
         """Swap a line's start and end (its angle turns by 180 degrees);
@@ -800,6 +953,7 @@ class ROIProject:
         roi = self.rois[roi_id]
         with self.edit(f"Reverse {name} of ROI {roi.number}"):
             roi.lines = {**roi.lines, name: [line[1], line[0]]}
+            roi.set_source(f"line:{name}", "hand")
         return True
 
     def add_roi(self, file_id, center, polygon=None, origin=None, ids=None,
@@ -814,9 +968,8 @@ class ROIProject:
         roi = ROI(file_id, point(center), polygon=(None if polygon is None else
                   polygon_vertices(polygon)),
                   ellipse=None if ellipse is None else ellipse_shape(ellipse),
-                  ids=id_values(ids),
-                  spatial=bool(spatial), frames=value_range(frames, "frame range"),
-                  z=value_range(z, "z range"))
+                  ids=id_values(ids), spatial=bool(spatial))
+        roi.frames, roi.z = frames, z
         if not roi.spatial and not roi.ids:
             raise ValueError("an ROI that is not a shape needs an id")
         if origin is not None:
@@ -824,6 +977,25 @@ class ROIProject:
         roi.number = self.next_number
         self.next_number += 1
         self.rois[roi.id] = roi
+        return roi
+
+    def add_site(self, file_id, site: dict, by: str = "") -> "ROI":
+        """A segmenter's site as an ROI: ``center`` and whichever of
+        ``polygon``, ``ellipse``, ``ids``, ``spatial``, ``origin``, ``use``
+        and ``angle`` it has.  The angle is the segmenter's, measured as it
+        measures (``angle_by``, else ``by``, else the origin's method,
+        kept in `ROI.set_by`): a
+        method that orients what it finds hands it back this way, and none
+        is built in here."""
+        roi = self.add_roi(file_id, site["center"], polygon=site.get("polygon"),
+                           ellipse=site.get("ellipse"), origin=site.get("origin"),
+                           ids=site.get("ids"), spatial=site.get("spatial", True))
+        roi.use = bool(site.get("use", True))
+        angle = site.get("angle")
+        if angle is not None and np.isfinite(float(angle)):
+            roi.angle = normal_angle(angle)
+            method = str((roi.origin or {}).get("method", "")).rsplit("/", 1)[-1]
+            roi.set_source("angle", site.get("angle_by") or by or method or "method")
         return roi
 
     def numbers(self) -> Dict[str, int]:
@@ -852,10 +1024,11 @@ class ROIProject:
             seen.add(roi.number)
         self.next_number = start
 
-    def move_roi(self, roi_id, center):
+    def move_roi(self, roi_id, center, by: str = ""):
         """Translate the entire ROI, including its polygon and lines.  An ROI
         of an id alone (``spatial`` off) has no place to move: its rows are
-        its id's wherever they are."""
+        its id's wherever they are.  ``by``, when given, is noted as who set
+        its centre (`ROI.set_by`)."""
         roi = self.rois[roi_id]
         if not roi.spatial:
             raise ValueError(f"ROI {roi.number} is {self.describe(roi)}, not a shape: "
@@ -870,6 +1043,8 @@ class ROIProject:
         roi.lines = {name: (np.asarray(line) + delta).tolist()
                      for name, line in roi.lines.items()}
         roi.center = center
+        if by:
+            roi.set_source("centre", by)
 
     def geometry(self, roi):
         """The ROI's shape and lines, as its measurements' signature takes
@@ -884,19 +1059,33 @@ class ROIProject:
             out = {"center": roi.center, "ellipse": roi.ellipse}
         else:
             out = {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm}
-        # only while it turns something (a square, `SITE_X`), so that the
-        # signatures of a project that does not rotate stay as they were
-        if self.site_angle(roi):
-            out["angle"] = self.site_angle(roi)
+        # the frame what is measured is in (`SITE_X`): only when turned, so
+        # an ROI never given an angle keeps the signature it always had --
+        # and one that is, while the project rotates, the one it had then.
+        # Not rotating, a shared square stays upright, which is another
+        # region than the turned one
+        if roi.angle:
+            out["angle"] = float(roi.angle)
+            if not self.rotate and roi.spatial and roi.polygon is None \
+                    and roi.ellipse is None and self.shape == "square":
+                out["upright"] = True
         out["direction"] = roi.lines.get(DIRECTION)
         others = {k: v for k, v in roi.lines.items() if k != DIRECTION}
         if others:
             out["lines"] = others
         # only when set, so an ROI of a shape alone keeps the signature it
         # had before an ROI could be anything else
-        for name in ("ids", "frames", "z"):
-            if getattr(roi, name):
-                out[name] = getattr(roi, name)
+        # the frame and z ranges by the keys they had before any attribute
+        # could have one, so the signatures saved then still match
+        if roi.ids:
+            out["ids"] = roi.ids
+        if roi.frames:
+            out["frames"] = roi.frames
+        if roi.z:
+            out["z"] = roi.z
+        others = {k: v for k, v in roi.ranges.items() if k not in (FRAME_RANGE, Z_RANGE)}
+        if others:
+            out["ranges"] = others
         return out
 
     def region(self, roi) -> Optional[Region]:
@@ -918,10 +1107,7 @@ class ROIProject:
             if angle:
                 parts[-1] += f" at {angle:.0f}\u00b0"
         parts += [f"{column} {value}" for column, value in roi.ids.items()]
-        if roi.frames is not None:
-            parts.append("frames " + range_text(roi.frames))
-        if roi.z is not None:
-            parts.append("z " + range_text(roi.z, " nm"))
+        parts += [range_description(c, b) for c, b in roi.ranges.items()]
         return ", ".join(parts)
 
     def members(self, roi, locs, index=None, keep=None) -> np.ndarray:
@@ -1017,7 +1203,7 @@ class ROIProject:
         alone, as an ROI's outline does not change with the filters."""
         ungrouped = self.state(roi.file_id).tables.ungrouped
         locs = ungrouped.locs
-        key = (roi.id, id(locs), json_text([roi.ids, roi.frames, roi.z, roi.spatial,
+        key = (roi.id, id(locs), json_text([roi.ids, roi.ranges, roi.spatial,
                                             roi.center, roi.polygon, roi.ellipse]))
         found = self._traces.get(key)
         if found is None:
@@ -1818,11 +2004,7 @@ class ROIProject:
             for roi_id in replaced:
                 self.rois.pop(roi_id, None)
             for site in preview["sites"]:
-                roi = self.add_roi(file_id, site["center"], polygon=site.get("polygon"),
-                                   origin=site.get("origin"), ids=site.get("ids"),
-                                   spatial=site.get("spatial", True))
-                roi.use = bool(site.get("use", True))
-                made.append(roi)
+                made.append(self.add_site(file_id, site, by=name))
             step.label = f"{name}: {len(made)} ROIs" + (
                 f" for {len(replaced)}" if replaced else "")
         self.segment_preview = None
@@ -2168,6 +2350,7 @@ class ROIProject:
                 "navigation": self.navigation,
                 "annotation_lists": self.annotation_lists,
                 "line_names": self.line_names,
+                "range_columns": self.range_columns,
                 "order": [i for i in self.order if i in self.rois],
                 "sources": [{"id": s.id, "number": s.number, "name": s.name}
                             for s in self.sources.values()],
@@ -2190,6 +2373,7 @@ class ROIProject:
         self.rotate = False
         self.set_annotation_lists(DEFAULT_ANNOTATION_LISTS)
         self.line_names = [LINE]
+        self.range_columns = list(DEFAULT_RANGES)
         self.order = []
         from ..chain import Block
         self.block = Block()
@@ -2207,6 +2391,7 @@ class ROIProject:
         self.rotate = bool(doc.get("rotate", False))
         self.set_annotation_lists(doc.get("annotation_lists", DEFAULT_ANNOTATION_LISTS))
         self.set_line_names(doc.get("line_names", [DIRECTION]))
+        self.set_range_columns(doc.get("range_columns", DEFAULT_RANGES))
         self.order = [str(i) for i in doc.get("order", [])]
         # ids the file used, mapped onto the files this session has
         by_number = {s.number: s for s in self.sources.values()}

@@ -747,3 +747,53 @@ def test_the_geometry_and_the_drawn_region_are_the_managers(tmp_path):
     assert added.id != roi.id and len(added.polygon) == 4
     assert np.allclose(added.center, [1600, 1550])
     window.close()
+
+
+def test_the_roi_image_draws_what_a_step_drew_over_the_roi(tmp_path):
+    from smappy.plugins.circle_fit import CircleFit
+    from smappy.roi_manager.pipeline import Step
+    session, window, roi = _shown(tmp_path)
+    project = session.rois
+    window.redraw()
+    assert window.roi_pane.shapes["overlay"].getData()[0] is None or \
+        len(window.roi_pane.shapes["overlay"].getData()[0]) == 0
+    steps = [Step(label="Circle fit", path="Analysis/Measure/Circle fit",
+                  plugin=CircleFit(), settings=CircleFit.Settings())]
+    project.evaluate(steps=steps)
+    window.redraw()
+    xs, ys = window.roi_pane.shapes["overlay"].getData()
+    assert xs is not None and np.isfinite(xs).sum() > 10        # a circle, drawn
+    entry = project.tables["Circle fit"].entry(roi.id)
+    (circle,) = entry["overlays"]
+    centre, r = np.asarray(circle["points"][0]), circle["radius"]
+    drawn = np.column_stack((xs, ys))[np.isfinite(xs)]
+    assert np.allclose(np.hypot(*(drawn - centre).T), r)
+    window.close()
+
+
+def test_dragging_inside_a_polygon_moves_it_and_a_click_inside_only_centres(tmp_path):
+    session, window, roi = _shown(tmp_path)
+    project = session.rois
+    square = [[1900.0, 1900.0], [2100.0, 1900.0], [2100.0, 2100.0], [1900.0, 2100.0]]
+    window._start_drawing("polygon")
+    for x, y in square + square[:1]:
+        window._roi_clicked(x, y)
+    project.set_line(roi.id, "line", [[1950.0, 2000.0], [2050.0, 2000.0]])
+    window.redraw()
+    _drag(window, [(2000, 2000), (2030, 2010), (2060, 2020)])
+    moved = roi_now(session, roi)
+    p = window.roi_pane.fov.pixelsize
+    assert np.allclose(moved.polygon, np.asarray(square) + [60, 20], atol=p)
+    assert np.allclose(moved.center, np.mean(moved.polygon, axis=0))
+    assert moved.lines["line"] == [[1950.0, 2000.0], [2050.0, 2000.0]]   # on the structure
+    window.undo()
+    assert roi_now(session, roi).polygon == square
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtTest import QTest
+    pane = window.roi_pane
+    at = pane.graphics.mapFromScene(pane.content.mapToScene(QPointF(2010.0, 1990.0)))
+    QTest.mouseClick(pane.graphics.viewport(), Qt.LeftButton, Qt.NoModifier, at)
+    clicked = roi_now(session, roi)
+    assert clicked.polygon == square                        # the outline stays
+    assert np.allclose(clicked.center, [2010, 1990], atol=p)
+    window.close()

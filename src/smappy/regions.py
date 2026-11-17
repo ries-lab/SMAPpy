@@ -258,13 +258,13 @@ class SiteFrame:
     turned by ``-angle`` so that a structure lying at ``angle`` (degrees,
     ``atan2(dy, dx)`` as a line's, SMAP's ``pos2angle``) lies along +x.
 
-    What the ROI manager shows when *rotate* is on, and what a measurement
-    in an ROI gets as `SITE_X` / `SITE_Y` beside the absolute ``x_nm`` /
-    ``y_nm``, which never change meaning: a plugin that reports a position
-    to be found again in the file (a circle's centre) keeps using those,
-    one that wants the structure's own axes uses these -- SMAP's
-    ``xnmrot`` / ``ynmrot``.  ``angle`` is the angle in use, 0 when the
-    ROIs are not rotated, so the frame is always the one on the screen.
+    What a measurement in an ROI gets as `SITE_X` / `SITE_Y` beside the
+    absolute ``x_nm`` / ``y_nm``, which never change meaning: a plugin that
+    reports a position to be found again in the file (a circle's centre)
+    keeps using those, one that wants the structure's own axes uses these
+    -- SMAP's ``xnmrot`` / ``ynmrot``.  ``angle`` is the ROI's own, whether
+    or not the ROI manager shows it turned (*rotate*): a display setting
+    must not change what is measured.
     """
     center: np.ndarray
     angle: float = 0.0

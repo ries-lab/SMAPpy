@@ -78,18 +78,23 @@ def test_an_older_files_direction_line_gives_the_roi_its_angle():
     assert roi.angle == 10                       # its own, once it has one
 
 
-def test_without_rotation_the_angle_is_an_annotation_and_changes_nothing():
+def test_without_rotation_an_roi_is_still_measured_in_its_own_frame():
+    """*rotate* is a way of looking: a plugin that wants the structure's axes
+    gets them whether or not it is ticked, so an unticked box cannot hand it
+    the file's axes instead.  The square stays upright, as it is shown."""
     session, project = _session([INSIDE_TURNED, INSIDE_UPRIGHT, FAR])
     roi = project.add_roi(next(iter(project.sources)), [0, 0])
     assert "roi_angle_deg" not in project.sort_rows()[roi.id]    # no angles: no column
     before = project.geometry(roi)
+    assert project.frame(roi).angle == 0                 # never turned: the file's axes
     project.set_angle(roi.id, 45)
-    assert project.geometry(roi) == before               # results stay current
-    assert project.region(roi).kind == "rect"
+    assert project.geometry(roi) != before               # the frame changed: out of date
+    assert project.region(roi).kind == "rect"            # the square not turned
     ctx = project.region_context(roi)
     assert sorted(ctx.locs["x_nm"]) == [90.0]
-    assert ctx.frame.angle == 0.0                        # centred, not turned
-    assert ctx.locs[SITE_X][0] == 90.0 and ctx.locs[SITE_Y][0] == 90.0
+    assert ctx.frame.angle == 45                         # its own frame all the same
+    assert ctx.locs[SITE_X][0] == pytest.approx(90 * np.sqrt(2))
+    assert ctx.locs[SITE_Y][0] == pytest.approx(0.0, abs=1e-9)
     assert project.sort_rows()[roi.id]["roi_angle_deg"] == 45
 
 
@@ -128,21 +133,24 @@ def test_turning_a_rotated_roi_puts_its_results_out_of_date_and_is_undone():
     assert project.rois[roi.id].angle == 0          # undo puts copies back
 
 
-def test_switching_rotation_off_ignores_every_angle_and_is_saved_with_the_project():
+def test_switching_rotation_off_keeps_the_frame_and_is_saved_with_the_project():
     session, project = _session([INSIDE_TURNED, INSIDE_UPRIGHT, FAR])
     roi = project.add_roi(next(iter(project.sources)), [0, 0])
     project.set_angle(roi.id, 45)
     project.set_rotate(True)
     turned = project.geometry(roi)
     project.set_rotate(False)
-    assert project.geometry(roi) != turned and "angle" not in project.geometry(roi)
+    upright = project.geometry(roi)
+    # the angle stays in the signature (it is the frame); the square is upright
+    assert upright != turned and upright["angle"] == 45 and upright["upright"]
+    assert project.frame(roi).angle == 45
     project.set_rotate(True)
     saved = project.to_dict()
     project.from_dict(None)
     assert not project.rotate
     project.from_dict(saved)
     assert project.rotate and project.rois[roi.id].angle == 45
-    assert project.geometry(project.rois[roi.id]) == turned
+    assert project.geometry(project.rois[roi.id]) == turned        # as before
 
 
 def test_a_rotated_roi_is_looked_at_along_its_angle_in_3d():
@@ -261,10 +269,10 @@ def test_a_range_cuts_the_roi_image_inside_the_roi_only_and_a_draft_keeps_its_ow
     window.draft = np.array([0.0, 0.0])
     window.redraw()
     assert window.shown_roi().frames is None                       # a draft: all frames
-    window.annotation.ranges.fields[("frames", 0)].setText("1")
-    window.annotation.ranges.fields[("frames", 1)].setText("2")
-    window.annotation.ranges._typed("frames")
-    assert window.draft_frames == [1.0, 2.0] and not project.rois  # no edit yet
+    window.annotation.ranges.fields[("frame", 0)].setText("1")
+    window.annotation.ranges.fields[("frame", 1)].setText("2")
+    window.annotation.ranges._typed("frame")
+    assert window.draft_ranges == {"frame": [1.0, 2.0]} and not project.rois  # no edit yet
     view = project.view(window.current_file()), project.state(window.current_file())
     layers, _ = window._cut_to_ranges(view)
     shown = np.flatnonzero(next(s for s in layers if s.locs is not None).mask)

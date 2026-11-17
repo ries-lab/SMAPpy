@@ -187,6 +187,11 @@ class CircleFit(Plugin):
         def plot(ax):
             draw(ax, fits)
 
+        # the fitted circles over the ROI image, per layer
+        overlays = [{"kind": "circle", "points": [[f["values"]["x_nm"], f["values"]["y_nm"]]],
+                     "radius": f["values"]["radius_nm"], "label": f"circle {f['name']}"}
+                    for f in fits if np.isfinite(f["values"]["radius_nm"])
+                    and np.isfinite(f["values"]["x_nm"]) and np.isfinite(f["values"]["y_nm"])]
         return Result(text="\n".join(lines), plot=Plot(plot, size=(4.6, 4.2)),
                       values=values, data={"fits": fits}, settings=settings,
-                      title="circle fit")
+                      title="circle fit", overlays=overlays)

@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.plugins.segment.SegmentRegions.run, smappy.plugins.segment.SegmentRegions.react, smappy.plugins.segment.SegmentRegions.replaced, smappy.plugins.segment.SegmentRegions.describe, smappy.plugins.segment.candidates, smappy.plugins.segment.presets, smappy.plugins.segment.made_by, smappy.plugins.segment.draw_as, smappy.plugins.segment.place_positions, smappy.plugins.segment.draw_values, smappy.segmentation.find_circles, smappy.segmentation.ring_kernel, smappy.segmentation.disc_kernel, smappy.segmentation.radii, smappy.segmentation.density_image, smappy.segmentation.filter_radii, smappy.segmentation.peaks, smappy.segmentation.too_close, smappy.segmentation.measure_ring, smappy.segmentation.measure_disc, smappy.segmentation.measure_beads, smappy.segmentation.mark_touching, smappy.segmentation.judge, smappy.segmentation.keep_test, smappy.segmentation.clauses, smappy.segmentation.read_positions, smappy.segmentation.fit_circle, smappy.segmentation.roundness, smappy.fiducials.find_beads, smappy.roi_manager.order.condition, smappy.roi_manager.core.segment_columns, smappy.roi_manager.core.ROIProject.draws_track, smappy.plugins.region_column.column_regions, smappy.plugins.region_column.hull, smappy.roi_manager.core.ROIProject.find, smappy.plugins.segment.learn, smappy.plugins.segment.examples_of, smappy.plugins.segment.similar_shape, smappy.plugins.segment.is_example, smappy.segmentation.measure_rows, smappy.plugins.segment.compared, smappy.plugins.segment.joined_keep, smappy.segmentation.mean_shift, smappy.segmentation.measure_at, smappy.segmentation.similarity_window, smappy.segmentation.window_condition, smappy.segmentation.similar_candidates]
+covers: [smappy.plugins.region_column.trace_values, smappy.roi_manager.core.ROIProject.add_site, smappy.plugins.segment.SegmentRegions.run, smappy.plugins.segment.SegmentRegions.react, smappy.plugins.segment.SegmentRegions.replaced, smappy.plugins.segment.SegmentRegions.describe, smappy.plugins.segment.candidates, smappy.plugins.segment.presets, smappy.plugins.segment.made_by, smappy.plugins.segment.draw_as, smappy.plugins.segment.place_positions, smappy.plugins.segment.draw_values, smappy.segmentation.find_circles, smappy.segmentation.ring_kernel, smappy.segmentation.disc_kernel, smappy.segmentation.radii, smappy.segmentation.density_image, smappy.segmentation.filter_radii, smappy.segmentation.peaks, smappy.segmentation.too_close, smappy.segmentation.measure_ring, smappy.segmentation.measure_disc, smappy.segmentation.measure_beads, smappy.segmentation.mark_touching, smappy.segmentation.judge, smappy.segmentation.keep_test, smappy.segmentation.clauses, smappy.segmentation.read_positions, smappy.segmentation.fit_circle, smappy.segmentation.roundness, smappy.fiducials.find_beads, smappy.roi_manager.order.condition, smappy.roi_manager.core.segment_columns, smappy.roi_manager.core.ROIProject.draws_track, smappy.plugins.region_column.column_regions, smappy.plugins.region_column.hull, smappy.roi_manager.core.ROIProject.find, smappy.plugins.segment.learn, smappy.plugins.segment.examples_of, smappy.plugins.segment.similar_shape, smappy.plugins.segment.is_example, smappy.segmentation.measure_rows, smappy.plugins.segment.compared, smappy.plugins.segment.joined_keep, smappy.segmentation.mean_shift, smappy.segmentation.measure_at, smappy.segmentation.similarity_window, smappy.segmentation.window_condition, smappy.segmentation.similar_candidates]
 ---
 
 ## What it does
@@ -138,7 +138,19 @@ alone* and the attribute `track_id` (from
 localizations and nothing else -- not the other tracks that cross its path,
 which any shape drawn round it would take in.  The ROI manager draws it as
 its line, selects it by a click on the line, and lists it beside the other
-ROIs, with *use*, keywords, and a frame range and z range of its own.
+ROIs, with *use*, keywords, and ranges of its own (frames, z, or any attribute).
+
+For **motors** -- kinesin on a microtubule, a MINFLUX `tid` that walks --
+the tracks that move one way can be picked out from those that diffuse,
+and each turned so that it runs along $x$, left to right in time.  *keep*
+of this method measures every id as a trace (its length, how elongated it
+is, which way it went) and makes ROIs only of those it keeps:
+`eccentricity >= 4 and displacement_nm >= 300` keeps long straight runs.
+*angle* gives each ROI the direction its trace moved, as its own frame, so
+every step measured in it, such as
+[Find steps](plugin:Analysis/Tracking/Find steps), gets positions along
+the track (`x_site_nm`).  Both are off by default: for diffusing
+molecules, or clusters, a direction means nothing.
 
 ### Positions from a file
 
@@ -377,6 +389,28 @@ contains `track` (or MINFLUX's `tid`) is drawn as tracks and any other as
 outlines.  Drawing a polygon on such an ROI in the ROI manager makes it the
 part of its id inside the polygon; *Clear shape* makes it the whole id
 again.
+
+**Each id as a trace.**  When *keep* or *angle* is set, every id's
+localizations are measured in time order (`time_s`, else the frame) by the
+same functions as [Trace statistics](plugin:Analysis/Tracking/Trace statistics):
+`n_locs`; `displacement_nm`, first to last; the spread along the long and
+the short axis of their positions (`std_long_nm`, `std_short_nm`), their
+ratio `eccentricity`, and `trend_nm`, the short axis' spread beyond the
+scatter between neighbours; and two directions, `angle_deg`, the long axis
+pointing from the trace's first quarter to its last, and `ends_angle_deg`,
+from its first localization to its last.  *keep* is tested on these, and
+an id that fails it gets no ROI; the text counts them, by the clause they
+failed.  The values are kept with each ROI and are columns of the results
+table, as the other methods' are.
+
+**The angle.**  *long axis, forward in time* gives each ROI `angle_deg`:
+the axis is fitted to all the localizations, so the jitter of single
+steps hardly moves it, and the first and last quarter only decide which
+way it points.  *first to last localization* gives `ends_angle_deg`, which
+is noisier but follows a track that curves.  A track that goes out and
+comes back has no clear direction either way; turn such an ROI by hand in
+the ROI manager, and [ROIs from results](plugin:Analysis/Regions/ROIs from results)
+run later leaves it alone.
 
 **The ROI.**  Its centre is the mean position of the cluster's
 localizations, its file the one its localizations came from, and it
@@ -826,6 +860,18 @@ Read only for *its id alone*.  A track's line shows its direction and its
 steps; an outline is the better picture of a cluster, whose localizations
 have no order.
 
+### ids.keep
+Separate from the other methods' *keep*, which names what they measure.
+For motors, start with `eccentricity >= 4 and displacement_nm >= 300` and
+look at the rejected count: a too strict eccentricity loses tracks that
+pause or curve, a too loose one lets diffusing molecules through.  Empty,
+every id with *at least* localizations becomes an ROI, as before.
+
+### ids.angle
+Only for directed tracks.  *long axis, forward in time* is the robust
+choice for a straight run; *first to last localization* for a track that
+curves.  Left at *none*, the ROIs get no angle and nothing is measured.
+
 ### similar.examples
 *used ROIs* is the quick way: put ROIs on a few good structures and run;
 untick one to leave it out.  *a keyword* is for a project that holds other
@@ -900,7 +946,10 @@ returns every candidate with its values, `use` and what it failed in
 ### From an id attribute
 
 The ROIs in the ROI manager; the text says how many were made, the smallest
-cluster that became one, and how many clusters had no outline.  It cannot run
+cluster that became one, how many clusters had no outline, and how many ids
+*keep* left out, by the clause they failed.  With *keep* or *angle* set,
+each ROI's trace values are columns of the results table, and with *angle*
+its `roi_angle_deg` is the direction its trace moved.  It cannot run
 inside a block, which repeats over regions: make the ROIs after it.
 
 ### Positions from a file

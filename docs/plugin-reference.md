@@ -48,14 +48,25 @@ and `smappy/simulate` are the record, and the code wins where they differ.
 * `ctx.region_id` / `ctx.per_region` -- set when the run is one region of
   many (an ROI or a cluster); `ctx.region` is the shape, None for a cluster.
 * `ctx.frame` -- in an ROI of the ROI manager, the ROI's own frame
-  (`regions.SiteFrame`): its `center` and the `angle` it is shown at (its
-  `ROI.angle` while the project's *rotate* is on, else 0), with
+  (`regions.SiteFrame`): its `center` and its `angle` (`ROI.angle`, 0 until
+  set, whether or not the project's *rotate* shows it turned), with
   `to_site(xy)` / `to_data(uv)`; None elsewhere.  Every table of such a run
   carries the same as two columns, `x_site_nm` / `y_site_nm` (SMAP's
   `xnmrot` / `ynmrot`), beside `x_nm` / `y_nm`, which always stay the
   file's positions.  Report a position meant to be found again in the file
   in `x_nm`; use the site columns for the structure's own axes.  The site
   columns are never written back to the session's table.
+* The ROI a per-region run is in is `ctx.rois.rois[ctx.region_id]`: its
+  centre, shape, lines, keywords (`annotations`), angle, `set_by` (who set
+  which of them: `roi.source("angle")` is "hand", a method's name or ""),
+  ranges and *use*, to read.  A measurement does not edit
+  it -- its results are stored against the ROI's signature, and an edit
+  under it would put them out of date as they are made.  What changes
+  ROIs is a plugin run over the project, not per region: it edits
+  `ctx.rois` inside `with ctx.rois.edit("what"):`, one step of the ROI
+  undo (*Centre ROIs*, *Filter ROIs*, *ROIs from results*), and a segmenter
+  hands its ROIs back as sites (`ROIProject.add_site`: centre, shape,
+  ids, `angle`).
 * `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
   another thread: end the run early keeping what it has, and "the live source
   is complete".  The panel's Run is Stop while a run goes, and sets `stop`.
@@ -108,6 +119,16 @@ made when two or more figures are on it; `Plot(..., summary=False)` keeps a
 figure off it, for one that is already a page of everything
 (`statistics.py`).  Return the settings
 that were actually used -- that is what the history records.
+
+A run in a region may hand back `overlays`, shapes to draw over it in the
+file's nm: `{"kind": "line" | "points" | "circle", "points": [[x, y], ...],
+"radius": r, "label": text}` each (`circle_fit.py`'s fitted circle, the
+*Trace inspector*'s axis).  They are kept with the region's results
+(`RegionTable.overlays`) and drawn, dotted, over the ROI manager's ROI image
+-- a picture only: nothing is measured from them and the ROI does not
+change.  A wrong one (an unknown kind, a point that is not finite, more
+than `MAX_OVERLAY_POINTS` in all) is refused (`overlay_shapes`).  To make
+one the ROI's own line, *ROIs from results*.
 
 `text` goes into the plugin panel's output box, however long it is; *Show result*
 opens the figures, or, for a result with none, the text in a window.  Set `text_window = True` on the

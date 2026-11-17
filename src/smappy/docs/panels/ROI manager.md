@@ -49,10 +49,13 @@ layer is rendered as tracks: a click in the zoom drafts the track drawn
 nearest it, and *Add* keeps it.  The list shows *all* ROIs, only the
 *shapes*, or only those *of an id*.
 
-Any ROI can also be cut in time and in depth: a frame range and a z range,
-set under *frames and z* in *annotate*, are part of what the ROI holds, so
-what is measured in it -- and what *Regions to attribute* writes -- is that
-part only.  Every frame and every z, the default, is no cut.
+Any ROI can also be cut on its attributes -- in time and in depth by
+default, on any other the table has as well (`time_s` for MINFLUX,
+`sigma_nm`, `photons`): ranges, set under *ranges* in *annotate*, are part
+of what the ROI holds, so what is measured in it -- and what *Regions to
+attribute* writes -- is that part only.  The layers' filters still apply;
+an ROI's ranges cut further, inside the ROI, on every layer.  No range,
+the default, is no cut.
 
 The Regions tab holds the plugins that find, measure and summarise ROIs;
 this window is for making, choosing and judging them, and holds the shape
@@ -240,8 +243,13 @@ like anything measured.  The keys: L draws the chosen line, Shift+L chooses
 the next name, R reverses it.
 
 Every ROI also has an **angle**: the direction its structure points in, 0
-until it is set.  It is a note, like a keyword, and is in the results table
-as `roi_angle_deg`.  With *rotate* ticked, each ROI is shown turned by its
+until it is set.  It is the ROI's own frame: every step run in the ROI gets
+the localizations turned by it (see *In detail*), and it is in the results
+table as `roi_angle_deg`.  It is set by hand, here; by the segmenter that
+made the ROI (*Segment regions* from an id attribute, *angle*); or by
+[ROIs from results](plugin:Analysis/Regions/ROIs from results) from any measured angle.
+An angle set by hand is kept apart, and a method run again leaves it alone
+unless told otherwise.  With *rotate* ticked, each ROI is shown turned by its
 angle, so that its structure lies along $x$ (to the right), and a green
 handle sits above it: drag the handle round and the picture turns with it
 (Shift turns in steps of 15°), or type the angle, or press [ and ] to turn
@@ -252,11 +260,12 @@ round the localizations it was drawn round.  Lines and polygons are kept in
 the file's coordinates, so they stay where they are whichever way the
 picture is turned.
 
-*Rotate* changes what is measured: with it, a square takes in the
-localizations of the turned square, and the steps are given each ROI's own
-coordinates turned (see *In detail*).  So ticking or unticking it, or
-turning an ROI while it is ticked, puts the results out of date.  Without
-it, every angle is ignored and nothing turns.
+*Rotate* is a way of looking, with one exception: with it, a square takes
+in the localizations of the turned square, so ticking or unticking it puts
+square ROIs' results out of date.  The steps are given each ROI's own
+coordinates either way: a step that measures along the structure cannot be
+fed the file's axes by a box left unticked.  Turning an ROI puts its
+results out of date, ticked or not.
 
 **6. Measuring.**  The steps run in every ROI are chosen, ordered, set up
 and run in the [Regions tab](plugin:Panels/Regions tab), under *per-region
@@ -344,9 +353,10 @@ step run in an ROI gets these as two extra columns, `x_site_nm` and
 `y_site_nm`, beside `x_nm` and `y_nm`, which stay the file's positions: a
 step that reports a position to be found again in the file (a circle's
 centre, which *Centre ROIs* moves the ROI to) keeps using those, and one
-that wants the structure's own axes uses these (SMAP's `xnmrot`).  Without
-*rotate*, $\theta = 0$ in the frame: `x_site_nm` is then only the distance
-from the centre.  The columns exist only while a step runs in an ROI; they
+that wants the structure's own axes uses these (SMAP's `xnmrot`).  They
+are turned whether or not *rotate* is ticked; an ROI never given an angle
+has $\theta = 0$, and `x_site_nm` is then only the distance from the
+centre.  The columns exist only while a step runs in an ROI; they
 are never written to the file's table.  A square ROI of side $s$ holds what
 has $|u_x| \leq s/2$ and $|u_y| \leq s/2$.  An angle is kept between
 $-180$° and $180$°.
@@ -449,7 +459,10 @@ ROI; an ROI of an id alone stays where its id is).  A click on one of the
 ROI's lines chooses it, and a click on another ROI's outline selects that
 one.  It is also where *Polygon* and *Line* are drawn, and where they
 stay editable: drag a polygon's corner or an ellipse's handle (the small
-squares) or a line's start or end, one undo step each.
+squares) or a line's start or end, one undo step each.  Dotted in
+orange is what the per-region steps drew over the ROI -- a fitted circle,
+a track's axis -- as kept with its results; a picture only, which no
+click edits.
 
 ### shape
 The three fields above the files: what every ROI's outline is, unless it
@@ -587,9 +600,10 @@ ROI.
 
 ### rotate
 Under the zoom.  Shows every ROI turned by its angle, with the angle and the handle to turn
-it, and measures it that way: a square turned with it, and the steps given
-its turned coordinates.  The choice is saved with the ROIs.  Unticked, the
-angles are kept but nothing turns, and the angle's controls are hidden.  The
+it, and turns a square ROI with it.  The steps are given each ROI's turned
+coordinates whether or not it is ticked.  The choice is saved with the
+ROIs.  Unticked, the pictures are not turned, a square stays upright, and
+the angle's controls are hidden.  The
 field beside it is the angle of the ROI shown, in degrees from $+x$ towards
 $+y$ (clockwise on the screen); on a draft, it goes with the draft when it
 is added.
@@ -635,38 +649,58 @@ ROI stays selected, for giving it keywords from several lists.
 One list a line: a name, a colon, and its keywords separated by commas
 (`quality: good, bad, unsure`).  The number keys reach the first nine of a
 list.  Saved with the ROIs.  An ROI keeps a keyword its list no longer has,
-so a list rewritten by mistake loses nothing already annotated.
+so a list rewritten by mistake loses nothing already annotated.  Keywords
+can also be given from what was measured, by a condition
+([ROIs from results](plugin:Analysis/Regions/ROIs from results)): one
+given here by hand is left alone by it.
 
-### frames and z
-The frame range and z range of the ROI the ROI image shows -- the selected
-one, or the draft while there is one: the part of it that is measured.
-Each ROI has its own; a new draft starts with every frame and every z, and
-*Add* gives the ROI the draft's.  The ROI image leaves out the
-localizations inside the ROI that the range leaves out, so it shows what
-is measured, with everything round the ROI as it is; the file image and
-the zoom show the file whatever an ROI's range.  Two plots show the ROI as
-it is without them: its localizations
-per frame, and its side view, z against x -- or against the distance along
-its line called *line* (*direction* in an older project), when it has one,
-so a tilted structure is seen edge on.  The green band is the range; drag it, or its edges, to set it.  A band
-let go at the edge of the data leaves that end open.  Each change is one
-step of the ROI undo, and puts the ROI's results out of date (a draft's,
-no step: it is not stored yet).  The side view
-is hidden for a table without `z_nm`, where a z range cuts nothing.
+### ranges
+The ranges of the ROI the ROI image shows -- the selected one, or the draft
+while there is one: the part of it that is measured.  A row per attribute
+listed under *attributes*, frame and z unless changed.  Each ROI has its
+own; a new draft starts with none, and *Add* gives the ROI the draft's.  A
+range can also be set from what was measured -- a tail's last frame, a
+structure's z and its spread -- by
+[ROIs from results](plugin:Analysis/Regions/ROIs from results), which
+leaves a range set here by hand alone.  The ROI image leaves out the
+localizations inside the ROI that the ranges leave out, so it shows what is
+measured, with everything round the ROI as it is; the file image and the
+zoom show the file whatever an ROI's ranges.
 
-### frames
-The first and last frame kept, both included.  Blank is an open end: from
-the start, or to the end.
+Each row has two fields, the lowest and highest value kept, both included
+(blank is an open end), and *Clear* and *To all used* for that range.
+Under them a plot of the ROI as it is without its
+ranges, in one of two kinds:
 
-### z
-The lowest and highest z kept, in nm, both included.  Blank is an open end.
+* **Bars** for an attribute where each value has many localizations -- a
+  time or an id (`frame`, `time_s`, `tid`, `..._id`): the localizations
+  counted over it.  Frames and ids are whole numbers, and a band let go
+  is rounded to them.
+* **Dots** for a measured quantity -- `z_nm`, `sigma_nm`, `photons`: the
+  attribute against x, or against the distance along the ROI's line called
+  *line* (*direction* in an older project) when it has one, so a tilted
+  structure is seen edge on.
 
-### All frames and z
-Clears both ranges of the selected ROI.
+The green band is the range; drag it, or its edges, to set it.  A band let
+go at the edge of the data leaves that end open.  Each change is one step
+of the ROI undo, and puts the ROI's results out of date (a draft's, no
+step: it is not stored yet).  An attribute the table does not have is said
+so, and its range cuts nothing.
+
+### attributes
+The attributes ranges are offered on, separated by commas, in the order
+the rows are shown: `frame, z_nm` by default.  For MINFLUX, `time_s` in
+place of `frame` cuts a trace in seconds.  Saved with the ROIs.  Taking an
+attribute out of the list keeps the ranges already set on it.
+
+### Clear
+On each range's row.  Clears that range of the ROI shown: all of the
+attribute again.
 
 ### To all used
-Gives every ROI ticked *use* the selected ROI's frame and z range, in one
-undo step: for a range that should be the same everywhere, set once.
+On each range's row.  Gives every ROI ticked *use* the ROI shown's range of
+that attribute -- or none, if it has none -- in one undo step: for a range
+that should be the same everywhere, set once.  The other ranges stay.
 
 ### line names
 The names an ROI's lines are drawn under, separated by commas
@@ -702,8 +736,8 @@ and a list of evaluators with a tab each are its design.
   are columns of the results table, where SMAP keeps them in the site's
   annotation for evaluators to read.  SMAP gives every evaluator the
   rotated coordinates (`xnmrot`, `ynmrot`) whether or not its image is
-  turned; here `x_site_nm` and `y_site_nm` are turned only with *rotate*
-  on, so they are always the frame on the screen.  SMAP stores a shape
+  turned, and so does this: `x_site_nm` and `y_site_nm` are turned by the
+  ROI's angle whether or not *rotate* shows it.  SMAP stores a shape
   drawn on a turned site in the turned image's coordinates; here it is
   stored in the file's.  SMAP's polar angle, the turn in 3D, is not
   ported.  An ROI can have its own polygon outline.

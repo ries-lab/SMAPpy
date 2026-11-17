@@ -211,6 +211,16 @@ class ColumnROIsSettings:
                       help="in the ROI manager: a line through its localizations "
                            "in frame order, or the hull round them; auto: a track "
                            "for a track attribute")
+    keep: str = param("", label="keep", kind="text",
+                      help="which ids become ROIs, by their trace's values, e.g. "
+                           "eccentricity >= 3 and displacement_nm >= 300 for "
+                           "motors; empty: all")
+    angle: str = param("none", label="angle",
+                       choices=[("none", "none"),
+                                ("axis", "long axis, forward in time"),
+                                ("ends", "first to last localization")],
+                       help="the ROI's angle from its trace: for directed tracks "
+                            "(motors); none for diffusion, where it means nothing")
 
 
 def hull(xy: np.ndarray) -> Optional[List[List[float]]]:
@@ -225,6 +235,34 @@ def hull(xy: np.ndarray) -> Optional[List[List[float]]]:
     except (QhullError, ValueError):
         return None
     return xy[h.vertices].tolist()
+
+
+#: what *keep* of *from an id attribute* can name: each id's localizations
+#: as a trace (`traces.statistics`), in frame order (or ``time_s``)
+TRACE_VALUES = ("n_locs", "displacement_nm", "std_long_nm", "std_short_nm",
+                "eccentricity", "trend_nm", "angle_deg", "ends_angle_deg")
+
+
+def trace_values(locs, column: str) -> Dict[int, Dict[str, float]]:
+    """Each id of ``column``'s localizations measured as a trace, in time
+    order: `TRACE_VALUES`.  ``angle_deg`` is the long axis pointing from the
+    trace's first quarter to its last (`traces.axes`), ``ends_angle_deg``
+    the direction from its first localization to its last; both 0-360,
+    anticlockwise from +x.  All ids at once, no loop over them."""
+    from .. import traces as T
+    time = np.asarray(locs["time_s"] if "time_s" in locs else locs["frame"], np.float64)
+    r = T.runs(locs[column], time)
+    if not len(r.ids):
+        return {}
+    x = np.asarray(locs["x_nm"], np.float64)[r.order]
+    y = np.asarray(locs["y_nm"], np.float64)[r.order]
+    st = T.statistics(r, x, y, time[r.order])
+    first, last = r.start, r.start + r.n - 1
+    ends = np.degrees(np.arctan2(y[last] - y[first], x[last] - x[first])) % 360.0
+    columns = {**{k: np.asarray(st[k], float) for k in TRACE_VALUES if k in st},
+               "ends_angle_deg": ends}
+    return {int(k): {name: float(v[i]) for name, v in columns.items()}
+            for i, k in enumerate(r.ids)}
 
 
 def column_regions(locs, column: str, min_size: int = 1, outline: bool = True

@@ -302,25 +302,59 @@ def test_the_frame_and_z_range_are_typed_or_dragged_and_undone(app):
     along_x = next(r for r in project.rois.values() if r.ids["track_id"] == 1)
     window.select(along_x.id)
     ranges = window.annotation.ranges
-    ranges.fields[("frames", 0)].setText("3")
-    ranges.fields[("frames", 0)].editingFinished.emit()
+    ranges.fields[("frame", 0)].setText("3")
+    ranges.fields[("frame", 0)].editingFinished.emit()
     assert project.rois[along_x.id].frames == [3.0, None]
     assert project.indices(project.rois[along_x.id]).tolist() == list(range(3, 10))
     # the band, let go between frames 2 and 6, its far end at the data's edge
-    band = ranges.frame_plot.band
+    band = ranges.plots["frame"].band
     band.setRegion((2.2, 10))
     band.sigRegionChangeFinished.emit(band)
     assert project.rois[along_x.id].frames == [2.0, None]
-    band = ranges.side_plot.band
+    band = ranges.plots["z_nm"].band
     band.setRegion((20, 60))
     band.sigRegionChangeFinished.emit(band)
     assert project.rois[along_x.id].z == [20.0, 60.0]
-    ranges._to_all()
+    ranges.buttons[("z_nm", "all")].click()                      # z only, on its row
     assert all(r.z == [20.0, 60.0] for r in project.rois.values())
+    assert [r.frames for r in project.rois.values()].count(None) == 1
     window.undo()
     assert [r.z for r in project.rois.values()].count(None) == 1
-    ranges._clear()
-    assert project.rois[along_x.id].frames is None and project.rois[along_x.id].z is None
+    ranges.buttons[("z_nm", "clear")].click()
+    assert project.rois[along_x.id].z is None
+    assert project.rois[along_x.id].frames == [2.0, None]      # the other row's stays
+    ranges.buttons[("frame", "clear")].click()
+    assert project.rois[along_x.id].frames is None
+    window.close()
+
+
+def test_a_range_on_any_attribute_is_offered_by_its_name_and_cuts_the_roi(app):
+    session, project, window = track_window()
+    along_x = next(r for r in project.rois.values() if r.ids["track_id"] == 1)
+    window.select(along_x.id)
+    ranges = window.annotation.ranges
+    assert list(ranges.plots) == ["frame", "z_nm"]               # the default two
+    ranges.columns.setText("frame, photons, z_nm")
+    ranges.columns.editingFinished.emit()
+    assert project.range_columns == ["frame", "photons", "z_nm"]
+    assert list(ranges.plots) == ["frame", "photons", "z_nm"]
+    # frame is counted in bars (the band across), photons and z drawn as dots
+    assert ranges.plots["frame"].band.orientation == "vertical"
+    assert ranges.plots["photons"].band.orientation == "horizontal"
+    photons = np.asarray(project.state(along_x.file_id).locs["photons"])
+    cut = float(np.median(photons[project.indices(along_x)]))
+    ranges.fields[("photons", 0)].setText(f"{cut:g}")
+    ranges.fields[("photons", 0)].editingFinished.emit()
+    roi = project.rois[along_x.id]
+    assert roi.ranges["photons"] == [cut, None]
+    assert roi.source("range:photons") == "hand"
+    kept = photons[project.indices(roi)]
+    assert len(kept) and kept.min() >= cut
+    assert "photons" in project.geometry(roi)["ranges"]           # out of date
+    saved = project.to_dict()
+    project.from_dict(saved)
+    assert project.range_columns == ["frame", "photons", "z_nm"]
+    assert project.rois[along_x.id].ranges["photons"] == [cut, None]
     window.close()
 
 

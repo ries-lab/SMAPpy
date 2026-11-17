@@ -113,8 +113,12 @@ field `field.<i>.<name>`.
 * `ctx.region` -- in a per-region run, the ROI's shape; `ctx.per_region`
   says whether this is one.
 * `ctx.frame` -- in an ROI of the ROI manager, its own frame: `.center`,
-  `.angle` (the ROI's angle when the ROI manager's *rotate* is on, else 0),
-  `.to_site(xy)` and `.to_data(uv)`; None elsewhere.  The tables of such a
+  `.angle` (the ROI's angle, 0 until one is set; whether or not the ROI
+  manager shows it turned), `.to_site(xy)` and `.to_data(uv)`; None
+  elsewhere.  The ROI itself, with its keywords (`.annotations`), lines,
+  angle and ranges, is `ctx.rois.rois[ctx.region_id]`: read it, never edit
+  it from a measurement -- a measurement hands back numbers, and a plugin
+  over the ROIs (as *ROIs from results* does) writes them onto the ROIs.  The tables of such a
   run also have `x_site_nm` / `y_site_nm`: positions relative to the ROI's
   centre, turned so its structure lies along +x.  `x_nm` / `y_nm` stay the
   positions in the file -- report a position in those if it is to be found
@@ -148,6 +152,7 @@ Every part is optional.
 | `plots` | more figures, `{"name": draw}` |
 | `data` | any numbers or arrays, for a script |
 | `values` | `{"name": number}`: with `per_region = True`, one row per ROI in the region table |
+| `overlays` | shapes drawn over the ROI in the ROI manager, nm: `[{"kind": "line", "points": [[x0, y0], [x1, y1]]}]`; `"points"` and `"circle"` (with `"radius"`) too |
 | `locs` | a **new** table that replaces the current one (then `changes_locs = True`) |
 | `settings` | the settings used -- always pass them |
 
