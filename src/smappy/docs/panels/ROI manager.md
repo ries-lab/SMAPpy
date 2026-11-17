@@ -143,14 +143,14 @@ step the zoom from one square to the next, row by row, so that every part of
 the data is looked at once, in a fixed order, and not only where the eye
 happened to land.
 
-```figure Simulated nuclear pores (Nup96, 60 % labelling) after Segment regions with its defaults, with ROIs of 200 nm.  Left: the file, every ROI found (amber) and a grid of 2.5 µm tiles, the current one in cyan.  Middle: the zoom on that tile, with an ROI excluded from use (grey), the selected ROI (green) and a draft not yet added (blue, dashed).  Right: the ROI image of the selected ROI, three ROI widths across, with a line called *direction* drawn on it (magenta).
+```figure Simulated nuclear pores (Nup96, 60 % labelling) after Segment regions with its defaults, with ROIs of 200 nm.  Left: the file, every ROI found (amber) and a grid of 2.5 µm tiles, the current one in cyan.  Middle: the zoom on that tile, with an ROI excluded from use (grey), the selected ROI (green) and a draft not yet added (blue, dashed).  Right: the ROI image of the selected ROI, three ROI widths across, with a line called *line* drawn on it (magenta).
 x0, y0, x1, y1 = state.index.bounds
 here = 5
 tx0, ty0, tx1, ty1 = tiles[here]
 mine = [r for r in found if tx0 <= r.center[0] < tx1 and ty0 <= r.center[1] < ty1]
 excluded, selected = mine[0], mine[1]
 excluded.use = False
-selected.lines = {"direction": [[selected.center[0] - 70, selected.center[1] + 50],
+selected.lines = {"line": [[selected.center[0] - 70, selected.center[1] + 50],
                                 [selected.center[0] + 70, selected.center[1] - 50]]}
 draft = ROI(source.id, [tx0 + 0.25 * (tx1 - tx0), ty0 + 0.8 * (ty1 - ty0)])
 fig.set_size_inches(7.5, 2.7)
@@ -173,7 +173,7 @@ half = project.size_nm * 1.5
 cx, cy = selected.center
 image(c, cx - half, cx + half, cy - half, cy + half)
 ring(c, selected, pen(ROI_PEN), 1.5)
-dx, dy = arrow(selected.lines["direction"])
+dx, dy = arrow(selected.lines["line"])
 c.plot(dx, dy, color=pen(LINE_PENS[0]), lw=1.5)
 c.set_title("ROI", fontsize=9)
 ```
@@ -204,12 +204,13 @@ summaries follow the same order, which is saved with the ROIs.  Sorting
 never changes an ROI's number.
 
 **5. Shapes and lines.**  All ROIs share the circle or square set in the
-Regions tab.  One ROI can have its own outline instead (*Polygon*).
+Regions tab.  One ROI can have its own shape instead: a polygon, a
+freehand outline or an ellipse (*Polygon*, right-click for the other two).
 
 An ROI can also carry lines drawn by hand, each under a name: the axis of
 an elongated structure, the direction a filament runs, the distance between
 two spots.  The names are written once for the project, under *line names*
-(*direction* to start with), and each ROI can have one line of each name.
+(*line* to start with), and each ROI can have one line of each name.
 Pick the name under *line*, then *Draw line* and two clicks, the start and
 then the end.  A line is an arrow, so it has a direction: a small ring
 marks its start and a head its end, both the same size on the screen at any
@@ -427,9 +428,14 @@ sizes by default); the wheel here changes that width for all ROIs.  An ROI of
 an id is shown as wide as its localizations reach, unless *ROI view* is set.
 The title says what the ROI holds: its shape or id, its range, how many
 localizations over which frames, and for a track the length of its path
-and its median step.  A click
-moves a draft, and a click on one of the ROI's lines chooses it.  It is
-also where *Polygon* and *Draw line* are drawn.
+and its median step.  A click centres the draft or the selected ROI
+there: its centre only, so a polygon and lines stay on the structure they
+were drawn on and move with the localizations (one undo step for a stored
+ROI; an ROI of an id alone stays where its id is).  A click on one of the
+ROI's lines chooses it, and a click on another ROI's outline selects that
+one.  It is also where *Polygon* and *Draw line* are drawn, and where they
+stay editable: drag a polygon's corner or an ellipse's handle (the small
+squares) or a line's start or end, one undo step each.
 
 ### Tiles
 Covers the file with a grid of squares of the size beside it and puts the
@@ -481,21 +487,37 @@ without adding any; *Run* in the segmenter, or *Add previewed ROIs*, adds
 them instead.
 
 ### Polygon
-Click once per vertex in the ROI image; clicking near the first vertex
-again, after at least three, closes the outline, and Escape abandons it.  The ROI's centre moves to the
-mean of the vertices.  On a draft, the outline goes with it when it is added.
+Draws the ROI's own shape in the ROI image; a right-click chooses which,
+and the button is named after it.  Escape abandons a shape half drawn.
+
+* *Polygon*: click once per vertex; a double-click, or a click near the
+  first vertex again, after at least three, closes the outline.
+* *Freehand*: drag round the structure and let go; the path closes itself.
+  It is kept as a polygon of the corners that matter: a point is left out
+  when it lies within a pixel of the line through those round it
+  (Ramer-Douglas-Peucker), so a smooth outline keeps a few dozen corners
+  rather than one per mouse event, and its corners can be dragged.
+* *Ellipse*: drag the box it fills, upright on the screen.  It is kept as an
+  ellipse -- centre, two semi-axes and tilt -- so what it holds is decided
+  exactly.  Its four handles, at the ends of its axes, stretch that axis
+  and turn the ellipse with the mouse; the other axis stays.  It is not
+  turned with the ROI's angle.
+
+The ROI's centre moves to the mean of the vertices, or the ellipse's
+centre.  On a draft, the shape goes with it when it is added.  Each shape
+replaces the one before.
 
 ### Clear shape
 Back to the circle or square of the Regions tab.  An ROI of an id with a
-polygon drawn on it (its id inside the polygon) goes back to its id alone.
-
-### line
-Which of the line names *Draw line*, *Reverse* and *Clear line* act on.
-The list holds the project's names, and any name the shown ROI has a line
-of besides.  Shift+L chooses the next one; a click on a line in the ROI
-image chooses that one.
+polygon or an ellipse drawn on it (its id inside the shape) goes back to
+its id alone.
 
 ### Draw line
+The list before it is which of the line names *Draw line*, *Reverse* and
+*Clear line* act on: the project's names, and any name the shown ROI has a
+line of besides.  Shift+L chooses the next one; a click on a line in the ROI
+image chooses that one.
+
 Two clicks in the ROI image, the start and then the end (L).  Drawing a
 line the ROI already has replaces it.  A line does not turn the image or
 the ROI.  It goes into the ROI's signature, so drawing one puts the ROI's
@@ -555,13 +577,20 @@ list.  Saved with the ROIs.  An ROI keeps a keyword its list no longer has,
 so a list rewritten by mistake loses nothing already annotated.
 
 ### frames and z
-The selected ROI's frame range and z range: the part of it that is
-measured.  Two plots show the ROI as it is without them: its localizations
+The frame range and z range of the ROI the ROI image shows -- the selected
+one, or the draft while there is one: the part of it that is measured.
+Each ROI has its own; a new draft starts with every frame and every z, and
+*Add* gives the ROI the draft's.  The ROI image leaves out the
+localizations inside the ROI that the range leaves out, so it shows what
+is measured, with everything round the ROI as it is; the file image and
+the zoom show the file whatever an ROI's range.  Two plots show the ROI as
+it is without them: its localizations
 per frame, and its side view, z against x -- or against the distance along
-its *direction* line, when it has one, so a tilted structure is seen edge
-on.  The green band is the range; drag it, or its edges, to set it.  A band
+its line called *line* (*direction* in an older project), when it has one,
+so a tilted structure is seen edge on.  The green band is the range; drag it, or its edges, to set it.  A band
 let go at the edge of the data leaves that end open.  Each change is one
-step of the ROI undo, and puts the ROI's results out of date.  The side view
+step of the ROI undo, and puts the ROI's results out of date (a draft's,
+no step: it is not stored yet).  The side view
 is hidden for a table without `z_nm`, where a z range cuts nothing.
 
 ### frames
@@ -580,7 +609,7 @@ undo step: for a range that should be the same everywhere, set once.
 
 ### line names
 The names an ROI's lines are drawn under, separated by commas
-(`direction, axis`).  Each is the start of two column names, so spaces
+(`line, axis`).  Each is the start of two column names, so spaces
 become `_` and other signs are dropped.  Saved with the ROIs.  Removing a
 name keeps the lines already drawn under it.
 

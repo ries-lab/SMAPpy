@@ -42,6 +42,13 @@ DRAWING_PEN = pg.mkPen("#00c4ff", width=2, style=Qt.DashLine)
 LINE_COLOURS = ("#e05fd0", "#00b8d4", "#ff8a00", "#9ccc65", "#ffee58", "#b388ff")
 LINE_PENS = [pg.mkPen(c, width=2) for c in LINE_COLOURS]
 ROI_PEN = pg.mkPen("#2e9e4f", width=2)          # the selected ROI
+CORNER_PIXELS = 7      # a polygon's corner marks, and how near a press takes one
+# the shapes the *Polygon* button draws, chosen by a right-click on it
+SHAPE_TOOLS = (("polygon", "Polygon"), ("freehand", "Freehand"), ("ellipse", "Ellipse"))
+# a freehand path is thinned to the points that leave it more than this far
+# from the line through the others: a drag gives a point per mouse event,
+# hundreds of corners for a smooth outline that a few dozen draw as well
+FREEHAND_PIXELS = 1.0
 EXCLUDED_PEN = pg.mkPen("#8a8a8a", width=1)     # not used
 EXCLUDED_ACTIVE_PEN = pg.mkPen("#8a8a8a", width=2)
 OTHER_PEN = pg.mkPen("#ffb300", width=1)
@@ -84,6 +91,52 @@ COUNT_LIMIT = 2000
 ARROW_HEAD_PIXELS = 11.0
 START_RING_PIXELS = 4.0
 RING_POINTS = 13
+
+
+def thin_path(points, tolerance: float) -> np.ndarray:
+    """The points of a drawn path that matter: Ramer-Douglas-Peucker, each
+    point dropped that lies within ``tolerance`` of the chord between those
+    kept round it.  For a closed outline the chord runs from the first point
+    to the farthest from it, then back."""
+    p = np.asarray(points, float).reshape(-1, 2)
+    if len(p) < 4:
+        return p
+
+    def simplify(seg):
+        keep = np.zeros(len(seg), bool)
+        keep[0] = keep[-1] = True
+        stack = [(0, len(seg) - 1)]
+        while stack:
+            i, j = stack.pop()
+            if j <= i + 1:
+                continue
+            a, b = seg[i], seg[j]
+            d = b - a
+            n = float(np.hypot(*d))
+            q = seg[i + 1:j] - a
+            dist = (np.abs(d[0] * q[:, 1] - d[1] * q[:, 0]) / n if n > 0
+                    else np.hypot(q[:, 0], q[:, 1]))
+            k = int(np.argmax(dist))
+            if dist[k] > tolerance:
+                keep[i + 1 + k] = True
+                stack += [(i, i + 1 + k), (i + 1 + k, j)]
+        return seg[keep]
+
+    far = int(np.argmax(np.hypot(*(p - p[0]).T)))
+    there = simplify(p[:far + 1])
+    back = simplify(np.vstack([p[far:], p[:1]]))
+    return np.vstack([there, back[1:-1]])
+
+
+def ellipse_handles(ellipse) -> list:
+    """An ellipse's four handles (`ROI.ellipse`): the ends of its first
+    semi-axis, then of its second -- what a drag turns and stretches it by."""
+    c = np.asarray(ellipse["center"], float)
+    a, b = ellipse["axes"]
+    t = np.radians(ellipse.get("tilt", 0.0))
+    u, v = np.array([np.cos(t), np.sin(t)]), np.array([-np.sin(t), np.cos(t)])
+    return [(c + a * u).tolist(), (c - a * u).tolist(),
+            (c + b * v).tolist(), (c - b * v).tolist()]
 
 
 def arrow(line, pixel: Optional[float] = None):
@@ -202,6 +255,14 @@ class ImagePane(QWidget):
     """One rendered quadrant: an image, outlines over it, and clicks."""
 
     clicked = Signal(float, float)
+    # the second press of a double-click, which never makes a click: the
+    # first press already did
+    double_clicked = Signal(float, float)
+    # a corner of the shown polygon or a line's end dragged: where to, and
+    # where let go -- NaN when it never moved, which is then a click as well
+    # (`grab` decides whether a press takes a point)
+    corner_moved = Signal(float, float)
+    corner_dropped = Signal(float, float)
     moved = Signal(float, float)           # only while `tracking` is on
     zoomed = Signal(float)
     panned = Signal(float, float)          # how far to move the view, in nm
@@ -250,6 +311,10 @@ class ImagePane(QWidget):
                              ("centres_excluded", EXCLUDED_PEN.color())):
             self.shapes[name] = pg.PlotDataItem(pen=None, symbol="o", symbolSize=3,
                                                 symbolPen=None, symbolBrush=colour)
+        # a polygon's corners, which a drag moves: squares of fixed size
+        self.shapes["corners"] = pg.PlotDataItem(
+            pen=None, symbol="s", symbolSize=CORNER_PIXELS, symbolPen=ROI_PEN.color(),
+            symbolBrush=pg.mkBrush(0, 0, 0, 0))
         for item in self.shapes.values():
             item.setParentItem(self.content)
         # the rotation handle, in the pane's own (unturned) coordinates: a
@@ -274,6 +339,11 @@ class ImagePane(QWidget):
         self._last = None
         self._dragged = False
         self.tracking = False
+        # set by the window: called with a press's data point, True when it
+        # takes a corner of the shown polygon, which the drag then moves
+        self.grab = None
+        self._holding = None          # where the press that took a point was
+        self._held_still = True
         self.graphics.viewport().installEventFilter(self)
 
     def set_tracking(self, on: bool) -> None:
@@ -364,6 +434,32 @@ class ImagePane(QWidget):
                 self._turning = None
                 self.turned.emit(delta, shift)
             return True
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton \
+                and self.grab is not None and self.fov is not None:
+            p = self._data_at(event.position())
+            if self.grab(p.x(), p.y()):
+                self._holding = event.position()
+                self._held_still = True
+                return True
+        if self._holding is not None and kind in (QEvent.MouseMove,
+                                                  QEvent.MouseButtonRelease):
+            p = self._data_at(event.position())
+            # still while it never went further than a click's wobble: a
+            # freehand outline ends where it began, and is no click
+            if (event.position() - self._holding).manhattanLength() > 3:
+                self._held_still = False
+            still = self._held_still
+            if kind == QEvent.MouseMove:
+                if not still:
+                    self.corner_moved.emit(p.x(), p.y())
+            else:
+                self._holding = None
+                if still:              # a click on the point, not a drag
+                    self.corner_dropped.emit(float("nan"), float("nan"))
+                    self.clicked.emit(p.x(), p.y())
+                else:
+                    self.corner_dropped.emit(p.x(), p.y())
+            return True
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
             self._press = self._last = event.position()
             self._dragged = False
@@ -388,6 +484,11 @@ class ImagePane(QWidget):
                 p = self._data_at(event.position())
                 self.clicked.emit(p.x(), p.y())
                 return True
+        elif kind == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton \
+                and self.fov is not None:
+            p = self._data_at(event.position())
+            self.double_clicked.emit(p.x(), p.y())
+            return True
         elif kind == QEvent.Wheel and self.zoomable:
             steps = event.angleDelta().y() / 120.0
             self.width_nm = float(np.clip(self.width_nm * 1.2 ** -steps, 50.0, 1e7))
@@ -595,6 +696,11 @@ class ROIManagerWindow(QMainWindow):
         self.active: Optional[str] = None
         self.draft: Optional[np.ndarray] = None
         self.draft_polygon: Optional[list] = None
+        self.draft_ellipse: Optional[dict] = None    # `ROI.ellipse`, for a draft
+        # a draft's frame and z range, the whole of both until set in
+        # *frames and z*; *Add* hands them to the ROI
+        self.draft_frames: Optional[list] = None
+        self.draft_z: Optional[list] = None
         self.draft_lines: dict = {}              # the draft's, as `ROI.lines`
         self.draft_angle = 0.0                   # the draft's, as `ROI.angle`
         self._turn_base: Optional[float] = None  # the angle as a handle drag began
@@ -792,10 +898,12 @@ class ROIManagerWindow(QMainWindow):
         tools.setSpacing(3)
         self.polygon_button = QPushButton("Polygon")
         self.polygon_button.setCheckable(True)
-        self.polygon_button.setToolTip("draw an outline in this image: a click per "
-                                       "vertex, a click on the first vertex closes it, "
+        self.polygon_button.setToolTip("draw the ROI's own shape in this image; "
+                                       "right-click: polygon, freehand or ellipse.  "
                                        "Escape cancels")
-        self.polygon_button.clicked.connect(lambda: self._start_drawing("polygon"))
+        self.polygon_button.clicked.connect(lambda: self._start_drawing(self.shape_tool))
+        self.polygon_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.polygon_button.customContextMenuRequested.connect(self._shape_menu)
         self.clear_shape_button = QPushButton("Clear shape")
         self.clear_shape_button.setToolTip("back to the global circle or square; "
                                            "an ROI of an id, back to its id alone")
@@ -820,7 +928,6 @@ class ROIManagerWindow(QMainWindow):
         for b in (self.polygon_button, self.clear_shape_button):
             tools.addWidget(b)
         tools.addSpacing(8)
-        tools.addWidget(QLabel("line"))
         for b in (self.line_box, self.line_button, self.reverse_button,
                   self.clear_line_button):
             tools.addWidget(b)
@@ -910,6 +1017,11 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_pane.clicked.connect(self._zoom_clicked)
         self.roi_pane.clicked.connect(self._roi_clicked)
         self.roi_pane.moved.connect(self._roi_hover)
+        self.roi_pane.double_clicked.connect(self._roi_double_clicked)
+        self.roi_pane.grab = self._grab_corner
+        self.roi_pane.corner_moved.connect(self._move_corner)
+        self.roi_pane.corner_dropped.connect(self._drop_corner)
+        self._corner: Optional[tuple] = None    # (index, the polygon as it was)
         self.zoom_pane.zoomed.connect(lambda _: self.redraw())
         self.zoom_pane.panned.connect(self._zoom_panned)
         self.roi_pane.zoomed.connect(self._preview_zoomed)
@@ -956,6 +1068,7 @@ class ROIManagerWindow(QMainWindow):
         self.link_2d.setCurrentIndex(max(0, self.link_2d.findData(link_mode(project.navigation))))
         self.rotate_box.setChecked(bool(project.rotate))
         self._show_turn_controls()
+        self.polygon_button.setText(dict(SHAPE_TOOLS)[self.shape_tool])
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
         self._loading = False
@@ -1108,6 +1221,8 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_pane.width_nm = max(x1 - x0, y1 - y0)
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         self.redraw()
         self.status.showMessage(f"tile {index + 1} of {len(tiles)}")
@@ -1218,6 +1333,10 @@ class ROIManagerWindow(QMainWindow):
             centre, half = self.project.extent(roi)
             return float(np.hypot(*(centre - np.asarray(roi.center, float)))
                          + half * np.sqrt(2))
+        if roi.ellipse is not None:
+            c = np.asarray(roi.ellipse["center"], float)
+            return float(np.hypot(*(c - np.asarray(roi.center, float)))
+                         + max(roi.ellipse["axes"]))
         if roi.polygon is None:
             return float(self.project.size_nm)
         cache = self._reaches
@@ -1265,13 +1384,16 @@ class ROIManagerWindow(QMainWindow):
         emphasis = self._emphasis()
         angle = self._shown_angle() if project.rotate else None
         self.roi_pane.set_turn(centre, angle)
-        self.roi_pane.render(view, centre[0] - half, centre[0] + half,
-                             centre[1] - half, centre[1] + half, emphasis)
+        self._follow_ranges()
+        self.roi_pane.render(self._cut_to_ranges(view), centre[0] - half,
+                             centre[0] + half, centre[1] - half, centre[1] + half,
+                             emphasis)
         polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
+        ellipse = self.draft_ellipse if drafted else (roi.ellipse if roi is not None else None)
         lines = self.draft_lines if drafted else (roi.lines if roi is not None else {})
         if of_id is None:
             xs, ys = Region.site(centre, project.shape, project.size_nm, polygon,
-                                 angle or 0.0).outline()
+                                 angle or 0.0, ellipse).outline()
         else:
             xs, ys = project.outline(of_id)
         self._place_handle(centre, half, xs, ys)
@@ -1281,6 +1403,12 @@ class ROIManagerWindow(QMainWindow):
         if emphasis is not None and of_id is not None:
             xs = ys = []               # a track, marked in the picture instead
         self.roi_pane.draw("draft" if drafted else ("roi" if used else "excluded_active"), xs, ys)
+        corners = np.empty((0, 2))
+        if of_id is None and polygon is not None:
+            corners = np.asarray(polygon, float)
+        elif of_id is None and ellipse is not None:
+            corners = np.asarray(ellipse_handles(ellipse), float)
+        self.roi_pane.draw("corners", corners[:, 0], corners[:, 1])
         self._draw_lines(self.roi_pane, [lines], labels=True)
         self._fill_line_box(lines)
         text = "ROI (draft)"
@@ -1366,6 +1494,8 @@ class ROIManagerWindow(QMainWindow):
         self._draft_track = None
         self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         self.redraw()
 
@@ -1397,11 +1527,15 @@ class ROIManagerWindow(QMainWindow):
         self._draft_track = track
         self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         self.redraw()
 
     def _roi_clicked(self, x: float, y: float) -> None:
-        """A click in the ROI image: place a vertex, or recentre the draft."""
+        """A click in the ROI image: place a vertex, choose a line, select
+        another ROI by its outline, or centre the draft or the selected ROI
+        there."""
         if np.isnan(x):
             self.redraw()
             return
@@ -1413,16 +1547,249 @@ class ROIManagerWindow(QMainWindow):
             self.set_line_name(line)
             return
         hit = self._roi_at(x, y, self.roi_pane)
-        if hit is not None and self.draft is None:
+        roi = self._selected()
+        if hit is not None and self.draft is None and (roi is None or hit.id != roi.id):
             self.select(hit.id)
         elif self.draft_track is not None:
             self._draft_track_at(x, y, self.roi_pane)
         elif self.draft is not None:
             self.draft = np.array([x, y])
             self.redraw()
+        elif roi is not None and roi.spatial:
+            # the stored ROI centred on the click as a draft is: its centre
+            # alone, so what is drawn -- a polygon, the lines -- stays on the
+            # structure it was drawn on and moves with the localizations in
+            # the picture.  An ROI of an id alone has no place to move
+            with self._edit("Centre"):
+                roi.center = [float(x), float(y)]
+            self.changed.emit()
+            self.redraw()
+
+    # ------------------------- a polygon's corners, an ellipse's, a line's ends
+    def _shown_polygon(self) -> Optional[list]:
+        """The polygon the ROI pane shows with its corners: the draft's, or
+        the selected ROI's."""
+        if self.draft is not None:
+            return self.draft_polygon if self.draft_track is None else None
+        roi = self._selected()
+        return roi.polygon if roi is not None and roi.spatial else None
+
+    def _shown_ellipse(self) -> Optional[dict]:
+        if self.draft is not None:
+            return self.draft_ellipse if self.draft_track is None else None
+        roi = self._selected()
+        return roi.ellipse if roi is not None and roi.spatial else None
+
+    def _grab_corner(self, x: float, y: float) -> bool:
+        """Whether a press at ``(x, y)`` starts a drag: the start of a
+        freehand outline or an ellipse being drawn, an end of one of the
+        shown lines, a handle of the shown ellipse or a corner of the shown
+        polygon -- within the corner mark's reach.  A line's end first: one
+        drawn across an outline often starts on it.  Never while a polygon
+        or a line is drawn, whose clicks place points."""
+        fov = self.roi_pane.fov
+        if fov is None:
+            return False
+        if self.drawing in ("freehand", "ellipse"):
+            self._points = [np.array([x, y], float)]
+            self._corner = ("draw", self.drawing, 0, None)
+            return True
+        if self.drawing:
+            return False
+        reach = CORNER_PIXELS * fov.pixelsize
+        candidates = [("line", name, [list(p) for p in line])
+                      for name, line in self._shown_lines().items()]
+        ellipse = self._shown_ellipse()
+        if ellipse is not None:
+            candidates.append(("ellipse", ellipse, ellipse_handles(ellipse)))
+        polygon = self._shown_polygon()
+        if polygon is not None:
+            candidates.append(("polygon", None, [list(p) for p in polygon]))
+        for kind, name, points in candidates:
+            v = np.asarray(points, float)
+            distance = np.hypot(v[:, 0] - x, v[:, 1] - y)
+            i = int(np.argmin(distance))
+            if distance[i] <= reach:
+                self._corner = (kind, name, i, points)
+                return True
+        return False
+
+    def _moved_points(self, x: float, y: float) -> list:
+        _, _, i, points = self._corner
+        moved = [list(p) for p in points]
+        moved[i] = [float(x), float(y)]
+        return moved
+
+    def _screen_tilt(self) -> float:
+        """The tilt of the screen's x in data coordinates: 0, or the turn
+        of a rotated pane, so a box dragged on the screen is upright on it."""
+        return float(self.roi_pane.turn[1]) if self.roi_pane.turn is not None else 0.0
+
+    def _dragged_ellipse(self, x: float, y: float) -> Optional[dict]:
+        """The ellipse in the box dragged from the press to ``(x, y)``,
+        upright on the screen; None while it has no width or height."""
+        start = self._points[0]
+        tilt = self._screen_tilt()
+        t = np.radians(tilt)
+        d = np.array([x, y], float) - start
+        u = d[0] * np.cos(t) + d[1] * np.sin(t)          # along the screen's x
+        v = -d[0] * np.sin(t) + d[1] * np.cos(t)
+        if min(abs(u), abs(v)) < self.roi_pane.fov.pixelsize:
+            return None
+        centre = start + d / 2
+        return {"center": [float(centre[0]), float(centre[1])],
+                "axes": [abs(u) / 2, abs(v) / 2], "tilt": tilt}
+
+    def _moved_ellipse(self, x: float, y: float) -> dict:
+        """The shown ellipse with handle ``i`` at ``(x, y)``: that semi-axis
+        as long as the handle is far from the centre, and the ellipse turned
+        to point it there; the centre and the other semi-axis stay."""
+        _, ellipse, i, _ = self._corner
+        c = np.asarray(ellipse["center"], float)
+        d = np.array([x, y], float) - c
+        length = max(float(np.hypot(*d)), self.roi_pane.fov.pixelsize)
+        tilt = float(np.degrees(np.arctan2(d[1], d[0]))) - (0, 180, 90, -90)[i]
+        tilt = (tilt + 180.0) % 360.0 - 180.0
+        axes = list(ellipse["axes"])
+        axes[0 if i < 2 else 1] = length
+        return {"center": list(ellipse["center"]), "axes": axes, "tilt": tilt}
+
+    def _move_corner(self, x: float, y: float) -> None:
+        """The shape as the drag would leave it; the ROI changes only at the
+        release, so a drag is one undo step and the pane stays put."""
+        if self._corner is None:
+            return
+        kind, what = self._corner[:2]
+        if kind == "draw" and what == "freehand":
+            last = self._points[-1]
+            if np.hypot(x - last[0], y - last[1]) >= self.roi_pane.fov.pixelsize:
+                self._points.append(np.array([x, y], float))
+            v = np.asarray(self._points, float)
+            self.roi_pane.draw("drawing", v[:, 0], v[:, 1])
+            return
+        if kind == "draw" or kind == "ellipse":
+            ellipse = (self._dragged_ellipse(x, y) if kind == "draw"
+                       else self._moved_ellipse(x, y))
+            if ellipse is None:
+                self.roi_pane.draw("drawing")
+                return
+            xs, ys = Region.site(ellipse["center"], "circle", 1.0,
+                                 ellipse=ellipse).outline()
+            self.roi_pane.draw("drawing", xs, ys)
+            if kind == "ellipse":
+                h = np.asarray(ellipse_handles(ellipse), float)
+                self.roi_pane.draw("corners", h[:, 0], h[:, 1])
+            return
+        v = np.asarray(self._moved_points(x, y), float)
+        if kind == "polygon":
+            self.roi_pane.draw("corners", v[:, 0], v[:, 1])
+            v = np.vstack([v, v[0]])
+        self.roi_pane.draw("drawing", v[:, 0], v[:, 1])
+
+    def _drop_corner(self, x: float, y: float) -> None:
+        """The drag let go: the outline or ellipse drawn, or the point where
+        it was let go -- the polygon and its centre as drawing it there would
+        have made them, the ellipse, or the line."""
+        if self._corner is None:
+            return
+        kind, name = self._corner[:2]
+        if np.isnan(x):                  # never moved: a click, nothing to keep
+            self._corner = None
+            if kind == "draw":
+                self._points = []
+            return
+        if kind == "draw":
+            self._corner = None
+            if name == "freehand":
+                self._points.append(np.array([x, y], float))
+                path = thin_path(self._points, FREEHAND_PIXELS * self.roi_pane.fov.pixelsize)
+                self._cancel_drawing()
+                if len(path) >= 3:
+                    self._set_shape(polygon=path.tolist(), what="Outline")
+            else:
+                ellipse = self._dragged_ellipse(x, y)
+                self._cancel_drawing()
+                if ellipse is not None:
+                    self._set_shape(ellipse=ellipse, what="Ellipse")
+            return
+        if kind == "ellipse":
+            ellipse = self._moved_ellipse(x, y)
+            self._corner = None
+            self.roi_pane.draw("drawing")
+            self._set_shape(ellipse=ellipse, what="Ellipse")
+            return
+        points = self._moved_points(x, y)
+        self._corner = None
+        self.roi_pane.draw("drawing")
+        if kind == "line":
+            roi = self._selected()
+            if self.draft is not None or roi is None:
+                self.draft_lines = {**self.draft_lines, name: points}
+            else:
+                self.project.set_line(roi.id, name, points)
+                self.annotated()
+            self.redraw()
+            return
+        self._set_shape(polygon=points, what="Move corner")
+
+    def _set_shape(self, polygon=None, ellipse=None, what: str = "Outline") -> None:
+        """The draft's or the selected ROI's own shape, a polygon or an
+        ellipse (the other goes), its centre moved to the shape's: one undo
+        step for a stored ROI; an ROI of an id drawn round keeps its id
+        inside the shape.  No ROI at all and the shape makes a draft."""
+        if polygon is not None:
+            polygon = [[float(p[0]), float(p[1])] for p in polygon]
+            centre = np.asarray(polygon, float).mean(axis=0)
+        else:
+            centre = np.asarray(ellipse["center"], float)
+        roi = self._selected()
+        if self.draft is not None or roi is None:
+            if self.draft is None or self.draft_track is not None:
+                self._draft_track = None
+            self.draft = centre
+            self.draft_polygon, self.draft_ellipse = polygon, ellipse
+        else:
+            with self._edit(what):
+                roi.polygon, roi.ellipse = polygon, ellipse
+                roi.center = [float(centre[0]), float(centre[1])]
+                roi.spatial = True
+            self.changed.emit()
+        self.redraw()
+
+    # ------------------------------------------------------- the shape tool
+    @property
+    def shape_tool(self) -> str:
+        """What *Polygon* draws: a polygon, freehand or an ellipse, chosen by
+        a right-click on it and kept with the project's navigation."""
+        chosen = self.project.navigation.get("shape_tool", "polygon")
+        return chosen if chosen in dict(SHAPE_TOOLS) else "polygon"
+
+    def set_shape_tool(self, kind: str) -> None:
+        if kind not in dict(SHAPE_TOOLS):
+            raise ValueError(f"the shape tool is one of {[k for k, _ in SHAPE_TOOLS]}")
+        if self.drawing in dict(SHAPE_TOOLS):
+            self._cancel_drawing()
+        self.project.navigation["shape_tool"] = kind
+        self.polygon_button.setText(dict(SHAPE_TOOLS)[kind])
+
+    def _shape_menu(self, pos) -> None:
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self.polygon_button)
+        for kind, label in SHAPE_TOOLS:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(kind == self.shape_tool)
+            action.triggered.connect(lambda _=False, k=kind: self.set_shape_tool(k))
+        menu.exec(self.polygon_button.mapToGlobal(pos))
+
+    def _roi_double_clicked(self, x: float, y: float) -> None:
+        """A double-click closes a polygon, as in the main view: its first
+        click has placed the last vertex already."""
+        if self.drawing == "polygon" and len(self._points) >= 3:
+            self._finish_polygon()
 
     def _roi_hover(self, x: float, y: float) -> None:
-        if self.drawing and self._points:
+        if self.drawing in ("polygon", "line") and self._points:
             self._hover = np.array([x, y])
             self._draw_in_progress()
 
@@ -1501,11 +1868,14 @@ class ROIManagerWindow(QMainWindow):
         self._points = []
         self._hover = None
         self.roi_pane.set_tracking(True)
-        self.polygon_button.setChecked(kind == "polygon")
+        self.polygon_button.setChecked(kind in dict(SHAPE_TOOLS))
         self.line_button.setChecked(kind == "line")
-        self.status.showMessage("a click per vertex; a click on the first vertex "
-                                "closes it, Escape cancels" if kind == "polygon"
-                                else f"{self.line_name}: click the start, then the end")
+        self.status.showMessage({
+            "polygon": "a click per vertex; a double-click or a click on the first "
+                       "vertex closes it, Escape cancels",
+            "freehand": "drag round the structure; let go to close it, Escape cancels",
+            "ellipse": "drag the box the ellipse fills; Escape cancels",
+        }.get(kind, f"{self.line_name}: click the start, then the end"))
 
     def _cancel_drawing(self) -> None:
         self.drawing = None
@@ -1518,6 +1888,8 @@ class ROIManagerWindow(QMainWindow):
         self.redraw()
 
     def _place(self, x: float, y: float) -> None:
+        if self.drawing not in ("polygon", "line"):
+            return                 # freehand and ellipse are drags (`_grab_corner`)
         point = np.array([x, y], float)
         if self.drawing == "line":
             self._points.append(point)
@@ -1603,22 +1975,8 @@ class ROIManagerWindow(QMainWindow):
     def _finish_polygon(self) -> None:
         polygon = [[float(p[0]), float(p[1])] for p in self._points]
         self._cancel_drawing()
-        if len(polygon) < 3:
-            return
-        centre = np.asarray(polygon, float).mean(axis=0)
-        roi = self._selected()
-        if self.draft is not None or roi is None:
-            self.draft = centre                    # a drafted ROI with this outline
-            self._draft_track = None
-            self.draft_polygon = polygon
-        else:
-            with self._edit("Outline"):
-                roi.polygon = polygon
-                roi.center = [float(centre[0]), float(centre[1])]
-                # an ROI of an id drawn round: that id inside the outline
-                roi.spatial = True
-            self.changed.emit()
-        self.redraw()
+        if len(polygon) >= 3:
+            self._set_shape(polygon=polygon, what="Outline")
 
     def _finish_line(self) -> None:
         line = [[float(p[0]), float(p[1])] for p in self._points]
@@ -1657,11 +2015,11 @@ class ROIManagerWindow(QMainWindow):
         """Back to the global circle or square."""
         self._cancel_drawing()
         if self.draft is not None:
-            self.draft_polygon = None
+            self.draft_polygon = self.draft_ellipse = None
         roi = self._selected()
         if roi is not None and self.draft is None:
             with self._edit("Clear shape of"):
-                roi.polygon = None
+                roi.polygon = roi.ellipse = None
                 if roi.ids:              # an ROI of an id: back to the id alone
                     roi.spatial = False
             self.changed.emit()
@@ -1736,6 +2094,8 @@ class ROIManagerWindow(QMainWindow):
         self.active = roi_id
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         project.navigation["roi"] = roi_id
         if roi.file_id != self.current_file():
@@ -1941,12 +2301,16 @@ class ROIManagerWindow(QMainWindow):
             else:
                 roi = self.project.add_roi(file_id, [float(self.draft[0]),
                                                      float(self.draft[1])],
-                                           polygon=self.draft_polygon)
+                                           polygon=self.draft_polygon,
+                                           ellipse=self.draft_ellipse)
             roi.lines = dict(self.draft_lines)
             roi.angle = float(self.draft_angle)
+            roi.frames, roi.z = self.draft_frames, self.draft_z
             step.label = f"Add ROI {self.project.numbers().get(roi.id)}"
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         self.active = roi.id
         self.project.navigation["roi"] = roi.id
@@ -1958,6 +2322,81 @@ class ROIManagerWindow(QMainWindow):
 
     def _selected(self):
         return self.project.rois.get(self.active) if self.active else None
+
+    def shown_roi(self):
+        """The ROI the ROI image shows: the draft, as the ROI *Add* would
+        make of it (not stored), or the selected one; None when neither."""
+        from dataclasses import replace
+        from ..roi_manager.core import ROI
+        if self.draft is None:
+            return self._selected()
+        if self.draft_track is not None:
+            return replace(self.draft_track, frames=self.draft_frames, z=self.draft_z,
+                           angle=float(self.draft_angle))
+        file_id = self.current_file()
+        if file_id is None:
+            return None
+        return ROI(file_id, [float(self.draft[0]), float(self.draft[1])],
+                   polygon=self.draft_polygon, ellipse=self.draft_ellipse,
+                   lines=dict(self.draft_lines),
+                   angle=float(self.draft_angle), frames=self.draft_frames, z=self.draft_z)
+
+    def _follow_ranges(self) -> None:
+        """*frames and z* shows what the ROI image does -- the draft while
+        there is one -- so it is refreshed when that changes, not on every
+        redraw (its plots measure the ROI)."""
+        roi = self.shown_roi()
+        key = None if roi is None else (
+            self.draft is not None, roi.id if self.draft is None else None,
+            tuple(roi.center), id(roi.polygon), id(roi.ellipse), roi.frames and tuple(roi.frames),
+            roi.z and tuple(roi.z))
+        if key != getattr(self, "_ranges_key", None) and hasattr(self, "annotation"):
+            self._ranges_key = key
+            self.annotation.ranges.refresh()
+
+    def set_draft_ranges(self, **ranges) -> None:
+        """The draft's frame or z range (``frames=``, ``z=``), set in
+        *frames and z*: not an edit of the project, so no undo step."""
+        if "frames" in ranges:
+            self.draft_frames = ranges["frames"]
+        if "z" in ranges:
+            self.draft_z = ranges["z"]
+        self.redraw()
+
+    def _cut_to_ranges(self, view):
+        """The ROI image's layers without the localizations inside the shown
+        ROI that its frame or z range leaves out -- what it measures, where
+        it is, and everything round it as it is.  The ROI image only: the
+        overview and the zoom show the file whatever an ROI's range."""
+        from dataclasses import replace
+        from ..roi_manager.core import narrow
+        roi = self.shown_roi()
+        if roi is None or (roi.frames is None and roi.z is None):
+            return view
+        layers, state = view
+        whole = replace(roi, frames=None, z=None)
+        only_ranges = replace(roi, ids={})
+        out = []
+        for snap in layers:
+            if snap.locs is None or snap.index is None or snap.mask is None \
+                    or not snap.visible:
+                out.append(snap)
+                continue
+            try:
+                rows = self.project.members(whole, snap.locs, snap.index)
+            except Exception:          # a picture is a courtesy, never a failure
+                out.append(snap)
+                continue
+            cut = np.setdiff1d(rows, narrow(only_ranges, snap.locs, rows),
+                               assume_unique=True)
+            cut = cut[cut < len(snap.mask)]
+            if not len(cut):
+                out.append(snap)
+                continue
+            mask = np.array(snap.mask, dtype=bool, copy=True)
+            mask[cut] = False
+            out.append(replace(snap, mask=mask, known_indices=None, memo={}))
+        return tuple(out), state
 
     # ------------------------------------------------------------- turning
     def _shown_angle(self) -> float:

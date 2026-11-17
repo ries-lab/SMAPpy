@@ -1738,7 +1738,7 @@ class Session:
                 table = project.tables.get(c.label)
                 parts.append(("rois", c.label, id(table),
                               None if table is None else tuple(table.signatures),
-                              tuple((r.id, r.use, tuple(r.center), id(r.polygon), r.file_id)
+                              tuple((r.id, r.use, tuple(r.center), id(r.polygon), id(r.ellipse), r.file_id)
                                     for r in project.rois.values())))
             else:
                 table = (self.id_regions.get(c.source) or {}).get(c.label)

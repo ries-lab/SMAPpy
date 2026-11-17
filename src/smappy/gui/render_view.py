@@ -931,6 +931,14 @@ class RenderView(QWidget):
             p = region.points                      # corners: p0+n, p1+n, p1-n, p0-n
             start, end = (p[0] + p[3]) / 2, (p[1] + p[2]) / 2
             item = pg.LineROI(start, end, region.width, pen=ROI_PEN)
+        elif region.kind == "ellipse":
+            # pyqtgraph's ellipse turns about its box's corner (`pos`): the
+            # corner is put where the turn leaves the centre in place
+            (cx, cy), (a, b) = region.points[0], region.axes
+            t = np.radians(region.tilt)
+            corner = (cx - (a * np.cos(t) - b * np.sin(t)),
+                      cy - (a * np.sin(t) + b * np.cos(t)))
+            item = pg.EllipseROI(corner, [2 * a, 2 * b], angle=region.tilt, pen=ROI_PEN)
         else:
             item = pg.PolyLineROI(region.points.tolist(), closed=True, pen=ROI_PEN)
         item.sigRegionChangeFinished.connect(self._roi_edited)
@@ -975,6 +983,11 @@ class RenderView(QWidget):
             start = ((corners[0].x() + corners[3].x()) / 2, (corners[0].y() + corners[3].y()) / 2)
             end = ((corners[1].x() + corners[2].x()) / 2, (corners[1].y() + corners[2].y()) / 2)
             region = Region.line(start, end, size.y())
+        elif old.kind == "ellipse":
+            size = item.size()
+            centre = item.mapToParent(QPointF(size.x() / 2, size.y() / 2))
+            region = Region.ellipse((centre.x(), centre.y()), size.x() / 2,
+                                    size.y() / 2, item.angle())
         else:
             pts = [item.mapToParent(pg.Point(p)) for p in item.getState()["points"]]
             region = Region("polygon", [(p.x(), p.y()) for p in pts])

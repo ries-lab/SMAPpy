@@ -42,7 +42,7 @@ def draw_lines(project, copies, turn_by=0.0):
     for roi, gamma in zip(project.rois.values(), copies["gamma_deg"]):
         a = np.radians(gamma + turn_by)
         x, y = roi.center
-        project.set_line(roi.id, "direction", [[x, y], [x + 60 * np.cos(a),
+        project.set_line(roi.id, "line", [[x, y], [x + 60 * np.cos(a),
                                                         y + 60 * np.sin(a)]])
 
 
@@ -114,7 +114,7 @@ def test_a_measured_centre_and_angle_place_each_roi(tmp_path):
     settings = AverageROIs.Settings()
     settings.centre.by = "measured"
     settings.orientation.by = "measured"
-    settings.orientation.angle = "direction_angle_deg"
+    settings.orientation.angle = "line_angle_deg"
     session.run(AverageROIs(), settings)
     x, y, _ = averaged(session)
     mean = np.mean(ARROW, axis=0)
@@ -143,12 +143,12 @@ def test_rois_without_what_the_settings_ask_for_are_left_out_and_said(tmp_path):
     file_id = next(iter(project.sources))
     a = project.add_roi(file_id, [500, 500])
     project.add_roi(file_id, [1500, 500])
-    project.set_line(a.id, "direction", [[500, 500], [500, 600]])
+    project.set_line(a.id, "line", [[500, 500], [500, 600]])
     settings = AverageROIs.Settings()
     settings.orientation.by = "line"
     result = session.run(AverageROIs(), settings)
     assert result.values == {"n_rois": 1, "n_skipped": 1, "n_localizations": 50}
-    assert "1 with no line direction" in result.text
+    assert "1 with no line called line" in result.text
     x, y, _ = averaged(session)
     assert abs(np.median(y)) < 5 and abs(np.median(x)) < 5
     bare = Session(locs)                         # a table, and no file it came from

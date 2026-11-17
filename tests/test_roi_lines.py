@@ -157,5 +157,5 @@ def test_a_drafted_roi_takes_its_lines_when_it_is_added(app):
     window._reverse_line()
     window._add()
     roi = project.rois[window.active]
-    assert roi.lines == {"direction": [[2000.0, 60.0], [2000.0, 0.0]]}
+    assert roi.lines == {"line": [[2000.0, 60.0], [2000.0, 0.0]]}
     window.close()

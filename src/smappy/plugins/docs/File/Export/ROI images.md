@@ -33,7 +33,7 @@ picture shows that file's localizations only.
 
 **Turned to a line.**  With *turn to* set to a line's name, each picture is
 turned so that the ROI's line of that name points to the right.  Draw a
-line along each structure in the ROI manager (a *direction*, for example),
+line along each structure in the ROI manager (the *line* a project starts with, for example),
 and the pictures show the structures all the same way round.  An ROI
 without that line is drawn as it lies.
 

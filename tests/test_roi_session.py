@@ -1,4 +1,7 @@
 """Analysis ROIs backed by the session: the layer's view, saved with the file."""
+import json
+from dataclasses import asdict
+
 import numpy as np
 import pytest
 
@@ -318,6 +321,121 @@ def test_a_drawn_polygon_becomes_the_roi_and_selects_by_it(tmp_path):
     assert roi.polygon is None
 
 
+def test_a_double_click_closes_a_polygon_drawn_with_the_mouse(tmp_path):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    session, window = _manager(tmp_path)
+    file_id = next(iter(session.rois.sources))
+    roi = session.rois.add_roi(file_id, [2000, 2000])
+    window.refresh()
+    window.select(roi.id)
+    window.show()
+    QTest.qWaitForWindowExposed(window)
+    window._start_drawing("polygon")
+    viewport = window.roi_pane.graphics.viewport()
+    centre = viewport.rect().center()
+    for dx, dy in ((-40, -40), (40, -40)):
+        QTest.mouseClick(viewport, Qt.LeftButton, Qt.NoModifier, centre + QPoint(dx, dy))
+    # a double-click is a click and then the double-click event, as the
+    # system sends it (QTest's mouseDClick sends the second alone)
+    last = centre + QPoint(40, 40)
+    QTest.mouseClick(viewport, Qt.LeftButton, Qt.NoModifier, last)
+    QTest.mouseDClick(viewport, Qt.LeftButton, Qt.NoModifier, last)
+    assert window.drawing is None
+    assert roi.polygon is not None and len(roi.polygon) == 3     # no vertex twice
+    window.close()
+
+
+def test_a_polygons_corner_is_dragged_in_one_undo_step(tmp_path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    session, window = _manager(tmp_path)
+    file_id = next(iter(session.rois.sources))
+    roi = session.rois.add_roi(file_id, [2000, 2000])
+    window.refresh()
+    window.select(roi.id)
+    window.show()
+    QTest.qWaitForWindowExposed(window)
+    window._start_drawing("polygon")
+    square = [(1900, 1900), (2100, 1900), (2100, 2100), (1900, 2100)]
+    for x, y in square + square[:1]:
+        window._roi_clicked(float(x), float(y))
+    pane = window.roi_pane
+    assert len(pane.shapes["corners"].getData()[0]) == 4         # marked to grab
+
+    def at(x, y):          # the widget's pixel over a data point
+        from PySide6.QtCore import QPointF
+        scene = pane.content.mapToScene(QPointF(x, y))
+        return pane.graphics.mapFromScene(scene)
+
+    viewport = pane.graphics.viewport()
+    start, end = at(2100, 2100), at(2200, 2150)
+    QTest.mousePress(viewport, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(viewport, end)
+    assert roi.polygon[2] == [2100.0, 2100.0]                    # only at the release
+    QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier, end)
+    p = pane.fov.pixelsize
+    assert roi.polygon[2] == [pytest.approx(2200, abs=p), pytest.approx(2150, abs=p)]
+    assert roi.polygon[0] == [1900.0, 1900.0]
+    assert np.allclose(roi.center, np.mean(roi.polygon, axis=0))
+    window.undo()
+    assert roi_now(session, roi).polygon[2] == [2100.0, 2100.0]
+    window.close()
+
+
+def test_a_lines_end_is_dragged_and_a_click_on_it_only_chooses_it(tmp_path):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtTest import QTest
+    session, window = _manager(tmp_path)
+    project = session.rois
+    project.set_line_names(["line", "axis"])
+    roi = project.add_roi(next(iter(project.sources)), [2000, 2000])
+    project.set_line(roi.id, "axis", [[1900.0, 2000.0], [2100.0, 2000.0]])
+    window.refresh()
+    window.select(roi.id)
+    window.show()
+    QTest.qWaitForWindowExposed(window)
+    pane = window.roi_pane
+    viewport = pane.graphics.viewport()
+
+    def at(x, y):
+        return pane.graphics.mapFromScene(pane.content.mapToScene(QPointF(x, y)))
+
+    steps = len(project.history._undo)
+    QTest.mouseClick(viewport, Qt.LeftButton, Qt.NoModifier, at(2100, 2000))
+    assert window.line_name == "axis"                            # chosen, not moved
+    assert roi.lines["axis"] == [[1900.0, 2000.0], [2100.0, 2000.0]]
+    assert len(project.history._undo) == steps                          # and no undo step
+    QTest.mousePress(viewport, Qt.LeftButton, Qt.NoModifier, at(2100, 2000))
+    QTest.mouseMove(viewport, at(2100, 2150))
+    QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier, at(2100, 2150))
+    p = pane.fov.pixelsize
+    end = project.rois[roi.id].lines["axis"]
+    assert end[0] == [1900.0, 2000.0]
+    assert end[1] == [pytest.approx(2100, abs=p), pytest.approx(2150, abs=p)]
+    window.close()
+
+
+def test_a_click_centres_the_stored_roi_and_its_line_stays_on_the_data(tmp_path):
+    session, window = _manager(tmp_path)
+    project = session.rois
+    roi = project.add_roi(next(iter(project.sources)), [2000, 2000])
+    project.set_line(roi.id, "line", [[1950.0, 2000.0], [2050.0, 2000.0]])
+    window.refresh()
+    window.select(roi.id)
+    window._roi_clicked(2030.0, 2040.0)
+    moved = project.rois[roi.id]
+    assert moved.center == [2030.0, 2040.0]
+    assert moved.lines["line"] == [[1950.0, 2000.0], [2050.0, 2000.0]]   # as a draft's
+    window.undo()
+    assert project.rois[roi.id].center == [2000.0, 2000.0]
+    window.close()
+
+
+def roi_now(session, roi):
+    return session.rois.rois[roi.id]
+
+
 def test_a_line_takes_two_clicks_and_is_saved_with_the_file(tmp_path):
     session, window = _manager(tmp_path)
     file_id = next(iter(session.rois.sources))
@@ -329,7 +447,7 @@ def test_a_line_takes_two_clicks_and_is_saved_with_the_file(tmp_path):
     window._roi_clicked(1900.0, 2000.0)
     assert roi.lines == {}                          # one click is not a line
     window._roi_clicked(2100.0, 2050.0)
-    assert roi.lines == {"direction": [[1900.0, 2000.0], [2100.0, 2050.0]]}
+    assert roi.lines == {"line": [[1900.0, 2000.0], [2100.0, 2050.0]]}
     assert window.drawing is None
 
     out = session.save(tmp_path / "with_direction.hdf5")
@@ -490,3 +608,92 @@ def test_roi_results_are_columns_beside_the_table_and_can_be_left_out(tmp_path):
     # what the segmenter measured goes with the ROIs; the evaluations do not
     assert len(back.rois.rois) == len(project.rois)
     assert not any("n_localizations" in row for row in back.rois.results())
+
+
+def _drag(window, path):
+    """A press, moves along ``path`` and a release, in data nm, on the ROI image."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtTest import QTest
+    pane = window.roi_pane
+    viewport = pane.graphics.viewport()
+
+    def at(x, y):
+        return pane.graphics.mapFromScene(pane.content.mapToScene(QPointF(x, y)))
+
+    QTest.mousePress(viewport, Qt.LeftButton, Qt.NoModifier, at(*path[0]))
+    for p in path[1:]:
+        QTest.mouseMove(viewport, at(*p))
+    QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier, at(*path[-1]))
+
+
+def _shown(tmp_path):
+    from PySide6.QtTest import QTest
+    session, window = _manager(tmp_path)
+    roi = session.rois.add_roi(next(iter(session.rois.sources)), [2000, 2000])
+    window.refresh()
+    window.select(roi.id)
+    window.show()
+    QTest.qWaitForWindowExposed(window)
+    return session, window, roi
+
+
+def test_a_freehand_outline_is_thinned_to_its_corners_and_becomes_the_polygon(tmp_path):
+    session, window, roi = _shown(tmp_path)
+    window.set_shape_tool("freehand")
+    assert window.polygon_button.text() == "Freehand"
+    window.polygon_button.click()
+    assert window.drawing == "freehand"
+    # a square traced with a point every 10 nm
+    side = np.linspace(1900, 2100, 21)
+    path = ([(x, 1900) for x in side] + [(2100, y) for y in side[1:]]
+            + [(x, 2100) for x in side[::-1][1:]] + [(1900, y) for y in side[::-1][1:]])
+    _drag(window, path)
+    assert window.drawing is None
+    p = window.roi_pane.fov.pixelsize
+    corners = np.asarray(roi_now(session, roi).polygon)
+    assert 4 <= len(corners) <= 6                       # a square's corners, not 80 points
+    assert corners.min(axis=0) == pytest.approx([1900, 1900], abs=2 * p)
+    assert corners.max(axis=0) == pytest.approx([2100, 2100], abs=2 * p)
+    window.close()
+
+
+def test_an_ellipse_is_dragged_as_its_box_and_its_handle_stretches_and_turns_it(tmp_path):
+    session, window, roi = _shown(tmp_path)
+    window.set_shape_tool("ellipse")
+    window.polygon_button.click()
+    _drag(window, [(1900, 1950), (2000, 2000), (2100, 2050)])
+    p = window.roi_pane.fov.pixelsize
+    drawn = roi_now(session, roi)
+    assert drawn.polygon is None
+    assert drawn.ellipse["center"] == [pytest.approx(2000, abs=p), pytest.approx(2000, abs=p)]
+    assert drawn.ellipse["axes"] == [pytest.approx(100, abs=p), pytest.approx(50, abs=p)]
+    assert drawn.ellipse["tilt"] == 0
+    assert np.allclose(drawn.center, drawn.ellipse["center"])
+    held = session.rois.extract(drawn)
+    u = (held["x_nm"] - 2000) / 100
+    v = (held["y_nm"] - 2000) / 50
+    assert len(held) and (u ** 2 + v ** 2 <= 1.01).all()     # exactly the ellipse
+    # the end of the long axis dragged up and further out: longer, turned
+    c = np.asarray(drawn.ellipse["center"])
+    _drag(window, [tuple(c + [drawn.ellipse["axes"][0], 0]), (2000 + 150, 2000 + 150)])
+    turned = roi_now(session, roi).ellipse
+    assert turned["tilt"] == pytest.approx(45, abs=1)
+    assert turned["axes"][0] == pytest.approx(np.hypot(150, 150), abs=2 * p)
+    assert turned["axes"][1] == drawn.ellipse["axes"][1]
+    window.undo()
+    assert roi_now(session, roi).ellipse["tilt"] == 0
+    window._clear_shape()
+    assert roi_now(session, roi).ellipse is None
+    window.close()
+
+
+def test_an_ellipse_is_saved_with_the_rois_and_read_back(tmp_path):
+    from smappy.roi_manager.core import ROI
+    session, _ = _manager(tmp_path)
+    project = session.rois
+    roi = project.add_roi(next(iter(project.sources)), [0, 0],
+                          ellipse={"center": [0, 0], "axes": [80, 40], "tilt": 30})
+    back = ROI.from_dict(json.loads(json.dumps(asdict(roi))))
+    assert back.ellipse == {"center": [0.0, 0.0], "axes": [80.0, 40.0], "tilt": 30.0}
+    assert str(project.region(back)) == "ellipse ROI 160 x 80"
+    assert "ellipse" in project.geometry(back)

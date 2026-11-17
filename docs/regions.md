@@ -14,8 +14,9 @@ annotates and organises ROIs; it is not the only place they can be measured.
 
 * **An ROI** (`roi_manager.core.ROI`, kept by the session's `ROIProject`,
   `Session.rois`, which takes its data, filters and grouping from the
-  session).  Its shape is a `regions.Region` (rect, polygon, line, circle):
-  its own polygon, or the project's circle or square of `size_nm` round its
+  session).  Its shape is a `regions.Region` (rect, polygon, line, circle,
+  ellipse): its own polygon or ellipse (`ROI.ellipse`, centre, semi-axes and
+  tilt, held exactly), or the project's circle or square of `size_nm` round its
   centre, worked out when asked for (`ROI.region`) so that changing the
   project's shape is one edit for every ROI.  Its named *lines*
   (`ROI.lines`, names from `ROIProject.line_names`), keywords, *use*,
