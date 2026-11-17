@@ -405,6 +405,16 @@ def psf_calibration_actions(control) -> List[Action]:
             raise ToolError(f"not saved: {type(error).__name__}: {error}") from None
         return {"saved": saved, "fitter": _status(w)}
 
+    def open_calibration(path, folder=None):
+        w = win()
+        _idle(w)
+        if not Path(path).exists():
+            raise ToolError(f"no file {path}")
+        # a stack not found is looked for in ``folder`` when given; never a question or a box
+        if not w.open_calibration(path, folder=folder, ask=False, quiet=True):
+            raise ToolError(f"not opened: {w.last_error or _status(w)}")
+        return {"opened": str(path), "files": list(w.paths), "status": _status(w), "pages": _pages(w.tabs)}
+
     def use():
         w = win()
         if w.run_result is None or w.run_result.saved is None:
@@ -476,6 +486,13 @@ def psf_calibration_actions(control) -> List[Action]:
                "by default where it was saved or beside the stacks; a path given is under the "
                "output folder or the stacks' folder -- and put it into its fitter.", save_as,
                {"path": {"type": "string", "description": "the .h5 to write"}}),
+        Action(f"{name}/Open calibration", "A saved calibration shown again: its pages and bead table "
+               "from the file, its settings into the forms, and its bead stacks into the files where they "
+               "are found -- where they were, beside the calibration, or by name under ``folder``.  Only "
+               "files saved from November 2026 keep their run.", open_calibration,
+               {"path": {"type": "string", "description": "the calibration .h5"},
+                "folder": {"type": "string", "description": "where to look for stacks that moved"}},
+               ("path",)),
         Action(f"{name}/Use in fitter", "Put the saved calibration into its fitter again: Spline "
                "3D, Spline 3D 2C, Spline 4Pi or Astigmatic z, by the method and mode.", use),
         Action(f"{name}/Add to microscope", "Keep the learnt pupil with the beads' microscope, "

@@ -92,3 +92,17 @@ def test_the_pupil_model_learns_from_the_beads_without_the_window(beads, tmp_pat
     assert (tmp_path / "pupil.h5").exists() and "Zernike" in str(list(result.data))
     assert {"Pupil and Zernikes", "Model vs data"} <= set(result.plots)
     assert np.isfinite(len(result.text))
+    # its run kept in the file (`saved_run`): every page from the file alone, the settings as typed
+    import h5py
+
+    from smappy.calibrate import saved_run
+    opened = saved_run.load(tmp_path / "pupil.h5")
+    titles = [p.title for p in saved_run.ENTRY.pages(opened)]
+    assert {"Pupil and Zernikes", "Residual atlas", "Zernike table", "Model vs data", "Fit quality", "CRLB",
+            "Beads"} <= set(titles)
+    assert saved_run.settings_of(opened.result.record)["optics"].NA == 1.43
+    # a start model is kept as a uipsf model group of its own: here the run's own model copied there
+    with h5py.File(tmp_path / "pupil.h5", "a") as f:
+        f.copy(f["uipsf"], f, name=saved_run.START)
+    start = saved_run.load(tmp_path / "pupil.h5").result.start
+    assert start is not None and set(start.shared) == set(opened.result.learned.shared)

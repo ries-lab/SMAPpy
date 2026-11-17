@@ -497,7 +497,12 @@ class PupilModel:
                                decisions=dict(marks or {}) if detected is not None or previous is not None
                                else marks or None,
                                progress=progress, cancel=cancel, rois=None if detected is None else detected.found)
-        return Run(done, dual, done.saved, extra={"spilled": cuda_spill()})
+        run = Run(done, dual, done.saved, extra={"spilled": cuda_spill()})
+        from .pupil import bead_size_warning
+        warning = bead_size_warning(inputs["model"])
+        if warning:
+            run.extra["warning"] = warning
+        return run
 
     def finish(self, run: Run, progress=None) -> Run:
         """The fit quality (Spline 3D on every bead) and the model against the data, kept with the run;

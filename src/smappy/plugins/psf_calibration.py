@@ -28,7 +28,7 @@ from ..calibrate.insitu import InSituSettings
 from ..calibrate.insitu_run import InSituModelSettings
 from ..calibrate.molecule_stack import MoleculeStackSettings
 from ..calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, SplineSettings
-from . import Context, FormState, Plot, Plugin, Result, param, register
+from . import Context, FormState, Notice, Plot, Plugin, Result, param, register
 
 #: the methods by key, as `calibrate.psf_methods.METHODS` has them; the sample follows from the method
 METHOD_KEYS = ("pupil", "average", "elliptical", "molecules", "molecules elliptical", "insitu")
@@ -166,11 +166,14 @@ class PSFCalibration(Plugin):
         try:
             method, dual = method_for(None, settings.method, settings.mode)
         except ValueError as error:
-            return FormState(notice=str(error))
+            return FormState(notice=Notice(str(error)))
         reads = method.sections
         insitu, fourpi = reads.get("in situ", False), reads.get("4Pi", False)
         molecules = reads.get("molecules", False)
-        return FormState(shown={
+        from ..calibrate.pupil import bead_size_warning
+        beads_model = reads["model"] and not insitu and not fourpi and not molecules
+        warning = bead_size_warning(settings.model) if beads_model else None
+        return FormState(notice=Notice(warning) if warning else None, shown={
             "model": reads["model"], "spline": reads["spline"], "in_situ": insitu,
             "in_situ_detection": insitu, "molecules": molecules, "elliptical": reads.get("elliptical", False),
             "fourpi": fourpi, "beads": not insitu and not fourpi and not molecules,
@@ -198,6 +201,8 @@ class PSFCalibration(Plugin):
             saved = Path(method.save_as(run, settings.save_as))
         camera = inputs.get("camera")
         if saved is not None:
+            from ..calibrate import saved_run
+            saved_run.write(method, run, paths)    # its pages, settings and stacks, for opening it again
             psf_run.list_calibration(saved, method, dual, paths, camera)
         fitter = psf_run.fitter_of(method, dual)
         summary = method.summary(run)

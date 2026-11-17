@@ -541,13 +541,19 @@ def has_model(path) -> bool:
         return False
 
 
-def load_model(path, device=None, dtype=torch.float32) -> LearnedPSF:
+def load_model(path, device=None, dtype=torch.float32, group: str | None = None) -> LearnedPSF:
     """The model at ``path``, ready for `LearnedPSF.psf`: a model file, or a SMAPpy calibration carrying one
-    (`EMBEDDED`)."""
+    (`EMBEDDED`); with ``group``, the model in that group of the file -- SMAPpy keeps the model a calibration
+    started from beside its own (`smappy.calibrate.saved_run`)."""
     with h5py.File(path, "r") as root:
-        f = model_group(root)
+        if group is not None:
+            inner = root.get(group)
+            f = inner if isinstance(inner, h5py.Group) and inner.attrs.get("format") == FORMAT else None
+        else:
+            f = model_group(root)
         if f is None:
-            raise ValueError(f"{path} is not a uipsf model file and carries no model")
+            raise ValueError(f"{path} is not a uipsf model file and carries no model"
+                             + (f" in {group}" if group is not None else ""))
         if int(f.attrs["version"]) > VERSION:
             raise ValueError(f"{path} is model-file version {int(f.attrs['version'])}; this uipsf reads up to "
                              f"{VERSION}")

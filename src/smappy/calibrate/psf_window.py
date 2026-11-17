@@ -410,6 +410,10 @@ class PSFCalibrationWindow(QMainWindow):
                                     "the microscope, for the state of its 3D lens: in situ learning starts "
                                     "from it")
         self.keep_button.clicked.connect(self._keep_pupil)
+        self.open_button = QPushButton("Open calibration...")
+        self.open_button.setToolTip("a saved calibration's pages and bead table again, with its settings, and "
+                                    "its bead stacks where they are found")
+        self.open_button.clicked.connect(self.open_calibration)
         steps = QHBoxLayout()
         steps.addWidget(self.detect_button)
         steps.addWidget(self.run_button)
@@ -418,7 +422,7 @@ class PSFCalibrationWindow(QMainWindow):
         layout.addWidget(self.found_label)
         layout.addWidget(self.warning_label)
         layout.addWidget(self.progress_bar)
-        for button in (self.save_as_button, self.use_button, self.keep_button):
+        for button in (self.save_as_button, self.use_button, self.keep_button, self.open_button):
             layout.addWidget(button)
         layout.addStretch(1)
         return panel
@@ -722,7 +726,22 @@ class PSFCalibrationWindow(QMainWindow):
             magnitude = "minimal"
         layered = self.method.sections.get("microscope", False) and self._coverslip_matters()
         self.model_form.set_shown(model_shown(kind, magnitude, self.is_dual, layered, ring))
+        self._show_bead_size(kind == "beads" and not fourpi and self.method.sections.get("model", False))
         self._show_fourpi()
+
+    def _show_bead_size(self, beads: bool) -> None:
+        """*bead diameter* red, the reason in its tooltip, while beads are learnt from with it at 0
+        (`pupil.bead_size_warning`): no default fits both 40 and 100 nm beads, but 0 is rarely right."""
+        from .pupil import bead_size_warning
+        label = self.model_form.labels.get("bead_diameter_nm")
+        if label is None:
+            return
+        try:
+            warning = bead_size_warning(self.model_form.value()) if beads else None
+        except ValueError:
+            warning = None
+        label.setStyleSheet("color: #e0453a; font-weight: bold" if warning else "")
+        label.setToolTip(warning or "")
 
     def _sample_index(self, optics, fourpi: bool) -> float:
         """The sample's index the method reads: typed, or its mode's *auto* (`OpticsSettings.sample_index`)."""
@@ -794,19 +813,33 @@ class PSFCalibrationWindow(QMainWindow):
         ready = not ((self.method.key in ("pupil", "insitu", "molecules") or getattr(self.method, "needs_torch", False))
                      and torch_missing() is not None)
         done = self.run_result is not None
-        self.toggle_button.setEnabled(done or self.detected is not None)
+        loaded = done and self.run_result.extra.get("loaded", False)
+        self.toggle_button.setEnabled((done and not loaded) or self.detected is not None)
         self.detect_button.setEnabled(ready and not self.busy)
         self.run_button.setEnabled(ready and not self.busy)
         self.stop_button.setEnabled(self.busy)
         self.save_as_button.setEnabled(done and not self.busy)
-        self.browse_button.setEnabled(done)
-        why = self.method.halves_needed(self.run_result) if done and getattr(self.method, "has_halves", False) else None
+        self.browse_button.setEnabled(done and self.run_result.extra.get("views") is not None)
+        self.open_button.setEnabled(not self.busy)
+        why = self.entry.halves_needed(self.run_result) if done and getattr(self.entry, "has_halves", False) else None
         self.halves_button.setEnabled(done and not self.busy and why is None)
         self.halves_button.setToolTip(why or self._halves_tip)
         self.use_button.setEnabled(done and not self.busy and self.run_result.saved is not None)
         learnt = done and self._learnt() is not None
         self.keep_button.setVisible(learnt)
         self.keep_button.setEnabled(learnt and not self.busy)
+
+    @property
+    def entry(self):
+        """The method entry that answers for the run shown: a run opened from its file has its own
+        (`saved_run.ENTRY`), whatever method made it; every other run its method's."""
+        from .saved_run import entry_of
+        return entry_of(self.method, self.run_result)
+
+    def _columns(self) -> tuple:
+        if self.run_result is not None and self.run_result.extra.get("loaded"):
+            return self.entry.columns_of(self.run_result)
+        return tuple(getattr(self.method, "columns", ()))
 
     def _learnt(self):
         """The uipsf model of the last run -- a pupil model's or in situ's -- or None (a bead average)."""
@@ -1035,6 +1068,7 @@ class PSFCalibrationWindow(QMainWindow):
             if value is None:
                 self.status_bar.showMessage("stopped: no uncertainty from halves")
                 return
+            self._keep_run()                          # the halves' numbers are in its model file now
             self.status_bar.showMessage(f"uncertainty from {value.n_splits} splits into halves"
                                         + (f"; saved into {self.run_result.saved.name}"
                                            if self.run_result.saved is not None else ""))
@@ -1048,6 +1082,7 @@ class PSFCalibrationWindow(QMainWindow):
             return
         self.run_result = value
         self.marks = self.method.initial_marks(value)
+        self._keep_run()
         self._show_result()
         if value.saved is not None:
             self._list_calibration(value.saved, value.dual)
@@ -1154,6 +1189,7 @@ class PSFCalibrationWindow(QMainWindow):
             run = method.run(paths, dual, inputs, progress, self._cancel, detected=found, marks=marks or None,
                              previous=last if again else None)
             run.extra["inputs"] = inputs           # what the next Calibrate compares its settings with
+            run.extra["paths"] = paths             # kept with the saved file, to find the stacks again
             return method.finish(run, progress)
         self._work("result", work)
 
@@ -1162,7 +1198,7 @@ class PSFCalibrationWindow(QMainWindow):
         in the worker (`Method.halves`), *Stop* as for a calibration.  ``splits`` given (a test, a
         script) asks nothing."""
         run = self.run_result
-        if run is None or not getattr(self.method, "has_halves", False) or self.busy:
+        if run is None or not getattr(self.entry, "has_halves", False) or self.busy:
             return
         why = self.method.halves_needed(run)
         if why:
@@ -1283,7 +1319,7 @@ class PSFCalibrationWindow(QMainWindow):
                   for (_, _, page), boxes in zip(self.pages, self.choices)}
         self._clear_pages()
         self.tabs.blockSignals(True)
-        for page in self.method.pages(self.run_result):
+        for page in self.entry.pages(self.run_result):
             if page.table is not None:
                 self.tabs.addTab(self._table_page(page), page.title)
                 self.pages.append((None, None, page))
@@ -1310,7 +1346,7 @@ class PSFCalibrationWindow(QMainWindow):
         self._update_buttons()
         self.redraw()
         saved = self.run_result.saved
-        self.status_bar.showMessage(self.method.summary(self.run_result) + (
+        self.status_bar.showMessage(self.entry.summary(self.run_result) + (
             f"; saved {saved.name}" if saved else "; not saved (save model is off)"))
         warning = self.run_result.extra.get("warning")
         self.warning_label.setText(warning or "")
@@ -1320,7 +1356,7 @@ class PSFCalibrationWindow(QMainWindow):
 
     def _positions(self) -> list:
         from .psf_methods import _positions
-        own = getattr(self.method, "positions", None)
+        own = getattr(self.entry, "positions", None)
         if own is not None:
             return own(self.run_result)
         records = getattr(getattr(self.run_result.result, "rois", None), "records", None)
@@ -1342,14 +1378,15 @@ class PSFCalibrationWindow(QMainWindow):
         from .stack_browser import MARKED
         if self.run_result is None and self.detected is None:
             return {}
-        own = getattr(self.method, "states" if self.run_result is not None else "detected_states", None)
+        own = getattr(self.entry, "states" if self.run_result is not None else "detected_states", None)
         if own is not None:
             return own(self.run_result if self.run_result is not None else self.detected)
-        if "state" not in getattr(self.method, "columns", ()):
+        columns = self._columns()
+        if "state" not in columns:
             return {}
-        rows = (self.method.rows(self.run_result, self.marks) if self.run_result is not None
+        rows = (self.entry.rows(self.run_result, self.marks) if self.run_result is not None
                 else self.method.detected_rows(self.detected, self.marks))
-        column = self.method.columns.index("state")
+        column = columns.index("state")
         states = {}
         for i, (values, _) in enumerate(rows):
             state, _, wish = str(values[column]).split(":")[0].partition(" -> ")
@@ -1416,11 +1453,12 @@ class PSFCalibrationWindow(QMainWindow):
             self.bead_table.setRowCount(0)
             return
         chosen = self.selected_beads()
-        rows = (self.method.rows(self.run_result, self.marks) if self.run_result is not None
+        rows = (self.entry.rows(self.run_result, self.marks) if self.run_result is not None
                 else self.method.detected_rows(self.detected, self.marks))
+        columns = self._columns()
         self.bead_table.blockSignals(True)
-        self.bead_table.setColumnCount(len(self.method.columns))
-        self.bead_table.setHorizontalHeaderLabels(self.method.columns)
+        self.bead_table.setColumnCount(len(columns))
+        self.bead_table.setHorizontalHeaderLabels(list(columns))
         self.bead_table.setRowCount(len(rows))
         for i, (values, greyed) in enumerate(rows):
             for column, value in enumerate(values):
@@ -1447,7 +1485,7 @@ class PSFCalibrationWindow(QMainWindow):
                 del self.marks[bead]
             else:
                 self.marks[bead] = ("exclude" if self.run_result is None
-                                    else self.method.mark(self.run_result, bead))
+                                    else self.entry.mark(self.run_result, bead))
         if self.run_result is None:
             self._show_detected_text()
         self.stack_browser.set_states(self._ring_states())
@@ -1468,7 +1506,7 @@ class PSFCalibrationWindow(QMainWindow):
         if self.run_result is None or not self.method.has_stack:
             return
         from .stack_view import StackViewer
-        views, calibration = self.method.stacks(self.run_result)
+        views, calibration = self.entry.stacks(self.run_result)
         if self.stack_viewer is None:
             self.stack_viewer = StackViewer(views.data, calibration, views.titles, views.mirror_axis, self,
                                             views=views)
@@ -1535,12 +1573,112 @@ class PSFCalibrationWindow(QMainWindow):
     def save_to(self, path) -> str:
         """Save the calibration at ``path``, list it and hand it to its fitter: *Save as...* after its
         dialog, and the assistant's *Save as* (`gui/window_actions.py`), which raises what went wrong."""
-        saved = self.method.save_as(self.run_result, path)
+        saved = self.entry.save_as(self.run_result, path)
+        self.run_result.saved = Path(saved)
+        self._keep_run()
         self._update_buttons()
         self.status_bar.showMessage(f"saved {saved}")
         self._list_calibration(saved, self.run_result.dual)
         self.calibrated.emit(str(saved), self.run_result.dual)
         return str(saved)
+
+    def _keep_run(self) -> None:
+        """The run shown kept in its saved file (`saved_run.write`): pages, table, settings and where its
+        stacks are, for *Open calibration...*.  Never a failure of the calibration: said, and the file stays
+        one the fitters read."""
+        from . import saved_run
+        run = self.run_result
+        if run is None or run.saved is None:
+            return
+        try:
+            saved_run.write(self.method, run, run.extra.get("paths", self.paths))
+        except Exception as error:
+            self.status_bar.showMessage(f"the run could not be kept in {Path(run.saved).name}: "
+                                        f"{type(error).__name__}: {error}")
+
+    def open_calibration(self, path=None, folder=None, ask: bool = True, quiet: bool = False) -> bool:
+        """*Open calibration...*: a saved calibration's run (`saved_run.load`) shown again -- its pages, its
+        bead table, its settings in the forms -- and its bead stacks into the file list where they are found:
+        where they were, beside the calibration as they were, or, asked, in a folder the user picks
+        (``folder``: a script's or a test's pick; ``ask`` False asks nothing, ``quiet`` puts an error in the
+        status line only, for the assistant).  Not all found, the run is shown from
+        the file alone, and no stacks are added: *Calibrate* would make another calibration from a part of
+        them.  False where nothing was opened."""
+        from . import saved_run
+        if self.busy:
+            return False
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Open calibration", folders.start(),
+                                                  "Calibration (*.h5)")
+            if not path:
+                return False
+        try:
+            run = saved_run.load(path)
+        except Exception as error:
+            self.error(error, quiet)
+            return False
+        record = run.result.record
+        # the method, then the settings: choosing a method drops the run shown and keeps the forms
+        self.choose(record["sample"], record["method"], record["mode"])
+        self._restore(saved_run.settings_of(record))
+        found = saved_run.find_sources(record, path)
+        missing = [s["name"] for s, hit in zip(record.get("sources", []), found, strict=True) if hit is None]
+        if missing and folder is None and ask and self._ask_folder(missing):
+            folder = self._chosen_folder
+        if missing and folder is not None:
+            found = saved_run.find_sources(record, path, folder)
+            missing = [s["name"] for s, hit in zip(record.get("sources", []), found, strict=True) if hit is None]
+        self.paths = [] if missing else list(found)
+        self._refresh_files()
+        if not missing:
+            for source, hit in zip(run.result.sources, found, strict=True):
+                source["path"] = hit             # the rings follow the stacks where they are now
+        self.detected = None
+        self.marks = {}
+        self.run_result = run
+        self._show_result()
+        names = ", ".join(missing[:3]) + (", ..." if len(missing) > 3 else "")
+        self.status_bar.showMessage(
+            self.entry.summary(run) + ("; its stacks restored: Calibrate makes it again" if not missing and found
+                                       else f"; {len(missing)} of {len(found)} stacks not found ({names}): shown "
+                                            f"from the file alone" if missing else ""))
+        return True
+
+    _chosen_folder = None
+
+    def _ask_folder(self, missing) -> bool:
+        """Whether to look for the stacks not found in a folder the user picks (`_chosen_folder`)."""
+        names = "\n".join(missing[:5]) + ("\n..." if len(missing) > 5 else "")
+        box = QMessageBox(QMessageBox.Question, "Open calibration",
+                          f"{len(missing)} of the calibration's bead stacks are not where they were:\n\n{names}\n\n"
+                          "Select the folder they are in now?  Cancel shows the calibration from its file "
+                          "alone, without its stacks.", parent=self)
+        select = box.addButton("Select folder...", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(select)
+        self._ask(box)
+        if box.clickedButton() is not select:
+            return False
+        chosen = QFileDialog.getExistingDirectory(self, "The folder with the bead stacks",
+                                                  folders.start())
+        self._chosen_folder = chosen or None
+        return bool(chosen)
+
+    def _restore(self, settings: dict) -> None:
+        """The forms set to a kept run's settings (`saved_run.settings_of`), each part only where it was
+        kept: the rest keep what they hold."""
+        if "run" in settings:
+            self.run_form.set(settings["run"])
+            self.start_form.set(settings["run"])
+        if "optics" in settings:
+            self.optics_form.set(settings["optics"])
+            self.medium_form.set(settings["optics"])
+        for name, form in (("model", self.model_form), ("spline", self.spline_form)):
+            if name in settings:
+                form.set(settings[name])
+        if "detection" in settings:
+            self.detection_forms[type(settings["detection"])].set(settings["detection"])
+        self._show_optics()
 
     def _use_in_fitter(self) -> None:
         if self.run_result is None or self.run_result.saved is None:
