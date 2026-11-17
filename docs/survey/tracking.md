@@ -151,6 +151,8 @@ TrackMate adds a feature penalty to d²: cost = d²·(1 + Σ 1.5·w·|f₁−f�
 
 So a per-track radius or likelihood cost would fix a minority of the errors, and only in the regime (fast jump over a quarter of the spacing) where the fast-fast swaps it cannot fix dominate.  The HMM's sensitivity to single wrong jumps is the thing to address instead: an outlier term in its emissions, or a density limit on the page.
 
+**The outlier term, tried and left out (2026-11).**  A link to another particle with probability epsilon, its position uniform within the longest jump, the track going on as that particle in a state drawn as a track's first; epsilon fitted.  On the true tracks it changes nothing (epsilon < 1e-4).  On the linked ones it fits epsilon at 0.1--1.1%, a sixth of the wrong links, and takes only part of the bias: without switching the spurious rates go from 1.45 to 0.89 /s at 0.5 /um^2 and from 2.9 to 1.8 at 1; with 2.5 /s true, from +60% to +40% at 0.5 and from +100% to +80% at 1.  It costs two to three times the time and pulls the fast D down by 3--7%.  The rest cannot be taken out by any model: a fast track that picks up a slow neighbour's localization and goes on as that particle *is*, in the data, a fast particle that slowed down -- a switch.  What a user can be given is a warning when the fast state's jump is more than about a sixth of the spacing between particles, where the rates came out 10--20% high (0.1--0.2 /um^2 here) and more beyond.
+
 #### 6. Drift from the tracks themselves -- trackpy  (S, port with attribution)
 
 **What it does.** `motion.compute_drift` (`motion.py:271`): the mean displacement of all particles between consecutive frames, accumulated (optionally smoothed). `subtract_drift` (`:318`) removes it.
