@@ -154,7 +154,8 @@ class _Prefetch:
         if done is not None:
             here = torch.cuda.current_stream(self.device)
             here.wait_event(done)
-            for t in (b.frames, b.xyz, b.photons, b.mask, b.background, b.photons_window, b.background_window):
+            for t in (b.frames, b.xyz, b.photons, b.mask, b.background, b.photons_window, b.background_window,
+                      b.movie):
                 if t is not None:
                     t.record_stream(here)        # not freed for the drawing stream while used here
         return b
@@ -304,11 +305,13 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
         total, parts_sum = 0.0, {}
         for _ in range(steps):
             batch = feed.get() if feed is not None else draw_batch(renderer, sim, cam, batch_size, g)
-            x = (batch.frames - scaling.input_offset) / scaling.input_scale
+            # cut from movies: the movies whole, each frame through the per-frame U-Net once
+            whole = batch.movie is not None
+            x = ((batch.movie if whole else batch.frames) - scaling.input_offset) / scaling.input_scale
             if channels_last:
                 x = x.contiguous(memory_format=torch.channels_last)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16):
-                out = forward(x)
+                out = forward(x, batch.movie_windows)[:len(batch.frames)] if whole else forward(x)
             value, t = loss.loss(out.float(), batch, scaling, parts.loss)
             for rp in reps:
                 if epoch >= rp.get("from_epoch", 5):

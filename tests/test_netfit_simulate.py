@@ -108,6 +108,10 @@ def test_windows_cut_from_one_movie_share_its_frames_shifted_by_one_and_target_t
             assert torch.equal(b.frames[i, 1:], b.frames[i + 1, :-1])
             assert torch.equal(b.background_window[i, 1:], b.background_window[i + 1, :-1])
     assert not torch.equal(b.frames[3, 1:], b.frames[4, :-1])     # another movie
+    # the movies come along for the network, which reads them whole: window i is movie i // 4 from frame i % 4
+    assert b.movie.shape == (3, 8, 24, 24) and b.movie_windows == 4
+    for i in range(10):
+        assert torch.equal(b.frames[i], b.movie[i // 4, i % 4:i % 4 + 5])
     # a window's targets are the molecules in its middle frame: a molecule in frames 2-3 of window 0
     # is in frames 1-2 of window 1, and its target photons are its middle frame's
     for i in range(10):

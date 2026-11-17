@@ -56,8 +56,9 @@ class Predictor:
         with torch.no_grad():
             for a in range(0, n, self.batch):
                 b = min(a + self.batch, n)
-                stack = torch.stack([x[i:i + 2 * k + 1] for i in range(a, b)]).to(self.device)
-                e = extract.extract(self.model(stack), self.scaling, self.threshold, self.extraction, self.scale)
+                # the windows a..b-1 as one movie: each frame through the per-frame U-Net once
+                movie = x[a:b + 2 * k][None].to(self.device)
+                e = extract.extract(self.model(movie, b - a), self.scaling, self.threshold, self.extraction, self.scale)
                 e = {name: v.detach().cpu().numpy() for name, v in e.items()}
                 e["frame"] = e["frame"] + a
                 parts.append(e)

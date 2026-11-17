@@ -37,6 +37,10 @@ class Batch:
     background: torch.Tensor      # (b,): the middle frame's background, photons a pixel
     photons_window: torch.Tensor | None = None     # (b, k, window): the molecules' photons in every frame
     background_window: torch.Tensor | None = None  # (b, window): every frame's background
+    # with ``movie_windows`` W > 1: the movies the windows were cut from, (ceil(b / W), window + W - 1,
+    # rows, columns), which the network reads whole (`network.TwoStageUNet.forward`'s ``windows``)
+    movie: torch.Tensor | None = None
+    movie_windows: int = 1
 
 
 def _uniform(lo, hi, n, g, device):
@@ -128,4 +132,4 @@ def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraMod
     window = torch.zeros((batch, max(k, 1), T), device=device)
     window[ks, rank] = per_frame[i[:, None], idx[w]]
     mask[ks, rank] = True
-    return Batch(frames, xyz, photons, mask, bgw[:, mid], window, bgw)
+    return Batch(frames, xyz, photons, mask, bgw[:, mid], window, bgw, movie if W > 1 else None, W)
