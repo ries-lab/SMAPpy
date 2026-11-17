@@ -1,4 +1,9 @@
-"""``smappy-gui``'s options, ``smappy info`` and ``smappy convert``."""
+"""``smappy``, the one command: its subcommands, ``smappy gui``'s options,
+``smappy info`` and ``smappy convert``."""
+import importlib
+import re
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -7,8 +12,11 @@ import pytest
 from smappy.cli import convert as convert_cli
 from smappy.cli import gui as gui_cli
 from smappy.cli import info as info_cli
+from smappy.cli.main import COMMANDS, main
 from smappy.session import Session
 from test_sml_files import AVERAGE, CAMERA, _rows, write_sml
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _two_files(tmp_path):
@@ -21,6 +29,49 @@ def _two_files(tmp_path):
     files = [("C:\\data\\Pos0_sml.mat", CAMERA), ("C:\\data\\Pos1_sml.mat", CAMERA),
              ("all_average_sites_sml.mat", AVERAGE)]
     return write_sml(tmp_path / "experiment_sml.mat", files, rows, sites=[site])
+
+
+# ------------------------------------------------------------------ smappy
+
+def test_every_smappy_script_is_also_a_command_running_the_same_function():
+    # read by hand: tomllib is 3.11's, and SMAPpy runs on 3.9
+    text = (ROOT / "pyproject.toml").read_text().split("[project.scripts]")[1].split("\n[")[0]
+    scripts = dict(re.findall(r'^([\w-]+) = "([^"]+)"', text, re.MULTILINE))
+    assert scripts.pop("smappy") == "smappy.cli.main:main"
+    for script, target in scripts.items():
+        name = script.removeprefix("smappy-")
+        module, function, _ = COMMANDS[name]
+        assert f"{module}:{function}" == target, script
+
+
+def test_every_command_names_a_function_that_exists():
+    for name, (module, function, _) in COMMANDS.items():
+        if module.startswith("decode_smlm") and importlib.util.find_spec("decode_smlm") is None:
+            continue
+        assert callable(getattr(importlib.import_module(module), function)), name
+
+
+def test_the_help_lists_every_command_and_loads_neither_qt_nor_numpy():
+    code = ("import sys; from smappy.cli.main import main; main(['-h']); "
+            "print([m for m in ('PySide6', 'numpy', 'torch') if m in sys.modules])")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True).stdout
+    for name in COMMANDS:
+        assert f"\n  {name} " in out
+    assert out.strip().endswith("[]")
+
+
+def test_a_mistyped_command_is_refused_with_the_nearest_one(capsys):
+    assert main(["inf"]) == 2
+    assert "did you mean `smappy info`" in capsys.readouterr().err
+
+
+def test_a_command_gets_the_rest_of_the_line_and_names_itself_in_its_usage(capsys, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["smappy"])
+    with pytest.raises(SystemExit) as exit:
+        main(["info", "-h"])
+    assert exit.value.code == 0
+    assert capsys.readouterr().out.startswith("usage: smappy info ")
 
 
 # ------------------------------------------------------------- smappy gui

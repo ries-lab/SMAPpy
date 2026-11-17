@@ -69,6 +69,18 @@ ready to fit.
 
 From a checkout, activate the venv first or run `.venv/bin/smappy-gui`.
 
+### From a terminal
+
+`smappy` runs everything SMAPpy does from a terminal; `smappy -h` lists it,
+and `smappy COMMAND -h` says what a command takes:
+
+    smappy gui FILE.hdf5 --open RCC     # the windows, with a plugin open
+    smappy info FILE                    # what a file holds: files, camera, columns, ROIs
+    smappy convert FILE_sml.mat         # as smappy HDF5, beside it
+    smappy batch run JOB.batch.yaml     # a chain of plugins over many files
+
+`smappy-gui`, `smappy-fit` and the other `smappy-…` commands still work.
+
 ## Tutorials and documentation
 
 **Tutorials.** [ries-lab.github.io/SMAPpy](https://ries-lab.github.io/SMAPpy/)

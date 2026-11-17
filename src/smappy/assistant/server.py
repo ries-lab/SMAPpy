@@ -39,8 +39,9 @@ def utf8_protocol(reader, writer, log=None) -> None:
 
 def main(argv=None) -> int:
     # the help is for the person setting a client up, not the module's notes
+    from ..cli import command_name
     p = argparse.ArgumentParser(
-        prog="smappy-mcp",
+        prog=command_name("smappy-mcp"),
         description="SMAPpy's tools for an AI assistant, over MCP (stdio).  "
                     "An MCP client launches this; in Claude Code: "
                     "claude mcp add smappy -- smappy-mcp --output ~/analysis.  "
