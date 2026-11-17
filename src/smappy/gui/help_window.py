@@ -220,6 +220,9 @@ class HelpWindow(QMainWindow):
 
     def show_page(self, path: str) -> None:
         """Render ``path``'s page.  Importing the plugin is the price of it."""
+        # which pages people read is part of what the usage log is for
+        from .. import usage_log
+        usage_log.event("help", page=path)
         document = self.browser.document()
         try:
             plugin_cls = (docs.panels()[path] if path.startswith(docs.PANEL_ROOT + "/")

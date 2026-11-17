@@ -15,9 +15,11 @@ in the tests, when installed, to check that a real client talks to this.
 from __future__ import annotations
 
 import json
+import time
 import traceback
 from typing import Any, Dict, Optional, TextIO
 
+from .. import usage_log
 from .tools import Assistant, Image, Later, ToolError
 
 # the revisions this server answers; a client asking for one gets it, any
@@ -72,22 +74,38 @@ class Server:
         name = params.get("name")
         if not isinstance(name, str):
             raise _Invalid("tools/call needs a tool's name")
+        arguments = params.get("arguments") or {}
+        started = time.perf_counter()
+        client = str((self.client or {}).get("name") or "")
+
+        def note(answer=None, error: str = "") -> None:
+            # the usage log, when the user turned it on (`smappy.usage_log`):
+            # what was called and what came of it; it never raises
+            usage_log.tool_call(name, arguments, time.perf_counter() - started,
+                                answer, error, client)
+
         try:
-            value = self.assistant.call(name, params.get("arguments") or {})
+            value = self.assistant.call(name, arguments)
         except ToolError as error:
             # the model reads this and corrects the call: not a protocol error
+            note(error=str(error))
             return {"content": content(str(error)), "isError": True}
         except Exception as error:
+            note(error=f"{type(error).__name__}: {error}")
             return {"content": content(f"{type(error).__name__}: {error}\n"
                                        + traceback.format_exc(limit=6)),
                     "isError": True}
         if isinstance(value, Later):
             # a run the GUI makes in its panel: answered when it ends
             out = Later()
-            value.then(lambda v, why: out.resolve(
-                {"content": content(why if why is not None else v),
-                 "isError": why is not None}))
+
+            def ended(v, why):
+                note(v, why or "")
+                out.resolve({"content": content(why if why is not None else v),
+                             "isError": why is not None})
+            value.then(ended)
             return out
+        note(value)
         return {"content": content(value), "isError": False}
 
     METHODS = {"initialize": initialize, "tools/list": tools_list,

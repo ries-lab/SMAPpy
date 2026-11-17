@@ -40,6 +40,10 @@ button, the proposals and the settings; *Assistant > Start assistant*, which
 starts the user's client through `assistant/launch.py`, reached by
 `smappy-mcp --attach`), and they only when asked;
 the design and the plan are `docs/ai-integration.md`.
+What the assistant tried, the help pages read and the client's transcripts
+go, when a user turns it on, into the usage log (`smappy/usage_log.py`,
+Preferences > Usage log), sent to an upload-only cloud link for the
+developers to read; a tool call is logged in `protocol.Server.tools_call`.
 A tool's description is what a model reads, so a change to a plugin's
 interface that a tool describes (`run_plugin`'s settings, `INSTRUCTIONS`)
 updates it too.  What the menus and buttons do is the assistant's through

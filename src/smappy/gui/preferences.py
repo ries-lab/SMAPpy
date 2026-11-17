@@ -1,6 +1,7 @@
 """Preferences: the folders scanned for plugins, the tabs, light or dark,
 whether quitting asks about unsaved changes and whether startup looks for
-updates, and the workstations DECODE trains on.
+updates, the workstations DECODE trains on, and the usage log and where it
+is sent.
 
 Both are things the user names on purpose.  One plugin folder is scanned
 without being named, the user's own (`config.user_plugin_dir`), and no tab
@@ -377,8 +378,111 @@ class HostsPage(QWidget):
             QApplication.restoreOverrideCursor()
 
 
+class UsageLogPage(QWidget):
+    """Whether SMAPpy keeps a log of how it is used, and where it sends it
+    (`smappy.usage_log`): an upload-only cloud link, kept until cleared."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from .. import usage_log
+        state = usage_log.settings()
+        layout = QVBoxLayout(self)
+        about = QLabel("A log for SMAPpy's developers of what the AI assistant tried, which "
+                       "plugins ran and which help pages were read: it shows what is hard to "
+                       "find or missing.  Pictures and localizations are never in it; file "
+                       "names are.  Nothing is sent without a link.")
+        about.setWordWrap(True)
+        about.setStyleSheet(note_style())
+        layout.addWidget(about)
+        self.enabled = QCheckBox("keep a usage log")
+        self.enabled.setToolTip("the assistant's tool calls and the help pages opened, "
+                                "written in the configuration folder; the plugin runs are "
+                                "in the program's log already")
+        self.enabled.setChecked(bool(state["enabled"]))
+        self.enabled.toggled.connect(lambda on: self._save(enabled=on))
+        layout.addWidget(self.enabled)
+        form = QFormLayout()
+        self.link = QLineEdit(state["link"])
+        self.link.setPlaceholderText("https://ucloud.univie.ac.at/index.php/s/...")
+        self.link.setToolTip("an upload-only share link of a cloud folder (Nextcloud's "
+                             "file drop, as u:cloud makes): kept until you clear it")
+        self.link.editingFinished.connect(lambda: self._save(link=self.link.text().strip()))
+        form.addRow("send to", self.link)
+        self.password = QLineEdit(state["password"])
+        self.password.setEchoMode(QLineEdit.Password)
+        self.password.setToolTip("the link's password, if it has one; kept in the "
+                                 "configuration file as it is typed")
+        self.password.editingFinished.connect(lambda: self._save(password=self.password.text()))
+        form.addRow("password", self.password)
+        self.name = QLineEdit(state["name"])
+        self.name.setToolTip("put in the sent files' names, so the developers know whose "
+                             "they are; empty, a random name for this computer")
+        self.name.editingFinished.connect(lambda: self._save(name=self.name.text().strip()))
+        form.addRow("your name", self.name)
+        layout.addLayout(form)
+        self.automatic = QCheckBox(f"send it every {usage_log.AUTOMATIC_DAYS} days, at startup")
+        self.automatic.setToolTip("what is new since the last send, in the background; "
+                                  "otherwise only when Send now is pressed")
+        self.automatic.setChecked(bool(state["automatic"]))
+        self.automatic.toggled.connect(lambda on: self._save(automatic=on))
+        layout.addWidget(self.automatic)
+        layout.addLayout(_buttons(("Send now", self.send_now),
+                                  ("Save a copy...", self.save_copy)))
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        layout.addStretch(1)
+        self.refresh()
+
+    def _save(self, **values) -> None:
+        from .. import usage_log
+        usage_log.save_settings(**values)
+        self.refresh()
+
+    def refresh(self) -> None:
+        from .. import usage_log
+        state = usage_log.settings()
+        on = bool(state["enabled"])
+        for widget in (self.link, self.password, self.name, self.automatic):
+            widget.setEnabled(on)
+        self.status.setText(usage_log.describe_since(state) if on else "off")
+        self.status.setStyleSheet("color: #c06000" if state["last_error"] else note_style())
+
+    def send_now(self) -> None:
+        """What is new since the last send, uploaded now, the window waiting."""
+        from .. import usage_log
+        usage_log.save_settings(link=self.link.text().strip(), password=self.password.text(),
+                                name=self.name.text().strip())
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            sent = usage_log.send()
+        except (OSError, ValueError) as error:
+            sent, problem = None, error
+        else:
+            problem = None
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.refresh()
+        if problem is not None:
+            QMessageBox.warning(self, "Usage log", f"Not sent: {problem}")
+        elif sent["count"] == 0:
+            self.status.setText("nothing new since the last send")
+        else:
+            parts = ", ".join(f"{n} {part}" for part, n in sent["parts"].items())
+            self.status.setText(f"sent {sent['bytes'] // 1024} kB: {parts}")
+
+    def save_copy(self) -> None:
+        """Everything the log holds, as a zip to look into: what would go."""
+        from .. import usage_log
+        path, _ = QFileDialog.getSaveFileName(self, "Save the usage log",
+                                              usage_log.bundle_name(), "zip (*.zip)")
+        if path:
+            made = usage_log.bundle(Path(path))
+            self.status.setText(f"saved {made['count']} parts to {path}")
+
+
 class PreferencesDialog(QDialog):
-    """Plugin folders, tabs, general settings and training hosts.  Accepting means the window rebuilds its tabs."""
+    """Plugin folders, tabs, general settings, training hosts and the usage log.  Accepting means the window rebuilds its tabs."""
 
     def __init__(self, workspace: Workspace, parent=None):
         super().__init__(parent)
@@ -390,10 +494,12 @@ class PreferencesDialog(QDialog):
         self.tabs = TabsPage(workspace)
         self.general = GeneralPage()
         self.training_hosts = HostsPage()
+        self.usage_log = UsageLogPage()
         self.pages.addTab(self.roots, "Plugin folders")
         self.pages.addTab(self.tabs, "Tabs")
         self.pages.addTab(self.general, "General")
         self.pages.addTab(self.training_hosts, "Training hosts")
+        self.pages.addTab(self.usage_log, "Usage log")
         layout.addWidget(self.pages)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.accept)

@@ -49,6 +49,7 @@ LEFT_OUT = {
     "Assistant": "the assistant's own connection and settings",
     "Help/Tutorials": "videos in the user's browser",
     "Help/Save a bug report": "a dialog asking where to save it",
+    "Help/Send usage log": "Preferences, a modal dialog: the user's own decision to send",
     "Help/Check for updates": "a dialog that may install and restart",
     "Help/About SMAPpy": "a modal dialog",
 }

@@ -348,6 +348,30 @@ A workflow is kept as a chain (`save_chain`), which is runnable, rather than
 as a note that describes it.  Notes that hold solutions -- how a problem was
 solved, with its chain -- come later.
 
+## The usage log
+
+What the assistant tried is the clearest record of what SMAPpy lacks: a
+`find_plugins` that found nothing, a `read_source` because a page did not
+say, a script of its own where a plugin existed.  `smappy/usage_log.py`
+collects it from colleagues who agree, for the developers to read with a
+model.  Off by default (Preferences > Usage log; *Help > Send usage log...*).
+When on, `protocol.Server.tools_call` writes each tool call -- the tool,
+its arguments, failure, time, the start of its answer -- and the Help
+window each page opened, as JSON lines in `<config dir>/usage-log`.  The
+rest is gathered when a bundle is made rather than recorded twice: the
+plugin runs of `smappy.log`, `own-code.md` with its scripts,
+`missing-tools.md`, and the client's own transcripts of conversations in
+the assistant's folder (Claude Code's `~/.claude/projects/<folder>`,
+Codex's `~/.codex/sessions` by their `cwd`), which hold what the user asked
+-- the one part SMAPpy never sees.  Pictures are removed and long texts cut.
+
+A bundle holds what is new since the last send and goes by one WebDAV `PUT`
+to a Nextcloud upload-only share link (u:cloud's *file drop*): no account on
+the sender's side, and a link that lets a lab add files but not read each
+other's.  The link stays in the configuration until cleared; *Send now*, or
+every seven days at startup in the background.  Nothing goes without a
+link, and nothing is written while the log is off.
+
 ## Steps
 
 1. **Headless server** (built): `smappy-mcp` over a `Session`, the index,
