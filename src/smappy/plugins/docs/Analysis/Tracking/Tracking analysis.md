@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.tracking.analysis.gather, smappy.tracking.analysis.steps_of, smappy.tracking.analysis.lag_sums, smappy.tracking.analysis.msd_covariance, smappy.tracking.analysis.lag_errors, smappy.tracking.analysis.optimal_lags, smappy.tracking.analysis.fit_msd, smappy.tracking.analysis.msd_analysis, smappy.tracking.analysis.jumps, smappy.tracking.analysis.jumps_over_lags, smappy.tracking.analysis.in_focus, smappy.tracking.analysis.fit_jumps, smappy.tracking.analysis.jump_density, smappy.plugins.tracking_analysis.TrackingAnalysis.run]
+covers: [smappy.tracking.analysis.gather, smappy.tracking.analysis.steps_of, smappy.tracking.analysis.lag_sums, smappy.tracking.analysis.msd_covariance, smappy.tracking.analysis.lag_errors, smappy.tracking.analysis.optimal_lags, smappy.tracking.analysis.fit_msd, smappy.tracking.analysis.msd_analysis, smappy.tracking.analysis.jumps, smappy.tracking.analysis.jumps_over_lags, smappy.tracking.analysis.in_focus, smappy.tracking.analysis.fit_jumps, smappy.tracking.analysis.jump_density, smappy.tracking.spectrum.pieces_of, smappy.tracking.spectrum.piece_loglik, smappy.tracking.spectrum.state_array, smappy.tracking.spectrum.spectrum, smappy.tracking.spectrum.peaks, smappy.tracking.spectrum.per_localization, smappy.plugins.tracking_analysis.TrackingAnalysis.run]
 ---
 
 ## What it does
@@ -32,8 +32,15 @@ else a simulation's `track_id_true`.  Two analyses, each ticked on or off:
   ([Hansen et al. 2018](https://doi.org/10.7554/eLife.33125)), with the
   frame-by-frame correction of saSPT
   ([Heckert et al. 2022](https://doi.org/10.7554/eLife.70169)).
+* **D spectrum** (off by default): the same jumps shared out over a fine
+  grid of *D* rather than one to three states -- saSPT's *state arrays*
+  (Heckert et al. 2022) -- so the number of populations is not chosen
+  but read off the peaks.  Each track is cut into short pieces, and each
+  piece gets its own *D*, which can be written onto its localizations
+  (`D_post_um2_per_s`) to colour, filter or split the tracks by, and
+  which shows a particle that changes state within a track.
 
-Both take the [localization precision](plugin:Panels/Glossary) into
+All take the [localization precision](plugin:Panels/Glossary) into
 account: a molecule that does not move still seems to, by its localization
 error, and an analysis that ignores it finds every molecule mobile.
 
@@ -60,6 +67,12 @@ two = simulate_tracks(n_frames=1000, density_um2=0.04, d_um2_s=(0.01, 0.5),
 thin = simulate_tracks(n_frames=1500, density_um2=0.02, d_um2_s=(0.05, 3.0),
                        fractions=(0.5, 0.5), track_frames=30.0,
                        precision_nm=25.0, focal_range_nm=700.0, seed=3)
+three = simulate_tracks(n_frames=1500, density_um2=0.02, d_um2_s=(0.02, 0.3, 2.0),
+                        fractions=(0.3, 0.3, 0.4), track_frames=30.0,
+                        precision_nm=25.0, seed=7)
+switching = simulate_tracks(n_frames=1000, density_um2=0.01, d_um2_s=(0.02, 2.0),
+                            fractions=(0.5, 0.5), switch_probability=0.03,
+                            track_frames=100.0, precision_nm=25.0, seed=12)
 
 def tracks(locs):
     return gather(locs["track_id_true"], locs["frame"], locs["x_nm"],
@@ -192,6 +205,56 @@ for ax, focus, name in ((middle, 0.0, "no axial range"),
     ax.legend(fontsize=7)
 ```
 
+**7. The D spectrum.**  Each track is cut into pieces of at most *piece*
+jumps.  For every piece and every *D* of a grid of 100, from 0.001 to 100
+µm²/s, the probability of its jumps is computed exactly -- the jumps of a
+piece are not independent, since each two consecutive ones share a
+localization and so its error.  Then the share of the jumps at each *D*
+(the *occupation*) is found that makes all pieces together most probable,
+with each piece weighed over the *D*s by how well each explains it.  The
+populations are the peaks of the occupations; their fractions are the
+occupations under each peak.  Each piece's *D* is its average over the
+*D*s by that weight.  With an *axial range*, the occupations are
+corrected for the focus as the jumps are.
+
+```figure Left: three populations, 30% at 0.02, 30% at 0.3 and 40% at 2 µm²/s (dotted); the D spectrum finds three peaks at their D with their fractions, without being told how many there are. Right: a particle that switches between 0.02 and 2 µm²/s; each piece of 10 jumps of its track gets its own D (dots), which follows the true D (grey) from piece to piece.
+from smappy.tracking.spectrum import spectrum, peaks
+fig.set_size_inches(9, 3.4)
+left, right = fig.subplots(1, 2)
+t = tracks(three)
+spec = spectrum(t)
+found = peaks(spec)
+left.plot(spec.D_um2_per_s, spec.occupation, color="C0")
+for d, f in found:
+    left.annotate(f"{d:.2g} µm²/s, {100 * f:.0f}%",
+                  (d, spec.occupation[np.argmin(np.abs(spec.D_um2_per_s - d))]),
+                  textcoords="offset points", xytext=(0, 3), ha="center", fontsize=7)
+for truth in (0.02, 0.3, 2.0):
+    left.axvline(truth, color="C3", lw=0.6, ls=":")
+left.set_xscale("log")
+left.set_ylim(0, None)
+left.set_xlabel("D (µm²/s)")
+left.set_ylabel("occupation")
+t = tracks(switching)
+spec = spectrum(t)
+p = spec.pieces
+state = np.asarray(switching["state_true"])[t.rows]
+k = next(k for k in range(t.n_tracks) if (p.track == k).sum() >= 8
+         and np.count_nonzero(np.diff(state[t.track == k])) >= 2)
+mine = np.flatnonzero(p.track == k)
+rows = np.flatnonzero(t.track == k)
+true_D = np.array([0.02, 2.0])[state[rows]]
+right.step(t.step[rows] * 0.01, true_D, where="post", color="0.6", label="truth")
+middle = t.step[p.first[mine] + p.n_jumps[mine] // 2] * 0.01
+right.plot(middle, spec.D_post_um2_per_s[mine], "o", color="C0", label="each piece")
+right.set_yscale("log")
+right.set_yticks([0.01, 0.1, 1, 10], ["0.01", "0.1", "1", "10"])
+right.set_ylim(0.005, 10)
+right.set_xlabel("time in the track (s)")
+right.set_ylabel("D (µm²/s)")
+right.legend(fontsize=7)
+```
+
 ## In detail
 
 **The MSD.**  For a track with positions $\mathbf{r}_i$ in frames $f_i$,
@@ -295,6 +358,46 @@ tracks), while x and y do not care.  A particle that comes back into
 focus is taken as a new one; a linker with a *memory* may join it to its
 old track across the gap, which the model does not count.
 
+**The D spectrum.**  Each track's jumps between consecutive localizations
+are cut, from its start, into pieces of at most *piece* jumps, the last
+shorter.  Along a piece, jump $j$ over $k_j$ frames has per axis the
+variance $2 D k_j \Delta t + s_j^2 + s_{j+1}^2$ ($s_j^2$ localization $j$'s
+error variance, from its precision), and jumps $j-1$ and $j$ share
+localization $j$, so they covary by $-s_j^2$.  The jumps of a piece are
+therefore jointly Gaussian with a tridiagonal covariance, whose
+determinant and quadratic form one pass along the piece gives (its LDL
+factorisation); the log-likelihood $\ell_{pg}$ of piece $p$ at grid point
+$g$ is the sum over the axes.  saSPT puts the localization error on a
+grid as well, one value for all; here each localization's own precision
+is used, which drops that grid.
+
+The occupations follow by variational Bayes, saSPT's scheme: a Dirichlet
+over them with one pseudo-count per grid point, and, round by round,
+
+$$R_{pg} \propto e^{\ell_{pg}} \, e^{\psi(\alpha_g) - \psi(\sum_h \alpha_h)} , \qquad \alpha_g = 1 + \sum_p n_p R_{pg} ,$$
+
+with $n_p$ the piece's number of jumps and $\psi$ the digamma function,
+until no occupation $\alpha_g / \sum_h \alpha_h$ moves by more than
+$10^{-7}$ (at most 5000 rounds; saSPT stops after 200, when single grid
+points can still be several percent from where they settle, though the
+fraction under a peak no longer moves).  The occupations are shares of
+the jumps.  With an *axial range* they are divided by each *D*'s fraction
+still in focus after one frame, $F(1)$ above, and renormalised: a piece's
+jumps are mostly between consecutive frames.  Each piece's *D* is
+$\exp \sum_g R_{pg} \ln D_g$, the posterior mean of $\ln D$.  The
+peaks are the local maxima of the occupations, each with the grid points
+down to the minima on either side; a peak with less than 2% is not
+reported.
+
+Against simulated tracks with three populations it gives back their *D*
+within 20% and their fractions within 0.04 (with 2,600 pieces), and a
+piece's *D* tells a slow from a fast state in 97% of pieces or more.
+Unlike the jumps' states, it needs no number of states and its
+likelihood is right for the correlated jumps.  Close populations are
+where it is weakest: on simulated tracks two halves a factor of two apart
+in *D* still gave two peaks, but at 62% and 38%; a factor of three gave
+55% and 45%.  Short pieces spread every peak out.
+
 **MINFLUX.**  A table with `time_s` has no regular frames; its
 localizations are put on a grid of the median interval between
 consecutive localizations of a track, each at the nearest step.
@@ -336,13 +439,26 @@ with lag is itself information.  Spot-On uses about 7.  Too many, and
 particles that change state within the lag blur the states together, and
 few fast particles are left at the longest lags.
 
-### jump_fit.axial_range_nm
+### axial_range_nm
 The depth around the focal plane in which a particle is detected, not
 the PSF's width: about 700 nm for 2D tracking with HILO illumination is a
 common value; measure it as the z range over which beads are still
 detected and fitted.  0 when nothing leaves -- 3D tracking over a deep
 range, MINFLUX, or particles on a membrane.  A value too large
 undercorrects (the fast fraction too small), one too small overcorrects.
+It applies to the jump distances and the D spectrum, not to the MSD.
+
+### spectrum_fit.split
+saSPT's 10.  Shorter pieces follow a particle that changes state more
+closely, but each says less about its *D*, which broadens the spectrum's
+peaks; longer pieces sharpen the peaks but blur a change of state within
+a piece.
+
+### spectrum_fit.d_min
+The grid has 100 points, log-spaced.  Keep it a decade beyond the slowest
+and fastest populations expected: occupation piled up at either end says
+the grid is too short.  A *D* below what the localization error can tell
+from zero, roughly $\sigma^2 / \Delta t$, is immobile.
 
 ## Output
 
@@ -356,8 +472,14 @@ the jumps per lag -- the model's (line), the jumps' own (dots, the mean
 of their memberships) and, with an *axial range*, its fraction of the
 particles (dashed).  Per region, the values (`msd_D_um2_per_s`,
 `msd_alpha`, `track_D_median_um2_per_s`, `jump_D1_um2_per_s`,
-`jump_fraction1`, ..., `jump_seen1`, ...) and the pooled MSD curve
-(`lag_s`, `msd_nm2`).
+`jump_fraction1`, ..., `jump_seen1`, ..., `spectrum_D1_um2_per_s`,
+`spectrum_fraction1`, ..., `n_pieces`), the pooled MSD curve (`lag_s`,
+`msd_nm2`) and the spectrum (`spectrum_D_um2_per_s`,
+`spectrum_occupation`).  The D spectrum adds a line with its peaks and
+their fractions and a panel of the occupations (with an *axial range*,
+of the particles, and of the jumps dashed); *write per localization*
+writes `D_post_um2_per_s`, each piece's *D* on its localizations (NaN on
+a track of one localization).
 
 Run on the view, the fit of every track is also kept as a
 [region table](plugin:Panels/Glossary) of the track id ("per track_id:
@@ -394,7 +516,8 @@ main changes:
   for the focus, which separates populations that the per-track *D* of
   short tracks blurs together.
 * SMAP's diffusion maps and its interactive track view are not ported;
-  the tracks are coloured by `track_D_um2_per_s` instead.
+  the tracks are coloured by `track_D_um2_per_s`, or piece by piece by
+  `D_post_um2_per_s`, instead.
 
 ## References
 

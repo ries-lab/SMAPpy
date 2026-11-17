@@ -104,6 +104,14 @@ class Tracks:
     xyz: np.ndarray
     err2: np.ndarray            # sum over axes of sigma_axis^2, per row
     dt_s: float
+    err_axis: Optional[np.ndarray] = None     # sigma_axis^2, per row and axis
+
+    def axis_errors(self) -> np.ndarray:
+        """Each localization's error variance per axis (rows x axes, nm^2):
+        kept by `gather`, else the sum shared out evenly."""
+        if self.err_axis is not None:
+            return self.err_axis
+        return np.repeat((self.err2 / self.dims)[:, None], self.dims, axis=1)
 
     @property
     def dims(self) -> int:
@@ -168,12 +176,12 @@ def gather(ids, frame, x, y, z=None, err_xy=None, err_z=None,
     starts = np.concatenate([[0], np.flatnonzero(np.diff(track)) + 1]) if len(track) else \
         np.zeros(0, np.int64)
     step = step - step[starts][track] if len(track) else step
-    e = np.zeros(len(rows))
+    axes = np.zeros((len(rows), xyz.shape[1]))
     if err_xy is not None:
-        e += 2.0 * np.nan_to_num(np.asarray(err_xy, float)[rows]) ** 2
+        axes[:, :2] = np.nan_to_num(np.asarray(err_xy, float)[rows])[:, None] ** 2
     if z is not None and err_z is not None:
-        e += np.nan_to_num(np.asarray(err_z, float)[rows]) ** 2
-    return Tracks(unique, rows, track, step, xyz[rows], e, dt)
+        axes[:, 2] = np.nan_to_num(np.asarray(err_z, float)[rows]) ** 2
+    return Tracks(unique, rows, track, step, xyz[rows], axes.sum(axis=1), dt, axes)
 
 
 def lag_sums(t: Tracks, max_lag: int) -> Tuple[np.ndarray, np.ndarray]:

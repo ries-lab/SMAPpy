@@ -61,6 +61,8 @@ These are the parts the comparisons below refer to.
 
 #### 2. Per-track state posterior and state arrays -- saSPT  (M, port with attribution)
 
+**Done, 2026-11** (*Tracking analysis*'s *D spectrum*, `tracking/spectrum.py`; `D_post_um2_per_s` per localization).  Re-implemented from the paper, not ported.  Each localization's own precision instead of a grid of sigma; the VB run to convergence rather than saSPT's 200 rounds; the focus corrected at one frame (`in_focus`).
+
 **What it does.**
 * For every track it evaluates the exact Gaussian likelihood of its whole jump vector on a grid of D and σ (`lik.py:146-202`). The default grid is 100 values of D, log-spaced from 0.01 to 100 µm²/s, and σ from 0 to 70 nm in 2 nm steps (`constants.py`).
 * The covariance is tridiagonal: 2(DΔt + σ²) on the diagonal, −σ² off it, because consecutive jumps share a localisation. Tracks are split into pieces of at most `splitsize`=10 jumps.

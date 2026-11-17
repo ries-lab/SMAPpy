@@ -235,9 +235,85 @@ def test_in_3d_the_axial_range_fits_the_lateral_jumps():
                            z_precision_nm=40.0, focal_range_nm=800.0, seed=5)
     settings = TrackingAnalysis.Settings(id_column="track_id_true", msd=False)
     settings.jump_fit.states = 1
-    settings.jump_fit.axial_range_nm = 800.0
+    settings.axial_range_nm = 800.0
     result = TrackingAnalysis().run(Context(locs=locs), settings)
     assert result.values["jump_D1_um2_per_s"] == pytest.approx(1.0, rel=0.05)
     assert "lateral jumps" in result.text
     assert result.data["jumps"].focal_range_nm == 800.0
+    assert result.plot is not None
+
+
+# ------------------------------------------------------ the D spectrum
+
+def test_a_pieces_likelihood_is_the_gaussian_of_its_shared_localizations():
+    from scipy.stats import multivariate_normal
+    from smappy.tracking.spectrum import _tridiagonal_loglik
+    rng = np.random.default_rng(1)
+    L = 6
+    x = rng.normal(size=(1, L)) * 100
+    lag = np.array([[1, 1, 2, 1, 1, 3]]) * 0.01
+    s2 = rng.uniform(100, 900, (1, L + 1))
+    D = np.array([0.3e6])
+    C = np.diag(2 * D[0] * lag[0] + s2[0, :-1] + s2[0, 1:])
+    for j in range(1, L):
+        C[j, j - 1] = C[j - 1, j] = -s2[0, j]       # the localization they share
+    got = _tridiagonal_loglik(x, lag, s2[:, :-1] + s2[:, 1:], s2[:, 1:-1], D)
+    assert got[0, 0] == pytest.approx(multivariate_normal(np.zeros(L), C).logpdf(x[0]))
+
+
+def test_tracks_are_cut_into_pieces_that_hold_every_jump_once():
+    from smappy.tracking.spectrum import pieces_of
+    locs = simulate_tracks(n_frames=200, density_um2=0.03, track_frames=25.0, seed=2)
+    t = tracks_of(locs)
+    p = pieces_of(t, 7)
+    assert p.n_jumps.max() == 7 and p.n_jumps.min() >= 1
+    assert p.n_jumps.sum() == (t.track[1:] == t.track[:-1]).sum()
+    # a piece stays in its track
+    assert (t.track[p.first + p.n_jumps] == p.track).all()
+
+
+def test_the_spectrum_finds_three_populations_without_being_told_how_many():
+    from smappy.tracking.spectrum import peaks, spectrum
+    locs = simulate_tracks(n_frames=1500, density_um2=0.02, d_um2_s=(0.02, 0.3, 2.0),
+                           fractions=(0.3, 0.3, 0.4), track_frames=30.0,
+                           precision_nm=25.0, seed=7)
+    found = peaks(spectrum(tracks_of(locs)))
+    assert len(found) == 3
+    D, f = np.array(found).T
+    assert D == pytest.approx([0.02, 0.3, 2.0], rel=0.2)
+    assert f == pytest.approx([0.3, 0.3, 0.4], abs=0.04)
+
+
+def test_the_spectrum_with_an_axial_range_gives_the_fractions_of_the_particles():
+    from smappy.tracking.spectrum import spectrum
+    locs = simulate_tracks(n_frames=2000, density_um2=0.02, d_um2_s=(0.05, 3.0),
+                           fractions=(0.5, 0.5), track_frames=30.0, precision_nm=25.0,
+                           focal_range_nm=700.0, seed=3)
+    t = tracks_of(locs)
+    plain, fixed = spectrum(t), spectrum(t, focal_range_nm=700.0)
+    assert plain.fraction_between(0.5, 100) < 0.45
+    assert fixed.fraction_between(0.5, 100) == pytest.approx(0.5, abs=0.04)
+    # each piece's D tells its state
+    state = np.asarray(locs["state_true"])[t.rows][fixed.pieces.first]
+    assert np.mean((fixed.D_post_um2_per_s > 0.4) == (state == 1)) > 0.95
+
+
+def test_the_plugin_writes_each_pieces_d_onto_its_localizations():
+    locs = simulate_tracks(n_frames=800, density_um2=0.02, d_um2_s=(0.02, 1.0),
+                           fractions=(0.5, 0.5), track_frames=30.0, seed=9)
+    settings = TrackingAnalysis.Settings(id_column="track_id_true", msd=False,
+                                         jumps=False, spectrum=True)
+    settings.spectrum_fit.write_column = True
+    plugin = TrackingAnalysis()
+    assert plugin.changes_locs_for(settings)
+    result = plugin.run(Context(locs=locs), settings)
+    v = result.values
+    assert v["spectrum_D1_um2_per_s"] == pytest.approx(0.02, rel=0.25)
+    assert v["spectrum_D2_um2_per_s"] == pytest.approx(1.0, rel=0.25)
+    D = np.asarray(result.locs["D_post_um2_per_s"])
+    state = np.asarray(locs["state_true"])
+    have = np.isfinite(D)
+    assert have.mean() > 0.9                    # all but tracks of one localization
+    assert np.mean((D[have] > 0.15) == (state[have] == 1)) > 0.95
+    assert "D_post_um2_per_s" in {r["field"] for r in recipes(result.locs)}
     assert result.plot is not None

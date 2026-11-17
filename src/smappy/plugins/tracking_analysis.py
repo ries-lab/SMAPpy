@@ -74,9 +74,20 @@ class JumpFitSettings:
                       help="the jumps 1, 2, ... this many frames apart, fitted together")
     states: int = param(2, label="states", min=1, max=3,
                         help="diffusive states fitted, 1 to 3")
-    axial_range_nm: float = param(0.0, label="axial range", unit="nm", min=0.0,
-                                  help="the depth in which particles are seen, for "
-                                       "the fast ones leaving it; 0: no correction")
+
+
+@dataclass
+class SpectrumSettings:
+    split: int = param(10, label="piece", unit="jumps", min=1, max=100,
+                       help="tracks cut into pieces of at most this many jumps, "
+                            "each given its own D")
+    d_min: float = param(0.001, label="D from", unit="µm²/s", min=1e-6,
+                         advanced=True, help="the smallest D of the grid")
+    d_max: float = param(100.0, label="to", unit="µm²/s", min=1e-5, beside=True,
+                         advanced=True, help="the largest D of the grid")
+    write_column: bool = param(False, label="write per localization",
+                               help="D_post_um2_per_s: each piece's D onto its "
+                                    "localizations")
 
 
 @dataclass
@@ -84,6 +95,9 @@ class TrackingAnalysisSettings:
     msd: bool = param(True, label="MSD", help="the mean squared displacement over lag")
     jumps: bool = param(True, label="jump distances",
                         help="the distribution of jumps, as diffusive states")
+    spectrum: bool = param(False, label="D spectrum",
+                           help="the jumps over a grid of D, no number of states "
+                                "chosen, and each piece of a track's D (saSPT)")
     id_column: str = param("", label="track id", choices=_id_choices,
                            help="the attribute naming the tracks; auto: track_id, "
                                 "else tid, else track_id_true")
@@ -91,9 +105,14 @@ class TrackingAnalysisSettings:
     frame_time_ms: Optional[float] = param(None, label="frame time", unit="ms",
                                            min=0.001, advanced=True,
                                            help="auto: the file's, else its exposure")
+    axial_range_nm: float = param(0.0, label="axial range", unit="nm", min=0.0,
+                                  help="the depth in which particles are seen, for "
+                                       "the fast ones leaving it; 0: no correction")
     msd_fit: MSDFitSettings = param(default_factory=MSDFitSettings, label="MSD")
     jump_fit: JumpFitSettings = param(default_factory=JumpFitSettings,
                                       label="jump distances")
+    spectrum_fit: SpectrumSettings = param(default_factory=SpectrumSettings,
+                                           label="D spectrum")
 
 
 @register("Analysis/Tracking/Tracking analysis")
@@ -109,11 +128,14 @@ class TrackingAnalysis(Plugin):
     version = "3"
 
     def changes_locs_for(self, settings: TrackingAnalysisSettings) -> bool:
-        return bool(settings.msd and settings.msd_fit.write_columns)
+        return bool((settings.msd and settings.msd_fit.write_columns)
+                    or (settings.spectrum and settings.spectrum_fit.write_column))
 
     def describe(self, ctx: Optional[Context], settings: TrackingAnalysisSettings
                  ) -> FormState:
-        state = FormState(shown={"msd_fit": settings.msd, "jump_fit": settings.jumps})
+        state = FormState(shown={"msd_fit": settings.msd, "jump_fit": settings.jumps,
+                                 "spectrum_fit": settings.spectrum},
+                          active={"axial_range_nm": settings.jumps or settings.spectrum})
         if ctx is not None and ctx.session is not None and len(ctx.locs):
             locs = ctx.locs
             from ..tracking.columns import track_column_choices
@@ -134,8 +156,8 @@ class TrackingAnalysis(Plugin):
     def run(self, ctx: Context, settings: TrackingAnalysisSettings) -> Result:
         from ..metadata import table_frame_time
         from ..tracking.analysis import fit_jumps, gather, jumps_over_lags, msd_analysis
-        if not (settings.msd or settings.jumps):
-            raise ValueError("tick MSD or jump distances")
+        if not (settings.msd or settings.jumps or settings.spectrum):
+            raise ValueError("tick MSD, jump distances or D spectrum")
         locs = ctx.locs
         from ..tracking.columns import track_column
         column = track_column(locs, settings.id_column)
@@ -219,17 +241,18 @@ class TrackingAnalysis(Plugin):
             panels += [lambda ax, msd=msd: draw_msd(ax, msd, t.dims),
                        lambda ax, msd=msd: draw_track_d(ax, msd)]
 
+        focus = float(settings.axial_range_nm or 0.0)
+        tj = t
+        if focus > 0 and t.dims == 3 and (settings.jumps or settings.spectrum):
+            # what stays in focus moved less in z: the lateral jumps alone
+            tj = gather(ids, locs["frame"], locs["x_nm"], locs["y_nm"], None,
+                        locs["xy_err_nm"] if "xy_err_nm" in locs else None,
+                        frame_time_s=(ft or 1.0) / 1000.0,
+                        time_s=locs["time_s"] if clock else None)
+
         if settings.jumps:
             j = settings.jump_fit
             ctx.report("tracking analysis: jump distances")
-            focus = float(j.axial_range_nm or 0.0)
-            tj = t
-            if focus > 0 and t.dims == 3:
-                # what stays in focus moved less in z: the lateral jumps alone
-                tj = gather(ids, locs["frame"], locs["x_nm"], locs["y_nm"], None,
-                            locs["xy_err_nm"] if "xy_err_nm" in locs else None,
-                            frame_time_s=(ft or 1.0) / 1000.0,
-                            time_s=locs["time_s"] if clock else None)
             d2, err, lag = jumps_over_lags(tj, j.lags)
             try:
                 jump = fit_jumps(d2, err, tj.dims, lag * t.dt_s, j.states,
@@ -268,6 +291,42 @@ class TrackingAnalysis(Plugin):
                     panels.append(lambda ax, jump=jump, seen=seen: draw_shares(
                         ax, jump, seen))
 
+        spec = None
+        if settings.spectrum:
+            sp = settings.spectrum_fit
+            ctx.report("tracking analysis: D spectrum")
+            from ..tracking.spectrum import d_grid, peaks, per_localization, spectrum
+            if not 0 < sp.d_min < sp.d_max:
+                raise ValueError(f"the D grid runs from {sp.d_min:g} to {sp.d_max:g} "
+                                 "µm²/s: the first must be the smaller")
+            try:
+                spec = spectrum(tj, d_grid(sp.d_min, sp.d_max), sp.split, focus)
+            except ValueError as error:
+                if not ctx.per_region:
+                    raise
+                ctx.warn(str(error))
+            if spec is not None:
+                found = peaks(spec)
+                values["n_pieces"] = len(spec.pieces)
+                for i, (D, f) in enumerate(found, 1):
+                    values[f"spectrum_D{i}_um2_per_s"] = D
+                    values[f"spectrum_fraction{i}"] = f
+                arrays.update({"spectrum_D_um2_per_s": spec.D_um2_per_s,
+                               "spectrum_occupation": spec.occupation})
+                where = (f", corrected for a {focus:g} nm focus"
+                         + (" (lateral jumps)" if tj is not t else "")) if focus > 0 else ""
+                lines.append(
+                    f"D spectrum: {len(spec.pieces)} pieces of up to {sp.split} jumps "
+                    f"({spec.n_jumps} jumps){where}; peaks at "
+                    + (", ".join(f"{D:.3g} µm²/s ({100 * f:.0f}%)" for D, f in found)
+                       or "none"))
+                if sp.write_column and not ctx.per_region:
+                    out_locs = _with_column(out_locs if out_locs is not None else locs,
+                                            "D_post_um2_per_s",
+                                            per_localization(tj, spec, len(locs)))
+                panels.append(lambda ax, spec=spec, found=found: draw_spectrum(
+                    ax, spec, found))
+
         def draw(figure):
             axes = np.atleast_1d(figure.subplots(1, len(panels)))
             for ax, panel in zip(axes, panels):
@@ -278,7 +337,7 @@ class TrackingAnalysis(Plugin):
         return Result(locs=out_locs, text="\n".join(lines), values=values,
                       id_regions=id_regions,
                       arrays=arrays, plot=plot, settings=settings,
-                      data={"msd": msd, "jumps": jump, "tracks": t},
+                      data={"msd": msd, "jumps": jump, "spectrum": spec, "tracks": t},
                       title="tracking analysis")
 
 
@@ -295,6 +354,15 @@ def _with_track_values(locs: Localizations, t, per) -> Localizations:
                         dict(locs.metadata))
     remember(out, "track_D_um2_per_s", "", grouped="mean")
     remember(out, "track_alpha", "", grouped="mean")
+    return out
+
+
+def _with_column(locs: Localizations, name: str, values: np.ndarray) -> Localizations:
+    """``name`` added (or replaced) as a column averaged per blink."""
+    from ..mathparse import remember
+    out = Localizations({**locs.columns, name: values.astype(np.float32)},
+                        dict(locs.metadata))
+    remember(out, name, "", grouped="mean")
     return out
 
 
@@ -389,3 +457,22 @@ def draw_shares(ax, jump, seen) -> None:
     ax.legend(fontsize=7)
     ax.set_title("per lag" + (" (dashed: of the particles)"
                               if jump.focal_range_nm else ""), fontsize=9)
+
+
+def draw_spectrum(ax, spec, found) -> None:
+    """The occupations over D: of the particles, and, corrected for the
+    focus, of the jumps (dashed); the peaks marked with their fractions."""
+    D = spec.D_um2_per_s
+    ax.plot(D, spec.occupation, color="C0", lw=1.2, label="particles"
+            if spec.focal_range_nm else None)
+    if spec.focal_range_nm:
+        ax.plot(D, spec.seen, color="0.5", lw=0.8, ls="--", label="jumps")
+        ax.legend(fontsize=7)
+    for d, f in found:
+        ax.annotate(f"{100 * f:.0f}%", (d, spec.occupation[np.argmin(np.abs(D - d))]),
+                    textcoords="offset points", xytext=(0, 3), ha="center", fontsize=7)
+    ax.set_xscale("log")
+    ax.set_ylim(0, None)
+    ax.set_xlabel("D (µm²/s)")
+    ax.set_ylabel("occupation")
+    ax.set_title(f"D spectrum, {len(spec.pieces)} pieces", fontsize=9)
