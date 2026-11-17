@@ -33,7 +33,7 @@ project through a session with no window (*Python API and plugins*, below).
 3. Click an ROI's *outline* to select it.  A click inside one drafts a new ROI
    instead, which is what makes overlapping ROIs drawable.
 4. A region drawn in the 2D view becomes an ROI with **Add drawn region**,
-   under the zoom, keeping its rectangle, line or polygon outline.
+   under the ROI list, keeping its rectangle, line or polygon outline.
 5. Select an ROI in the list to jump to its file and centre the zoom on it.
    The **use** checkbox, or the space bar, includes or excludes it; **Remove**
    deletes it, and previous run records stay in the history.

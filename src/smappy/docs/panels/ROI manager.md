@@ -124,7 +124,8 @@ def ring(ax, roi, colour, lw=1.0, ls="-"):
 
 **1. Three images and a list.**  Three pictures side by side, each about
 square: the whole file, a zoom, and the ROI being looked at.  Under the ROI
-image is one row of what to draw, how the ROI is turned, and *Add*.  Under
+image is one row of what to draw and *Add*; under the zoom, *2D view* and
+*rotate*, how the ROI is turned.  Under
 the pictures, the files and the ROIs on the left and *annotate* on the
 right.  The
 dividers between them can be dragged.  A click in the file moves the zoom
@@ -573,7 +574,7 @@ In the *Line* button's right-click menu.  Removes the chosen line from the
 ROI.
 
 ### rotate
-Shows every ROI turned by its angle, with the angle and the handle to turn
+Under the zoom.  Shows every ROI turned by its angle, with the angle and the handle to turn
 it, and measures it that way: a square turned with it, and the steps given
 its turned coordinates.  The choice is saved with the ROIs.  Unticked, the
 angles are kept but nothing turns, and the angle's controls are hidden.  The
@@ -586,11 +587,11 @@ Sets the angle to the chosen line's, start to end: draw a line along the
 structure, then turn the ROI by it.  The line stays, as any other.
 
 ### 2D view
-Under the zoom.  What selecting an ROI does to the main picture.  *not linked* (the default)
-leaves it alone.  *centred on the ROI* centres it on the ROI, at the zoom
+Under the zoom.  What selecting an ROI does to the main picture.  *off* (the default)
+leaves it alone.  *centred* centres it on the ROI, at the zoom
 it has, and filters every localization layer to the ROI's file, as the
 Render tab's file list would -- so other files are not drawn over it.
-*shows the ROI, in 3D too* does the same and also makes the ROI the 2D
+*ROI, in 3D too* does the same and also makes the ROI the 2D
 view's own ROI, which the 3D view's box follows while its *follow 2D ROI*
 is on: an ROI with a line becomes a line ROI along it, as wide as the ROI
 reaches across it -- the chosen line under *Line*, or the first it has
@@ -599,7 +600,7 @@ as its shape.  With *rotate* ticked, an ROI with no line chosen is looked
 at along its angle instead, through its centre.  That replaces whatever ROI the 2D view had.
 
 ### Add drawn region
-Under the zoom, beside *2D view*.  Draw a rectangle, a circle, a line or a polygon in the 2D view first; it
+Under the ROI list, beside *Redo*.  Draw a rectangle, a circle, a line or a polygon in the 2D view first; it
 becomes an ROI of the file shown here, and is selected.  Useful for
 structures that are not round, or a region the automatic finder would not
 propose; the outline is kept as it is.

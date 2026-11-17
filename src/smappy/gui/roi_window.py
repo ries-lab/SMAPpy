@@ -166,8 +166,7 @@ def arrow(line, pixel: Optional[float] = None):
 # what selecting an ROI does to the main picture (`link_mode`): the 2D view
 # left alone, centred on the ROI, or given the ROI as its own -- which the
 # 3D view's box follows (`ROIProject.view_region`)
-LINK_CHOICES = (("not linked", "off"), ("centred on the ROI", "centre"),
-                ("shows the ROI, in 3D too", "roi"))
+LINK_CHOICES = (("off", "off"), ("centred", "centre"), ("ROI, in 3D too", "roi"))
 
 
 def link_mode(navigation: dict) -> str:
@@ -860,26 +859,26 @@ class ROIManagerWindow(QMainWindow):
         for text, key in LINK_CHOICES:
             self.link_2d.addItem(text, key)
         self.link_2d.setToolTip("what selecting an ROI does to the main picture: "
-                                "nothing; centre it on the ROI, on its file; or "
-                                "also make the ROI the 2D view's ROI -- a line ROI "
-                                "along its line when it has one -- so the 3D view "
-                                "shows it")
+                                "off, nothing; centred, centre it on the ROI, on its "
+                                "file; ROI, in 3D too, also make the ROI the 2D "
+                                "view's ROI -- a line ROI along its line when it "
+                                "has one -- so the 3D view shows it")
         self.link_2d.currentIndexChanged.connect(self._on_link_2d)
         # at the widths the controls need: stretched over the whole lists
         # side, a choice of three and a Remove were half a window wide
         link.addWidget(self.link_2d)
-        # the 2D view's drawn region made an ROI: beside the choice of what
-        # the 2D view is to the ROIs
+        # the 2D view's drawn region made an ROI: with the edits of the list
         self.from_region = QPushButton("Add drawn region")
         self.from_region.setToolTip("turn the rectangle, circle, line or polygon "
                                     "drawn in the 2D view into an ROI")
         self.from_region.clicked.connect(self._from_region)
-        link.addWidget(self.from_region)
-        link.addStretch(1)
+        link.addSpacing(16)
         self._link_row = link             # under the zoom (below), not the lists
         edits.addWidget(self.remove_button)
         edits.addWidget(self.undo_button)
         edits.addWidget(self.redo_button)
+        edits.addSpacing(12)
+        edits.addWidget(self.from_region)
         edits.addStretch(1)
         roi_side_list.addLayout(edits)          # under the list they act on
         # what the user says of the selected ROI: a keyword from each list,
@@ -1001,11 +1000,7 @@ class ROIManagerWindow(QMainWindow):
         self.angle_from_line.setToolTip("take the angle of the chosen line, start "
                                         "to end")
         self.angle_from_line.clicked.connect(self._angle_from_line)
-        tools.addSpacing(16)                  # drawing apart from turning
-        tools.addWidget(self.rotate_box)
-        tools.addWidget(self.angle_box)
-        tools.addWidget(self.angle_from_line)
-        tools.addSpacing(16)
+        tools.addSpacing(16)                  # drawing apart from adding
         for key, step in (("[", -1.0), ("]", 1.0)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.WindowShortcut)
@@ -1034,6 +1029,12 @@ class ROIManagerWindow(QMainWindow):
         zlayout.setContentsMargins(0, 0, 0, 0)
         zlayout.addWidget(self.zoom_pane, 1)
         self.zoom_bar = QWidget()
+        # how the ROIs are turned, beside how the 2D view follows them: on
+        # the ROI image's row, the angle field coming and going with
+        # *rotate* resized *Add* under the mouse
+        for widget in (self.rotate_box, self.angle_box, self.angle_from_line):
+            self._link_row.addWidget(widget)
+        self._link_row.addStretch(1)
         self._link_row.setContentsMargins(0, 0, 0, 0)
         self.zoom_bar.setLayout(self._link_row)
         zlayout.addWidget(self.zoom_bar)
