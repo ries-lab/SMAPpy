@@ -65,7 +65,11 @@ the region where the drawn ROI would be** (`ROIProject.region_context`,
 `ColumnRegions.tables`).  `ctx.locs` is the region's rows of the table the
 layer shows, `ctx.table(i)` and `ctx.layer_selection(i)` each layer cut to
 the region with its own filter, `ctx.region` the ROI's shape (None for a
-cluster), `ctx.region_id` the region's id.  No drawn ROI or 3D slab narrows
+cluster), `ctx.region_id` the region's id.  In an ROI, `ctx.frame` is its
+own frame (`regions.SiteFrame`: its centre, and its angle while the project
+rotates its ROIs), and every table carries it as `x_site_nm` /
+`y_site_nm` beside the absolute `x_nm` / `y_nm` -- SMAP's `xnmrot`; a
+rotated project's square turns with the ROI's angle.  No drawn ROI or 3D slab narrows
 it.  A layer's grouped table is cut too -- for an ROI by its shape, for an
 id column through `group_id`, so a blink whose localizations fall in two
 regions is in both.  Whether a plugin measures per layer or several layers

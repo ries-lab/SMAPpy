@@ -2,7 +2,7 @@
 title: ROI manager
 summary: The window where ROIs are found, looked at one by one, kept or excluded, and measured.
 widget: smappy.gui.roi_window.ROIManagerWindow
-covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.ROIList, smappy.gui.roi_window.ROIManagerWindow._in_view, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.core.ROIProject.view, smappy.roi_manager.core.ROIProject._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit, smappy.roi_manager.core.ROIProject.set_line, smappy.roi_manager.core.ROIProject.reverse_line, smappy.roi_manager.core.line_angle_length, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.members, smappy.roi_manager.core.narrow, smappy.roi_manager.core.ROIProject.set_ranges, smappy.roi_manager.core.ROIProject.outline, smappy.roi_manager.core.ROIProject.rim_distance, smappy.roi_manager.core.ROIProject.summary, smappy.gui.roi_ranges.RangePanel]
+covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.ROIList, smappy.gui.roi_window.ROIManagerWindow._in_view, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.core.ROIProject.view, smappy.roi_manager.core.ROIProject._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit, smappy.roi_manager.core.ROIProject.set_line, smappy.roi_manager.core.ROIProject.reverse_line, smappy.roi_manager.core.line_angle_length, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.members, smappy.roi_manager.core.narrow, smappy.roi_manager.core.ROIProject.set_ranges, smappy.roi_manager.core.ROIProject.outline, smappy.roi_manager.core.ROIProject.rim_distance, smappy.roi_manager.core.ROIProject.summary, smappy.gui.roi_ranges.RangePanel, smappy.roi_manager.core.ROIProject.set_angle, smappy.roi_manager.core.ROIProject.set_rotate, smappy.roi_manager.core.ROIProject.frame, smappy.roi_manager.core.ROIProject.view_region, smappy.roi_manager.core.normal_angle, smappy.regions.SiteFrame, smappy.regions.Region.site, smappy.gui.roi_window.arrow, smappy.gui.roi_window.ImagePane.set_turn]
 ---
 
 ## What it does
@@ -211,9 +211,10 @@ an elongated structure, the direction a filament runs, the distance between
 two spots.  The names are written once for the project, under *line names*
 (*direction* to start with), and each ROI can have one line of each name.
 Pick the name under *line*, then *Draw line* and two clicks, the start and
-then the end.  A line is an arrow, so it has a direction; *Reverse* turns
-it round.  Each name has its own colour, and its name is written at the
-arrow's tip.
+then the end.  A line is an arrow, so it has a direction: a small ring
+marks its start and a head its end, both the same size on the screen at any
+zoom.  *Reverse* turns it round.  Each name has its own colour, and its name
+is written at the arrow's tip.
 
 Each line gives two numbers in the ROI's row of the results table:
 `<name>_angle_deg`, its angle, and `<name>_length_nm`, its length.  So
@@ -222,6 +223,25 @@ Each line gives two numbers in the ROI's row of the results table:
 [Regions to attribute](plugin:Analysis/Regions/Regions to attribute) read them
 like anything measured.  The keys: L draws the chosen line, Shift+L chooses
 the next name, R reverses it.
+
+Every ROI also has an **angle**: the direction its structure points in, 0
+until it is set.  It is a note, like a keyword, and is in the results table
+as `roi_angle_deg`.  With *rotate* ticked, each ROI is shown turned by its
+angle, so that its structure lies along $x$ (to the right), and a green
+handle sits above it: drag the handle round and the picture turns with it
+(Shift turns in steps of 15°), or type the angle, or press [ and ] to turn
+by a degree, or take it from a line drawn along the structure (*From
+line*).  A square ROI stays square on the screen, so it turns with the
+structure; a circle is the same at any angle; a polygon drawn by hand stays
+round the localizations it was drawn round.  Lines and polygons are kept in
+the file's coordinates, so they stay where they are whichever way the
+picture is turned.
+
+*Rotate* changes what is measured: with it, a square takes in the
+localizations of the turned square, and the steps are given each ROI's own
+coordinates turned (see *In detail*).  So ticking or unticking it, or
+turning an ROI while it is ticked, puts the results out of date.  Without
+it, every angle is ignored and nothing turns.
 
 **6. Measuring.**  The steps run in every ROI are chosen, ordered, set up
 and run in the [Regions tab](plugin:Panels/Regions tab), under *per-region
@@ -299,6 +319,30 @@ is $\sqrt{(x_1 - x_0)^2 + (y_1 - y_0)^2}$ in nm.  Where a step already
 writes a column of the same name, the line's is called
 `annotation.<name>_angle_deg`.  An old file's one *direction* opens as the
 line called `direction`, and its stored results stay current.
+
+**An ROI's own coordinates.**  An ROI at the centre $\mathbf{c}$ with the
+angle $\theta$ (the same convention as a line's) has its own frame: a
+position $\mathbf{p}$ is, in it,
+$\mathbf{u} = R(-\theta)\,(\mathbf{p} - \mathbf{c})$, where $R(\alpha)$
+turns by $\alpha$ -- so a structure at $\theta$ lies along $+u$.  Every
+step run in an ROI gets these as two extra columns, `x_site_nm` and
+`y_site_nm`, beside `x_nm` and `y_nm`, which stay the file's positions: a
+step that reports a position to be found again in the file (a circle's
+centre, which *Centre ROIs* moves the ROI to) keeps using those, and one
+that wants the structure's own axes uses these (SMAP's `xnmrot`).  Without
+*rotate*, $\theta = 0$ in the frame: `x_site_nm` is then only the distance
+from the centre.  The columns exist only while a step runs in an ROI; they
+are never written to the file's table.  A square ROI of side $s$ holds what
+has $|u_x| \leq s/2$ and $|u_y| \leq s/2$.  An angle is kept between
+$-180$° and $180$°.
+
+**What turns the picture.**  The ROI image is drawn as it is and turned on
+the screen by $-\theta$ about the ROI's centre, with the outlines and lines
+turned with it, so dragging the handle turns it at once and the picture is
+rendered again only when the handle is let go.  To fill the image at any
+angle, it is rendered $\sqrt{2}$ times as wide at the same pixel size.  A
+click is turned back before it is used, so what is drawn is stored in the
+file's coordinates.
 
 **Many ROIs.**  Thousands of ROIs -- every [cluster](plugin:Panels/Glossary)
 (localizations lying closer to each other than to the rest) of a cell, made by
@@ -465,6 +509,19 @@ matters, as for averaging ROIs.
 ### Clear line
 Removes the chosen line from the ROI.
 
+### rotate
+Shows every ROI turned by its angle, with the angle and the handle to turn
+it, and measures it that way: a square turned with it, and the steps given
+its turned coordinates.  The choice is saved with the ROIs.  Unticked, the
+angles are kept but nothing turns, and the angle's controls are hidden.  The
+field beside it is the angle of the ROI shown, in degrees from $+x$ towards
+$+y$ (clockwise on the screen); on a draft, it goes with the draft when it
+is added.
+
+### From line
+Sets the angle to the chosen line's, start to end: draw a line along the
+structure, then turn the ROI by it.  The line stays, as any other.
+
 ### 2D view
 What selecting an ROI does to the main picture.  *not linked* (the default)
 leaves it alone.  *centred on the ROI* centres it on the ROI, at the zoom
@@ -475,7 +532,8 @@ view's own ROI, which the 3D view's box follows while its *follow 2D ROI*
 is on: an ROI with a line becomes a line ROI along it, as wide as the ROI
 reaches across it -- the chosen line under *Draw line*, or the first it has
 -- so the 3D view looks along the line; an ROI without one is put there
-as its shape.  That replaces whatever ROI the 2D view had.
+as its shape.  With *rotate* ticked, an ROI with no line chosen is looked
+at along its angle instead, through its centre.  That replaces whatever ROI the 2D view had.
 
 ### annotate
 What the selected ROI is, in the user's own words.  The keys work wherever
@@ -544,13 +602,21 @@ and a list of evaluators with a tab each are its design.
   the signature of its data, geometry, filters and parameters, results that
   no longer match are marked and left out of the table, and only the
   step being looked at is run on selection.
-* **Named lines, not rotations.**  SMAP can turn a site by an angle, and
-  has two fixed lines per site, *line 1* and *line 2*, each with a button to
-  reverse it.  Here a site has any number of lines, each under a name the
-  project defines, and the image is not turned.  The angle is SMAP's,
-  `atan2(dy, dx)` in degrees; the lines' angles and lengths are columns of
-  the results table, where SMAP keeps them in the site's annotation for
-  evaluators to read.  An ROI can have its own polygon outline.
+* **An angle and named lines.**  SMAP turns a site by a rotation line
+  (`rotationpos`, set by clicks beside the site image or a typed angle) and
+  has two fixed lines per site, *line 1* and *line 2*.  Here the turn is the
+  ROI's angle, set with a handle, and a site has any number of lines, each
+  under a name the project defines; a SMAP file's rotation line becomes
+  both the angle and the line `direction`.  The angle is SMAP's,
+  `atan2(dy, dx)` in degrees; the angle and the lines' angles and lengths
+  are columns of the results table, where SMAP keeps them in the site's
+  annotation for evaluators to read.  SMAP gives every evaluator the
+  rotated coordinates (`xnmrot`, `ynmrot`) whether or not its image is
+  turned; here `x_site_nm` and `y_site_nm` are turned only with *rotate*
+  on, so they are always the frame on the screen.  SMAP stores a shape
+  drawn on a turned site in the turned image's coordinates; here it is
+  stored in the file's.  SMAP's polar angle, the turn in 3D, is not
+  ported.  An ROI can have its own polygon outline.
 * **Annotation lists.**  SMAP has four lists, loaded from a text file, each
   a list box, with the arrow keys moving between lists and entries.  Here the
   lists are written in the window, as many as wanted, with a name each, and

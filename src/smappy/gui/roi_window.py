@@ -56,6 +56,13 @@ STALE_COLOUR = "#c07000"        # an ROI whose evaluation is out of date
 DETAIL_NM = 3000.0            # the zoom's width to start with
 DEFAULT_TILE_NM = 5000.0      # a tile to start from
 RIM_PIXELS = 6.0              # how near the outline a click must be to select
+# the rotation handle: its dot's size, its stem's length past the ROI, and
+# the step Shift snaps a turn to
+HANDLE_PIXELS = 12.0
+HANDLE_STEM_PIXELS = 26.0
+HANDLE_COLOUR = "#2e9e4f"               # the selected ROI's green
+HANDLE_PEN = pg.mkPen(HANDLE_COLOUR, width=2)
+SNAP_DEGREES = 15.0
 # a pane with more ROIs than this in view draws a dot at each centre instead
 # of its outline: past it the outlines are a tangle and cost a second a redraw
 OUTLINE_LIMIT = 1000
@@ -72,18 +79,34 @@ OTHERS_DIM = 0.8
 COUNT_LIMIT = 2000
 
 
-def arrow(line):
-    """A line with a small head at its end, which shows which way it goes."""
+# a line's marks, in screen pixels: the head at its end and the ring at its
+# start, so that the way it goes reads at any zoom and on a short line too
+ARROW_HEAD_PIXELS = 11.0
+START_RING_PIXELS = 4.0
+RING_POINTS = 13
+
+
+def arrow(line, pixel: Optional[float] = None):
+    """A line marked with which way it goes: a ring at its start and a head
+    at its end -- ``o--->``.  ``pixel`` is the pane's pixel size in nm, so
+    the marks keep their size on the screen; None sizes them by the line, as
+    a picture without a pane has to.  The head is never more than half the
+    line, so a short line still shows where it starts."""
     (x0, y0), (x1, y1) = np.asarray(line, float)
     d = np.array([x1 - x0, y1 - y0])
     length = float(np.hypot(*d)) or 1.0
     unit = d / length
     side = np.array([-unit[1], unit[0]])
-    head = 0.18 * length
+    head = ARROW_HEAD_PIXELS * pixel if pixel else 0.18 * length
+    ring = START_RING_PIXELS * pixel if pixel else 0.05 * length
+    head = min(head, 0.5 * length)
     left = np.array([x1, y1]) - head * unit + 0.5 * head * side
     right = np.array([x1, y1]) - head * unit - 0.5 * head * side
-    xs = [x0, x1, np.nan, left[0], x1, right[0]]
-    ys = [y0, y1, np.nan, left[1], y1, right[1]]
+    t = np.linspace(0, 2 * np.pi, RING_POINTS)
+    xs = [x0 + ring * unit[0], x1, np.nan, left[0], x1, right[0], np.nan,
+          *(x0 + ring * np.cos(t))]
+    ys = [y0 + ring * unit[1], y1, np.nan, left[1], y1, right[1], np.nan,
+          *(y0 + ring * np.sin(t))]
     return xs, ys
 
 
@@ -182,6 +205,11 @@ class ImagePane(QWidget):
     moved = Signal(float, float)           # only while `tracking` is on
     zoomed = Signal(float)
     panned = Signal(float, float)          # how far to move the view, in nm
+    # the rotation handle dragged: degrees the picture has turned with the
+    # mouse since the press (anticlockwise in data coordinates), and whether
+    # Shift is held; `turned` once, at the release
+    turning = Signal(float, bool)
+    turned = Signal(float, bool)
 
     def __init__(self, title: str, zoomable: bool = False, pannable: bool = False,
                  parent=None):
@@ -198,8 +226,16 @@ class ImagePane(QWidget):
         self.view = self.graphics.addViewBox(lockAspect=True, invertY=True, enableMenu=False,
                                              enableMouse=False)
         fill_canvas(self.graphics)          # the picture reaches the pane's edges
+        # Everything drawn in data coordinates is a child of one group, which
+        # carries the turn of a rotated ROI (`set_turn`): the picture, the
+        # outlines, the lines and their names turn as one, and a click is
+        # mapped back through it (`_data_at`), so what is drawn is stored in
+        # absolute nm whether or not the pane is turned
+        self.content = pg.ItemGroup()
+        self.view.addItem(self.content)
+        self.turn: Optional[tuple] = None        # (centre, degrees), or None
         self.image = pg.ImageItem(axisOrder="row-major")
-        self.view.addItem(self.image)
+        self.image.setParentItem(self.content)
         self.shapes = {name: pg.PlotDataItem(pen=pen, connect="finite")
                        for name, pen in (("preview", PREVIEW_PEN),
                                          ("preview_rejected", PREVIEW_REJECTED_PEN),
@@ -215,7 +251,18 @@ class ImagePane(QWidget):
             self.shapes[name] = pg.PlotDataItem(pen=None, symbol="o", symbolSize=3,
                                                 symbolPen=None, symbolBrush=colour)
         for item in self.shapes.values():
+            item.setParentItem(self.content)
+        # the rotation handle, in the pane's own (unturned) coordinates: a
+        # stem up from the ROI and a dot to drag, as a drawing program has
+        self.handle_stem = pg.PlotDataItem(pen=HANDLE_PEN)
+        self.handle_dot = pg.ScatterPlotItem(size=HANDLE_PIXELS, pen=HANDLE_PEN,
+                                             brush=pg.mkBrush(HANDLE_COLOUR))
+        for item in (self.handle_stem, self.handle_dot):
+            item.setZValue(10)
             self.view.addItem(item)
+        self.handle: Optional[tuple] = None      # (centre, reach in nm) when shown
+        self._turning: Optional[float] = None    # the mouse's angle at the press
+        self._turned = 0.0
         layout.addWidget(self.graphics)
         self.texts: list = []          # the lines' names, at their ends
         self.title = title
@@ -234,16 +281,94 @@ class ImagePane(QWidget):
         self.tracking = bool(on)
         self.graphics.viewport().setMouseTracking(bool(on))
 
+    def _data_at(self, position):
+        """The data coordinates under a point of the widget: through the
+        turn, when the pane is turned."""
+        return self.content.mapFromScene(self.graphics.mapToScene(position.toPoint()))
+
+    def _view_at(self, position):
+        """The pane's own coordinates under a point of the widget, unturned."""
+        return self.view.mapSceneToView(self.graphics.mapToScene(position.toPoint()))
+
+    # -------------------------------------------------------------- turning
+    def set_turn(self, centre, degrees: Optional[float]) -> None:
+        """Show the data turned by ``-degrees`` about ``centre``, so that a
+        structure at ``degrees`` lies along +x (`regions.SiteFrame`); None
+        shows it as it is.  Only the transform changes, so the picture turns
+        at once while the handle is dragged; `render` covers enough of the
+        data for any angle."""
+        from PySide6.QtGui import QTransform
+        if degrees is None or centre is None:
+            self.turn = None
+            self.content.setTransform(QTransform())
+            return
+        cx, cy = (float(v) for v in centre)
+        self.turn = (np.array([cx, cy]), float(degrees))
+        t = QTransform()
+        t.translate(cx, cy)
+        t.rotate(-float(degrees))
+        t.translate(-cx, -cy)
+        self.content.setTransform(t)
+
+    def show_handle(self, centre=None, reach: float = 0.0, turned: float = 0.0) -> None:
+        """The rotation handle over ``centre``, past ``reach`` nm of it
+        (straight up, or ``turned`` degrees round while it is dragged);
+        no centre hides it."""
+        if centre is None or self.fov is None:
+            self.handle = None
+            self.handle_stem.setData([], [])
+            self.handle_dot.setData([], [])
+            return
+        centre = np.asarray(centre, float)
+        self.handle = (centre, float(reach))
+        p = self.fov.pixelsize
+        a = np.radians(-90.0 + turned)          # up on a screen whose y points down
+        unit = np.array([np.cos(a), np.sin(a)])
+        start = centre + unit * reach
+        end = centre + unit * (reach + HANDLE_STEM_PIXELS * p)
+        self.handle_stem.setData([start[0], end[0]], [start[1], end[1]])
+        self.handle_dot.setData([end[0]], [end[1]])
+
+    def _on_handle(self, position) -> bool:
+        if self.handle is None or self.fov is None:
+            return False
+        dot = self.handle_dot.data
+        if not len(dot):
+            return False
+        p = self._view_at(position)
+        x, y = float(dot["x"][0]), float(dot["y"][0])
+        return float(np.hypot(p.x() - x, p.y() - y)) <= HANDLE_PIXELS * self.fov.pixelsize
+
+    def _mouse_angle(self, position) -> float:
+        p = self._view_at(position)
+        c = self.handle[0]
+        return float(np.degrees(np.arctan2(p.y() - c[1], p.x() - c[0])))
+
     def eventFilter(self, obj, event) -> bool:
         kind = event.type()
-        if kind.name == "MouseButtonPress" if hasattr(kind, "name") else False:
-            pass
         from PySide6.QtCore import QEvent
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton \
+                and self._on_handle(event.position()):
+            self._turning = self._mouse_angle(event.position())
+            self._turned = 0.0
+            return True
+        if self._turning is not None and kind in (QEvent.MouseMove,
+                                                   QEvent.MouseButtonRelease):
+            delta = self._mouse_angle(event.position()) - self._turning
+            delta = (delta + 180.0) % 360.0 - 180.0
+            shift = bool(event.modifiers() & Qt.ShiftModifier)
+            if kind == QEvent.MouseMove:
+                self._turned = delta
+                self.turning.emit(delta, shift)
+            else:
+                self._turning = None
+                self.turned.emit(delta, shift)
+            return True
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
             self._press = self._last = event.position()
             self._dragged = False
         elif kind == QEvent.MouseMove and self.tracking and self.fov is not None:
-            p = self.view.mapSceneToView(self.graphics.mapToScene(event.position().toPoint()))
+            p = self._data_at(event.position())
             self.moved.emit(p.x(), p.y())
             return False
         elif kind == QEvent.MouseMove and self._press is not None and self.pannable:
@@ -260,7 +385,7 @@ class ImagePane(QWidget):
             moved = (event.position() - self._press).manhattanLength()
             dragged, self._press, self._dragged = self._dragged, None, False
             if not dragged and moved <= 3 and self.fov is not None:
-                p = self.view.mapSceneToView(self.graphics.mapToScene(event.position().toPoint()))
+                p = self._data_at(event.position())
                 self.clicked.emit(p.x(), p.y())
                 return True
         elif kind == QEvent.Wheel and self.zoomable:
@@ -280,13 +405,28 @@ class ImagePane(QWidget):
         the ROIs follow, whose tracks the marks pick."""
         from ..layer_state import render_panels
         layers, state = view
-        fov = FieldOfView.fit((x0, x1), (y0, y1), *canvas_pixels(self.graphics))
+        nx, ny = canvas_pixels(self.graphics)
+        shown = FieldOfView.fit((x0, x1), (y0, y1), nx, ny)
+        fov = shown
+        if self.turn is not None:
+            # a turned picture must still fill the pane at any angle: the
+            # data round its centre out to the pane's corners, at the same
+            # pixel size -- twice the pixels, rendered once per redraw, and
+            # none while the handle turns it
+            k = np.sqrt(2.0)
+            cx, cy = 0.5 * (shown.x0 + shown.x1), 0.5 * (shown.y0 + shown.y1)
+            hx, hy = k * 0.5 * (shown.x1 - shown.x0), k * 0.5 * (shown.y1 - shown.y0)
+            half = max(hx, hy)
+            fov = FieldOfView.fit((cx - half, cx + half), (cy - half, cy + half),
+                                  int(np.ceil(k * max(nx, ny))),
+                                  int(np.ceil(k * max(nx, ny))))
         (rgb,), _ = render_panels(layers, fov)
         if emphasis is not None:
             rgb = emphasised(state.snapshot(), fov, emphasis, base=rgb)
         self.image.setImage(np.ascontiguousarray(rgb), levels=[0, 1], autoLevels=False)
         self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
-        self.view.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0), padding=0)
+        self.view.setRange(QRectF(shown.x0, shown.y0, shown.x1 - shown.x0,
+                                  shown.y1 - shown.y0), padding=0)
         self.fov = fov
 
     def clipboard_image(self):
@@ -300,11 +440,13 @@ class ImagePane(QWidget):
         for item in self.shapes.values():
             item.setData([], [])
         self.label_lines([])
+        self.show_handle()
 
     def label_lines(self, labels) -> None:
         """Names at the lines' ends: ``[(x, y, text, colour, bold)]``."""
         for item in self.texts:
-            self.view.removeItem(item)
+            if item.scene() is not None:
+                item.scene().removeItem(item)
         self.texts = []
         for x, y, text, colour, bold in labels:
             item = pg.TextItem(text, color=colour, anchor=(0, 1))
@@ -313,7 +455,7 @@ class ImagePane(QWidget):
                 font.setBold(True)
                 item.setFont(font)
             item.setPos(x, y)
-            self.view.addItem(item)
+            item.setParentItem(self.content)      # turned with the line, kept upright
             self.texts.append(item)
 
     def draw(self, name: str, xs=None, ys=None) -> None:
@@ -454,6 +596,8 @@ class ROIManagerWindow(QMainWindow):
         self.draft: Optional[np.ndarray] = None
         self.draft_polygon: Optional[list] = None
         self.draft_lines: dict = {}              # the draft's, as `ROI.lines`
+        self.draft_angle = 0.0                   # the draft's, as `ROI.angle`
+        self._turn_base: Optional[float] = None  # the angle as a handle drag began
         # a drafted ROI of a track (`ROIProject.drafts_tracks`), an unnumbered
         # `ROI` to draw it by; read through `draft_track`, so that whatever
         # drops the draft drops it too
@@ -686,10 +830,41 @@ class ROIManagerWindow(QMainWindow):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.WindowShortcut)
             shortcut.activated.connect(slot)
+        # The ROIs turned to their angles (`ROIProject.rotate`): a setting of
+        # the project, since it decides what is measured, shown here because
+        # it is a way of looking.  Off, the angle and the handle are gone and
+        # every ROI is shown and measured as it lies in the file
+        turns = QHBoxLayout()
+        turns.setSpacing(3)
+        self.rotate_box = QCheckBox("rotate")
+        self.rotate_box.setToolTip("show and measure each ROI turned to its angle, so "
+                                   "its structure lies along x; drag the green "
+                                   "handle to turn it (Shift: 15\u00b0 steps)")
+        self.rotate_box.toggled.connect(self._on_rotate)
+        self.angle_box = QDoubleSpinBox(minimum=-180, maximum=180, decimals=1,
+                                        suffix="\u00b0")
+        self.angle_box.setWrapping(True)
+        self.angle_box.setKeyboardTracking(False)
+        self.angle_box.setToolTip("the ROI's angle: the direction of its structure, "
+                                  "from +x towards +y ([ and ] turn it by 1\u00b0)")
+        self.angle_box.valueChanged.connect(self._on_angle_box)
+        self.angle_from_line = QPushButton("From line")
+        self.angle_from_line.setToolTip("take the angle of the chosen line, start "
+                                        "to end")
+        self.angle_from_line.clicked.connect(self._angle_from_line)
+        turns.addWidget(self.rotate_box)
+        turns.addWidget(self.angle_box)
+        turns.addWidget(self.angle_from_line)
+        turns.addStretch(1)
+        for key, step in (("[", -1.0), ("]", 1.0)):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.WindowShortcut)
+            shortcut.activated.connect(lambda step=step: self._step_angle(step))
         # the tools that say what to draw sit above the image they draw into;
         # *Add*, the one button that is pressed over and over, sits directly
         # under it, where the eye already is after judging the ROI
         rlayout.addLayout(tools)
+        rlayout.addLayout(turns)
         rlayout.addWidget(self.roi_pane, 1)
         self.add_button = QPushButton("Add")
         self.add_button.setToolTip("store the drafted ROI (Enter)")
@@ -738,6 +913,8 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_pane.zoomed.connect(lambda _: self.redraw())
         self.zoom_pane.panned.connect(self._zoom_panned)
         self.roi_pane.zoomed.connect(self._preview_zoomed)
+        self.roi_pane.turning.connect(self._on_turning)
+        self.roi_pane.turned.connect(self._on_turned)
         session.on_change(self._on_session)
         self.refresh(files=True)
 
@@ -777,6 +954,8 @@ class ROIManagerWindow(QMainWindow):
             self.files.setCurrentRow(max(0, min(row, self.files.count() - 1)))
         self._fill_table()
         self.link_2d.setCurrentIndex(max(0, self.link_2d.findData(link_mode(project.navigation))))
+        self.rotate_box.setChecked(bool(project.rotate))
+        self._show_turn_controls()
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
         self._loading = False
@@ -850,7 +1029,9 @@ class ROIManagerWindow(QMainWindow):
         else:
             self.zoom_pane.draw("draft", *([[], []] if self.draft is None else
                                            Region.site(self.draft, project.shape,
-                                                       project.size_nm).outline()))
+                                                       project.size_nm, None,
+                                                       self._draft_site_angle()
+                                                       ).outline()))
         # the frame the zoom covers, on the file image
         self.file_pane.draw("frame",
                             [centre[0] - half, centre[0] + half, centre[0] + half,
@@ -927,6 +1108,7 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_pane.width_nm = max(x1 - x0, y1 - y0)
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_angle = 0.0
         self.redraw()
         self.status.showMessage(f"tile {index + 1} of {len(tiles)}")
 
@@ -1017,7 +1199,7 @@ class ROIManagerWindow(QMainWindow):
         for named in lines:
             for name, line in named.items():
                 slot = self._line_slot(name)
-                ax, ay = arrow(line)
+                ax, ay = arrow(line, pane.fov.pixelsize if pane.fov is not None else None)
                 xs[slot].extend(list(ax) + [np.nan])
                 ys[slot].extend(list(ay) + [np.nan])
                 if labels:
@@ -1081,14 +1263,18 @@ class ROIManagerWindow(QMainWindow):
         half = width / 2
         self.roi_pane.width_nm = width
         emphasis = self._emphasis()
+        angle = self._shown_angle() if project.rotate else None
+        self.roi_pane.set_turn(centre, angle)
         self.roi_pane.render(view, centre[0] - half, centre[0] + half,
                              centre[1] - half, centre[1] + half, emphasis)
         polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
         lines = self.draft_lines if drafted else (roi.lines if roi is not None else {})
         if of_id is None:
-            xs, ys = Region.site(centre, project.shape, project.size_nm, polygon).outline()
+            xs, ys = Region.site(centre, project.shape, project.size_nm, polygon,
+                                 angle or 0.0).outline()
         else:
             xs, ys = project.outline(of_id)
+        self._place_handle(centre, half, xs, ys)
         used = drafted or roi is None or roi.use
         for name in ("draft", "roi", "excluded_active"):
             self.roi_pane.draw(name)
@@ -1180,6 +1366,7 @@ class ROIManagerWindow(QMainWindow):
         self._draft_track = None
         self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_angle = 0.0
         self.redraw()
 
     @property
@@ -1210,6 +1397,7 @@ class ROIManagerWindow(QMainWindow):
         self._draft_track = track
         self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_angle = 0.0
         self.redraw()
 
     def _roi_clicked(self, x: float, y: float) -> None:
@@ -1548,6 +1736,7 @@ class ROIManagerWindow(QMainWindow):
         self.active = roi_id
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_angle = 0.0
         project.navigation["roi"] = roi_id
         if roi.file_id != self.current_file():
             ids = list(project.sources)
@@ -1754,9 +1943,11 @@ class ROIManagerWindow(QMainWindow):
                                                      float(self.draft[1])],
                                            polygon=self.draft_polygon)
             roi.lines = dict(self.draft_lines)
+            roi.angle = float(self.draft_angle)
             step.label = f"Add ROI {self.project.numbers().get(roi.id)}"
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_angle = 0.0
         self.active = roi.id
         self.project.navigation["roi"] = roi.id
         self._fill_table()
@@ -1767,6 +1958,110 @@ class ROIManagerWindow(QMainWindow):
 
     def _selected(self):
         return self.project.rois.get(self.active) if self.active else None
+
+    # ------------------------------------------------------------- turning
+    def _shown_angle(self) -> float:
+        """The angle of what the ROI pane shows: the draft's or the ROI's."""
+        if self.draft is not None:
+            return float(self.draft_angle)
+        roi = self._selected()
+        return float(roi.angle) if roi is not None else 0.0
+
+    def _draft_site_angle(self) -> float:
+        return float(self.draft_angle) if self.project.rotate else 0.0
+
+    def _show_turn_controls(self) -> None:
+        """The angle and its button only while the ROIs are rotated."""
+        on = bool(self.project.rotate)
+        for w in (self.angle_box, self.angle_from_line):
+            w.setVisible(on)
+
+    def _place_handle(self, centre, half: float, xs, ys) -> None:
+        """The handle above what the ROI pane shows, while the ROIs rotate."""
+        if not self.project.rotate or (self.draft is None and self._selected() is None):
+            self.roi_pane.show_handle()
+            return
+        from ..regions import SiteFrame
+        _, v = SiteFrame(centre, self._shown_angle()).columns(xs, ys)
+        top = -float(np.nanmin(v)) if len(v) and np.isfinite(v).any() else 0.0
+        stem = HANDLE_STEM_PIXELS * (self.roi_pane.fov.pixelsize
+                                     if self.roi_pane.fov is not None else 0.0)
+        reach = float(np.clip(top, 0.0, max(0.9 * half - stem, 0.0)))
+        self.roi_pane.show_handle(centre, reach)
+        was, self._loading = self._loading, True
+        self.angle_box.setValue(self._shown_angle())
+        self._loading = was
+
+    def _on_rotate(self, on: bool) -> None:
+        if self._loading:
+            return
+        self.project.set_rotate(on)
+        self._show_turn_controls()
+        # what each ROI holds has changed: the list marks the out-of-date
+        self.annotated()
+        self.redraw()
+
+    def _snapped(self, angle: float, snap: bool) -> float:
+        from ..roi_manager.core import normal_angle
+        if snap:
+            angle = SNAP_DEGREES * round(angle / SNAP_DEGREES)
+        return normal_angle(angle)
+
+    def _on_turning(self, delta: float, snap: bool) -> None:
+        """The handle being dragged: the picture turns with it, nothing is
+        rendered or stored until it is let go."""
+        if self._turn_base is None:
+            self._turn_base = self._shown_angle()
+        angle = self._snapped(self._turn_base - delta, snap)
+        turn = self.roi_pane.turn
+        if turn is not None:
+            self.roi_pane.set_turn(turn[0], angle)
+            handle = self.roi_pane.handle
+            if handle is not None:
+                self.roi_pane.show_handle(handle[0], handle[1], self._turn_base - angle)
+        was, self._loading = self._loading, True
+        self.angle_box.setValue(angle)
+        self._loading = was
+
+    def _on_turned(self, delta: float, snap: bool) -> None:
+        base = self._turn_base if self._turn_base is not None else self._shown_angle()
+        self._turn_base = None
+        self.set_angle(self._snapped(base - delta, snap))
+
+    def _on_angle_box(self, value: float) -> None:
+        if not self._loading:
+            self.set_angle(value)
+
+    def _step_angle(self, step: float) -> None:
+        """[ and ]: turn by a degree."""
+        if self.project.rotate and (self.draft is not None or self._selected() is not None):
+            self.set_angle(self._shown_angle() + step)
+
+    def _angle_from_line(self) -> None:
+        """The angle of the chosen line: drawn along the structure, as SMAP's
+        rotation line was."""
+        from ..roi_manager.core import line_angle_length
+        line = self._shown_lines().get(self.line_name)
+        if line is None:
+            self.status.showMessage(f"this ROI has no line {self.line_name!r}: "
+                                    "draw it along the structure first")
+            return
+        self.set_angle(line_angle_length(line)[0])
+
+    def set_angle(self, angle: float) -> None:
+        """Turn the draft or the selected ROI to ``angle`` degrees: one ROI
+        undo step, and a picture rendered for it."""
+        from ..roi_manager.core import normal_angle
+        angle = normal_angle(angle)
+        roi = self._selected()
+        if self.draft is not None:
+            self.draft_angle = angle
+        elif roi is not None:
+            self.project.set_angle(roi.id, angle)
+            self.annotated()
+        else:
+            return
+        self.redraw()
 
     def _toggle(self) -> None:
         """Space: include or exclude the selected ROI."""

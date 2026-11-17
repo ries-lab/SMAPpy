@@ -8,8 +8,9 @@ _NPC read the site's own rotation (``xnmrot``) and a LocMoFit model's
 parameters; AverageSites_kinetochore centres on a point of one annotation
 line and turns by the angle of the other.  Here the *centre* is the ROI's,
 a pair of measured values (a cluster's or a circle fit's centre) or a point
-of a named line (`ROI.lines`), and the *orientation* none, a named line or
-a measured angle: one plugin covers what they did, apart from LocMoFit's
+of a named line (`ROI.lines`), and the *orientation* none, the ROI's own
+angle (`ROI.angle`, SMAP's ``rotationpos``), a named line or a measured
+angle: one plugin covers what they did, apart from LocMoFit's
 model, which is a later port.
 
 Two departures, both because the output is a table that is used further:
@@ -39,7 +40,7 @@ from . import Context, FormState, Plot, Plugin, Result, param, register
 
 CENTRES = [("roi", "the ROI's centre"), ("measured", "measured values"),
            ("line", "a point of a line")]
-ORIENTATIONS = [("none", "as it is"), ("line", "a line"),
+ORIENTATIONS = [("none", "as it is"), ("roi", "the ROI's angle"), ("line", "a line"),
                 ("measured", "a measured angle")]
 LINE_POINTS = [("start", "its start"), ("middle", "its middle"), ("end", "its end")]
 OUTPUTS = [("file", "a new file"), ("table", "the table")]
@@ -125,7 +126,9 @@ def placement(roi, row: Dict[str, Any], settings: AverageROIsSettings
         centre = line_point(roi.lines[c.line], c.point)
     else:
         centre = np.asarray(roi.center, dtype=float)
-    if o.by == "line":
+    if o.by == "roi":
+        angle = float(roi.angle)
+    elif o.by == "line":
         if o.line not in roi.lines:
             return None, None, f"no line {o.line}"
         angle = line_angle_length(roi.lines[o.line])[0]
@@ -149,11 +152,13 @@ def average(parts: List[Tuple[Any, np.ndarray, float, int]]):
     of each ROI moved past the last one's (see the module docstring), the
     frame in its file kept as ``frame_in_file``."""
     from ..locs import Localizations, concat
+    from ..regions import SITE_X, SITE_Y
     frames = [np.asarray(p[0]["frame"]) for p in parts if "frame" in p[0] and len(p[0])]
     span = int(max((f.max() for f in frames), default=0)) + 1
     tables = []
     for k, (locs, centre, angle, number) in enumerate(parts):
-        columns = dict(locs.columns)
+        # each ROI's own frame is the averaged positions now: not kept twice
+        columns = {k: v for k, v in locs.columns.items() if k not in (SITE_X, SITE_Y)}
         columns["x_nm"], columns["y_nm"] = superimpose(locs["x_nm"], locs["y_nm"],
                                                        centre, angle)
         columns["roi_id"] = np.full(len(locs), number, dtype=np.int64)
@@ -203,7 +208,7 @@ class AverageROIs(Plugin):
         parts, skipped = [], {}
         used = [project.rois[i] for i in project.ordered_ids() if project.rois[i].use]
         for k, roi in enumerate(used):
-            row = measured.get(roi.number) or annotation_columns(roi, {})
+            row = measured.get(roi.number) or annotation_columns(roi, {}, project.uses_angles)
             centre, angle, why = placement(roi, row, settings)
             if centre is None:
                 skipped[why] = skipped.get(why, 0) + 1

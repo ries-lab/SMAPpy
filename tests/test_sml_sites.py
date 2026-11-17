@@ -139,6 +139,7 @@ def test_smap_sites_come_in_as_rois_with_their_lines_keywords_and_use(tmp_path):
     first, second = rois
     assert first.center == [1000.0, 2000.0] and first.use
     assert np.allclose(first.lines["direction"], [[900, 2000], [1100, 2000]])
+    assert first.angle == 0.0 and second.angle == 0.0  # along +x; none drawn
     assert np.allclose(first.lines["line1"], [[1000, 1900], [1000, 2150]])
     assert "line2" not in first.lines                 # never drawn: all zeros
     assert first.annotations == {"list1": "good"}
@@ -185,3 +186,11 @@ def test_a_real_smap_files_sites_are_read():
     for roi in project.rois.values():
         assert roi.origin["method"] == "SMAP"
         assert len(project.indices(roi))           # the site is where the data are
+
+
+def test_smaps_rotation_line_is_the_rois_angle_and_stays_a_line():
+    site = {"pos": np.array([[1000.0, 1000.0, 0.0]]), "ID": np.array([[1.0]]),
+            "annotation": {"rotationpos": {"pos": np.array([[1.0, 1.0], [1.0, 0.9]])}}}
+    (roi,) = sml_sites_project([site])["rois"]
+    assert roi["angle"] == pytest.approx(-90)          # towards -y: up on the screen
+    assert np.allclose(roi["lines"]["direction"], [[1000, 1000], [1000, 900]])

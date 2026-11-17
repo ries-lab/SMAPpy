@@ -316,7 +316,9 @@ class Thing(Plugin):
 * `per_region = True` says `run` hands back `Result.values` (numbers, a
   column each of the region table) and `Result.arrays`, so it can run once
   per ROI -- in `ROIProject.region_context(roi)`: `ctx.locs` the ROI's rows,
-  each layer's filter over them, `ctx.region` its shape -- as well as on the
+  each layer's filter over them, `ctx.region` its shape, `ctx.frame` its own
+  frame (`regions.SiteFrame`, the ROI's angle while the project rotates),
+  also as columns `x_site_nm` / `y_site_nm` beside the absolute `x_nm` -- as well as on the
   view like any other plugin.  The per-region steps (the Regions tab) offer these; in a chain
   it runs once in each region as a step of a block (`chain.Block`,
   `smappy/blocks.py`): over the ROIs or an id column such as `cluster_id`
