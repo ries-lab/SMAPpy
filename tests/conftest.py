@@ -53,6 +53,93 @@ if importlib.util.find_spec("torch") is None:
 LONG_TIMEOUT = 1200
 
 
+#: The packages kept in this repository beside smappy, each with its own tests
+#: folder (the first path).  Their fast tests always run; their slow tests run
+#: under `--slow` only when one of the package's paths changed
+#: (`package_changes`), and always under `--release`, `--long`, `--package
+#: NAME` or with the package's tests named on the command line.  The paths are
+#: the package, its tests and the parts of smappy its tests lean on most --
+#: not all of them: uipsf's tests import a dozen smappy modules, and a change
+#: to `smappy.simulate` reaches them through the fast tier and `--release`,
+#: not here.  A new package is an entry here and a folder of its tests.
+PACKAGES = {
+    "uipsf": ("tests/uipsf_tests", "src/uipsf", "benchmarks/uipsf", "scripts/uipsf",
+              "src/smappy/calibrate", "src/smappy/psf.py", "src/smappy/io/calibration.py",
+              "src/smappy/plugins/fit.py", "csrc"),
+    "decode": ("tests/decode_tests", "src/decode_smlm", "src/smappy/training",
+               "src/smappy/plugins/fit_decode.py", "src/smappy/decode_remote.py",
+               "src/smappy/window_engine.py", "src/smappy/io/calibration.py"),
+}
+
+#: a change here is a change to every package: how the tests run, what is installed
+SHARED_PATHS = ("tests/conftest.py", "pyproject.toml", "setup.py")
+
+
+def _git(root, *args):
+    import subprocess
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
+                          check=True, timeout=30).stdout
+
+
+def package_changes(root, since):
+    """Which packages' paths differ from `since`: a set of names, and a line
+    saying what they were compared with.  The comparison is with the merge
+    base of HEAD and `since`, so a branch is judged by its own commits and not
+    by what landed upstream meanwhile, plus what is staged, unstaged and
+    untracked.  Every package counts as changed when git cannot answer -- no
+    git, no such ref, an sdist -- since a skip nobody asked for is the failure
+    to avoid."""
+    try:
+        base = _git(root, "merge-base", "HEAD", since).strip()
+        files = _git(root, "diff", "--name-only", base).splitlines()
+        files += _git(root, "ls-files", "--others", "--exclude-standard").splitlines()
+    except Exception as exc:  # noqa: BLE001 -- any failure means "assume changed"
+        return set(PACKAGES), f"git could not compare with {since} ({type(exc).__name__}): all run"
+
+    def touches(prefixes):
+        return any(f == p or f.startswith(p + "/") for f in files for p in prefixes)
+
+    if touches(SHARED_PATHS):
+        return set(PACKAGES), f"shared files changed since {since} ({base[:8]})"
+    return ({name for name, paths in PACKAGES.items() if touches(paths)},
+            f"compared with {since} ({base[:8]})")
+
+
+def _packages_to_run(config):
+    """The packages whose slow tier runs, and why; computed once per process
+    (each xdist worker asks git itself, a few milliseconds)."""
+    cached = getattr(config, "_smappy_packages", None)
+    if cached is not None:
+        return cached
+    asked = set(config.getoption("--package") or ())
+    unknown = asked - set(PACKAGES)
+    if unknown:
+        raise pytest.UsageError(f"--package {', '.join(sorted(unknown))}: "
+                                f"the packages are {', '.join(PACKAGES)}")
+    root = str(config.rootpath)
+    # a package's tests named on the command line are wanted whatever changed
+    for arg in config.args:
+        path = os.path.relpath(os.path.abspath(arg.split("::")[0]), root).replace(os.sep, "/")
+        for name, paths in PACKAGES.items():
+            if path == paths[0] or path.startswith(paths[0] + "/"):
+                asked.add(name)
+    if config.getoption("--release") or config.getoption("--long"):
+        result = set(PACKAGES), "--release" if config.getoption("--release") else "--long"
+    else:
+        changed, why = package_changes(root, config.getoption("--since"))
+        result = changed | asked, why
+    config._smappy_packages = result
+    return result
+
+
+def _package_of(item, root):
+    path = os.path.relpath(str(item.path), root).replace(os.sep, "/")
+    for name, paths in PACKAGES.items():
+        if path.startswith(paths[0] + "/"):
+            return name
+    return None
+
+
 def pytest_addoption(parser):
     """`timeout` in pyproject.toml belongs to pytest-timeout; without that
     plugin it is declared here, so that it is not an unknown-option warning.
@@ -65,6 +152,15 @@ def pytest_addoption(parser):
     parser.addoption("--long", action="store_true",
                      help="also run the tests marked long, uipsf's learning studies "
                           "of 20 s to minutes each (implies --slow)")
+    parser.addoption("--release", action="store_true",
+                     help="before a release: --slow with every package's slow tier, "
+                          "changed or not")
+    parser.addoption("--package", action="append", metavar="NAME",
+                     help=f"run this package's slow tier under --slow even if it did not "
+                          f"change (repeatable): {', '.join(PACKAGES)}")
+    parser.addoption("--since", default="origin/main", metavar="REF",
+                     help="what a package's change is measured against under --slow "
+                          "(default origin/main, through the merge base)")
     try:
         import pytest_timeout  # noqa: F401
     except ImportError:
@@ -116,7 +212,15 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "long" in item.keywords:
                 item.add_marker(skip)
-    if long_ or config.getoption("--slow"):
+    if long_ or config.getoption("--slow") or config.getoption("--release"):
+        # a package's slow tier only where the package changed (`PACKAGES`)
+        run, why = _packages_to_run(config)
+        root = str(config.rootpath)
+        for item in items:
+            name = _package_of(item, root)
+            if name is not None and name not in run and "slow" in item.keywords:
+                item.add_marker(pytest.mark.skip(
+                    reason=f"{name} slow: unchanged ({why}); run with --package {name} or --release"))
         # longest first: collected last (`test_tutorial`), the tutorials were
         # a tail of 20-50 s tests that four workers sat through after
         # everything else had finished
@@ -127,6 +231,18 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "slow" in item.keywords and "long" not in item.keywords:
             item.add_marker(skip)
+
+
+def pytest_terminal_summary(terminalreporter, config):
+    """Say which packages' slow tiers were left out: a skip count alone hid
+    that the run had not checked them."""
+    if not (config.getoption("--slow") or config.getoption("--long")
+            or config.getoption("--release")):
+        return
+    run, why = _packages_to_run(config)
+    for name in PACKAGES:
+        state = "run" if name in run else f"SKIPPED (unchanged) -- --package {name} to run it"
+        terminalreporter.write_line(f"{name} slow tier: {state}; {why}")
 
 
 _exitstatus = 0

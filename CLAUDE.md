@@ -81,7 +81,9 @@ in one line of the summary, saying what has gathered since the last tag
 (`git log --oneline $(git describe --tags --abbrev=0)..origin/main`).
 Do not release yourself: a tag publishes to PyPI, which cannot be taken back.
 
-A release is: `version` in `pyproject.toml` raised (and pushed to `main`),
+A release is: `python -m pytest tests -q -n auto --release` passing on
+`origin/main` (`--slow` with every package's slow tier, changed or not; see
+below), `version` in `pyproject.toml` raised (and pushed to `main`),
 then an annotated tag of that commit, `git tag -a vX.Y.Z -m "smappy-smlm
 X.Y.Z"` and `git push origin vX.Y.Z`; `.github/workflows/wheels.yml` builds
 the wheels on every platform, tests them and publishes them to PyPI.
@@ -93,11 +95,26 @@ A fresh container has **no numpy**.  Before anything else:
     pip install -e .                    # builds the C++ extensions too
     pip install -e .[test]              # pytest, pytest-timeout (a 300 s limit per test), pytest-xdist
 
-Running the tests -- three tiers:
+Running the tests -- three tiers, and the run before a release:
 
     python -m pytest tests -q -n auto           # after each change: ~1 min, the slow tier skipped
     python -m pytest tests -q -n auto --slow    # before a PR or a push of major work: ~4.5 min on four cores
     python -m pytest tests -q -n auto --long    # by hand, when uipsf's learning changes: --slow and the studies
+    python -m pytest tests -q -n auto --release # before a release: --slow with every package's slow tier
+
+* **The packages beside smappy (uipsf, decode_smlm, and those to come) run
+  their slow tier only when they changed.**  Their fast tests always run;
+  under `--slow` a package's slow tests run only if one of its paths differs
+  from the merge base with `origin/main` (committed, staged, unstaged or
+  untracked) -- the paths are `PACKAGES` in `tests/conftest.py`: the package,
+  its tests and the parts of smappy its tests lean on most.  A change to
+  `tests/conftest.py` or `pyproject.toml` counts for all.  `--package NAME`
+  runs one anyway, naming its tests folder on the command line does too,
+  `--since REF` moves the comparison, and `--release` and `--long` run them
+  all.  The run's summary ends with a line per package saying whether its
+  slow tier ran.  A new package bundled here is an entry in `PACKAGES` and a
+  folder `tests/<name>_tests/`, with its tests marked `slow` / `long` as
+  smappy's are.
 
 * **Run the slow tier before you open a PR, and before you call major work
   done** -- a new plugin, a change to the GUI, a tutorial, a page or what an
