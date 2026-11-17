@@ -663,7 +663,7 @@ def test_space_excludes_and_includes_every_selected_roi_in_one_undo_step(app):
     window._toggle()                             # all used: all excluded
     assert [r.use for r in rois] == [False, False, False, True, True, True]
     assert window.undo_button.toolTip() == "undo: Exclude 3 ROIs"
-    # the selection survives the list's refresh, so Space again takes it back
+    # the selection survives the list's refresh, for the next key
     assert window.selected_ids() == [r.id for r in rois[:3]]
     window.set_use([rois[1].id], True)
     window._toggle()                             # partly used: all included
@@ -679,32 +679,19 @@ def test_space_excludes_and_includes_every_selected_roi_in_one_undo_step(app):
     window.close()
 
 
-def test_remove_takes_every_selected_roi_in_one_undo_step_after_asking(app, monkeypatch):
+def test_remove_takes_every_selected_roi_in_one_undo_step(app):
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QMessageBox
     window, project, rois = _manager_of_six(app)
-    asked, reply = [], [QMessageBox.Cancel]
-
-    def question(parent, title, text, *args):
-        asked.append(text)
-        return reply[0]
-    monkeypatch.setattr(QMessageBox, "question", question)
-
     _click_row(window, 1)
     _click_row(window, 2, Qt.ShiftModifier)
-    window._remove()                             # two: not asked
-    assert not asked
+    window._remove()
     assert [r.id in project.rois for r in rois] == [True, False, False, True, True, True]
     assert window.undo_button.toolTip() == "undo: Remove 2 ROIs"
     window.undo()
     assert all(r.id in project.rois for r in rois)
 
     window.table.selectAll()
-    window._remove()                             # six: asked, and cancelled
-    assert asked == ["Remove 6 ROIs?  Undo brings them back."]
-    assert len(project.rois) == 6
-    reply[0] = QMessageBox.Yes
-    window._remove()
+    window._remove()                             # no question: Undo is the answer
     assert not project.rois and window.rows.rowCount() == 0
     window.undo()                                # one step brings all six back
     assert len(project.rois) == 6 and window.rows.rowCount() == 6

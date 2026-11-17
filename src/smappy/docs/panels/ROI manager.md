@@ -496,8 +496,7 @@ Enter does the same.
 
 ### Remove
 Deletes the selected ROIs -- every one selected in the list, as one step of
-*Undo*.  With more than three selected it asks first, so that a stray Ctrl+A
-does not empty the list.  To keep an ROI out of the analysis without
+*Undo*, without asking: *Undo* brings them all back.  To keep an ROI out of the analysis without
 losing it, untick *use* instead (the space bar, or *Don't use* in the list's
 right-click menu, for several).  The other ROIs keep their numbers: an ROI
 is given its number when it is made and keeps it, and a number is never given

@@ -84,8 +84,6 @@ OTHERS_DIM = 0.8
 # the status line counts the ROIs waiting on the evaluation only up to this
 # many: counting means checking every one, the cost the list no longer pays
 COUNT_LIMIT = 2000
-# *Remove* asks first when more ROIs than this are selected
-CONFIRM_REMOVE = 3
 
 
 # a line's marks, in screen pixels: the head at its end and the ring at its
@@ -2264,7 +2262,7 @@ class ROIManagerWindow(QMainWindow):
         self.changed.emit()
 
     def remove_rois(self, ids) -> None:
-        """Remove these ROIs, in one undo step, without asking."""
+        """Remove these ROIs, in one undo step."""
         ids = [i for i in ids if i in self.project.rois]
         if not ids:
             return
@@ -2798,15 +2796,6 @@ class ROIManagerWindow(QMainWindow):
             self.set_use(ids, not all(self.project.rois[i].use for i in ids))
 
     def _remove(self) -> None:
-        """*Remove*: the selected ROIs, asking first when there are more than
-        `CONFIRM_REMOVE` -- a stray Ctrl+A should not cost a session's review."""
-        ids = self.selected_ids()
-        if len(ids) > CONFIRM_REMOVE:
-            from PySide6.QtWidgets import QMessageBox
-            answer = QMessageBox.question(
-                self, "Remove ROIs",
-                f"Remove {len(ids)} ROIs?  Undo brings them back.",
-                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-            if answer != QMessageBox.Yes:
-                return
-        self.remove_rois(ids)
+        """*Remove*: the selected ROIs.  Never asked: *Undo* brings them all
+        back in one step, which a question would only delay."""
+        self.remove_rois(self.selected_ids())
