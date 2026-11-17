@@ -393,3 +393,30 @@ def test_the_plugin_writes_each_localizations_state():
     assert np.mean(state[state >= 0] == truth[state >= 0]) > 0.95
     assert {"hmm_state", "hmm_p1", "hmm_p2"} <= {r["field"] for r in recipes(result.locs)}
     assert result.plot is not None
+
+
+def test_the_spacing_measured_per_frame_is_the_nearest_neighbour_distance_of_the_density():
+    from smappy.simulate import spacing_nm
+    from smappy.tracking.hmm import nearest_spacing_nm
+    rng = np.random.default_rng(5)
+    density, side, frames = 0.2, 40_000.0, 50                # per um^2, nm
+    n = rng.poisson(density * (side / 1000) ** 2, frames)
+    frame = np.repeat(np.arange(frames), n)
+    x, y = rng.uniform(0, side, (2, len(frame)))
+    # the field's edges lengthen it a little
+    assert nearest_spacing_nm(x, y, frame) == pytest.approx(spacing_nm(density), rel=0.05)
+
+
+def test_state_switching_warns_when_the_fast_jump_is_large_against_the_spacing():
+    settings = TrackingAnalysis.Settings(id_column="track_id_true", msd=False,
+                                         jumps=False, switching=True)
+    def warnings_at(density):
+        locs = switching_tracks(density_um2=density, n_frames=150)
+        ctx = Context(locs=locs)
+        result = TrackingAnalysis().run(ctx, settings)
+        return result.values["hmm_crowding"], [w for w in ctx.warnings if "between" in w]
+    # a 200 nm jump: 0.4 of the spacing at 1 /um^2, 0.09 at 0.05
+    crowded, warned = warnings_at(1.0)
+    assert crowded == pytest.approx(0.4, rel=0.15) and warned
+    sparse, quiet = warnings_at(0.05)
+    assert sparse < 0.12 and not quiet

@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.tracking.analysis.gather, smappy.tracking.analysis.steps_of, smappy.tracking.analysis.lag_sums, smappy.tracking.analysis.msd_covariance, smappy.tracking.analysis.lag_errors, smappy.tracking.analysis.optimal_lags, smappy.tracking.analysis.fit_msd, smappy.tracking.analysis.msd_analysis, smappy.tracking.analysis.jumps, smappy.tracking.analysis.jumps_over_lags, smappy.tracking.analysis.in_focus, smappy.tracking.analysis.fit_jumps, smappy.tracking.analysis.jump_density, smappy.tracking.spectrum.pieces_of, smappy.tracking.spectrum.piece_loglik, smappy.tracking.spectrum.state_array, smappy.tracking.spectrum.spectrum, smappy.tracking.spectrum.peaks, smappy.tracking.spectrum.per_localization, smappy.tracking.hmm.steps_of, smappy.tracking.hmm.track_loglik, smappy.tracking.hmm.state_probabilities, smappy.tracking.hmm.fit_hmm, smappy.tracking.hmm.per_localization, smappy.plugins.tracking_analysis.TrackingAnalysis.run]
+covers: [smappy.tracking.analysis.gather, smappy.tracking.analysis.steps_of, smappy.tracking.analysis.lag_sums, smappy.tracking.analysis.msd_covariance, smappy.tracking.analysis.lag_errors, smappy.tracking.analysis.optimal_lags, smappy.tracking.analysis.fit_msd, smappy.tracking.analysis.msd_analysis, smappy.tracking.analysis.jumps, smappy.tracking.analysis.jumps_over_lags, smappy.tracking.analysis.in_focus, smappy.tracking.analysis.fit_jumps, smappy.tracking.analysis.jump_density, smappy.tracking.spectrum.pieces_of, smappy.tracking.spectrum.piece_loglik, smappy.tracking.spectrum.state_array, smappy.tracking.spectrum.spectrum, smappy.tracking.spectrum.peaks, smappy.tracking.spectrum.per_localization, smappy.tracking.hmm.steps_of, smappy.tracking.hmm.track_loglik, smappy.tracking.hmm.state_probabilities, smappy.tracking.hmm.fit_hmm, smappy.tracking.hmm.per_localization, smappy.tracking.hmm.nearest_spacing_nm, smappy.tracking.hmm.crowding, smappy.plugins.tracking_analysis.TrackingAnalysis.run]
 ---
 
 ## What it does
@@ -499,6 +499,25 @@ model does not follow -- so it is not applied, and with an *axial range*
 the run warns: take the fractions from the jump distances or the D
 spectrum there, and read the rates with care.
 
+**Crowding.**  The rates are only as good as the linking.  Where
+particles are dense, a fast track sometimes picks up a slow neighbour's
+localization and goes on as that particle; in the data that *is* a fast
+particle that slowed down, a switch, and no model of the track can tell
+it from a real one.  Two states 50 times apart (0.02 and 1 µm²/s, 10 ms
+frames, linked by the global linker at three times the fast jump) gave
+rates 10--20% too high where the fast state's rms jump in a frame,
+$\sqrt{4 D_\mathrm{fast} \Delta t}$, was 0.13--0.18 of the mean distance
+from a particle to its nearest neighbour, 60% too high at 0.28 and twice
+too high at 0.4; with no switching at all, 0.3, 1.3 and 2.7 switches per
+second were found.  The jump distances and their *D*s hardly moved.  So
+state switching measures that ratio: the distance from each localization
+to the nearest one in its frame, averaged over the localizations
+analysed (linked or not), against the fastest state's jump.  It is
+written as `hmm_crowding`, and above 0.15 the run warns.  A term for
+wrong links in the model (a link to anywhere, its probability fitted)
+was tried: it caught a sixth of them, halved the spurious rates at best,
+pulled the fast *D* down by up to 7% and was left out.
+
 **MINFLUX.**  A table with `time_s` has no regular frames; its
 localizations are put on a grid of the median interval between
 consecutive localizations of a track, each at the nearest step.
@@ -590,7 +609,8 @@ writes `D_post_um2_per_s`, each piece's *D* on its localizations (NaN on
 a track of one localization).  State switching adds a line with each
 state's *D*, fraction and dwell time and the rates, the values
 `hmm_D1_um2_per_s`, `hmm_fraction1`, `hmm_dwell1_s`, `hmm_rate12_per_s`
-(from state 1 to 2), ..., `hmm_bic`, and a panel of the states with the
+(from state 1 to 2), ..., `hmm_bic`, `hmm_crowding` (the fast jump over
+the spacing between particles: above 0.15 the rates come out high), and a panel of the states with the
 rates on arrows; *write per localization* writes `hmm_state` (0 the
 slowest state, -1 none) and `hmm_p1`, `hmm_p2`, ... (each state's
 probability), to colour the tracks by state or to measure where the

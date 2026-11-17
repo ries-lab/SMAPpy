@@ -351,7 +351,8 @@ class TrackingAnalysis(Plugin):
         if settings.switching:
             sw = settings.switching_fit
             ctx.report("tracking analysis: state switching")
-            from ..tracking.hmm import fit_hmm, per_localization as hmm_states
+            from ..tracking.hmm import (CROWDED, crowding, fit_hmm, nearest_spacing_nm,
+                                        per_localization as hmm_states)
             try:
                 hmm = fit_hmm(tj, sw.states)
             except ValueError as error:
@@ -378,6 +379,17 @@ class TrackingAnalysis(Plugin):
                              f"tracks; {states} (fraction, dwell)"
                              + (f"; rates {rates}" if rates else "")
                              + f"; BIC {hmm.bic:.1f}")
+                spacing = nearest_spacing_nm(np.asarray(locs["x_nm"])[use], np.asarray(locs["y_nm"])[use],
+                                             np.asarray(locs["frame"])[use])
+                crowded = crowding(p, t.dt_s, spacing)
+                values["hmm_crowding"] = crowded
+                if crowded > CROWDED:
+                    ctx.warn(f"state switching: the fastest state's jump is "
+                             f"{crowded:.2f} of the {spacing:.0f} nm between "
+                             "particles: wrong links look like switches, and in "
+                             "simulations the rates came out 10-20% high from 0.15 "
+                             "and twice as high at 0.4; image sparser or read the "
+                             "rates as upper bounds")
                 if focus > 0:
                     ctx.warn("state switching does not correct for the focus: fast "
                              "particles leave it, and in simulations the rate from "

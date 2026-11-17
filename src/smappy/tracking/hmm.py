@@ -61,6 +61,20 @@ ExTrack's loss probability is the same for every state and has the same
 blind spot.  In a thin focus the fractions should come from the jump fit
 or the D spectrum with the axial range, and the rates read with care:
 here they came out low from slow to fast and high back.
+
+**Crowding.**  A wrong link that carries a fast track onto a slow
+neighbour, which then goes on as that particle, is in the data a fast
+particle that slowed down: a switch, which no model of the track can tell
+from a real one.  So the rates grow with the density.  Two states 50
+times apart in D (`studies/tracking/two_states.py`, the survey's item 5)
+came out 10--20% high where the fast state's rms jump in a frame was
+0.13--0.18 of the mean distance between particles, 60% high at 0.28 and
+twice as high at 0.4; with no switching at all, rates of 0.3, 1.3 and
+2.7 /s were found.  An outlier term (a link to anywhere, with a fitted
+probability) took a sixth of the wrong links and part of the bias, slowed
+the fit two to three times and pulled the fast D down, and was left out.
+`crowding` measures that ratio from the data, and above `CROWDED` the
+plugin warns.
 """
 from __future__ import annotations
 
@@ -74,6 +88,34 @@ from .analysis import Tracks
 # the most jumps fitted: a random subset of tracks beyond (the same one each run)
 MAX_JUMPS = 50_000
 FLOOR_D = 1e-6                     # um^2/s
+# the fast state's rms jump over the spacing beyond which the rates come
+# out 10--20% high and more (the docstring's *Crowding*)
+CROWDED = 0.15
+
+
+def nearest_spacing_nm(x, y, frame) -> float:
+    """The mean distance from each localization to the nearest one in
+    its frame (nm), NaN if no frame has two: for points at random,
+    ``1 / (2 sqrt(density))``, `simulate.spacing_nm`.  One tree over the
+    positions with the frames set far apart along a third axis."""
+    from scipy.spatial import cKDTree
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    f = np.asarray(frame, float)
+    ok = np.isfinite(x) & np.isfinite(y) & np.isfinite(f)
+    if ok.sum() < 2:
+        return float("nan")
+    far = 10.0 * (np.ptp(x[ok]) + np.ptp(y[ok]) + 1.0)
+    pts = np.column_stack([x[ok], y[ok], f[ok] * far])
+    d, _ = cKDTree(pts).query(pts, k=2)
+    near = d[:, 1][d[:, 1] < far / 2]                 # a neighbour in the same frame
+    return float(near.mean()) if len(near) else float("nan")
+
+
+def crowding(params: "HMMParams", dt_s: float, spacing_nm: float) -> float:
+    """The fastest state's lateral rms jump in one step, ``sqrt(4 D dt)``,
+    over the spacing between particles (`nearest_spacing_nm`)."""
+    D = float(np.max(params.D_um2_per_s)) * 1e6
+    return float(np.sqrt(4.0 * D * dt_s) / spacing_nm) if spacing_nm > 0 else float("nan")
 
 
 @dataclass
