@@ -519,6 +519,11 @@ class ControlWindow(QMainWindow):
         help_.addSeparator()
         self._action(help_, "Save a bug report...", None, self.save_bug_report)
         self._action(help_, "Show the log folder", None, self.show_log_folder)
+        # what the assistant tried and which pages were read, for the developers
+        # (`smappy.usage_log`): its settings and *Send now* are in Preferences
+        self._action(help_, "Send usage log...", None,
+                     lambda: self.open_preferences("Usage log")).setToolTip(
+            "the usage log's settings: whether it is kept, where it goes, and Send now")
         help_.addSeparator()
         from .updates import Updates
         self.updates = Updates(self)     # started by `main`, so no test asks PyPI
@@ -2685,6 +2690,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args:                     # after the windows: a big file takes minutes,
         control.load_paths(args, reset_view=True)   # and says so as it goes
     control.updates.start()      # once a day at most, and a few seconds in
+    from .. import usage_log     # every few days, if the user asked for it
+    usage_log.send_in_background(
+        lambda sent, error: error is not None and print(f"usage log not sent: {error}"))
     control.listen_if_asked()    # the assistant's, if its settings say so
     from . import warmup         # scipy and matplotlib before the first click
     warmup.start_later()
