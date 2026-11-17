@@ -152,8 +152,9 @@ def check(report=print) -> int:
 
 
 def main(argv=None) -> int:
+    from .cli import command_name
     parser = argparse.ArgumentParser(
-        prog="smappy-plugins",
+        prog=command_name("smappy-plugins"),
         description="Your own SMAPpy plugins: print the folder (made ready "
                     "for an AI assistant), or start a new plugin in it.")
     sub = parser.add_subparsers(dest="command")

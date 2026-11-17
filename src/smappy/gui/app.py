@@ -5,7 +5,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QElapsedTimer, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
@@ -2658,8 +2658,29 @@ def _start_log() -> None:
     qInstallMessageHandler(qt_message)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    argv = sys.argv if argv is None else argv
+def start_with(control: "ControlWindow", files: Sequence[str] = (),
+               handoff: Optional[str] = None, workspace: Optional[str] = None,
+               restore: bool = False, open_plugins: Sequence[str] = ()) -> None:
+    """What the command line asked for, done as the menus do it, in the
+    windows `main` has shown."""
+    if workspace:                # before the files: a workspace's filters apply to them
+        control.load_gui_from(workspace)
+    if handoff:                  # started by *Open in a new window* elsewhere
+        control.take_handoff(handoff)
+    if restore:                  # the one file, and once read, its session
+        control.open_and_restore(files[0])
+    elif files:
+        control.load_paths(list(files), reset_view=True)
+    for path in open_plugins:
+        control.open_plugin_window(path)
+
+
+def main(argv: Optional[List[str]] = None, files: Sequence[str] = (),
+         handoff: Optional[str] = None, workspace: Optional[str] = None,
+         restore: bool = False, open_plugins: Sequence[str] = ()) -> int:
+    """The windows.  The options are `cli.gui`'s, checked there: ``argv``
+    is Qt's alone, so no file name is ever taken for one of its flags."""
+    argv = sys.argv[:1] if argv is None else argv
     app = make_app(argv)
     _start_log()
     session = Session()
@@ -2681,14 +2702,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     render.show()
     control.raise_()             # in front, as before, with the focus
     control.activateWindow()
-    args = list(argv[1:])
-    if "--handoff" in args:      # started by *Open in a new window* elsewhere
-        at = args.index("--handoff")
-        if at + 1 < len(args):
-            control.take_handoff(args[at + 1])
-        del args[at:at + 2]
-    if args:                     # after the windows: a big file takes minutes,
-        control.load_paths(args, reset_view=True)   # and says so as it goes
+    # after the windows: a big file takes minutes, and says so as it goes
+    start_with(control, files, handoff, workspace, restore, open_plugins)
     control.updates.start()      # once a day at most, and a few seconds in
     from .. import usage_log     # every few days, if the user asked for it
     usage_log.send_in_background(

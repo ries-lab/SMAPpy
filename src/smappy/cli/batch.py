@@ -45,7 +45,8 @@ def main(argv=None) -> int:
     utf8_streams(sys.stdout, sys.stderr)
     import matplotlib
     matplotlib.use("Agg")          # no window, ever: this runs as a subprocess
-    p = argparse.ArgumentParser(prog="smappy-batch", description=__doc__,
+    from . import command_name
+    p = argparse.ArgumentParser(prog=command_name("smappy-batch"), description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
     r = sub.add_parser("run", help="run a job")

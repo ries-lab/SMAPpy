@@ -147,6 +147,8 @@ testpaths = ["tests"]
 faulthandler_timeout = 240
 
 [project.scripts]
+# one command for all of them, `smappy fit` for `smappy-fit` (`cli/main.py`)
+smappy = "smappy.cli.main:main"
 smappy-fit = "smappy.cli.fit:main"
 smappy-drift = "smappy.cli.drift:main"
 smappy-gui = "smappy.cli.gui:main"
