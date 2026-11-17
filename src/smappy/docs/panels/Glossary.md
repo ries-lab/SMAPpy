@@ -268,6 +268,11 @@ papers and in other software.
   above 1 for directed motion.
 * **diffusive state**: a population of particles, or a phase of one
   particle's track, with one diffusion coefficient -- bound and free, say.
+* **hidden Markov model** (HMM): a model in which the particle is in one
+  of a few states at any moment, which cannot be seen directly, and jumps
+  between them at fixed rates; what is seen -- here, how far it moves --
+  depends on the state.  Fitting it gives the states and the rates of
+  switching.
 
 ## Two colours
 

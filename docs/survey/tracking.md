@@ -39,6 +39,8 @@ These are the parts the comparisons below refer to.
 
 #### 1. Multi-lag jump-distance fit with z-escape (defocalisation) correction -- Spot-On's model, saSPT's correction  (M; saSPT's code: port with attribution; Spot-On: re-implement)
 
+**Done, 2026-11** (*Tracking analysis* version 3: *lags* and *axial range*, `tracking.analysis.in_focus`; `simulate_tracks(focal_range_nm=...)`).  Re-implemented, not ported.  Two departures from what is proposed below: no *first jumps per track* (it biases the correction, `jumps_over_lags`), and in 3D the corrected fit uses the lateral jumps alone.
+
 **What it does.**
 * **Spot-On** fits 2 or 3 states jointly to the jump-length distributions at lags 1..TimePoints−1 (default 7 lags: `fastspt.py:33,81,146`). It allows `GapsAllowed` dark frames and uses only the first `JumpsToConsider`=4 jumps of each track (`fastspt.py:116-131`). That last choice stops long-lived, slow or bound tracks from dominating the fit.
 * **The model** (`_compute_2states`, `fastspt.py:357-375`): each state is a 2D Rayleigh of variance 2(D·Δt + σ²). The *free* state is multiplied by Z_corr(Δt, D), the probability of staying inside a slab of thickness ΔZ_use. Z_corr comes from an absorbing-boundary series summed until a term is below 1e-10 (`C_AbsorBoundAUTO`, `fastspt.py:559-590`). The slab is widened empirically: ΔZ_use = dZ + a·√D + b (`fastspt.py:446`; a = 0.15716 and b = 0.20811 are in a comment at `:442`).
@@ -58,6 +60,8 @@ These are the parts the comparisons below refer to.
 **Test data.** `simulate_tracks` needs an axial escape. Give each particle a z inside a slab and end the track (or start a dark run) when |z| > dz/2; the 3D path (`use_z`, `z_range_nm`) already diffuses z. Spot-On-cli also ships sample datasets (`datasets/datasets.py`).
 
 #### 2. Per-track state posterior and state arrays -- saSPT  (M, port with attribution)
+
+**Done, 2026-11** (*Tracking analysis*'s *D spectrum*, `tracking/spectrum.py`; `D_post_um2_per_s` per localization).  Re-implemented from the paper, not ported.  Each localization's own precision instead of a grid of sigma; the VB run to convergence rather than saSPT's 200 rounds; the focus corrected at one frame (`in_focus`).
 
 **What it does.**
 * For every track it evaluates the exact Gaussian likelihood of its whole jump vector on a grid of D and σ (`lik.py:146-202`). The default grid is 100 values of D, log-spaced from 0.01 to 100 µm²/s, and σ from 0 to 70 nm in 2 nm steps (`constants.py`).
@@ -82,6 +86,8 @@ These are the parts the comparisons below refer to.
 **Test data.** `simulate_tracks` with 2–3 states, `switch_probability`=0.
 
 #### 3. HMM with transitions, localisation error marginalised -- ExTrack (vbSPT as the Bayesian variant)  (M–L, ExTrack: port with attribution; vbSPT: re-implement from the paper)
+
+**Done, 2026-11** (*Tracking analysis*'s *state switching*, `tracking/hmm.py`; `hmm_state`, `hmm_p1`, ... per localization).  Re-implemented from the paper: ExTrack's merging at a memory of one localization, the initial probabilities free, the per-localization states by forward-backward on independent jumps.  Not corrected for leaving a thin focus, which biases the rates (measured on the page); a per-step survival factor was tried and did not help.
 
 **What it does.** ExTrack's `P_Cs_inter_bound_stats` (`tracking.py:160-390`) and its thresholded and "ages" variants (`:618`, `:1116`) compute each track's likelihood under a hidden Markov model.
 * The true positions are integrated out analytically, the Gaussians fused step by step.
@@ -136,6 +142,16 @@ TrackMate adds a feature penalty to d²: cost = d²·(1 + Σ 1.5·w·|f₁−f�
 **Why it is (moderately) worth it.** In the mixed-mobility sptPALM case, one R tuned for the fast state lets a slow track's gap closures reach R far away, into its neighbours. Tuned for the slow state, R cuts the fast tracks. A cost of −log p(jump | D_track, σa, σb, gap) = d²/(2(2·D·k·Δt + σa² + σb²)) + log terms, with D from the track so far (or two passes: link, estimate D per track, link again), handles both. It gives a natural gap penalty and would use the precisions SMAPpy already has. The benchmark harness (`studies/tracking/bench.py`) can measure the gain at once: simulate 2 states with D a factor of 50 apart.
 
 **How it would fit SMAPpy.** Optional per-candidate weights in `link_global`'s `gain`. Candidates are generated at R_max as now, and a candidate is accepted only when d² ≤ (radius of its end)². Size S for the per-track radius, M for the likelihood cost.
+
+**Measured, 2026-11: not worth it now** (`studies/tracking/two_states.py`, `two_states.csv`).  0.02 and 1 um^2/s at 50/50, 10 ms frames, 20 nm precision, blinking, R for the fast state as the page says; with and without switching at 2.5 /s.
+* Wrong links: 0.2% at 0.05 /um^2 (fast rms jump / spacing 0.09), 1% at 0.1--0.2 (0.13--0.18), 3.5% at 0.5 (0.28), 6.5% at 1 (0.4).  Only 25--40% of them start in the slow state; the rest are fast particles swapping, which no radius per track can tell apart.
+* The jump fit is untouched at every density (D within 5%, fractions within 0.02 of the true ids').  The spectrum loses up to 0.09 of its slow fraction and grows a spurious peak from 0.5 /um^2.
+* The HMM is what suffers: without switching, spurious rates of 0.15 /s at 0.05 /um^2, 0.3 /s at 0.1--0.2, 1.3 /s at 0.5 and 2.7 /s at 1; with 2.5 /s true, +15% at 0.2, +60% at 0.5, +100% at 1.
+* The gain's bound: the links cut where they exceed three times the rms jump of the **true** state at their start (an oracle radius, no relinking) take the wrong links only from 6.6% to 5.3% at 1 /um^2 and from 3.5% to 2.8% at 0.5; the HMM's spurious rates fall by about half.  With each track's own median jump instead of the truth, 3--5% of the true links are cut too and the fast D falls by 10--20%.  R for the slow state cuts a third of the links and loses the fast state.
+
+So a per-track radius or likelihood cost would fix a minority of the errors, and only in the regime (fast jump over a quarter of the spacing) where the fast-fast swaps it cannot fix dominate.  The HMM's sensitivity to single wrong jumps is the thing to address instead: an outlier term in its emissions, or a density limit on the page.
+
+**The outlier term, tried and left out (2026-11).**  A link to another particle with probability epsilon, its position uniform within the longest jump, the track going on as that particle in a state drawn as a track's first; epsilon fitted.  On the true tracks it changes nothing (epsilon < 1e-4).  On the linked ones it fits epsilon at 0.1--1.1%, a sixth of the wrong links, and takes only part of the bias: without switching the spurious rates go from 1.45 to 0.89 /s at 0.5 /um^2 and from 2.9 to 1.8 at 1; with 2.5 /s true, from +60% to +40% at 0.5 and from +100% to +80% at 1.  It costs two to three times the time and pulls the fast D down by 3--7%.  The rest cannot be taken out by any model: a fast track that picks up a slow neighbour's localization and goes on as that particle *is*, in the data, a fast particle that slowed down -- a switch.  What a user can be given is a warning when the fast state's jump is more than about a sixth of the spacing between particles, where the rates came out 10--20% high (0.1--0.2 /um^2 here) and more beyond.
 
 #### 6. Drift from the tracks themselves -- trackpy  (S, port with attribution)
 

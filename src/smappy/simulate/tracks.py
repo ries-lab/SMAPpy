@@ -8,7 +8,7 @@ to its neighbours -- with frames where the fluorophore was dark, dim or
 badly fitted: those are the frames a linker has to bridge.  So the model is:
 
 * **particles** appear at a constant rate anywhere in a square field and
-  last a geometric number of frames (bleaching, or leaving the focus), the
+  last a geometric number of frames (bleaching), the
   rate set so that ``density_um2`` particles are present in a frame on
   average; the first frame starts with that many already there.  They are
   free to wander out of the field: the field is where they start;
@@ -25,7 +25,20 @@ badly fitted: those are the frames a linker has to bridge.  So the model is:
 * **localizations**: the true position plus a Gaussian error of
   ``precision_nm`` per axis (``z_precision_nm`` in z), recorded as
   ``xy_err_nm`` (and ``z_err_nm``); optionally spurious localizations at
-  ``noise_density_um2`` per frame, uniform over the field, in no track.
+  ``noise_density_um2`` per frame, uniform over the field, in no track;
+* **the focus** (``focal_range_nm`` > 0): a particle is seen only while
+  its z is within half that of the focal plane, as in 2D tracking with a
+  thin focus (sptPALM).  Every particle then diffuses in z too, in a slab
+  twice the focal range thick whose top and bottom are joined (periodic),
+  so the particles in focus are spread evenly in z at every frame, as
+  those of a cell are, and what leaves at the top comes back at the
+  bottom as a particle of a neighbourhood would.  Each run of frames in
+  focus is a track of its own: a particle that leaves is lost, and one
+  that comes back is, to a linker, a new one.  This is the loss the jump
+  fit's *axial range* corrects (`tracking.analysis.in_focus`): fast
+  particles leave sooner, so they make fewer and shorter tracks.  With it
+  ``density_um2`` counts the particles in focus, and ``track_frames`` is
+  the photophysics' lifetime alone.
 
 The truth is ``track_id_true`` (1, 2, ...; -1 for a spurious localization)
 and ``state_true`` (the state at that frame, -1 for spurious).  No motion
@@ -59,6 +72,7 @@ class TrackSimulationSettings:
     z_range_nm: float = 800.0               # where particles start in z
     z_precision_nm: float = 50.0
     noise_density_um2: float = 0.0          # spurious localizations per um^2 per frame
+    focal_range_nm: float = 0.0             # > 0: seen only within half this of focus
     seed: int = 0
 
 
@@ -81,10 +95,15 @@ def simulate_tracks(settings: Optional[TrackSimulationSettings] = None,
     side = s.field_um * 1000.0
     area_um2 = s.field_um ** 2
 
+    focus = float(s.focal_range_nm) > 0
+    # with a focus, half the particles are in it at any frame (the slab is
+    # twice as thick), so twice as many are made
+    made = s.density_um2 * area_um2 * (2.0 if focus else 1.0)
+
     # particles: those present at the start, then a steady stream; geometric
     # lifetimes are memoryless, so the ones already there are drawn alike
-    present = rng.poisson(s.density_um2 * area_um2)
-    arriving = rng.poisson(s.density_um2 * area_um2 / s.track_frames, max(s.n_frames - 1, 0))
+    present = rng.poisson(made)
+    arriving = rng.poisson(made / s.track_frames, max(s.n_frames - 1, 0))
     start = np.concatenate([np.zeros(present, np.int64),
                             np.repeat(np.arange(1, s.n_frames), arriving)])
     n = len(start)
@@ -111,21 +130,37 @@ def simulate_tracks(settings: Optional[TrackSimulationSettings] = None,
     # Brownian steps with the state of the frame before; the first row of
     # each particle is where it starts
     dims = 3 if s.use_z else 2
+    walk = 3 if (s.use_z or focus) else 2               # z walks behind a 2D focus too
+    half = s.focal_range_nm / 2.0
+    z_start = s.focal_range_nm if focus else s.z_range_nm / 2   # the slab's half-thickness
     sigma = np.sqrt(2.0 * d * 1e6 * s.frame_time_ms * 1e-3)        # nm per axis
-    moves = rng.normal(size=(rows, dims))
+    moves = rng.normal(size=(rows, walk))
     moves[1:] *= sigma[state[:-1]][:, None]
     origin = np.column_stack([rng.uniform(0, side, (n, 2))]
-                             + ([rng.uniform(-s.z_range_nm / 2, s.z_range_nm / 2, (n, 1))]
-                                if s.use_z else []))
+                             + ([rng.uniform(-z_start, z_start, (n, 1))]
+                                if walk == 3 else []))
     moves[first] = 0.0
     walked = np.cumsum(moves, axis=0)
     xyz = walked - walked[first][pid] + origin[pid]
 
     seen = ~dark
-    frame, pid, state, xyz = frame[seen], pid[seen], state[seen], xyz[seen]
+    track = pid
+    if focus:
+        # periodic in z over the slab; a run of frames in focus is a track
+        xyz[:, 2] = np.mod(xyz[:, 2] + z_start, 2 * z_start) - z_start
+        inside = np.abs(xyz[:, 2]) <= half
+        begins = inside.copy()
+        begins[1:] &= ~inside[:-1] | (pid[1:] != pid[:-1])
+        track = np.cumsum(begins) - 1
+        seen &= inside
+    frame, track, state, xyz = frame[seen], track[seen], state[seen], xyz[seen, :dims]
+    if focus:
+        # numbered 1, 2, ... over the runs that left a localization
+        track = np.unique(track, return_inverse=True)[1].reshape(-1)
     error = np.array([s.precision_nm, s.precision_nm, s.z_precision_nm][:dims])
     xyz = xyz + rng.normal(size=xyz.shape) * error
-    truth = pid + 1
+    truth = track + 1
+    n_tracks = int(truth.max(initial=0)) if focus else n
 
     n_noise = rng.poisson(s.noise_density_um2 * area_um2 * s.n_frames)
     if n_noise:
@@ -149,7 +184,7 @@ def simulate_tracks(settings: Optional[TrackSimulationSettings] = None,
     columns["track_id_true"] = truth[order].astype(np.int64)
     columns["state_true"] = state[order].astype(np.int32)
     metadata = {"units": "nm", "simulation": "smappy tracks", "seed": s.seed,
-                "n_frames": s.n_frames, "n_tracks": n, "n_localizations": m,
+                "n_frames": s.n_frames, "n_tracks": n_tracks, "n_localizations": m,
                 # where every reader of seconds looks (`metadata.file_frame_time`)
                 "camera": {"frame_time_ms": s.frame_time_ms},
                 "track_simulation": _plain(asdict(s))}
