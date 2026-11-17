@@ -47,7 +47,9 @@ class TraceInspector(Plugin):
     grouping = "ungrouped"
     per_region = True
     follow_roi = True
-    version = "1"
+    # 2: the trace's axis among the values (angle_deg forward in time, the
+    # spread along and across, the centre), drawn over the ROI
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: TraceInspectorSettings) -> FormState:
         state = FormState()
@@ -82,6 +84,24 @@ class TraceInspector(Plugin):
         values = trace_values(t, pos, {q: np.asarray(locs[q], np.float64)[rows]
                                        for q in QUALITY if q in locs})
         values["trace"] = float(r.ids[i])
+        # the trace's axis: which way it went, what an ROI of it is oriented
+        # by (*ROIs from results*), and drawn over the ROI image
+        overlays = []
+        if "x" in pos and "y" in pos and len(rows) >= 3:
+            one = T.runs(np.zeros(len(rows), np.int64), t)
+            a = T.axes(one, pos["x"][one.order], pos["y"][one.order])
+            axis = {k: float(a[k][0]) for k in ("centre_x_nm", "centre_y_nm",
+                                                 "std_long_nm", "std_short_nm",
+                                                 "angle_deg")}
+            values.update(axis)
+            if np.all(np.isfinite(list(axis.values()))):
+                half = 2.0 * axis["std_long_nm"]          # +-2 sd: the bulk of it
+                u = np.array([np.cos(np.radians(axis["angle_deg"])),
+                              np.sin(np.radians(axis["angle_deg"]))]) * half
+                c = np.array([axis["centre_x_nm"], axis["centre_y_nm"]])
+                overlays.append({"kind": "line", "points": [(c - u).tolist(),
+                                                            (c + u).tolist()],
+                                 "label": "axis"})
         unit = "s" if clock else "frame"
         lines = [f"{column} {r.ids[i]}: {len(rows)} localizations over "
                  f"{values['duration']:.3g} {unit}" + ("s" if unit == "frame" else ""),
@@ -98,7 +118,7 @@ class TraceInspector(Plugin):
         n_panels = 2 + bool(quality)
         return Result(text="\n".join(lines), values=values,
                       plot=Plot(draw, panels=n_panels, size=(4.0 * n_panels, 3.2)),
-                      settings=settings, title="trace inspector")
+                      settings=settings, title="trace inspector", overlays=overlays)
 
     def _gallery(self, ctx, settings, r, column, T):
         locs = ctx.locs

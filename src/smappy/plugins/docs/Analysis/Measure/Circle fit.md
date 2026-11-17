@@ -172,6 +172,8 @@ least squares, which background pulls.
   their errors `x_err_nm`, `y_err_nm`, `radius_err_nm`, and `rms_nm` and
   `chi2_red`.  In the ROI manager they are columns of the results table.
 * **The figure**: the localizations with the fitted circle and its centre.
+* **In an ROI**, the fitted circle is drawn over the ROI manager's ROI
+  image too, dotted, and stays with the ROI's results.
 
 A good fit has the circle through the middle of the ring, a radius error a
 small fraction of the radius, and a reduced chi-square not far above 1.  A

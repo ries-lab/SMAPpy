@@ -827,6 +827,14 @@ class Result:
     # `data` and the figures are for the run that made them.
     values: Dict[str, Any] = field(default_factory=dict)
     arrays: Dict[str, Any] = field(default_factory=dict)
+    # Shapes the run draws over its region, in the file's nm: a fitted
+    # circle, a track's axis, step positions -- ``{"kind": "line" | "points"
+    # | "circle", "points": [[x, y], ...], "radius": r (a circle), "label":
+    # text}`` each.  Kept with the region's results and drawn over the ROI
+    # image in the ROI manager (`overlay_shapes`); a picture only: nothing
+    # is measured from them and nothing about the ROI changes.  To make one
+    # the ROI's own line, *ROIs from results*.
+    overlays: List[Dict[str, Any]] = field(default_factory=list)
     settings: Any = None                    # what was actually used
     # more for the log entry, beside the path, the text and the settings: a
     # chain puts its steps here, so the history shows what each one did

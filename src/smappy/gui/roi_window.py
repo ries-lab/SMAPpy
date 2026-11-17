@@ -59,6 +59,10 @@ PREVIEW_REJECTED_PEN = pg.mkPen("#8a8a8a", width=1, style=Qt.DotLine)
 FRAME_PEN = pg.mkPen("#ffd54a", width=1)
 TILE_PEN = pg.mkPen("#5a6a7a", width=1)         # the grid
 TILE_HERE_PEN = pg.mkPen("#00c4ff", width=2)    # the tile being looked at
+# what the per-region steps drew over the ROI (`Result.overlays`): a colour
+# no outline or line uses, dotted, so it reads as a measurement's, not a shape
+OVERLAY_COLOUR = "#ff9f1c"
+OVERLAY_PEN = pg.mkPen(OVERLAY_COLOUR, width=2, style=Qt.DotLine)
 STALE_COLOUR = "#c07000"        # an ROI whose evaluation is out of date
 DETAIL_NM = 3000.0            # the zoom's width to start with
 DEFAULT_TILE_NM = 5000.0      # a tile to start from
@@ -295,11 +299,15 @@ class ImagePane(QWidget):
                                          *((f"line{i}", pen)
                                            for i, pen in enumerate(LINE_PENS)),
                                          ("drawing", DRAWING_PEN), ("frame", FRAME_PEN),
-                                         ("tiles", TILE_PEN), ("tile", TILE_HERE_PEN))}
+                                         ("tiles", TILE_PEN), ("tile", TILE_HERE_PEN),
+                                         ("overlay", OVERLAY_PEN))}
         for name, colour in (("centres", OTHER_PEN.color()),
                              ("centres_excluded", EXCLUDED_PEN.color())):
             self.shapes[name] = pg.PlotDataItem(pen=None, symbol="o", symbolSize=3,
                                                 symbolPen=None, symbolBrush=colour)
+        self.shapes["overlay_points"] = pg.PlotDataItem(
+            pen=None, symbol="+", symbolSize=9, symbolPen=pg.mkPen(OVERLAY_COLOUR, width=2),
+            symbolBrush=None)
         # a polygon's corners, which a drag moves: squares of fixed size
         self.shapes["corners"] = pg.PlotDataItem(
             pen=None, symbol="s", symbolSize=CORNER_PIXELS, symbolPen=ROI_PEN.color(),
@@ -691,10 +699,9 @@ class ROIManagerWindow(QMainWindow):
         self.draft: Optional[np.ndarray] = None
         self.draft_polygon: Optional[list] = None
         self.draft_ellipse: Optional[dict] = None    # `ROI.ellipse`, for a draft
-        # a draft's frame and z range, the whole of both until set in
-        # *frames and z*; *Add* hands them to the ROI
-        self.draft_frames: Optional[list] = None
-        self.draft_z: Optional[list] = None
+        # a draft's ranges (`ROI.ranges`), none until set in *ranges*; *Add*
+        # hands them to the ROI
+        self.draft_ranges: dict = {}
         self.draft_lines: dict = {}              # the draft's, as `ROI.lines`
         self.draft_angle = 0.0                   # the draft's, as `ROI.angle`
         self._turn_base: Optional[float] = None  # the angle as a handle drag began
@@ -1059,7 +1066,7 @@ class ROIManagerWindow(QMainWindow):
         # and so about square -- ROIs are mostly square, and a grid of halves
         # made the ROI image twice as wide as tall -- and below them the
         # lists on the left and *annotate* on the right, side by side, so
-        # unfolding *frames and z* no longer takes its height from the list
+        # unfolding *ranges* no longer takes its height from the list
         top = QSplitter(Qt.Horizontal)
         for column in (file_column, zoom_column, roi_side):
             column.layout().setSpacing(4)
@@ -1311,7 +1318,7 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_pane.width_nm = max(x1 - x0, y1 - y0)
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
-        self.draft_frames = self.draft_z = None
+        self.draft_ranges = {}
         self.draft_ellipse = None
         self.draft_angle = 0.0
         self.redraw()
@@ -1500,6 +1507,7 @@ class ROIManagerWindow(QMainWindow):
             corners = np.asarray(ellipse_handles(ellipse), float)
         self.roi_pane.draw("corners", corners[:, 0], corners[:, 1])
         self._draw_lines(self.roi_pane, [lines], labels=True)
+        self._draw_overlays(None if drafted else roi)
         self._fill_line_box(lines)
         text = "ROI (draft)"
         if self.draft_track is not None:
@@ -1584,7 +1592,7 @@ class ROIManagerWindow(QMainWindow):
         self._draft_track = None
         self.draft_polygon = None
         self.draft_lines = {}
-        self.draft_frames = self.draft_z = None
+        self.draft_ranges = {}
         self.draft_ellipse = None
         self.draft_angle = 0.0
         self.redraw()
@@ -1617,7 +1625,7 @@ class ROIManagerWindow(QMainWindow):
         self._draft_track = track
         self.draft_polygon = None
         self.draft_lines = {}
-        self.draft_frames = self.draft_z = None
+        self.draft_ranges = {}
         self.draft_ellipse = None
         self.draft_angle = 0.0
         self.redraw()
@@ -1651,6 +1659,8 @@ class ROIManagerWindow(QMainWindow):
             # structure it was drawn on and moves with the localizations in
             # the picture.  An ROI of an id alone has no place to move
             with self._edit("Centre"):
+                # not noted as set by hand: a click is a rough placement,
+                # which a measured centre always improves on
                 roi.center = [float(x), float(y)]
             self.changed.emit()
             self.redraw()
@@ -1674,7 +1684,8 @@ class ROIManagerWindow(QMainWindow):
         """Whether a press at ``(x, y)`` starts a drag: the start of a
         freehand outline or an ellipse being drawn, an end of one of the
         shown lines, a handle of the shown ellipse or a corner of the shown
-        polygon -- within the corner mark's reach.  A line's end first: one
+        polygon -- within the corner mark's reach -- or, anywhere else inside
+        the shown polygon or ellipse, the whole shape.  A line's end first: one
         drawn across an outline often starts on it.  Never while a polygon
         or a line is drawn, whose clicks place points."""
         fov = self.roi_pane.fov
@@ -1702,7 +1713,27 @@ class ROIManagerWindow(QMainWindow):
             if distance[i] <= reach:
                 self._corner = (kind, name, i, points)
                 return True
+        # inside the shape, off its corners: the whole shape, should the
+        # press move (one that does not is a click, and centres as ever)
+        shape = None
+        if polygon is not None:
+            shape = Region.polygon(polygon)
+        elif ellipse is not None:
+            shape = Region.site(ellipse["center"], "circle", 1.0, ellipse=ellipse)
+        if shape is not None and bool(shape.mask([x], [y])[0]):
+            self._corner = ("shape", None, 0, {"start": [float(x), float(y)],
+                                               "polygon": polygon, "ellipse": ellipse})
+            return True
         return False
+
+    def _moved_shape(self, x: float, y: float) -> tuple:
+        """``(polygon, ellipse)`` moved by the drag so far, one of them None."""
+        held = self._corner[3]
+        d = np.array([x, y], float) - np.asarray(held["start"], float)
+        if held["polygon"] is not None:
+            return (np.asarray(held["polygon"], float) + d).tolist(), None
+        e = held["ellipse"]
+        return None, {**e, "center": (np.asarray(e["center"], float) + d).tolist()}
 
     def _moved_points(self, x: float, y: float) -> list:
         _, _, i, points = self._corner
@@ -1750,6 +1781,20 @@ class ROIManagerWindow(QMainWindow):
         if self._corner is None:
             return
         kind, what = self._corner[:2]
+        if kind == "shape":
+            polygon, ellipse = self._moved_shape(x, y)
+            if polygon is not None:
+                v = np.asarray(polygon, float)
+                self.roi_pane.draw("corners", v[:, 0], v[:, 1])
+                v = np.vstack([v, v[0]])
+                self.roi_pane.draw("drawing", v[:, 0], v[:, 1])
+            else:
+                xs, ys = Region.site(ellipse["center"], "circle", 1.0,
+                                     ellipse=ellipse).outline()
+                h = np.asarray(ellipse_handles(ellipse), float)
+                self.roi_pane.draw("drawing", xs, ys)
+                self.roi_pane.draw("corners", h[:, 0], h[:, 1])
+            return
         if kind == "draw" and what == "freehand":
             last = self._points[-1]
             if np.hypot(x - last[0], y - last[1]) >= self.roi_pane.fov.pixelsize:
@@ -1807,6 +1852,13 @@ class ROIManagerWindow(QMainWindow):
             self._corner = None
             self.roi_pane.draw("drawing")
             self._set_shape(ellipse=ellipse, what="Ellipse")
+            return
+        if kind == "shape":
+            # the outline moved onto the structure; the lines stay on theirs
+            polygon, ellipse = self._moved_shape(x, y)
+            self._corner = None
+            self.roi_pane.draw("drawing")
+            self._set_shape(polygon=polygon, ellipse=ellipse, what="Move shape of")
             return
         points = self._moved_points(x, y)
         self._corner = None
@@ -2284,7 +2336,7 @@ class ROIManagerWindow(QMainWindow):
         self.active = roi_id
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
-        self.draft_frames = self.draft_z = None
+        self.draft_ranges = {}
         self.draft_ellipse = None
         self.draft_angle = 0.0
         project.navigation["roi"] = roi_id
@@ -2495,11 +2547,12 @@ class ROIManagerWindow(QMainWindow):
                                            ellipse=self.draft_ellipse)
             roi.lines = dict(self.draft_lines)
             roi.angle = float(self.draft_angle)
-            roi.frames, roi.z = self.draft_frames, self.draft_z
+            roi.set_source("angle", "hand" if roi.angle else "")  # turned before it was added
+            roi.ranges = dict(self.draft_ranges)
             step.label = f"Add ROI {self.project.numbers().get(roi.id)}"
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
-        self.draft_frames = self.draft_z = None
+        self.draft_ranges = {}
         self.draft_ellipse = None
         self.draft_angle = 0.0
         self.active = roi.id
@@ -2512,6 +2565,31 @@ class ROIManagerWindow(QMainWindow):
 
     def _selected(self):
         return self.project.rois.get(self.active) if self.active else None
+
+    def _draw_overlays(self, roi) -> None:
+        """What the per-region steps drew over this ROI (`Result.overlays`),
+        as stored with its results -- current or not, as the numbers in the
+        Regions tab are shown -- in a colour of their own; none for a draft,
+        which nothing has measured."""
+        from ..regions import Region
+        xs, ys, px, py = [], [], [], []
+        if roi is not None:
+            for table in self.project.tables.values():
+                entry = table.entry(roi.id) if roi.id in table else None
+                for shape in (entry or {}).get("overlays") or ():
+                    p = np.asarray(shape["points"], float).reshape(-1, 2)
+                    if shape["kind"] == "points":
+                        px += list(p[:, 0])
+                        py += list(p[:, 1])
+                        continue
+                    if shape["kind"] == "circle":
+                        ox, oy = Region.circle(p[0], shape["radius"]).outline()
+                    else:
+                        ox, oy = p[:, 0], p[:, 1]
+                    xs += list(ox) + [np.nan]
+                    ys += list(oy) + [np.nan]
+        self.roi_pane.draw("overlay", xs, ys)
+        self.roi_pane.draw("overlay_points", px, py)
 
     # ------------------------------------------------------------ geometry
     def show_geometry(self) -> None:
@@ -2616,7 +2694,7 @@ class ROIManagerWindow(QMainWindow):
         if self.draft is None:
             return self._selected()
         if self.draft_track is not None:
-            return replace(self.draft_track, frames=self.draft_frames, z=self.draft_z,
+            return replace(self.draft_track, ranges=dict(self.draft_ranges),
                            angle=float(self.draft_angle))
         file_id = self.current_file()
         if file_id is None:
@@ -2624,28 +2702,32 @@ class ROIManagerWindow(QMainWindow):
         return ROI(file_id, [float(self.draft[0]), float(self.draft[1])],
                    polygon=self.draft_polygon, ellipse=self.draft_ellipse,
                    lines=dict(self.draft_lines),
-                   angle=float(self.draft_angle), frames=self.draft_frames, z=self.draft_z)
+                   angle=float(self.draft_angle), ranges=dict(self.draft_ranges))
 
     def _follow_ranges(self) -> None:
-        """*frames and z* shows what the ROI image does -- the draft while
+        """*ranges* shows what the ROI image does -- the draft while
         there is one -- so it is refreshed when that changes, not on every
         redraw (its plots measure the ROI)."""
         roi = self.shown_roi()
         key = None if roi is None else (
             self.draft is not None, roi.id if self.draft is None else None,
-            tuple(roi.center), id(roi.polygon), id(roi.ellipse), roi.frames and tuple(roi.frames),
-            roi.z and tuple(roi.z))
+            tuple(roi.center), id(roi.polygon), id(roi.ellipse),
+            tuple(sorted((c, tuple(b)) for c, b in roi.ranges.items())))
         if key != getattr(self, "_ranges_key", None) and hasattr(self, "annotation"):
             self._ranges_key = key
             self.annotation.ranges.refresh()
 
-    def set_draft_ranges(self, **ranges) -> None:
-        """The draft's frame or z range (``frames=``, ``z=``), set in
-        *frames and z*: not an edit of the project, so no undo step."""
-        if "frames" in ranges:
-            self.draft_frames = ranges["frames"]
-        if "z" in ranges:
-            self.draft_z = ranges["z"]
+    def set_draft_ranges(self, ranges: dict) -> None:
+        """The draft's ranges, ``{attribute: [low, high] or None}``, set in
+        *ranges*: not an edit of the project, so no undo step."""
+        from ..roi_manager.core import value_range
+        out = dict(self.draft_ranges)
+        for column, bounds in ranges.items():
+            bounds = value_range(bounds, f"{column} range")
+            out.pop(column, None)
+            if bounds is not None:
+                out[column] = bounds
+        self.draft_ranges = out
         self.redraw()
 
     def _cut_to_ranges(self, view):
@@ -2656,10 +2738,10 @@ class ROIManagerWindow(QMainWindow):
         from dataclasses import replace
         from ..roi_manager.core import narrow
         roi = self.shown_roi()
-        if roi is None or (roi.frames is None and roi.z is None):
+        if roi is None or not roi.ranges:
             return view
         layers, state = view
-        whole = replace(roi, frames=None, z=None)
+        whole = replace(roi, ranges={})
         only_ranges = replace(roi, ids={})
         out = []
         for snap in layers:

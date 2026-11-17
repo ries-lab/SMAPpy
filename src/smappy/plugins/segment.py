@@ -80,7 +80,7 @@ import numpy as np
 from . import (Context, FormState, Notice, Plot, Result, param, register,
                settings_values)
 from .. import segmentation
-from .region_column import ColumnROIsSettings, column_regions
+from .region_column import TRACE_VALUES, ColumnROIsSettings, column_regions, trace_values
 from .roi import SegmenterPlugin, current_file, replace_param
 
 PATH = "Analysis/Regions/Segment regions"
@@ -423,6 +423,14 @@ class SegmentRegions(SegmenterPlugin):
         state.active["ids.draw"] = by_id
         if by_id and settings.ids.draw == "auto":
             state.hints["ids.draw"] = draw_as(settings.ids.column.strip())
+        if settings.method == "ids":
+            try:
+                segmentation.keep_test(settings.ids.keep, TRACE_VALUES)
+            except ValueError as error:
+                state.notice = Notice(str(error))
+            else:
+                state.notice = Notice("keep can name " + ", ".join(TRACE_VALUES)
+                                      + " (each id as a trace)", kind="info")
         measured = settings.method in MEASURED
         state.shown["keep"] = measured
         state.shown["keep_rejected"] = measured
@@ -652,6 +660,31 @@ class SegmentRegions(SegmenterPlugin):
         # needs no hull of its own
         outline = ids.outline and not by_id
         found = column_regions(ctx.locs, column, ids.min_size, outline)
+        if ids.angle not in ("none", "axis", "ends"):
+            raise ValueError(f"angle is none, axis or ends, not {ids.angle!r}")
+        # each id measured as a trace only when keep or the angle reads it:
+        # most id columns (clusters, diffusing tracks) want neither
+        measured = bool(ids.keep.strip()) or ids.angle != "none"
+        values: Dict[int, Dict[str, float]] = {}
+        rejected = 0
+        reasons: Dict[str, int] = {}
+        if measured:
+            test, _ = segmentation.keep_test(ids.keep, TRACE_VALUES)
+            parts = segmentation.clauses(ids.keep) if ids.keep.strip() else []
+            from ..roi_manager.order import condition
+            tests = [(part, condition(part)[0]) for part in parts] if len(parts) > 1 else []
+            values = trace_values(ctx.locs, column)
+            kept = []
+            for region in found:
+                v = values.get(region["id"], {})
+                if test(v):
+                    kept.append(region)
+                    continue
+                rejected += 1
+                for part in [p for p, t in tests if not t(v)] or [ids.keep.strip()]:
+                    reasons[part] = reasons.get(part, 0) + 1
+            found = kept
+        angle_key = {"axis": "angle_deg", "ends": "ends_angle_deg"}.get(ids.angle)
 
         def ours(r) -> bool:
             return made_by(r, "ids") and (r.origin or {}).get("column") == column
@@ -662,12 +695,27 @@ class SegmentRegions(SegmenterPlugin):
             origin = {"method": self.path, "segment": "ids",
                       "parameters": settings_values(settings), "column": column,
                       "cluster": region["id"], "localizations": int(len(region["rows"]))}
+            measured_here = values.get(region["id"])
+            if measured_here:
+                # shown as results columns, as the other methods' values are
+                origin["values"] = {k: v for k, v in measured_here.items()
+                                    if np.isfinite(v)}
             if by_id:
                 origin["draw"] = draw
-                return {"center": region["center"], "use": True, "origin": origin,
-                        "ids": {column: region["id"]}, "spatial": False}
-            return {"center": region["center"], "use": True, "origin": origin,
-                    "polygon": region["polygon"]}
+                out = {"center": region["center"], "use": True, "origin": origin,
+                       "ids": {column: region["id"]}, "spatial": False}
+            else:
+                out = {"center": region["center"], "use": True, "origin": origin,
+                       "polygon": region["polygon"]}
+            if angle_key and measured_here and np.isfinite(measured_here[angle_key]):
+                out["angle"] = measured_here[angle_key]
+                out["angle_by"] = self.name
+            return out
+
+        note = ""
+        if rejected:
+            note = f"; {rejected} failing keep: " + ", ".join(
+                f"{k} ({v})" for k, v in sorted(reasons.items()))
 
         first = next(iter(sources.values()))
         if not commit:
@@ -676,7 +724,7 @@ class SegmentRegions(SegmenterPlugin):
             replaced = ([r.id for r in project.rois.values()
                          if r.file_id == file_id and ours(r)] if settings.replace else [])
             sites = [site(r) for r in found if sources.get(r["file"], first) == file_id]
-            return Result(text=f"preview: {len(sites)} ROIs of {column} on this file",
+            return Result(text=f"preview: {len(sites)} ROIs of {column} on this file" + note,
                           settings=settings, data={"centers": [s["center"] for s in sites]},
                           roi_preview={"file_id": file_id, "method": self.path,
                                        "sites": sites, "replaces": replaced})
@@ -690,11 +738,8 @@ class SegmentRegions(SegmenterPlugin):
             for region in found:
                 if outline and region["polygon"] is None:
                     flat += 1                   # no hull: the centre, as without
-                roi = site(region)
-                made.append(project.add_roi(
-                    sources.get(region["file"], first), roi["center"],
-                    polygon=roi.get("polygon"), origin=roi["origin"],
-                    ids=roi.get("ids"), spatial=roi.get("spatial", True)))
+                made.append(project.add_site(sources.get(region["file"], first),
+                                             site(region)))
             step.label = f"{self.name}: {len(made)} ROIs" + (
                 f" for {len(replaced)}" if replaced else "")
         text = f"{len(made)} ROIs of {column}, from {ids.min_size} localizations"
@@ -702,6 +747,7 @@ class SegmentRegions(SegmenterPlugin):
             text += f", replacing {len(replaced)}"
         if flat:
             text += f"; {flat} with no outline (on a line) got the ROI manager's shape"
+        text += note
         return Result(text=text, settings=settings, rois=made,
                       values={"rois": len(made)})
 

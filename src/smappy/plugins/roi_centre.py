@@ -76,7 +76,7 @@ class CentreROIs(Plugin):
                     found = roi_centre(project, project.rois[roi_id], settings)
                     if found is None:
                         break
-                    project.move_roi(roi_id, found)
+                    project.move_roi(roi_id, found, by=self.name)
                 shift = float(np.hypot(*(np.asarray(project.rois[roi_id].center) - start)))
                 if shift > 0:
                     moved += 1

@@ -31,8 +31,9 @@ annotates and organises ROIs; it is not the only place they can be measured.
   is given once and never reused, so ROI 5 stays 5 in the list, in a
   `roi_id` column and in the results after ROI 3 is deleted.
   An ROI is a filter more than a shape: its rows are its shape narrowed by
-  `ROI.ids` (``{column: id}``), `ROI.frames` and `ROI.z` (``[low, high]``,
-  either end open) -- or, with `ROI.spatial` off, its id alone, which is
+  `ROI.ids` (``{column: id}``) and `ROI.ranges` (``{attribute: [low,
+  high]}``, either end open; `ROI.frames` and `ROI.z` the ``frame`` and
+  ``z_nm`` ones, the attributes offered `ROIProject.range_columns`) -- or, with `ROI.spatial` off, its id alone, which is
   how a track is an ROI (*Segment regions*, *from an id column*, *its id
   alone*): its localizations, and not the tracks crossing its path, which a
   shape round it would take in (`ROIProject.members`, `core.narrow`; the
@@ -67,10 +68,14 @@ the region where the drawn ROI would be** (`ROIProject.region_context`,
 layer shows, `ctx.table(i)` and `ctx.layer_selection(i)` each layer cut to
 the region with its own filter, `ctx.region` the ROI's shape (None for a
 cluster), `ctx.region_id` the region's id.  In an ROI, `ctx.frame` is its
-own frame (`regions.SiteFrame`: its centre, and its angle while the project
-rotates its ROIs), and every table carries it as `x_site_nm` /
+own frame (`regions.SiteFrame`: its centre and its angle, whether or not
+the ROI manager shows it turned -- *rotate* is a way of looking, and must
+not change what is measured), and every table carries it as `x_site_nm` /
 `y_site_nm` beside the absolute `x_nm` / `y_nm` -- SMAP's `xnmrot`; a
-rotated project's square turns with the ROI's angle.  No drawn ROI or 3D slab narrows
+rotated project's square turns with the ROI's angle.  The angle is set by
+hand, by the segmenter that made the ROI (a site's `angle`,
+`ROIProject.add_site`) or by *ROIs from results* from a measured column, as are an ROI's ranges, lines, keywords and centre;
+`ROI.set_by` says which (`{"angle": "hand"}`), and a method leaves one set by hand alone.  No drawn ROI or 3D slab narrows
 it.  A layer's grouped table is cut too -- for an ROI by its shape, for an
 id column through `group_id`, so a blink whose localizations fall in two
 regions is in both.  Whether a plugin measures per layer or several layers
