@@ -228,8 +228,8 @@ Folded under the chain's file name: the tools that change which steps it
 has.  Opened by itself for a new, empty chain.
 
 ### add...
-In *build*: adds a plugin as a step, after the step last opened, or into it
-if it is a block.
+In *build*'s title line, so it is there with *build* folded: adds a plugin
+as a step, after the step last opened, or into it if it is a block.
 
 ### block...
 In *build*: adds a block, steps repeated in each ROI or in each region of

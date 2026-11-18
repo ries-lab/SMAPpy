@@ -163,10 +163,14 @@ class Workspace:
                     continue
                 values = item.get("values")
                 chain = item.get("chain")
+                # a plugin merged into another, pinned as it is now
+                from .plugins import moved
+                plugin, values = moved(str(item["plugin"]),
+                                       values if isinstance(values, dict) else {})
                 instances.append(Instance(
-                    plugin=str(item["plugin"]), id=str(item.get("id") or ""),
+                    plugin=plugin, id=str(item.get("id") or ""),
                     label=str(item.get("label") or ""),
-                    values=values if isinstance(values, dict) else {},
+                    values=values,
                     enabled=bool(item.get("enabled", True)),
                     chain=chain if isinstance(chain, dict) else None,
                     line_above=bool(item.get("line_above", False))))

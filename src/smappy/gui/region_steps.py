@@ -33,8 +33,9 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
+                               QPushButton,
                                QVBoxLayout, QWidget)
 
 from ..chain import BLOCK_ROIS, Block, ChainSpec, chain_class
@@ -46,6 +47,8 @@ from .widgets import note_style
 PATH = "Analysis/Regions/Per-region steps"
 # the block's own fields, which this panel shows in its own places
 BLOCK_FIELDS = ("regions", "write_back", "write_values", "merge")
+RUN_TIP = ("run the steps in every ROI (or region) whose result is missing or "
+           "out of date; the current ones are kept")
 
 
 class RegionSteps(QWidget):
@@ -72,6 +75,10 @@ class RegionSteps(QWidget):
         # moved here) and what the tab adds beside it; then the tab's ticks
         self.controls = QHBoxLayout()
         self.controls.setContentsMargins(0, 0, 0, 0)
+        self.run_button = QPushButton("Measure all")
+        self.run_button.setToolTip(RUN_TIP)
+        self.run_button.clicked.connect(self._press_run)
+        self.controls.addWidget(self.run_button)
         self.controls.addStretch(1)
         layout.addLayout(self.controls)
         self.shared = QVBoxLayout()
@@ -92,9 +99,20 @@ class RegionSteps(QWidget):
         layout.addLayout(each)
         self.panel = ChainPanel(self.instance, session, chain_class(spec, path=PATH),
                                 root=(0,))
-        # the block's write-back, part of building it
-        writes = QFormLayout()
+        # The block's write-back is not offered here: what a step measures in
+        # a region is kept with the region, a value becomes an ROI's property
+        # through *Write results* (to the ROIs) and an attribute of its localizations
+        # through *Write results* (to the localizations), and a list of attribute names to
+        # type was one more thing to know.  A project saved with one set still
+        # writes it, so the rows are shown for it, to be seen and cleared.
+        self.writes_box = QWidget()
+        writes = QFormLayout(self.writes_box)
         writes.setContentsMargins(0, 2, 0, 0)
+        self.writes_note = QLabel("this project's steps write back into the table; "
+                                  "empty both to stop")
+        self.writes_note.setWordWrap(True)
+        self.writes_note.setStyleSheet(note_style())
+        writes.addRow(self.writes_note)
         self.write_back = QLineEdit()
         self.write_back.setToolTip("attributes the steps make that go into the real "
                                    "table, comma separated; empty: nothing changes it")
@@ -115,12 +133,82 @@ class RegionSteps(QWidget):
         writes.addRow("write back", self.write_back)
         writes.addRow("write values", self.write_values)
         writes.addRow("overlaps", self.overlaps)
-        self.panel.editor.layout().addLayout(writes)
+        self.panel.editor.layout().addWidget(self.writes_box)
+        # a block inside the block is for a chain; here the steps are the
+        # block's, and *for each* says what they repeat over
+        self.panel.block_button.hide()
         self.panel.changed.connect(self._rewire)
         layout.addWidget(self.panel)
-        self._run = None
+        self._project = project
+        self._rebuild_timer = QTimer(self)
+        self._rebuild_timer.setSingleShot(True)
+        self._rebuild_timer.setInterval(0)
+        self._rebuild_timer.timeout.connect(self._rebuild_safely)
+        self._run_timer = QTimer(self)
+        self._run_timer.setInterval(200)
+        self._run_timer.timeout.connect(self._sync_run)
         self._states: Optional[Dict[str, str]] = None
         self._rewire()
+
+    def _press_run(self) -> None:
+        """Run (or Stop) through the panel's own button, then follow it."""
+        self.panel.panel.run_button.click()
+        self._sync_run()
+        if self.panel.panel.run_button.text() != self.panel.panel.run_text:
+            self._run_timer.start()             # a run is going: follow Stop
+
+    def _sync_run(self) -> None:
+        """The top button says and allows what the panel's Run does."""
+        try:                                    # a timer's callable never raises
+            inner = self.panel.panel.run_button
+            self.run_button.setText(inner.text())
+            self.run_button.setToolTip(inner.toolTip() or RUN_TIP)
+            self.run_button.setEnabled(inner.isEnabled())
+            if inner.text() == self.panel.panel.run_text:
+                self._run_timer.stop()
+        except Exception as error:              # noqa: BLE001
+            print(f"following Run: {error}")
+            self._run_timer.stop()
+
+    def follow_project(self) -> None:
+        """The session's ROI project, if it is a new one -- another file
+        opened.  The panel kept the last project's steps, and the new
+        project's empty list meant an ROI selected in the ROI manager was not
+        measured until something stored the panel's steps into it.
+
+        A project with no steps of its own takes the panel's, as they stand:
+        the steps one set up go on to the next file, and nothing is rebuilt.
+        One that saved its own steps is shown with them -- a rebuild of the
+        panel, put off until the event loop is free (`_rebuild_later`)."""
+        project = self.session.rois
+        if project is self._project:
+            return
+        self._project = project
+        if not project.block.steps:
+            self.store()
+            return
+        self._rebuild_later()
+
+    def _rebuild_later(self) -> None:
+        # Rebuilding inside the session's notice of a change -- where a run's
+        # own notice may still be on the stack -- crashed a test worker now
+        # and then.  Tied to this widget: dropped with it.
+        # a timer of this widget's own, not `QTimer.singleShot` with a
+        # context: it goes with the widget, and a pending call with it
+        self._rebuild_timer.start()
+
+    def _rebuild_safely(self) -> None:
+        try:                                    # a singleShot callable never raises
+            if self.run_button.text() != self.panel.panel.run_text:
+                self._rebuild_later()           # a run is going: after it
+                return
+            project = self.session.rois
+            spec = ChainSpec(steps=[project.block], path=PATH,
+                             description=self.panel.cls.spec.description)
+            self.panel._current = ()
+            self.panel._apply(spec)
+        except Exception as error:              # noqa: BLE001
+            print(f"showing the ROI project's steps: {error}")
 
     def block_key(self) -> str:
         return self.panel.cls.spec.keys()[0]
@@ -143,14 +231,17 @@ class RegionSteps(QWidget):
         if inner.about is not None:
             inner.about.hide()
         # Run, at the top with what else applies to every step
-        run = inner.run_button
-        if self._run is not None and self._run is not run:
-            self.controls.removeWidget(self._run)
-            self._run.setParent(None)
-            self._run.deleteLater()
-        if self._run is not run:
-            self.controls.insertWidget(0, run)
-            self._run = run
+        # The panel's Run stays in the panel, hidden; the button at the top
+        # presses it and shows what it says (Stop while a run goes).  Moving
+        # the panel's own button up here, across the panels an edit rebuilds,
+        # crashed a test worker now and then.
+        inner.run_text = "Measure all"
+        inner.run_tip = RUN_TIP
+        if inner.run_button.text() == "Run":
+            inner.run_button.setText(inner.run_text)
+            inner.run_button.setToolTip(RUN_TIP)
+        inner.run_button.hide()
+        self._sync_run()
         # the block's section is not shown: its steps stand as the list, and
         # its own fields are in their places here
         key = self.block_key()
@@ -190,6 +281,9 @@ class RegionSteps(QWidget):
                              (self.write_values, block.write_values)):
             if not edit.hasFocus():
                 edit.setText(", ".join(values))
+        self.writes_box.setVisible(bool(block.write_back or block.write_values)
+                                   or self.write_back.hasFocus()
+                                   or self.write_values.hasFocus())
 
     def _block_field(self, name: str, value: str) -> None:
         self.panel.panel.form.set_values({f"{self.block_key()}.{name}": value})
@@ -265,6 +359,7 @@ class RegionSteps(QWidget):
         return result
 
     def _ended(self, how: str, result) -> None:
+        self._sync_run()
         if how != "done" or result is None:
             # not the last percentage, which would read as a run still going:
             # how it ended, and what is left to measure after it
@@ -282,5 +377,6 @@ class RegionSteps(QWidget):
 
     def showEvent(self, event) -> None:            # noqa: N802 (Qt's name)
         super().showEvent(event)
+        self.follow_project()
         self._fill_block_fields()
         self.refresh_counts()

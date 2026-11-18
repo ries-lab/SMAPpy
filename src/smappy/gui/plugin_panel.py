@@ -180,6 +180,9 @@ class PluginPanel(QWidget):
         self._notice_window: Optional[str] = None
 
         buttons = QHBoxLayout()
+        # what Run says, and comes back to after a run: a panel that runs
+        # something more particular names it (the per-region steps' *Measure all*)
+        self.run_text, self.run_tip = "Run", ""
         self.run_button = QPushButton("Run")
         buttons.addWidget(self.run_button)
         # a preview sits next to Run because it answers the question Run asks:
@@ -1048,8 +1051,8 @@ class PluginPanel(QWidget):
         self._run_ticker.stop()
         stop, self._stop = self._stop, None
         if stop is not None:                 # a run, not a preview
-            self.run_button.setText("Run")
-            self.run_button.setToolTip("")
+            self.run_button.setText(self.run_text)
+            self.run_button.setToolTip(self.run_tip)
         for button in self._buttons():
             button.setEnabled(True)
         self._enable_parts()

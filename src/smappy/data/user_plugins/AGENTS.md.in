@@ -118,7 +118,7 @@ field `field.<i>.<name>`.
   elsewhere.  The ROI itself, with its keywords (`.annotations`), lines,
   angle and ranges, is `ctx.rois.rois[ctx.region_id]`: read it, never edit
   it from a measurement -- a measurement hands back numbers, and a plugin
-  over the ROIs (as *ROIs from results* does) writes them onto the ROIs.  The tables of such a
+  over the ROIs (as *Write results* (to the ROIs) does) writes them onto the ROIs.  The tables of such a
   run also have `x_site_nm` / `y_site_nm`: positions relative to the ROI's
   centre, turned so its structure lies along +x.  `x_nm` / `y_nm` stay the
   positions in the file -- report a position in those if it is to be found

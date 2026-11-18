@@ -1,4 +1,5 @@
-"""ROIs from results: a value measured in each ROI written onto the ROI --
+"""*Write results* to the ROIs (`region_column.WriteResults`, once *ROIs from
+results*): a value measured in each ROI written onto the ROI --
 its angle, a range of any attribute, a line, a keyword, or its centre.
 
 What a structure is like is a measurement, and which measurement is best
@@ -436,11 +437,19 @@ def apply_proposals(project, step: str, roi_ids, which: str = "not_hand",
 
 # ------------------------------------------------------------------ the plugin
 
-@register("Analysis/Regions/ROIs from results")
 class ROIsFromResults(Plugin):
     """Sets a property of each ROI -- its angle, frame or z range, a line, a
     keyword or its centre -- from what was measured in it, leaving what was
-    set by hand alone."""
+    set by hand alone.
+
+    *Write results*' destination *the ROIs* (`region_column.WriteResults`),
+    not a plugin of the tree of its own any more; a saved chain naming its
+    old path is read as *Write results* (`plugins.MOVED`)."""
+
+    # what an ROI's property says set it (`ROI.set_by`); the path is the old
+    # one, which `MOVED` reads
+    name = "ROIs from results"
+    path = "Analysis/Regions/ROIs from results"
 
     Settings = ROIsFromResultsSettings
     changes_locs = False
@@ -537,9 +546,12 @@ class AcceptProposalsSettings:
 
 @register("Analysis/Regions/Accept proposals")
 class AcceptProposals(Plugin):
-    """Takes what a per-region step proposed each ROI should be -- its angle,
+    """Sets on each ROI what a per-region step proposed for it -- its angle,
     a range, a line, a keyword, its centre -- as the Regions tab's *Apply*
     does, for a chain or a batch."""
+
+    # what it does, in the tab; the path, which chains name it by, stays
+    name = "Apply proposals to ROIs"
 
     Settings = AcceptProposalsSettings
     changes_locs = False

@@ -202,7 +202,7 @@ excludes them all when all are included, and otherwise includes them all.
 Up and Down, or a click in the zoom, select one ROI again.  The selection
 is also what setting ROIs from measurements acts on -- the Regions tab's
 *Apply* beside a step's proposals,
-[ROIs from results](plugin:Analysis/Regions/ROIs from results),
+[Write results](plugin:Analysis/Regions/Write results),
 [Accept proposals](plugin:Analysis/Regions/Accept proposals) -- and with
 none selected, all ROIs: *use* is for the analysis, what is changed is
 chosen by selecting.
@@ -244,7 +244,7 @@ Each line gives two numbers in the ROI's row of the results table:
 `<name>_angle_deg`, its angle, and `<name>_length_nm`, its length.  So
 [Filter ROIs](plugin:Analysis/Regions/Filter ROIs),
 [Sort ROIs](plugin:Analysis/Regions/Sort ROIs), the summaries and
-[Regions to attribute](plugin:Analysis/Regions/Regions to attribute) read them
+[Write results](plugin:Analysis/Regions/Write results) read them
 like anything measured.  The keys: L draws the chosen line, Shift+L chooses
 the next name, R reverses it.
 
@@ -253,7 +253,7 @@ until it is set.  It is the ROI's own frame: every step run in the ROI gets
 the localizations turned by it (see *In detail*), and it is in the results
 table as `roi_angle_deg`.  It is set by hand, here; by the segmenter that
 made the ROI (*Segment regions* from an id attribute, *angle*); or by
-[ROIs from results](plugin:Analysis/Regions/ROIs from results) from any measured angle.
+[Write results](plugin:Analysis/Regions/Write results) from any measured angle.
 An angle set by hand is kept apart, and a method run again leaves it alone
 unless told otherwise.  With *rotate* ticked, each ROI is shown turned by its
 angle, so that its structure lies along $x$ (to the right), and a green
@@ -524,7 +524,7 @@ losing it, untick *use* instead (the space bar, or *Don't use* in the list's
 right-click menu, for several).  The other ROIs keep their numbers: an ROI
 is given its number when it is made and keeps it, and a number is never given
 again, so ROI 5 is ROI 5 in the list, in the results and in the `roi_id`
-attribute of *Regions to attribute*, whatever was removed before it.  *Undo*
+attribute of *Write results* (to the localizations), whatever was removed before it.  *Undo*
 brings a removed ROI back under its own number.
 
 ### Undo
@@ -661,7 +661,7 @@ One list a line: a name, a colon, and its keywords separated by commas
 list.  Saved with the ROIs.  An ROI keeps a keyword its list no longer has,
 so a list rewritten by mistake loses nothing already annotated.  Keywords
 can also be given from what was measured, by a condition
-([ROIs from results](plugin:Analysis/Regions/ROIs from results)): one
+([Write results](plugin:Analysis/Regions/Write results)): one
 given here by hand is left alone by it.
 
 ### ranges
@@ -671,7 +671,7 @@ listed under *attributes*, frame and z unless changed.  Each ROI has its
 own; a new draft starts with none, and *Add* gives the ROI the draft's.  A
 range can also be set from what was measured -- a tail's last frame, a
 structure's z and its spread -- by
-[ROIs from results](plugin:Analysis/Regions/ROIs from results), which
+[Write results](plugin:Analysis/Regions/Write results), which
 leaves a range set here by hand alone.  The ROI image leaves out the
 localizations inside the ROI that the ranges leave out, so it shows what is
 measured, with everything round the ROI as it is; the file image and the

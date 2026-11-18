@@ -2503,6 +2503,13 @@ class ROIManagerWindow(QMainWindow):
             # closed by hand: measuring for a window nobody is looking at is
             # the cost this whole arrangement exists to avoid
             self._site.closed.connect(lambda: self.set_plotting(False))
+            # Up and Down step through the ROIs from the figures too: the
+            # manager's own keys are its window's, and the figures, a window
+            # of their own, are what one looks at while stepping
+            for key, step in ((Qt.Key_Down, 1), (Qt.Key_Up, -1)):
+                walk = QShortcut(QKeySequence(key), self._site)
+                walk.setContext(Qt.WindowShortcut)
+                walk.activated.connect(lambda step=step: self.step_roi(step))
         return self._site
 
     def evaluate_active(self, label: Optional[str] = None, now: bool = False) -> None:

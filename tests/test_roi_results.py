@@ -399,7 +399,7 @@ def test_the_regions_tab_offers_a_steps_proposals_for_the_selection():
     project.selected = [roi.id]
     header._show_result()
     texts = [w.text() for w in header.proposals.findChildren(QLabel)]
-    assert any(t.startswith("Trace inspector proposes: angle") and "line axis" in t
+    assert any(t.startswith("Trace inspector proposes for the ROI: angle") and "line axis" in t
                for t in texts)
     (button,) = header.proposals.findChildren(QPushButton)
     assert button.text() == "Apply to this ROI"

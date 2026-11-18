@@ -23,7 +23,7 @@ for any [id attribute](plugin:Panels/Glossary) -- a linked track's
 The numbers are kept as a [region table](plugin:Panels/Glossary), a row per
 trace, named "per tid: Id statistics", not as attributes of the localizations.
 *Summarize/Histograms* then shows how they are distributed over the traces,
-and *Regions to attribute* writes one onto the localizations where it is wanted
+and *Write results* (to the localizations) writes one onto the localizations where it is wanted
 there, to colour by it or to filter on it.
 
 It measures every region in one pass.  The same numbers from

@@ -22,6 +22,13 @@ from ..session import Session
 from .widgets import CONTROL_WIDTH, CollapsibleSection
 
 
+#: what a proposal is, for a person who meets one
+PROPOSAL_TIP = ("What this step measured in the ROI, offered as the ROI's own "
+                "properties: its angle, a range of an attribute, a line, a keyword, "
+                "its centre.  Nothing changes until it is applied; a property set "
+                "by hand stays as it is.")
+
+
 def proposal_text(key: str, value) -> str:
     """A proposal in a few words: ``angle 37\u00b0``, ``line axis``,
     ``frames 3-``, ``type: motor``, ``centre``."""
@@ -35,6 +42,8 @@ def proposal_text(key: str, value) -> str:
         return f"line {name}"
     if kind == "keyword":
         return f"{name}: {value}"
+    if key == "centre":
+        return "its centre"
     return key
 from ..roi_manager.core import annotation_columns
 from .roi_window import COUNT_LIMIT
@@ -105,6 +114,14 @@ class ROIHeader(QWidget):
         self.measure_now.clicked.connect(self.measure_selected)
         # with Run, at the top of the steps: what applies to all of them
         self.steps.controls.insertWidget(1, self.measure_now)
+        # what the steps proposed for the ROIs, set on them in one click: on
+        # the ROIs selected in the ROI manager, all when none is
+        self.apply_all = QPushButton("Apply proposals")
+        self.apply_all.setToolTip(PROPOSAL_TIP + "  On the ROIs selected in the ROI "
+                                  "manager, all when none is, each its own; one "
+                                  "undo step.  Several steps proposing: choose which.")
+        self.apply_all.clicked.connect(lambda: self.apply_proposals())
+        self.steps.controls.insertWidget(2, self.apply_all)
         ticks = QHBoxLayout()
         ticks.setContentsMargins(0, 0, 0, 0)
         ticks.addWidget(self.measure)
@@ -175,6 +192,9 @@ class ROIHeader(QWidget):
 
     def _on_session(self, what: str) -> None:
         if what in ("locs", "layers", "rois"):
+            # another file's project: its own steps in the panel, before
+            # anything is measured with them
+            self.steps.follow_project()
             self.refresh(files_changed=True)
         elif what == "roi-preview" and self.project.segment_preview is not None:
             # a preview is drawn in the manager and nowhere else
@@ -320,6 +340,7 @@ class ROIHeader(QWidget):
         active = project.navigation.get("roi")
         roi = project.rois.get(active) if active else None
         self.measure_now.setEnabled(roi is not None)
+        self.apply_all.setEnabled(bool(self.proposing_steps()))
         # each step's title says how its result stands for this ROI
         self.steps.show_states(project.latest(roi.id)[1] if roi is not None else None)
         self.results.setRowCount(0)
@@ -383,13 +404,15 @@ class ROIHeader(QWidget):
             proposed = (entry or {}).get("proposals")
             if not proposed:
                 continue
-            text = QLabel(f"{label} proposes: " + ", ".join(
+            text = QLabel(f"{label} proposes for the ROI: " + ", ".join(
                 proposal_text(k, v) for k, v in proposed.items()))
+            text.setToolTip(PROPOSAL_TIP)
             text.setWordWrap(True)
             text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             button = QPushButton(f"Apply to {where}")
-            button.setToolTip("take these proposals as the ROIs' own -- each ROI its "
-                              "own -- leaving what was set by hand; one undo step")
+            button.setToolTip(PROPOSAL_TIP + "  On the ROIs selected in the ROI "
+                              "manager, all when none is, each taking its own; "
+                              "one undo step.")
             button.clicked.connect(lambda _=False, step=label: self._apply_proposals(step))
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
@@ -398,6 +421,32 @@ class ROIHeader(QWidget):
             line = QWidget()
             line.setLayout(row)
             self.proposals_layout.addWidget(line)
+
+    def proposing_steps(self) -> list:
+        from ..plugins.roi_results import proposal_steps
+        try:
+            return list(proposal_steps(self.project))
+        except Exception:                        # noqa: BLE001 -- a button's state
+            return []
+
+    def apply_proposals(self, step=None) -> None:
+        """*Apply proposals*: one step's, or with several a menu to choose
+        one or all."""
+        steps = self.proposing_steps()
+        if not steps:
+            self.summary.setText("no step has proposed anything for the ROIs")
+            return
+        if step is None and len(steps) > 1:
+            from PySide6.QtWidgets import QMenu
+            menu = QMenu(self)
+            for label in steps:
+                menu.addAction(label, lambda _=False, s=label: self.apply_proposals(s))
+            menu.addSeparator()
+            menu.addAction("all of them", lambda: self.apply_proposals("*"))
+            menu.exec(self.apply_all.mapToGlobal(self.apply_all.rect().bottomLeft()))
+            return
+        for label in (steps if step in (None, "*") else [step]):
+            self._apply_proposals(label)
 
     def _apply_proposals(self, step: str) -> None:
         from ..plugins.roi_results import apply_proposals

@@ -243,7 +243,7 @@ class ROI:
     # line
     angle: float = 0.0
     # who set which of its properties, ``{property: who}``: "hand" in the ROI
-    # manager, or the method that measured it (a segmenter, *ROIs from results*),
+    # manager, or the method that measured it (a segmenter, *Write results* (to the ROIs)),
     # so a method run again can leave what was corrected by hand alone --
     # "angle" now; frame and z ranges, lines and keywords set from results
     # later.  A property not in it was never set.  Replaced, never edited

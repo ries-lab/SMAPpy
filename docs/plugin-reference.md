@@ -64,7 +64,7 @@ and `smappy/simulate` are the record, and the code wins where they differ.
   under it would put them out of date as they are made.  What changes
   ROIs is a plugin run over the project, not per region: it edits
   `ctx.rois` inside `with ctx.rois.edit("what"):`, one step of the ROI
-  undo (*Centre ROIs*, *Filter ROIs*, *ROIs from results*), and a segmenter
+  undo (*Centre ROIs*, *Filter ROIs*, *Write results* (to the ROIs)), and a segmenter
   hands its ROIs back as sites (`ROIProject.add_site`: centre, shape,
   ids, `angle`).
 * `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
@@ -128,7 +128,7 @@ file's nm: `{"kind": "line" | "points" | "circle", "points": [[x, y], ...],
 -- a picture only: nothing is measured from them and the ROI does not
 change.  A wrong one (an unknown kind, a point that is not finite, more
 than `MAX_OVERLAY_POINTS` in all) is refused (`overlay_shapes`).  To make
-one the ROI's own line, *ROIs from results*.
+one the ROI's own line, *Write results* (to the ROIs).
 
 A run in a region may also hand back `proposals`: what its ROI could be,
 as values ready to take, by the keys `ROI.set_by` names properties by --
@@ -136,7 +136,7 @@ as values ready to take, by the keys `ROI.set_by` names properties by --
 "line:<name>": [[x0, y0], [x1, y1]], "keyword:<list>": word}` (the *Trace
 inspector* proposes its axis as the angle and the line *axis*).  Kept with
 the region's results (`proposal_values` checks them) and taken only when
-someone applies them -- the Regions tab's *Apply*, *Accept proposals* in a
+someone applies them -- the Regions tab's *Apply*, *Apply proposals to ROIs* in a
 chain, both through `roi_results.apply_proposals`, on the ROIs selected in
 the ROI manager (`ROIProject.chosen`: all when none is), what was set by
 hand left alone.  A measurement never changes its ROI by itself.

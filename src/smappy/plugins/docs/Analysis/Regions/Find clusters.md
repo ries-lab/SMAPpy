@@ -57,7 +57,7 @@ cluster has).  With them
   -- [Localization Statistics](plugin:Analysis/Measure/Localization Statistics)
   or [Cluster shape](plugin:Analysis/Measure/Cluster shape), say -- and
   keeps a row of numbers per cluster, which the block's *write values* or
-  [Regions to attribute](plugin:Analysis/Regions/Regions to attribute) puts back
+  [Write results](plugin:Analysis/Regions/Write results) puts back
   onto the localizations, to filter or colour by;
 * [Segment regions](plugin:Analysis/Regions/Segment regions), *from an id attribute*, makes an
   [ROI](plugin:Panels/Glossary) (region of interest) of each cluster, to look at, review and annotate in the

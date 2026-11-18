@@ -103,9 +103,9 @@ def make(d) -> None:
     d.settle()
     from ...gui.chain_panel import ChainPanel
     panel = [p for p in analysis.findChildren(ChainPanel) if p.isVisible()][-1]
-    add = _button(panel.editor, "add...")
-    d.shot("Under build, Add puts a plugin in, from the same tree as the tabs.",
-           spot=[add], point=add, click=True, zoom=d.around(panel.editor, 760))
+    add = panel.add_button
+    d.shot("Add, in the build line, puts a plugin in, from the same tree as the tabs.",
+           spot=[add], point=add, click=True, zoom=d.around(panel.build, 760))
     from ... import plugins
     from ...chain import Step
     spec = panel.current_spec()

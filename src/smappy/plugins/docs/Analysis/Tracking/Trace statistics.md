@@ -16,7 +16,7 @@ before it settles on its track -- and can measure each trace without it.
 
 The numbers are kept as a [region table](plugin:Panels/Glossary) of the
 [id attribute](plugin:Panels/Glossary), "per tid: Trace statistics", for
-*Filter regions*, the summaries and *Regions to attribute*.  On request it
+*Filter regions*, the summaries and *Write results* (to the localizations).  On request it
 also writes onto the localizations each track turned onto its own axes
 (`x_rot_nm`, `y_rot_nm`: the long axis along x, pointing the way the
 molecule moved) with the track's angle and length (`track_angle_deg`,

@@ -78,6 +78,7 @@ class ChainPanel(QWidget):
     that build it folded above them."""
 
     changed = Signal()              # the steps, or where the chain lives, changed
+    titled = Signal(str)            # what the file line says now (`title_widgets`)
 
     def __init__(self, instance: Instance, session: Session, cls: type, parent=None,
                  root: Tuple[int, ...] = ()):
@@ -105,8 +106,13 @@ class ChainPanel(QWidget):
         self.menu_button.setToolTip("open, save or save the chain as a file")
         self.menu_button.setPopupMode(QToolButton.InstantPopup)
         self.chain_menu = QMenu(self)
-        self.open_action = self.chain_menu.addAction("Open chain...", self.open_chain)
-        self.save_action = self.chain_menu.addAction("Save chain", self.save_chain)
+        # through lambdas: an action's triggered and a button's clicked hand
+        # over their checked flag, which became the slot's first argument
+        # (Open chain took False for a file, interface... for its dialog)
+        self.open_action = self.chain_menu.addAction("Open chain...",
+                                                     lambda: self.open_chain())
+        self.save_action = self.chain_menu.addAction("Save chain",
+                                                     lambda: self.save_chain())
         self.save_as_action = self.chain_menu.addAction(
             "Save as...", lambda: self.save_chain(ask=True))
         self.menu_button.setMenu(self.chain_menu)
@@ -121,25 +127,27 @@ class ChainPanel(QWidget):
         column.setSpacing(2)
         row = QHBoxLayout()
         row.setSpacing(4)
-        for label, slot, tip in (
-                ("add...", self.add_step, "add a plugin as a step, after the step "
-                                          "last opened, or into it if it is a block"),
-                ("block...", self.add_block, "add a block: steps repeated in each "
-                                             "ROI, or each region of an id attribute")):
-            button = QPushButton(label)
-            button.setToolTip(tip)
-            button.clicked.connect(slot)
-            row.addWidget(button)
+        # *add...* stands in build's title line (below), the one tool wanted
+        # without unfolding the rest
+        self.add_button = QPushButton("add...")
+        self.add_button.setToolTip("add a plugin as a step, after the step last "
+                                   "opened, or into it if it is a block")
+        self.add_button.clicked.connect(lambda: self.add_step())
+        self.block_button = QPushButton("block...")
+        self.block_button.setToolTip("add a block: steps repeated in each ROI, or "
+                                     "each region of an id attribute")
+        self.block_button.clicked.connect(lambda: self.add_block())
+        row.addWidget(self.block_button)
         self.interface_button = QPushButton("interface...")
         self.interface_button.setToolTip("choose the settings this chain asks: shown at the top "
                                          "of its form, the steps folded away")
-        self.interface_button.clicked.connect(self.edit_interface)
+        self.interface_button.clicked.connect(lambda: self.edit_interface())
         row.addWidget(self.interface_button)
         self.check_button = QPushButton("check")
         self.check_button.setToolTip("time the block in a few of its regions: what "
                                      "the whole will take, and the attributes it "
                                      "changes without writing them back")
-        self.check_button.clicked.connect(self.check_block)
+        self.check_button.clicked.connect(lambda: self.check_block())
         row.addWidget(self.check_button)
         row.addStretch(1)
         column.addLayout(row)
@@ -152,6 +160,7 @@ class ChainPanel(QWidget):
         self.checked.setStyleSheet(note_style())
         column.addWidget(self.checked)
         self.build = CollapsibleSection("build", self.editor, expanded=False)
+        self.build.add_to_title([self.add_button])
         # what a tab or the batch window ticks to open the tools (an empty chain)
         self.edit = self.build.button
         layout.addWidget(self.build)
@@ -161,9 +170,41 @@ class ChainPanel(QWidget):
         self._build(cls)
 
     def title_widgets(self) -> List[QWidget]:
-        """What a section's title bar shows of the chain: its file and its
-        menu (`CollapsibleSection.add_to_title`)."""
-        return [self.where, self.menu_button]
+        """A section's title bar's own copy of the chain's file and ⋯ menu,
+        new each call, for `CollapsibleSection.add_to_title`; this panel's
+        own row is then hidden.  The label follows `titled`; the menu asks
+        this panel for its entries each time it opens.  Not this panel's
+        widgets lent out: moved into a section and back across rebuilds,
+        they were freed under their owner now and then."""
+        where = QLabel(self.where.text())
+        where.setStyleSheet(note_style())
+        self.titled.connect(where.setText)       # dropped when the label goes
+        button = QToolButton(text="\u22ef", autoRaise=True)
+        button.setToolTip(self.menu_button.toolTip())
+        button.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(button)
+
+        def fill():
+            menu.clear()
+            try:
+                self.fill_menu(menu)
+            except RuntimeError:                 # the panel is gone
+                pass
+        menu.aboutToShow.connect(fill)
+        button.setMenu(menu)
+        self.where.hide()
+        self.menu_button.hide()
+        return [where, button]
+
+    def fill_menu(self, menu: QMenu) -> None:
+        """The chain's file entries, into ``menu``."""
+        menu.addAction("Open chain...", lambda: self.open_chain())
+        menu.addAction("Save chain", lambda: self.save_chain())
+        menu.addAction("Save as...", lambda: self.save_chain(ask=True))
+
+    def _set_where(self, text: str) -> None:
+        self.where.setText(text)
+        self.titled.emit(text)
 
     def runnable(self, on: bool) -> None:
         """Whether the chain can be run on the session from here.  Not in the
@@ -194,9 +235,12 @@ class ChainPanel(QWidget):
         if self.panel is not None:
             self.panel.release()
             self.holder.removeWidget(self.panel)
-            # gone now, not when the event loop gets round to deleting it
             self.panel.hide()
-            self.panel.setParent(None)
+            # Still this panel's child until Qt deletes it.  An edit now comes
+            # from inside the old form -- a step's tick, its title's menu --
+            # and unparented, the old panel was Python's: freed the moment
+            # `self.panel` let go of it, under the tick whose signal was still
+            # running, which crashed a test worker now and then.
             self.panel.deleteLater()
         self.cls = cls
         self.panel = PluginPanel(cls, self.session)
@@ -204,9 +248,9 @@ class ChainPanel(QWidget):
         self._show_run_controls()
         self._decorate()
         origin = cls.spec.origin
-        self.where.setText(("unsaved changes" if self.instance.chain and origin else
-                            "not saved" if self.instance.chain else "")
-                           + (f"  {origin.name}" if origin else ""))
+        self._set_where(("unsaved changes" if self.instance.chain and origin else
+                         "not saved" if self.instance.chain else "")
+                        + (f"  {origin.name}" if origin else ""))
         self.check_button.setEnabled(bool(self.root) or any(
             isinstance(step, Block) for step in cls.spec.steps))
 
@@ -538,7 +582,7 @@ class ChainPanel(QWidget):
             spec.origin = target
             self._apply(spec)
             if ref is None:
-                self.where.setText(f"saved to {target}, which is not a plugin folder: "
-                                   "it will not appear in the tree")
+                self._set_where(f"saved to {target}, which is not a plugin folder: "
+                                "it will not appear in the tree")
         self.changed.emit()
         return target
