@@ -2234,3 +2234,58 @@ one slot's or the other's.  Only isolated splits are fewer (0.18 against 0.37 %)
 already.  By the rule set before the runs (kept only for clearly more pairs below 200 nm), the
 matched loss is dropped; the code stays (`loss.matched_terms`, `extract.by_threshold`) for the
 Sinkhorn runs, which ask only whether a soft assignment learns faster or pixelates less.
+
+### Step 4: the time model (2026-11-16 -- 18)
+
+How the network uses the frames around the one it fits, the backbone and loss as the base (above).
+Test sets `B7` (mean on-time 1 frame) and `B7_l3` (3 frames), 7 frames each, density 50; every
+model at its threshold for precision 0.97 on molecules >= 1000 photons; RMSE on the brightest quarter
+of the true molecules that every model and seed found (28,472 on B7, 39,892 on B7_l3), lateral / z
+nm; pairs: two mutual nearest bright molecules 100-200 nm apart, both matched and each within 3x its
+CRLB.  6 M samples, mean over 3 seeds unless one; minutes on the H100 to 95 % of the final Jaccard.
+The full table, with the ranges over seeds: the time-models page (`time_page.py` in the session's
+scratchpad, published as an artifact).
+
+| | trained on-time | B7 | B7 pairs | B7 pixel_mod | B7_l3 | B7_l3 pairs | s/epoch | min to 95 % |
+|---|---|---|---|---|---|---|---|---|
+| T3, frame stack, 3 frames | 1 | 29.8 / 29.1 | 12.8 % | 0.024 | 34.4 / 28.1 | 18.0 % | 17.1 | 7 |
+| S7, frame stack, 7 frames | 1 | 28.7 / 28.4 | 13.7 % | 0.030 | 30.1 / 25.6 | 22.1 % | 29.1 | 13 |
+| A7, per-pixel attention, 7 | 1 | 28.4 / 27.7 | 14.2 % | 0.036 | 29.6 / 24.2 | 22.6 % | 57.4 | 22 |
+| G7N, ConvGRU + norm, 7 | 1 | 27.8 / 27.2 | 16.0 % | 0.022 | 27.8 / 23.5 | 25.6 % | 34.6 | 15 |
+| GN3C, ConvGRU + norm, streamed, 3 | 1 | 29.4 / 28.4 | 14.2 % | 0.022 | 33.4 / 27.1 | 20.5 % | 15.5 | 6 |
+| GN5C, same, 5 | 1 | 28.1 / 27.5 | 15.5 % | 0.023 | 29.5 / 24.3 | 24.6 % | 17.8 | 7 |
+| GN7C, same, 7 | 1 | 28.1 / 27.3 | 15.4 % | 0.028 | 28.2 / 23.6 | 25.7 % | 19.9 | 9 |
+| GLN7C, same, 7 | 3 | 28.4 / 27.8 | 12.5 % | 0.056 | 26.3 / 22.1 | 32.1 % | 19.9 | 11 |
+| GMN7, ConvGRU + norm, 7 | 1-3 | 27.7 / 27.1 | 15.7 % | 0.034 | 26.4 / 22.4 | 31.7 % | 34.9 | 14 |
+| GMN7C, same, streamed | 1-3 | 27.9 / 27.4 | 14.3 % | 0.047 | 26.7 / 22.6 | 30.7 % | 19.7 | 8 |
+
+- **A ConvGRU over the frames**, with its input normalised (`norm`), beats the frame stack and
+  per-pixel attention: lower RMSE and more pairs, and attention is the slowest (57 s an epoch).  The norm
+  replaced the skip (G7K), which pixelated more (0.043) and was needed only because one seed stalled.
+- **Streaming** (`movie_windows` 8: windows cut from one movie, each frame through the per-frame
+  U-Net once) gives the same numbers in 20 s an epoch instead of 35.
+- **Mixed on-times** (`lifetime_max_frames` 3: a mean on-time log-uniform in 1-3 frames per sample)
+  match the on-time-3 specialist on B7_l3 within 2 % and the on-time-1 models on B7; the specialist
+  trained at 3 frames pixelates on brief blinks (0.056) and loses recall there.  Streaming adds about
+  0.006 to pixel_mod on B7 and mixing about 0.012, each within the seeds' spread; G7N pixelates least.
+- **The window matters only for long on-times**: at on-time 1, 5 frames equal 7 and 3 lose 1.3 nm;
+  at on-time 3, 7 frames are 1.6 nm better than 5.  One 7-frame architecture serves both.
+- **Fine-tuning** (the schedule's `init`: a trained model's weights, a fresh optimizer and
+  schedule): GMN7C_s0 trained on at one on-time, lr 1e-4, one seed, against the specialists (RMSE on
+  the molecules all of this comparison found, 45,555 and 52,857, so not comparable with the table):
+
+  | | B7: lateral / z | recall | pairs | pixel_mod | B7_l3: lateral / z | recall | pairs | pixel_mod | min |
+  |---|---|---|---|---|---|---|---|---|---|
+  | GMN7C_s0, before | 36.0 / 31.8 | 0.597 | 13.7 % | 0.029 | 34.3 / 25.9 | 0.748 | 30.8 % | 0.018 | 0 |
+  | fine-tuned 0.1 M | 36.2 / 32.0 | 0.618 | 15.4 % | 0.033 | 34.3 / 26.0 | 0.743 | 30.0 % | 0.023 | 1 |
+  | fine-tuned 1 M | 36.0 / 31.7 | 0.630 | 16.3 % | 0.018 | 33.9 / 25.7 | 0.740 | 29.7 % | 0.021 | 10 |
+  | fine-tuned 2 M | 36.0 / 31.6 | 0.631 | 16.6 % | 0.012 | 33.6 / 25.6 | 0.744 | 30.5 % | 0.024 | 20 |
+  | specialist, 6 M (GN7C / GLN7C) | 36.3 / 31.7 | 0.618 | 15.4 % | 0.028 | 33.9 / 25.7 | 0.751 | 32.1 % | 0.021 | 61 |
+
+  To on-time 1 it reaches the specialist in 0.1 M samples and passes it by 2 M, pixelating less than
+  any model trained from scratch; to on-time 3 it matches the RMSE and recall by 2 M, pairs 1.6
+  points short (within the seeds' spread).  lr 3e-4 makes the first snapshots worse.
+
+So the time model is GMN7C, trained once over on-times 1-3, and fine-tuned for 1-2 M samples at lr
+1e-4 to the on-time the prefit measures.  Open: real data (G7N against GMN7C on pixelation), the
+on-time from the prefit, densities above the training's, the fitting speed.
