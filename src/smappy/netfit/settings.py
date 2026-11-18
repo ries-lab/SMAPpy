@@ -23,6 +23,13 @@ class SimulationSettings:
     # many per area (DECODE's emitter_av is per frame, of its 40 x 40; the example package's 50)
     density_per_40px: float = 50.0
     lifetime_frames: float = 1.0              # mean on-time, exponential (DECODE's lifetime_avg)
+    # above lifetime_frames: each sample's mean on-time drawn log-uniform between the two, a network for
+    # every dye whose mean is in that range (a dye has one mean; a field of view one dye)
+    lifetime_max_frames: float = 0.0
+    # windows cut from one simulated movie, shifted by a frame each: a frame is drawn once and read by up
+    # to `window` samples, so simulation, half of a 7-frame epoch, costs about 1/window of that; 1 draws
+    # every sample on its own
+    movie_windows: int = 1
     photons_mean: float = 7000.0              # flux while on, a full frame's photons
     photons_sd: float = 3000.0
     photons_min: float = 0.0                  # the flux drawn no lower (DECODE's intensity_th, unset there)

@@ -266,17 +266,27 @@ class TimeGRU(nn.Module):
     runs of four (G7_s1, G7L_s0, 2026-11-16) sat at Jaccard 0 for 60-130 epochs before they learned,
     and never caught up: everything the union U-Net saw had passed through gates that start near
     their middle.  With it, the network has the frame stack's direct path from the first step.  Off by
-    default so a model saved without it is built as it was trained."""
+    default so a model saved without it is built as it was trained.
 
-    def __init__(self, features: int, window: int, skip: bool = False):
+    ``norm``: each frame's features normalised (a group norm, learnt scale and offset) before the cells
+    read them -- the other way out of the stall, without the skip, whose models pixelated 2.5 times as
+    much (0.043 against 0.016, 3 seeds and 2; 2026-11-16).  Under the Kaiming initialisation the frame
+    features' spread depends on the seed (1.7 to 2.7 at seeds 0-3), and the seed that stalled, 1, had
+    the largest: 15 % of its gates' inputs beyond 4, 23 % of its candidate's tanh saturated, where the
+    seeds that learnt had 3-4 % and 13 %.  Normalised, every seed's gates start alike."""
+
+    def __init__(self, features: int, window: int, skip: bool = False, norm: bool = False):
         super().__init__()
         self.fwd, self.bwd = ConvGRUCell(features), ConvGRUCell(features)
         self.skip = skip
+        self.norm = nn.GroupNorm(min(8, features), features) if norm else None
         self.out_channels = (3 if skip else 2) * features
 
     def forward(self, f):
         b, t, c, h, w = f.shape
         mid = t // 2
+        if self.norm is not None:
+            f = self.norm(f.reshape(b * t, c, h, w)).reshape(b, t, c, h, w)
         hf = f.new_zeros(b, c, h, w)
         for i in range(mid + 1):
             hf = self.fwd(f[:, i], hf)
@@ -356,13 +366,25 @@ class TwoStageUNet(nn.Module):
         p0 = p0 / self.out_scale ** 2 / self.slots    # the same molecules over more cells and slots
         nn.init.constant_(self.heads["p"].net[-1].bias, math.log(p0 / (1 - p0)))
 
-    def forward(self, x):
+    def forward(self, x, windows: int = 1):
         """``x`` (b, window, rows, columns) in network units -> (b, 9 K + 1, rows * s, columns * s), ``s``
-        the ``out_scale``, K the ``slots`` (13 channels with ``sigma_rep``)."""
-        b, t, h, w = x.shape
-        feats = self.frame(x.reshape(b * t, 1, h, w))
-        feats = (feats.reshape(b, -1, h, w) if self.time is None
-                 else self.time(feats.reshape(b, t, -1, h, w)))
+        the ``out_scale``, K the ``slots`` (13 channels with ``sigma_rep``).
+
+        ``windows`` > 1: ``x`` is (n, window + windows - 1, rows, columns), n movies each read as
+        ``windows`` windows shifted by a frame, and the output (n windows, ...), a movie's windows
+        together.  Each frame goes through the per-frame U-Net once, not once for every window it is
+        in, and the windows are cut from its features: the same numbers as the windows passed one by
+        one -- nothing in the per-frame U-Net mixes samples -- for about 1 + (windows - 1) / window
+        frames a window instead of window frames (training on cut movies, `simulate.draw_batch`'s
+        ``movie_windows``, and the predictor's sliding window)."""
+        n, L, h, w = x.shape
+        t = L - windows + 1
+        feats = self.frame(x.reshape(n * L, 1, h, w)).reshape(n, L, -1, h, w)
+        if windows > 1:
+            idx = torch.arange(windows, device=x.device)[:, None] + torch.arange(t, device=x.device)[None]
+            feats = feats[:, idx]                                   # (n, windows, t, F, h, w)
+        feats = feats.reshape(n * windows, t, -1, h, w)
+        feats = feats.reshape(n * windows, -1, h, w) if self.time is None else self.time(feats)
         u = self.refine(self.union(feats))
         # the heads in full precision, whatever the backbone ran in: in bf16 an output of z over
         # +-1000 nm resolves only about 4 nm (`train`'s ``precision``)

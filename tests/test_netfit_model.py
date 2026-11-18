@@ -327,7 +327,8 @@ def test_shots_sinkhorn_assignment_reaches_the_exact_one_and_gives_two_molecules
     assert soft > exact
 
 
-@pytest.mark.parametrize("time_model, extra", [("attention", {}), ("convgru", {}), ("convgru", {"skip": True})])
+@pytest.mark.parametrize("time_model, extra", [("attention", {}), ("convgru", {}), ("convgru", {"skip": True}),
+                                              ("convgru", {"norm": True})])
 def test_a_time_model_gives_the_same_maps_and_reads_the_neighbouring_frames(time_model, extra):
     from smappy.netfit.settings import Part, Parts
     torch.manual_seed(0)
@@ -363,3 +364,18 @@ def test_the_attentions_temporal_dropout_acts_only_in_training_and_never_hides_t
     assert torch.allclose(att(g), alone, atol=1e-5)
     att.eval()
     assert not torch.allclose(att(g), att(f))
+
+
+@pytest.mark.parametrize("time", [("frame_stack", {}), ("convgru", {"norm": True}), ("attention", {})])
+def test_windows_read_from_one_movie_give_the_maps_of_the_windows_one_by_one(time):
+    """`TwoStageUNet.forward`'s ``windows``: each frame through the per-frame U-Net once, the windows cut
+    from its features -- the same numbers as each window passed alone, in a movie's order."""
+    torch.manual_seed(0)
+    model = network.TwoStageUNet(window=5, features=8, init="kaiming", time_model=time[0],
+                                 time_settings=time[1] or None).eval()
+    movies = torch.randn(2, 5 + 3, 8, 8)
+    with torch.no_grad():
+        whole = model(movies, 4)
+        alone = model(torch.stack([movies[m, w:w + 5] for m in range(2) for w in range(4)]))
+    assert whole.shape == alone.shape == (8, 10, 8, 8)
+    assert torch.allclose(whole, alone, atol=1e-5)

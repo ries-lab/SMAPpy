@@ -154,7 +154,8 @@ class _Prefetch:
         if done is not None:
             here = torch.cuda.current_stream(self.device)
             here.wait_event(done)
-            for t in (b.frames, b.xyz, b.photons, b.mask, b.background, b.photons_window, b.background_window):
+            for t in (b.frames, b.xyz, b.photons, b.mask, b.background, b.photons_window, b.background_window,
+                      b.movie):
                 if t is not None:
                     t.record_stream(here)        # not freed for the drawing stream while used here
         return b
@@ -198,6 +199,13 @@ def _found(out, scaling, threshold, how, pixel_nm, scale=1):
             "err": np.c_[to(e["x_err"]) * pixel_nm[0], to(e["y_err"]) * pixel_nm[1], to(e["z_err_nm"])]}
 
 
+def warm_start(model, path) -> None:
+    """``model``'s weights from a model file (what training saved: the EMA's weights, plain names).
+    Strict: a file of another architecture or window is refused, never half loaded."""
+    tensors, _ = model_file.read(path)
+    model.load_state_dict({k: torch.from_numpy(v) for k, v in tensors.items()})
+
+
 def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int | None = None, log=print,
           early_stop: bool = True):
     folder = Path(folder)
@@ -211,6 +219,11 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     renderer = SplineRenderer(drawn, device)
     scaling = network.Scaling.for_simulation(sim)
     model = network.build(parts, sim.window).to(device)
+    # ``init``: a trained model's file to start from -- its weights, with a fresh optimizer and schedule --
+    # to fine-tune a network trained on a broad range (on-times, say) to what was measured on the data.
+    # Loaded before the EMA copies the model, and only on a fresh start: a resumed run has its own weights.
+    if sch.get("init") and not (folder / "checkpoint.pt").exists():
+        warm_start(model, sch["init"])
     batch_size, lr = batch_and_rate(sch, device)
     steps = max(1, sch["samples_per_epoch"] // batch_size)
     per_epoch = steps * batch_size
@@ -304,11 +317,13 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
         total, parts_sum = 0.0, {}
         for _ in range(steps):
             batch = feed.get() if feed is not None else draw_batch(renderer, sim, cam, batch_size, g)
-            x = (batch.frames - scaling.input_offset) / scaling.input_scale
+            # cut from movies: the movies whole, each frame through the per-frame U-Net once
+            whole = batch.movie is not None
+            x = ((batch.movie if whole else batch.frames) - scaling.input_offset) / scaling.input_scale
             if channels_last:
                 x = x.contiguous(memory_format=torch.channels_last)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16):
-                out = forward(x)
+                out = forward(x, batch.movie_windows)[:len(batch.frames)] if whole else forward(x)
             value, t = loss.loss(out.float(), batch, scaling, parts.loss)
             for rp in reps:
                 if epoch >= rp.get("from_epoch", 5):
