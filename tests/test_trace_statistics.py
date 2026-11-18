@@ -107,3 +107,44 @@ def test_the_region_table_holds_each_traces_cfr_with_missing_values_left_out():
     cfr = np.array([0.2, np.nan, 0.4, np.nan, 0.9, np.nan])[r.order]
     means = T.nan_means(r, cfr)
     assert np.allclose(means[:2], [0.3, 0.9]) and np.isnan(means[2])
+
+
+def test_in_an_roi_it_proposes_the_traces_direction_and_the_range_after_its_tail():
+    """Run per ROI: the moving track's direction as the ROI's angle, the
+    still molecule's settled part as the ROI's range; *Apply proposals*
+    sets them, and the next measurement leaves the tail out."""
+    from smappy.io.formats import FileInfo
+    from smappy.plugins.roi_results import apply_proposals
+    from smappy.plugins.trace_statistics import TraceStatistics
+    from smappy.roi_manager.pipeline import Step
+    ids, x, y, t = tracks()
+    frame = np.r_[np.arange(200), np.arange(100), np.arange(200)]
+    locs = Localizations({"x_nm": x, "y_nm": y, "time_s": t, "frame": frame,
+                          "tid": ids.astype(np.int64)}, {})
+    session = Session()
+    session.add_file(locs, FileInfo(name="traces", path="", format="test"))
+    session.show_grouped(0, False)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    moving = project.add_roi(file_id, [0, 0], ids={"tid": 1}, spatial=False)
+    still = project.add_roi(file_id, [3000, 3000], ids={"tid": 2}, spatial=False)
+    settings = TraceStatistics.Settings()
+    settings.tail.rule = "still"
+    settings.tail.reference_from = 30
+    step = Step(label="Trace statistics", path=PLUGIN, plugin=TraceStatistics(),
+                settings=settings)
+    project.evaluate(steps=[step])
+    table = project.tables["Trace statistics"]
+    proposed = table.entry(moving.id)["proposals"]
+    assert proposed["angle"] == pytest.approx(30, abs=2)
+    start, end = table.entry(still.id)["proposals"]["range:time_s"]
+    assert end is None and 0.008 <= start <= 0.020          # after the 15 creeping in
+    changed, written, _ = apply_proposals(project, "Trace statistics",
+                                          [moving.id, still.id])
+    assert project.rois[moving.id].angle == pytest.approx(30, abs=2)
+    assert project.rois[still.id].ranges["time_s"] == [start, None]
+    tail = np.asarray(locs["time_s"])[project.indices(project.rois[still.id])]
+    assert tail.min() >= start and len(tail) < 100        # the tail is left out
+    # run over the view, not in an ROI: nothing is proposed
+    result = session.run(TraceStatistics(), settings)
+    assert result.proposals == {}

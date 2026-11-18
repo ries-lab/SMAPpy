@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.traces.runs, smappy.traces.axes, smappy.traces.rotate, smappy.traces.consecutive_precision, smappy.traces.steps, smappy.traces.rolling_std, smappy.traces.tails, smappy.traces.cfr_cut, smappy.traces.nan_means, smappy.traces.statistics, smappy.traces.convergence, smappy.plugins.trace_statistics.TraceStatistics.run]
+covers: [smappy.traces.runs, smappy.traces.axes, smappy.traces.rotate, smappy.traces.consecutive_precision, smappy.traces.steps, smappy.traces.rolling_std, smappy.traces.tails, smappy.traces.cfr_cut, smappy.traces.nan_means, smappy.traces.statistics, smappy.traces.convergence, smappy.plugins.trace_statistics.TraceStatistics.run, smappy.plugins.trace_statistics.trace_proposals]
 ---
 
 ## What it does
@@ -23,6 +23,16 @@ molecule moved) with the track's angle and length (`track_angle_deg`,
 `track_length_nm`: coloured by the angle, the tracks of a motor-PAINT
 measurement map the directions of the filaments they ran on), and which
 localizations are its tail (`in_tail`), to filter or colour by.
+
+Run in an [ROI](plugin:Panels/Glossary) -- as one of the
+[per-region steps](plugin:Panels/Regions tab), say over ROIs of a trace
+each -- it also **proposes** what the ROI could be: the trace's direction
+(its long axis, forward in time) as the ROI's angle, and, with a tail rule,
+the range from its first localization after the tail on, so that what is
+measured in the ROI leaves the tail out.  An ROI that holds several traces
+takes them from the one with the most localizations.  Nothing changes on
+the ROI until the proposals are applied (*Apply proposals* in the Regions
+tab); the range is on `time_s` where the table has it, else on `frame`.
 
 Use *Id statistics* for a quick count, centre, spread and the statistics of
 other attributes per trace; use this for the trace's path.  It reads the
@@ -225,6 +235,9 @@ sequence measures cfr once, at the trace's start, for what follows, so
 the velocity, the precision across the track and the eccentricity over the
 traces, and the pooled distance of each trace's n-th localization from its
 settled position, beside 120 nm/√N for the photons collected by then.
+In an ROI, the text ends with what it proposes for the ROI (`angle`,
+`range:time_s` or `range:frame`), shown under the ROI's numbers in the
+Regions tab.
 
 A good still-molecule measurement shows precisions close to `xy_err_nm`,
 eccentricities near 1 and short tails; two emitters in one trace show as
