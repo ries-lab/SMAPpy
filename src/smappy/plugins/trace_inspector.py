@@ -48,7 +48,8 @@ class TraceInspector(Plugin):
     per_region = True
     follow_roi = True
     # 2: the trace's axis among the values (angle_deg forward in time, the
-    # spread along and across, the centre), drawn over the ROI
+    # spread along and across, the centre), drawn over the ROI and proposed
+    # as the ROI's angle, a line and its centre
     version = "2"
 
     def describe(self, ctx: Optional[Context], settings: TraceInspectorSettings) -> FormState:
@@ -86,7 +87,7 @@ class TraceInspector(Plugin):
         values["trace"] = float(r.ids[i])
         # the trace's axis: which way it went, what an ROI of it is oriented
         # by (*ROIs from results*), and drawn over the ROI image
-        overlays = []
+        overlays, proposals = [], {}
         if "x" in pos and "y" in pos and len(rows) >= 3:
             one = T.runs(np.zeros(len(rows), np.int64), t)
             a = T.axes(one, pos["x"][one.order], pos["y"][one.order])
@@ -102,6 +103,11 @@ class TraceInspector(Plugin):
                 overlays.append({"kind": "line", "points": [(c - u).tolist(),
                                                             (c + u).tolist()],
                                  "label": "axis"})
+                # what an ROI of this trace could take on: its direction as
+                # the ROI's frame, the axis as a line, the trace's centre
+                proposals = {"angle": axis["angle_deg"],
+                             "line:axis": [(c - u).tolist(), (c + u).tolist()],
+                             "centre": c.tolist()}
         unit = "s" if clock else "frame"
         lines = [f"{column} {r.ids[i]}: {len(rows)} localizations over "
                  f"{values['duration']:.3g} {unit}" + ("s" if unit == "frame" else ""),
@@ -118,7 +124,8 @@ class TraceInspector(Plugin):
         n_panels = 2 + bool(quality)
         return Result(text="\n".join(lines), values=values,
                       plot=Plot(draw, panels=n_panels, size=(4.0 * n_panels, 3.2)),
-                      settings=settings, title="trace inspector", overlays=overlays)
+                      settings=settings, title="trace inspector", overlays=overlays,
+                      proposals=proposals if ctx.per_region else {})
 
     def _gallery(self, ctx, settings, r, column, T):
         locs = ctx.locs

@@ -95,7 +95,7 @@ def from_results(target, **part):
     """The plugin's settings: ``target`` set from ``part``'s fields."""
     settings = ROIsFromResults.Settings(target=target)
     for name, value in part.items():
-        if name in ("which", "used_only"):
+        if name == "which":
             setattr(settings, name, value)
         else:
             setattr(getattr(settings, target), name, value)
@@ -117,16 +117,16 @@ def test_the_angle_comes_from_a_measured_column_and_hand_turned_rois_stay():
     rois = sorted(project.rois.values(), key=lambda r: r.ids["tid"])
     assert all(r.angle == 0 for r in rois)                    # angle: none
     project.set_angle(rois[0].id, 10.0)                       # corrected by hand
-    rois[2].use = False
+    project.selected = [rois[0].id, rois[1].id]               # as the ROI manager's list
     result = session.run(ROIsFromResults(), from_results("angle", column="angle_deg"))
     assert project.rois[rois[0].id].angle == 10.0             # by hand: kept
     assert off(project.rois[rois[1].id].angle, 150) == pytest.approx(0, abs=3)
     assert project.rois[rois[1].id].source("angle") == "ROIs from results"
-    assert project.rois[rois[2].id].angle == 0                # not used: left
-    assert "1 by hand" in result.text and "1 not used" in result.text
-    # all of them, the hand-turned one too, in one undo step
-    session.run(ROIsFromResults(), from_results("angle", column="angle_deg", which="all",
-                                                used_only=False))
+    assert project.rois[rois[2].id].angle == 0                # not selected: left
+    assert "1 by hand" in result.text and "of 2 selected" in result.text
+    # none selected is all of them, the hand-turned one too, in one undo step
+    project.selected = []
+    session.run(ROIsFromResults(), from_results("angle", column="angle_deg", which="all"))
     assert off(project.rois[rois[0].id].angle, 30) == pytest.approx(0, abs=3)
     project.undo()
     assert project.rois[rois[0].id].angle == 10.0
@@ -314,3 +314,101 @@ def test_a_centre_set_by_a_click_is_overwritten_by_a_measured_one():
     roi.set_source("centre", "hand")                          # as an older file may say
     session.run(ROIsFromResults(), from_results("centre", x="fx", y="fy"))
     assert np.allclose(project.rois[roi.id].center, start + [5, 0])
+
+
+# ------------------------------------------------------------------ proposals
+
+def _inspected(session):
+    """Every ROI measured by the Trace inspector, which proposes its angle,
+    the axis as a line and its centre."""
+    from smappy.plugins.trace_inspector import TraceInspector
+    from smappy.roi_manager.pipeline import Step
+    steps = [Step(label="Trace inspector", path="Analysis/Tracking/Trace inspector",
+                  plugin=TraceInspector(), settings=TraceInspector.Settings())]
+    session.rois.evaluate(steps=steps)
+
+
+def test_proposals_are_checked_by_what_their_key_says_and_kept():
+    from smappy.plugins import Result
+    from smappy.region_table import RegionTable
+    from smappy.roi_manager.core import proposal_values, region_entry
+    entry = region_entry(Result(values={"n": 1}, proposals={
+        "angle": 270, "centre": [1, 2], "range:frame": [3, None],
+        "line:axis": [[0, 0], [5, 0]], "keyword:type": "motor"}))
+    assert entry["proposals"]["angle"] == -90.0
+    table = RegionTable()
+    table.set("r", {**entry, "signature": "s"}, step={"label": "x"})
+    assert RegionTable.from_dict(table.to_dict()).entry("r")["proposals"] == entry["proposals"]
+    for wrong, why in (({"colour": "red"}, "not a property"),
+                       ({"angle": float("nan")}, "angle"),
+                       ({"line:axis": [[0, 0]]}, "line:axis"),
+                       ({"range:z_nm": [None, None]}, "no range")):
+        with pytest.raises(ValueError, match=why):
+            proposal_values(wrong)
+
+
+def test_proposals_are_taken_on_the_selected_rois_and_hand_set_ones_stay():
+    from smappy.plugins.roi_results import apply_proposals, proposal_steps
+    session = session_of(tracks())
+    segment(session, keep="eccentricity >= 4")
+    project = session.rois
+    rois = sorted(project.rois.values(), key=lambda r: r.ids["tid"])
+    _inspected(session)
+    assert set(proposal_steps(project)["Trace inspector"]) == {"angle", "line:axis", "centre"}
+    assert all(r.angle == 0 and "axis" not in r.lines for r in rois)   # nothing yet
+    project.set_angle(rois[0].id, 5.0)                        # by hand
+    project.selected = [rois[0].id, rois[1].id]
+    changed, written, counts = apply_proposals(project, "Trace inspector", project.chosen())
+    assert project.rois[rois[0].id].angle == 5.0 and counts["by hand"] == 1
+    assert "axis" in project.rois[rois[0].id].lines           # its other proposals taken
+    assert off(project.rois[rois[1].id].angle, MOTOR_ANGLES[1]) == pytest.approx(0, abs=3)
+    assert project.rois[rois[1].id].source("angle") == "Trace inspector"
+    assert project.rois[rois[2].id].angle == 0                # not selected
+    assert "axis" in project.line_names
+    project.undo()
+    assert project.rois[rois[1].id].angle == 0                # one undo step
+
+
+def test_accept_proposals_in_a_chain_takes_them_on_every_roi():
+    from smappy.plugins.roi_results import AcceptProposals
+    session = session_of(tracks())
+    segment(session, keep="eccentricity >= 4")
+    _inspected(session)
+    result = session.run(AcceptProposals(), AcceptProposals.Settings(
+        step="Trace inspector", property="angle"))
+    for roi in session.rois.rois.values():
+        assert off(roi.angle, MOTOR_ANGLES[roi.ids["tid"]]) == pytest.approx(0, abs=3)
+        assert "axis" not in roi.lines                        # only the angle asked for
+    assert "all 3" in result.text
+    with pytest.raises(ValueError, match="proposed nothing"):
+        session.run(AcceptProposals(), AcceptProposals.Settings(step="Circle fit"))
+
+
+def test_the_regions_tab_offers_a_steps_proposals_for_the_selection():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QLabel, QPushButton
+    QApplication.instance() or QApplication([])
+    from smappy.gui.roi_tab import ROIHeader
+    session = session_of(tracks())
+    segment(session, keep="eccentricity >= 4")
+    project = session.rois
+    _inspected(session)
+    roi = sorted(project.rois.values(), key=lambda r: r.ids["tid"])[1]
+    project.navigation["roi"] = roi.id
+    header = ROIHeader(session)
+    project.selected = [roi.id]
+    header._show_result()
+    texts = [w.text() for w in header.proposals.findChildren(QLabel)]
+    assert any(t.startswith("Trace inspector proposes: angle") and "line axis" in t
+               for t in texts)
+    (button,) = header.proposals.findChildren(QPushButton)
+    assert button.text() == "Apply to this ROI"
+    button.click()
+    assert off(project.rois[roi.id].angle, MOTOR_ANGLES[1]) == pytest.approx(0, abs=3)
+    others = [r for r in project.rois.values() if r.id != roi.id]
+    assert all(r.angle == 0 for r in others)
+    project.selected = []
+    header._show_result()
+    (button,) = header.proposals.findChildren(QPushButton)
+    assert button.text() == "Apply to all 3"
+    header.deleteLater()

@@ -127,8 +127,11 @@ class RangePanel(QWidget):
         """A row per attribute: its fields, then its plot."""
         while self.rows.count():
             item = self.rows.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                # out of the panel now, not at the next turn of the event loop
+                widget.setParent(None)
+                widget.deleteLater()
         self.fields, self.plots, self.notes, self.buttons = {}, {}, {}, {}
         for column in columns:
             box = QWidget()

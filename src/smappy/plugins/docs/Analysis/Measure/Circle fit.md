@@ -173,7 +173,10 @@ least squares, which background pulls.
   `chi2_red`.  In the ROI manager they are columns of the results table.
 * **The figure**: the localizations with the fitted circle and its centre.
 * **In an ROI**, the fitted circle is drawn over the ROI manager's ROI
-  image too, dotted, and stays with the ROI's results.
+  image too, dotted, and stays with the ROI's results; its centre (the
+  first layer's) is proposed as the ROI's, taken with *Apply* in the
+  Regions tab or
+  [Accept proposals](plugin:Analysis/Regions/Accept proposals).
 
 A good fit has the circle through the middle of the ring, a radius error a
 small fraction of the radius, and a reduced chi-square not far above 1.  A

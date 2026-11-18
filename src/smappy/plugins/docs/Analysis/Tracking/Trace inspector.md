@@ -85,9 +85,12 @@ measures it for every trace: `centre_x_nm`, `centre_y_nm`, the spread along
 and across its long axis (`std_long_nm`, `std_short_nm`), and `angle_deg`,
 the long axis pointing from the trace's first quarter to its last -- the
 way it moved.  In an ROI the axis is drawn over the ROI image, dotted, two
-spreads either side of the centre; and `angle_deg` is what
-[ROIs from results](plugin:Analysis/Regions/ROIs from results) can turn the
-ROI by, so the track runs along $x$ in it.
+spreads either side of the centre, and is **proposed** as the ROI's own:
+its direction as the ROI's angle (the track then runs along $x$ in it),
+the axis as the line *axis*, the trace's centre as the ROI's -- taken with
+*Apply* in the Regions tab, or
+[Accept proposals](plugin:Analysis/Regions/Accept proposals) in a chain,
+never by measuring alone.
 
 ## Differences from SMAP
 

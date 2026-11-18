@@ -199,7 +199,13 @@ last one clicked, and drawing and *annotate* work on it alone.  The space
 bar, *Remove* and the list's right-click menu -- *Use*, *Don't use* and
 *Remove* -- act on every selected ROI, as one step of *Undo*.  The space bar
 excludes them all when all are included, and otherwise includes them all.
-Up and Down, or a click in the zoom, select one ROI again.
+Up and Down, or a click in the zoom, select one ROI again.  The selection
+is also what setting ROIs from measurements acts on -- the Regions tab's
+*Apply* beside a step's proposals,
+[ROIs from results](plugin:Analysis/Regions/ROIs from results),
+[Accept proposals](plugin:Analysis/Regions/Accept proposals) -- and with
+none selected, all ROIs: *use* is for the analysis, what is changed is
+chosen by selecting.
 
 **Annotating.**  Beside the list, *annotate* gives the selected ROI a
 keyword from each of a few lists the user writes -- *quality: good, bad,

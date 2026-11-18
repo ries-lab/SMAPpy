@@ -687,6 +687,7 @@ class ROIList(QAbstractTableModel):
 class ROIManagerWindow(QMainWindow):
     changed = Signal()          # ROIs added, removed or toggled
     selected = Signal(object)   # the ROI now selected, measured or not
+    selection_changed = Signal()  # the rows selected in the list (`ROIProject.selected`)
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -840,6 +841,7 @@ class ROIManagerWindow(QMainWindow):
         # move under a pressed button is left alone: a Ctrl-click that
         # unselects a row makes it current before it unselects it
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._on_select())
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self._note_selection())
         self.table.selectionModel().currentRowChanged.connect(
             lambda *_: QApplication.mouseButtons() == Qt.NoButton and self._on_select())
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -2248,6 +2250,17 @@ class ROIManagerWindow(QMainWindow):
         roi_id = self.rows.ids[current.row()]
         if roi_id != self.active:
             self.select(roi_id, from_table=True)
+
+    def _note_selection(self) -> None:
+        """Tell the project which ROIs are selected in the list
+        (`ROIProject.selected`): what applying measured properties acts
+        on, all of them when none is.  Exactly the selected rows, not the
+        ROI shown when none is."""
+        model = self.table.selectionModel()
+        ids = [self.rows.ids[i.row()] for i in model.selectedRows()
+               if i.row() < len(self.rows.ids)]
+        self.project.selected = [i for i in ids if i in self.project.rois]
+        self.selection_changed.emit()
 
     def selected_ids(self) -> list:
         """The ROIs selected in the list, in its order; the selected ROI

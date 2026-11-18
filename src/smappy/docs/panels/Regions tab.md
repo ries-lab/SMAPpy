@@ -154,6 +154,21 @@ into the table, and hold a block of its own.  Run measures every ROI; with
 selected or added in the ROI manager, and its numbers appear under the
 steps.
 
+**Proposals.**  Some steps say not only what they measured but what the
+ROI could be: the [Trace inspector](plugin:Analysis/Tracking/Trace inspector)
+proposes a track's direction as the ROI's angle, its axis as the line
+*axis*, its centre; [Circle fit](plugin:Analysis/Measure/Circle fit) the
+fitted centre.  Under the selected ROI's numbers, a line per step says what
+it proposes, and *Apply* takes it -- on the ROIs selected in the ROI
+manager's list, or all of them when none is, each ROI its own proposals --
+as one step of the ROI manager's undo.  What was set by hand (an angle
+turned, a range set, a line drawn) is left alone.  Once applied, they are
+the ROIs' own properties, as if set by hand or by
+[ROIs from results](plugin:Analysis/Regions/ROIs from results); nothing is
+applied by measuring alone.  In a chain,
+[Accept proposals](plugin:Analysis/Regions/Accept proposals) does the
+same.
+
 **4. What is still true.**  Each stored measurement remembers what it was made
 from: the file's data, the ROI and its geometry, the filter, the merge
 settings, and the step's plugin with its version and settings.  When the data

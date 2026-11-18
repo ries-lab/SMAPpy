@@ -130,6 +130,17 @@ change.  A wrong one (an unknown kind, a point that is not finite, more
 than `MAX_OVERLAY_POINTS` in all) is refused (`overlay_shapes`).  To make
 one the ROI's own line, *ROIs from results*.
 
+A run in a region may also hand back `proposals`: what its ROI could be,
+as values ready to take, by the keys `ROI.set_by` names properties by --
+`{"angle": deg, "centre": [x, y], "range:<attribute>": [lo, hi],
+"line:<name>": [[x0, y0], [x1, y1]], "keyword:<list>": word}` (the *Trace
+inspector* proposes its axis as the angle and the line *axis*).  Kept with
+the region's results (`proposal_values` checks them) and taken only when
+someone applies them -- the Regions tab's *Apply*, *Accept proposals* in a
+chain, both through `roi_results.apply_proposals`, on the ROIs selected in
+the ROI manager (`ROIProject.chosen`: all when none is), what was set by
+hand left alone.  A measurement never changes its ROI by itself.
+
 `text` goes into the plugin panel's output box, however long it is; *Show result*
 opens the figures, or, for a result with none, the text in a window.  Set `text_window = True` on the
 plugin only when the text *is* the result and is long -- `history.py` is the

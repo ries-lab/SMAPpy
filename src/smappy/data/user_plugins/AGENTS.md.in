@@ -153,6 +153,7 @@ Every part is optional.
 | `data` | any numbers or arrays, for a script |
 | `values` | `{"name": number}`: with `per_region = True`, one row per ROI in the region table |
 | `overlays` | shapes drawn over the ROI in the ROI manager, nm: `[{"kind": "line", "points": [[x0, y0], [x1, y1]]}]`; `"points"` and `"circle"` (with `"radius"`) too |
+| `proposals` | what the ROI could be, applied only when the user takes it: `{"angle": 30.0, "centre": [x, y], "line:axis": [[x0, y0], [x1, y1]], "range:frame": [lo, hi], "keyword:type": "motor"}` |
 | `locs` | a **new** table that replaces the current one (then `changes_locs = True`) |
 | `settings` | the settings used -- always pass them |
 

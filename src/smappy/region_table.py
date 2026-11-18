@@ -70,6 +70,8 @@ class RegionTable:
         # per row: the shapes the step drew over the region (`Result.overlays`),
         # or None -- shown in the ROI manager, never measured
         self.overlays: List[Optional[List[Dict[str, Any]]]] = []
+        # per row: what the step proposed the ROI be (`Result.proposals`)
+        self.proposals: List[Optional[Dict[str, Any]]] = []
         # values that are statistics of one quantity, ``{group: {member:
         # value name}}`` -- ``{"cfr": {"mean": "cfr_mean", "max": "cfr_max"}}``
         # -- so a reader can offer them as a level of their own; the values
@@ -104,6 +106,7 @@ class RegionTable:
         table.errors = [""] * n
         table.kept = [None] * n
         table.overlays = [None] * n
+        table.proposals = [None] * n
         for name, column in values.items():
             column = np.asarray(column)
             if column.shape != (n,):
@@ -133,6 +136,7 @@ class RegionTable:
         self.errors.append("")
         self.kept.append(None)
         self.overlays.append(None)
+        self.proposals.append(None)
         for column in self.values.values():
             column.append(None)
         for column in self.arrays.values():
@@ -160,6 +164,7 @@ class RegionTable:
         self.errors[i] = str(entry.get("error") or "")
         self.kept[i] = entry.get("kept") or None
         self.overlays[i] = entry.get("overlays") or None
+        self.proposals[i] = entry.get("proposals") or None
         values = entry.get("values") or {}
         for name in values:
             if name not in self.values:
@@ -193,6 +198,8 @@ class RegionTable:
                 out["kept"] = self.kept[i]
             if self.overlays[i] is not None:
                 out["overlays"] = self.overlays[i]
+            if self.proposals[i] is not None:
+                out["proposals"] = self.proposals[i]
         if self.signatures[i]:
             out["signature"] = self.signatures[i]
         return out
@@ -217,7 +224,8 @@ class RegionTable:
             return
         self.ids = [self.ids[i] for i in keep]
         self._index = {r: n for n, r in enumerate(self.ids)}
-        for name in ("step_of", "signatures", "data", "errors", "kept", "overlays"):
+        for name in ("step_of", "signatures", "data", "errors", "kept", "overlays",
+                     "proposals"):
             setattr(self, name, [getattr(self, name)[i] for i in keep])
         self.values = {k: [c[i] for i in keep] for k, c in self.values.items()}
         self.arrays = {k: [c[i] for i in keep] for k, c in self.arrays.items()}
@@ -260,6 +268,7 @@ class RegionTable:
                 "errors": [self.errors[i] for i in rows],
                 "kept": [self.kept[i] for i in rows],
                 "overlays": [self.overlays[i] for i in rows],
+                "proposals": [self.proposals[i] for i in rows],
                 "values": {k: [_plain(c[i]) for i in rows] for k, c in self.values.items()},
                 "arrays": {k: [None if c[i] is None else c[i].tolist() for i in rows]
                            for k, c in self.arrays.items()}}
@@ -283,6 +292,7 @@ class RegionTable:
         table.errors = [str(s or "") for s in column("errors", "")]
         table.kept = [k or None for k in column("kept", None)]
         table.overlays = [k or None for k in column("overlays", None)]
+        table.proposals = [k or None for k in column("proposals", None)]
         table.values = {k: list(c) for k, c in (doc.get("values") or {}).items()
                         if len(c) == n}
         table.arrays = {k: [None if a is None else np.asarray(a) for a in c]
@@ -319,7 +329,7 @@ class RegionTable:
             elif any(column):
                 group.create_dataset(name, data=np.array(column, dtype=object),
                                      dtype=text)
-        for name in ("kept", "overlays"):
+        for name in ("kept", "overlays", "proposals"):
             rows = getattr(self, name)
             if any(k is not None for k in rows):
                 group.create_dataset(name, data=np.array(
@@ -376,7 +386,7 @@ class RegionTable:
             if len(got) != n:
                 got = [str(group.attrs.get(_UNIFORM + name, ""))] * n
             setattr(table, name, got)
-        for name in ("kept", "overlays"):
+        for name in ("kept", "overlays", "proposals"):
             got = strings(name)
             setattr(table, name, [json.loads(k) if k else None for k in got]
                     if len(got) == n else [None] * n)
