@@ -1,0 +1,4 @@
+base: netfit_time
+name: nf_G7N_s0
+models:
+  B: netfit/G7N_s0/model.safetensors

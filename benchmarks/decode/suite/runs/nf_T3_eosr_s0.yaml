@@ -1,0 +1,4 @@
+base: netfit_time
+name: nf_T3_eosr_s0
+models:
+  B: netfit/T3_eosr_s0/model.safetensors

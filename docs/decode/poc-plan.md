@@ -2289,3 +2289,55 @@ scratchpad, published as an artifact).
 So the time model is GMN7C, trained once over on-times 1-3, and fine-tuned for 1-2 M samples at lr
 1e-4 to the on-time the prefit measures.  Open: real data (G7N against GMN7C on pixelation), the
 on-time from the prefit, densities above the training's, the fitting speed.
+
+### The time models on real data: the example (2026-11-18)
+
+G7N and GMN7C (3 seeds each) against the 1-frame base (`A_eosr`, 3 seeds), the base at 3 frames
+(`T3_eosr`) and v1f at 3 frames (`nt_t3_pk`, 2 seeds), on the example movie's first 5000 frames, fitted
+on the Mac through the benchmark (`run.py`, runs `nf_<job>`; scored by `real_time_models.py`, as
+`report.score_real`: p >= 0.5, >= 1000 photons, |z| <= 700 nm).  The predictor keeps the mixture's sigma
+beside the reporting head's (`x_err_mix_pix`, `z_err_mix_nm`).  KS is the larger of x and y; the pair
+check the robust width of each pair's difference over the root of its two claims, at the frames apart
+where the two fits share no frame (7 for a 7-frame model), and at 7 for all as a like-for-like check --
+on real data it grows with the lag, the sample moving between frames.  Mean over seeds:
+
+| model | kept a frame | KS | KS by \|z\| 0-150 / 150-300 / 300-450 / 450-600 / 600-700 | pairs x / z, own lag | at lag 7 | mixture's sigma, own lag |
+|---|---:|---:|---|---|---|---|
+| G7N | 248 | 0.007 (0.006 - 0.009) | 0.007 / 0.010 / 0.026 / 0.028 / 0.056 | 1.14 / 1.00 (7) | 1.14 / 1.00 | 1.33 / 1.23 |
+| GMN7C | 252 | 0.009 (0.007 - 0.013) | 0.008 / 0.013 / 0.053 / 0.038 / 0.059 | 1.10 / 0.98 (7) | 1.10 / 0.98 | 1.28 / 1.19 |
+| base, 1 frame | 227 | 0.005 (0.004 - 0.006) | 0.004 / 0.009 / 0.023 / 0.026 / 0.053 | 0.95 / 0.87 (1) | 1.14 / 1.07 | 1.10 / 1.07 |
+| base, 3 frames | 240 | 0.006 | 0.007 / 0.008 / 0.019 / 0.047 / 0.036 | 1.12 / 0.96 (3) | 1.25 / 1.11 | 1.31 / 1.15 |
+| v1f, 3 frames | 246 | 0.016 | 0.008 / 0.019 / 0.068 / 0.087 / 0.079 | 1.39 / 1.23 (3) | 1.51 / 1.41 | -- |
+| port `decode_B`, 1 frame | 220 | 0.010 | 0.013 / 0.016 / 0.061 / 0.039 / 0.065 | 1.13 / 1.18 (1) | 1.39 / 1.47 | -- |
+| Spline 3D | 120 | 0.002 | 0.002 / 0.008 / 0.008 / 0.005 / 0.017 | 1.91 / 1.75 (1) | 2.75 / 2.67 | -- |
+
+By photons (1000 - 2000 / 2000 - 4000 / 4000 - 8000 / 8000 - 16 000; above 16 000 too few in some
+fits): G7N 0.008 / 0.011 / 0.006 / 0.014, GMN7C 0.019 / 0.011 / 0.007 / 0.009, the 1-frame base
+0.010 / 0.007 / 0.006 / 0.008.  The pair check by the claim in x (0-5 / 5-10 / 10-15 / 15-20 / 20-30 /
+30-50 nm), the head's against the mixture's:
+
+| | reported | mixture's |
+|---|---|---|
+| G7N | 1.53 / 1.51 / 1.31 / 1.16 / 1.00 / 0.84 | 1.75 / 1.69 / 1.42 / 1.26 / 1.13 / 0.95 |
+| GMN7C | 1.45 / 1.43 / 1.25 / 1.11 / 0.99 / 0.85 | 1.74 / 1.64 / 1.35 / 1.22 / 1.10 / 0.93 |
+
+In z the head's ratio is 0.91 - 1.08 in every bin (the mixture's 1.14 - 1.25).  Median claims: x 11.6
+/ 12.0 nm reported against 10.1 / 10.5 by the mixture, z 34 / 35 against 28 / 30.
+
+- **Both pixelate little on the example**, below the port and v1f, above Spline 3D: 0.007 and 0.009
+  overall, within each other's seeds.  Where they differ is where simulation said: GMN7C pixelates
+  twice as much at |z| 300 - 450 nm (0.048 - 0.062 against G7N's 0.019 - 0.032, every seed) and at
+  1000 - 2000 photons (0.019 against 0.008) -- the mixed on-times' cost on brief blinks.  Both stay
+  below the target of 0.053 except GMN7C at 300 - 450 nm and both at 600 - 700 nm, as the 1-frame base.
+- **The time models find 10 % more** than the 1-frame base (250 against 227 a frame) and 14 % more
+  than the port.
+- **The reporting head is honest** at the frames apart where the fits are independent: x 1.10 - 1.14,
+  z 0.98 - 1.00, as the 1-frame base at the same lag (1.14 / 1.07) and far better than v1f without it
+  (1.51 / 1.41).  The mixture's sigma is 15 - 20 % too small (1.28 - 1.33).  The smallest claims are
+  still too small (x 1.45 - 1.53 below 10 nm) -- part of that is the sample's movement over 7 frames,
+  which no claim includes and which matters most where the claim is smallest.
+
+So on real data the choice is the one simulation gave: GMN7C detects as many, claims as honestly, and
+pixelates more only out of focus and on dim spots; fine-tuning to the measured on-time took that back
+on simulation (step 4's time-model section), not yet tried on real data.  fig4e: needs its own trainings
+(its beads and camera), not run yet.

@@ -62,10 +62,14 @@ class Predictor:
                 e = {name: v.detach().cpu().numpy() for name, v in e.items()}
                 e["frame"] = e["frame"] + a
                 parts.append(e)
-        cols = {name: np.concatenate([p[name] for p in parts]) if parts else np.zeros(0) for name in
-                ("frame", "x", "y", "z_nm", "photons", "prob", "photons_err", "x_err", "y_err", "z_err_nm", "background")}
+        names = ("frame", "x", "y", "z_nm", "photons", "prob", "photons_err", "x_err", "y_err", "z_err_nm", "background")
+        # a model with the reporting head reports its sigma; the mixture's is kept beside it, to compare
+        mix = ("x_err_mix", "y_err_mix", "z_err_mix_nm") if parts and "x_err_mix" in parts[0] else ()
+        cols = {name: np.concatenate([p[name] for p in parts]) if parts else np.zeros(0) for name in names + mix}
         x_pix = (ww - 1) - cols["x"] if self.frames_mirrored else cols["x"]
         return {"frame": cols["frame"].astype(np.int64) + int(first_frame), "x_pix": x_pix + c0, "y_pix": cols["y"] + r0,
                 "z_nm": cols["z_nm"], "photons": cols["photons"], "background": cols["background"], "prob": cols["prob"],
                 "x_err_pix": cols["x_err"], "y_err_pix": cols["y_err"], "z_err_nm": cols["z_err_nm"],
-                "photons_err": cols["photons_err"]}
+                "photons_err": cols["photons_err"],
+                **({"x_err_mix_pix": cols["x_err_mix"], "y_err_mix_pix": cols["y_err_mix"],
+                    "z_err_mix_nm": cols["z_err_mix_nm"]} if mix else {})}

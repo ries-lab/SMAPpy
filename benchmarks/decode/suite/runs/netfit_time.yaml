@@ -1,0 +1,7 @@
+# netfit's time models (poc-plan, "Step 4: the time model") on the real sets: each run names one
+# training's model; its parts are the model file's own (settings.json beside it), so none are listed.
+name: netfit_time
+fitter: netfit
+about: smappy.netfit, a step-4 training, extraction and sigma as the model was trained
+fit: {threshold: 0.5}
+keep: {min_prob: 0.5}
