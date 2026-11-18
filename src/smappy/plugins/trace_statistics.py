@@ -3,6 +3,9 @@ displacement, velocity, the track's long and short axis, the precision from
 consecutive differences, the trend across the track -- and its start, the
 tail, by a rule; kept as a region table of the id column, and on request
 the track turned onto its axes and the tail labelled on the localizations.
+In an ROI it proposes for the ROI its trace's direction as the angle and,
+with a tail rule, the range after the tail (`trace_proposals`), which
+*Apply proposals* sets.
 
 The maths is `smappy.traces`.  *Id statistics* stays the quick count,
 centre, spread and statistics of attributes; this is the trace's own
@@ -177,8 +180,15 @@ class TraceStatistics(Plugin):
             hist(panels[2], st["eccentricity"][good], "eccentricity (long/short)")
             draw_convergence(panels[3], conv)
 
+        # in an ROI (the per-region steps): what the ROI could take from its
+        # trace, set by *Apply proposals* -- never by measuring alone
+        proposals = (trace_proposals(r, t, st, tail, ts.rule, "time_s" if clock else "frame")
+                     if ctx.per_region else {})
+        if proposals:
+            lines.append("proposes for the ROI: " + ", ".join(proposals))
         return Result(locs=out_locs, text="\n".join(lines),
                       plot=Plot(draw, panels=4, size=(13, 3.0)),
+                      proposals=proposals,
                       id_regions={column: {LABEL: table}},
                       data={"statistics": values, "column": column, "tails": tail},
                       settings=settings, title="trace statistics")
@@ -207,6 +217,28 @@ class TraceStatistics(Plugin):
                 after[r.order] = cut
                 columns["after_cfr"] = after
         return Localizations(columns, dict(locs.metadata))
+
+
+def trace_proposals(r, t, st, tail, rule: str, attribute: str) -> dict:
+    """What an ROI could take from the trace it holds -- the one with the
+    most localizations, where an ROI of a shape holds several: its long
+    axis, forward in time, as the ROI's angle; and, with a tail rule, the
+    range of ``attribute`` (frame, or time_s) from its first localization
+    after the tail on, open at the end, so what is measured in the ROI
+    leaves the tail out.  Keys as `Result.proposals` reads them."""
+    if not len(r.ids):
+        return {}
+    i = int(np.argmax(r.n))
+    out = {}
+    angle = float(st["angle_deg"][i])
+    if np.isfinite(angle):
+        out["angle"] = angle
+    if rule != "none":
+        rows = slice(int(r.start[i]), int(r.start[i] + r.n[i]))
+        settled = np.flatnonzero(~np.asarray(tail.in_tail[rows], bool))
+        if len(settled) and settled[0] > 0:          # a tail, and a trace after it
+            out[f"range:{attribute}"] = [float(t[rows][settled[0]]), None]
+    return out
 
 
 def hist(ax, values, label: str) -> None:

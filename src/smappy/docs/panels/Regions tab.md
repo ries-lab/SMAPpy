@@ -156,8 +156,10 @@ steps.
 **Proposals.**  Some steps say not only what they measured but what the
 ROI could be: the [Trace inspector](plugin:Analysis/Tracking/Trace inspector)
 proposes a track's direction as the ROI's angle, its axis as the line
-*axis*, its centre; [Circle fit](plugin:Analysis/Measure/Circle fit) the
-fitted centre.  Under the selected ROI's numbers, a line per step says what
+*axis*, its centre; [Trace statistics](plugin:Analysis/Tracking/Trace statistics)
+the trace's direction as the angle and, with a tail rule, the range after
+its tail; [Circle fit](plugin:Analysis/Measure/Circle fit) the fitted
+centre.  Under the selected ROI's numbers, a line per step says what
 it proposes for the ROI ("Trace inspector proposes for the ROI: angle 37°,
 line axis, its centre"), and *Apply* sets it on the ROI -- on the ROIs selected in the ROI
 manager's list, or all of them when none is, each ROI its own proposals --
