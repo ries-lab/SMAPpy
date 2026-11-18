@@ -199,6 +199,13 @@ def _found(out, scaling, threshold, how, pixel_nm, scale=1):
             "err": np.c_[to(e["x_err"]) * pixel_nm[0], to(e["y_err"]) * pixel_nm[1], to(e["z_err_nm"])]}
 
 
+def warm_start(model, path) -> None:
+    """``model``'s weights from a model file (what training saved: the EMA's weights, plain names).
+    Strict: a file of another architecture or window is refused, never half loaded."""
+    tensors, _ = model_file.read(path)
+    model.load_state_dict({k: torch.from_numpy(v) for k, v in tensors.items()})
+
+
 def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int | None = None, log=print,
           early_stop: bool = True):
     folder = Path(folder)
@@ -212,6 +219,11 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     renderer = SplineRenderer(drawn, device)
     scaling = network.Scaling.for_simulation(sim)
     model = network.build(parts, sim.window).to(device)
+    # ``init``: a trained model's file to start from -- its weights, with a fresh optimizer and schedule --
+    # to fine-tune a network trained on a broad range (on-times, say) to what was measured on the data.
+    # Loaded before the EMA copies the model, and only on a fresh start: a resumed run has its own weights.
+    if sch.get("init") and not (folder / "checkpoint.pt").exists():
+        warm_start(model, sch["init"])
     batch_size, lr = batch_and_rate(sch, device)
     steps = max(1, sch["samples_per_epoch"] // batch_size)
     per_epoch = steps * batch_size

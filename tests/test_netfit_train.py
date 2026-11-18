@@ -85,3 +85,16 @@ def test_a_new_training_is_step_4s_base_ema_offsets_reaching_two_cells_and_a_hea
     assert {r["head"]: r["weight"] for r in p.loss.settings["reported"]} == {"mixture": 0.1, "rep": 1.0}
     model = network.build(p, 3)
     assert model(torch.zeros(1, 3, 16, 16)).shape[1] == 13     # one slot's 9 maps, the background, 3 reported sigmas
+
+
+def test_a_warm_start_takes_every_weight_of_a_saved_model_and_refuses_another_architecture(tmp_path):
+    from smappy.netfit.settings import Part
+    from smappy.training import model_file
+    gru = Parts(time_model=Part("convgru", {"frames": 5, "norm": True}))
+    trained, fresh = network.build(gru, 5), network.build(gru, 5)
+    path = model_file.write(tmp_path / "m.safetensors", {k: v.detach().numpy() for k, v in trained.state_dict().items()})
+    train.warm_start(fresh, path)
+    for k, v in trained.state_dict().items():
+        assert torch.equal(fresh.state_dict()[k], v), k
+    with pytest.raises(RuntimeError):
+        train.warm_start(network.build(Parts(time_model=Part("convgru", {"frames": 5, "skip": True})), 5), path)
