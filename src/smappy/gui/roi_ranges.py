@@ -6,8 +6,10 @@ What is measured in an ROI is its shape (or its id) narrowed by these
 between two heights, a MINFLUX trace's first seconds.  Which attributes are
 offered is the project's (`ROIProject.range_columns`, *attributes*), frame
 and z unless changed.  Each has two fields, blank for an open end, and a
-small plot to drag it on -- so a range is chosen by looking at the data
-rather than by guessing numbers.  How the plot looks depends on the
+small plot to drag its edges on (Shift and a drag inside the band moves it
+whole) -- so a range is chosen by looking at the data rather than by
+guessing numbers; a bound dragged or typed stays as set, and only *Clear*
+opens it again.  How the plot looks depends on the
 attribute (`range_kind`): a time or an id, where each value has many
 localizations, as **bars**, the localizations counted over it; a measured
 quantity -- z, sigma -- as **dots**, the attribute against the position
@@ -34,6 +36,7 @@ SIDE_POINTS = 20000          # the dots draw at most this many, a sample
 BAND_BRUSH = (46, 158, 79, 70)
 PLOT_HEIGHT = 110
 BINS = 200                   # bars: at most so many, or one per whole value
+EDGE_GRAB_PIXELS = 6         # a band's edge is grabbed so far either side of it
 
 
 def number_or_none(text: str) -> Optional[float]:
@@ -68,6 +71,38 @@ def whole(values: np.ndarray) -> bool:
     return v.dtype.kind in "iub" or (len(v) > 0 and bool(np.all(np.mod(v, 1) == 0)))
 
 
+class Band(pg.LinearRegionItem):
+    """The range's band: its edges are what is dragged.
+
+    pyqtgraph's band moves as a whole when dragged inside, and its edges
+    are a few pixels wide, so setting a bound moved the window more often
+    than not.  Here the edges are wide to grab (`EDGE_GRAB_PIXELS`), a drag
+    inside the band moves it only with Shift held, and the band is no part
+    of the plot's range: pyqtgraph scales the view to take it in, so an edge
+    dragged near the plot's side made the scale run away under the mouse.
+    """
+
+    def __init__(self, orientation):
+        super().__init__(orientation=orientation, brush=BAND_BRUSH)
+        for line in self.lines:
+            # the grab zone is the line's bounding box, its pen and the
+            # largest marker, in pixels either side (`InfiniteLine`); no
+            # marker is drawn, the zone is only made wider
+            line._maxMarkerSize = EDGE_GRAB_PIXELS
+            line.setPen(pg.mkPen((46, 158, 79), width=2))
+            line.setHoverPen(pg.mkPen((46, 158, 79), width=4))
+
+    def dataBounds(self, axis, frac=1.0, orthoRange=None):    # noqa: N802 (pyqtgraph's)
+        return None
+
+    def mouseDragEvent(self, ev):                             # noqa: N802
+        from PySide6.QtCore import Qt
+        if not (ev.modifiers() & Qt.ShiftModifier) and not self.moving:
+            ev.ignore()
+            return
+        super().mouseDragEvent(ev)
+
+
 class RangePlot(pg.PlotWidget):
     """A small plot with a band to drag: across the bars (the attribute on
     x), or along the dots (the attribute on y)."""
@@ -79,12 +114,27 @@ class RangePlot(pg.PlotWidget):
         self.hideButtons()
         self.getPlotItem().setContentsMargins(0, 0, 0, 0)
         orientation = "horizontal" if vertical else "vertical"
-        self.band = pg.LinearRegionItem(orientation=orientation, brush=BAND_BRUSH)
+        self.band = Band(orientation)
         self.band.setZValue(10)
         self.addItem(self.band)
         self.band.hide()
         self.data = None
         self.whole = False            # bars of whole values: a band snaps to them
+        self.vertical = vertical
+
+    def frame(self, lo: float, hi: float, bounds) -> None:
+        """Fix the attribute's axis on the data and the range, with a margin,
+        so neither a drag nor a bound far outside rescales it on the way."""
+        ends = [lo, hi] + [b for b in (bounds or ()) if b is not None]
+        a, b = min(ends), max(ends)
+        pad = 0.03 * (b - a) if b > a else 0.5
+        view = self.getPlotItem().getViewBox()
+        if self.vertical:
+            view.enableAutoRange(y=False)
+            view.setYRange(a - pad, b + pad, padding=0)
+        else:
+            view.enableAutoRange(x=False)
+            view.setXRange(a - pad, b + pad, padding=0)
 
 
 class RangePanel(QWidget):
@@ -166,6 +216,7 @@ class RangePanel(QWidget):
             v.addLayout(grid)
             bars = range_kind(column) == "bars"
             plot = RangePlot(vertical=not bars)
+            plot.column = column
             if bars:
                 plot.setLabel("bottom", column)
                 plot.setToolTip(f"the ROI's localizations over {column}; drag the band "
@@ -210,6 +261,7 @@ class RangePanel(QWidget):
         for column, plot in self.plots.items():
             for item in list(plot.listDataItems()):
                 plot.removeItem(item)
+            plot.getPlotItem().getViewBox().enableAutoRange()
             plot.band.hide()
             plot.band.data = None
             self.notes[column].setVisible(False)
@@ -267,6 +319,11 @@ class RangePanel(QWidget):
         """The band at the range, or over all of it when there is none."""
         a = lo if not bounds or bounds[0] is None else bounds[0]
         b = hi if not bounds or bounds[1] is None else bounds[1]
+        if plot.whole and bounds and bounds[1] is not None and range_kind(plot.column) == "bars":
+            # the last value kept is a bar, whose right edge is one past it:
+            # drawn at the value itself, every drag let go took one off
+            b = bounds[1] + 1
+        plot.frame(lo, hi, bounds)
         blocked = plot.band.blockSignals(True)
         plot.band.setRegion((a, b))
         plot.band.blockSignals(blocked)
@@ -303,21 +360,25 @@ class RangePanel(QWidget):
             self._set([roi.id], {column: wanted})
 
     def _dragged(self, column: str) -> None:
-        """A band let go: its ends, an end at the data's edge left open."""
+        """A band let go: its ends, as dragged.
+
+        Both ends are kept as numbers, wherever they were let go.  An end
+        at the data's edge was left open, so a band dragged out to it
+        cleared its field and the range jumped back to *all*; a bound set by
+        hand stays set, and only *Clear* opens it."""
         roi = self.window.shown_roi()
         plot = self.plots.get(column)
         if self._filling or roi is None or plot is None or plot.band.data is None:
             return
-        lo, hi = plot.band.data
         a, b = plot.band.getRegion()
         if range_kind(column) == "bars" and plot.whole:
             # whole values; the last bar's right edge is one past the last
             a, b = float(np.round(a)), float(np.round(b)) - 1
-            hi = hi - 1
         else:
             a, b = float(f"{a:.4g}"), float(f"{b:.4g}")
-        bounds = [None if a <= lo else a, None if b >= hi else b]
-        self._set([roi.id], {column: None if bounds == [None, None] else bounds})
+        if b < a:
+            a, b = b, a
+        self._set([roi.id], {column: [a, b]})
 
     def _clear(self, column: str) -> None:
         roi = self.window.shown_roi()

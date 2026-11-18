@@ -237,7 +237,7 @@ ordinary plugins that run on the view as well; `docs/regions.md`.)
 *Replaced* -- `docs/regions.md` (2026-10-11) folded evaluators into ordinary
 plugins and the pipeline into a block of a chain, which the ROI project holds
 (`ROIProject.block`) and the per-region steps in the Regions tab edit; a pipeline file
-of its own is gone (*save as...* keeps the block as a chain).  What follows
+of its own is gone (*Save as...* in its ⋯ menu keeps the block as a chain).  What follows
 is the design as it was, kept for its reasoning.
 
 Evaluators are the one thing that does not fit a tab.  A tab's pins are run

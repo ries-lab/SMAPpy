@@ -231,19 +231,41 @@ Ctrl+R).  Under the button, the file chosen there and
 how many of its ROIs there are and are used.
 
 ### per-region steps
-Folded when the tab opens; unfold it to choose and run the steps.  Which steps run, in what order, with which settings: the same editor as any
-chain's, opened on the one block.  *check* times them in a few ROIs, and
-Run measures what is out of date and carries the rest forward.  While it
-measures, Run is Stop: the ROI being measured is finished, the ones measured
-so far are kept, and the rest wait for the next Run.  The grey line under the
-steps says how far a run has got -- the share and number of ROIs (or regions)
-measured, how many a second and about how long is left -- and, after a Stop
-or a failure, how many are still to measure.  A new list starts with
-the general measurements, once each, with their own defaults; a specialised
-one, such as NPC Corners, is added there when the data call for it.  A run
-that will take more than a minute says how long before it starts.  The list
-is saved in the file with the results, because the results table's columns
-mean nothing without it, and *save as...* keeps it as a chain.
+Folded when the tab opens; unfold it to choose and run the steps.  At the
+top is what applies to every step: Run, *Measure this ROI*, and the ticks
+that measure and draw the ROI selected in the ROI manager.  Run measures
+what is out of date and carries the rest forward.  While it measures, Run
+is Stop: the ROI being measured is finished, the ones measured so far are
+kept, and the rest wait for the next Run.  The grey line under them says
+how far a run has got -- the share and number of ROIs (or regions)
+measured, how many a second and about how long is left -- and, after a
+Stop or a failure, how many are still to measure.  A run that will take
+more than a minute says how long before it starts.
+
+Below them, the steps: each a folded section with a tick in its title.
+Ticked, the step runs; unticked, it stays in the list with its settings and
+is skipped.  Unfolding a step shows its settings, and a right click on its
+title renames, moves or removes it.  With an ROI selected in the ROI
+manager, a step's title says how its result for that ROI stands --
+*(stale)*, *(failed)* -- and says nothing when it is current.  A new list
+starts with the general measurements, once each, with their own defaults;
+a specialised one, such as NPC Corners, is added there when the data call
+for it.  The list is saved in the file with the results, because the
+results table's columns mean nothing without it.  The **⋯** menu in the
+section's title bar opens a saved list (*Open chain...*: a chain's steps, or
+a block's) and keeps this one as a chain (*Save as...*).
+
+### for each
+What the steps are repeated over: every ROI of the ROI manager, or each
+region of an id attribute of the table (`cluster_id`, `track_id`, `tid`).
+
+### build
+Folded: the tools that change the steps.  *add...* adds a plugin as a step,
+after the step last opened; *check* times the steps in a few ROIs and says
+what the whole will take.  *write back* names the attributes the steps make
+that go into the real table, *write values* the numbers measured per region
+that are written onto its localizations, and *overlaps* how a localization
+in two regions takes their values (see `docs/regions.md`).
 
 Under it, how many ROIs have a complete, current row in the results table,
 and, once an ROI is selected in the ROI manager, a table of what was
@@ -258,12 +280,21 @@ they measure is stored, so the same work is not done on the next visit.
 Untick it to scroll a large project without anything being computed behind
 you; the numbers are then shown as stored.
 
+### Measure this ROI
+Runs the steps on the ROI selected in the ROI manager now, whether or not
+*measure the selected ROI* is ticked: the steps whose result for it is
+missing or out of date, which a step whose settings were just changed is.
+It is the way to see what a new setting gives on the ROI being looked at
+before running all of them.
+
 ### draw its figures
 Opens the *ROI results* window beside the ROI manager (and the manager, if
 it is not open): what the steps draw for the selected ROI, a tab per
-enabled step, redrawn in place by the next ROI.  The step whose tab is open
-runs on every selection, measured or not, because a figure cannot be stored.
-Closing that window unticks it.
+enabled step, redrawn in place by the next ROI.  A step that keeps the data
+its figure is drawn from with its result -- Localization Statistics,
+Binding kinetics -- draws it from what is stored, without measuring again;
+any other step whose tab is open runs again for its figure.  Closing that
+window unticks it.
 
 ### region filter
 Keeps the localizations of the [regions](plugin:Panels/Glossary) whose

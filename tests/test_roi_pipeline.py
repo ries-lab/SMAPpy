@@ -362,24 +362,27 @@ def test_the_region_steps_edit_the_projects_block(app, monkeypatch):
     session = Session(table([(0, 0)]))
     window = RegionSteps(session)
     project = session.rois
-    tree = window.panel.steps.invisibleRootItem()
-    assert tree.childCount() == 1                       # the block's steps, at the top
-    assert tree.child(0).text(0).startswith("Localization Statistics")
+    sections = window.panel.step_sections()
+    assert len(sections) == 1                           # the block's steps, at the top
+    assert sections[0][3].title.startswith("Localization Statistics")
     window.panel.form.set_values({"for_each_roi.localization_statistics.bins": 50})
     assert project.block.steps[0].values["bins"] == 50
     # a step added with nothing selected goes into the block
-    window.panel.steps.setCurrentItem(None)
+    window.panel.select(())
     monkeypatch.setattr(chooser, "choose_plugin",
                         lambda *a, **k: "Analysis/Measure/NPC Corners")
     window.panel.add_step()
     assert [i.plugin for i in project.block.steps] == [
         "Analysis/Measure/Localization Statistics", "Analysis/Measure/NPC Corners"]
     assert project.block.steps[0].values["bins"] == 50     # what the form held survives
-    window.panel.steps.invisibleRootItem().child(1).setCheckState(0, Qt.Unchecked)
+    # the tick in a step's title switches it off; its section and values stay
+    window.panel.step_sections()[1][3].tick.setChecked(False)
     assert not project.block.steps[1].enabled
+    assert len(window.panel.step_sections()) == 2
     assert [s.label for s in project.block_steps()] == ["Localization Statistics"]
-    # what it repeats over is the block's own field
-    window.panel.form.set_values({"for_each_roi.write_back": "n_here"})
+    # what it repeats over and writes back: the block's own fields, set here
+    window.write_back.setText("n_here")
+    window.write_back.editingFinished.emit()
     assert project.block.write_back == ["n_here"]
 
 
@@ -483,7 +486,7 @@ def test_a_stopped_or_failed_run_leaves_no_percentage_behind(app, monkeypatch):
     window = RegionSteps(Session(table([(0, 0)])))
     monkeypatch.setattr(chooser, "choose_plugin",
                         lambda *a, **k: "Analysis/Measure/NPC Corners")
-    window.panel.steps.setCurrentItem(None)
+    window.panel.select(())
     window.panel.add_step()                     # a new inner panel, wired again
     line = "37% (37 of 100 ROIs), 2.1 a second, about 30 s left"
     for how in ("stopped", "failed"):

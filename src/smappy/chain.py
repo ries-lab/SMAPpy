@@ -474,6 +474,9 @@ class ChainPlugin(Plugin):
     """A chain, as a plugin.  Made by `chain_class`; not registered itself."""
     spec: ChainSpec = None
     steps: List[tuple] = []           # (key, Step, plugin class) of enabled steps
+    # the steps switched off: in the settings, so the panel shows each as a
+    # section with its tick off and its values kept, but never run
+    off: List[tuple] = []
     logged = True                     # a chain's record is the point of it
     # whether a step changes the table: `chain_class` answers for the
     # chain's own values, `changes_locs_for` for the form's
@@ -757,7 +760,7 @@ class ChainPlugin(Plugin):
         values in the form and the version of the plugin that is installed.
         """
         steps = []
-        by_key = {k: (step, plugin) for k, step, plugin in cls.steps}
+        by_key = {k: (step, plugin) for k, step, plugin in list(cls.steps) + list(cls.off)}
         keys = cls.spec.keys()
         for key, step in zip(keys, cls.spec.steps):
             step = copy.deepcopy(step)
@@ -779,6 +782,22 @@ class ChainPlugin(Plugin):
                          interface=dict(getattr(cls.spec, "interface", None) or {}))
 
 
+def _step_column(key: str, step) -> Tuple[tuple, type]:
+    """The settings column a step (or block) adds to its chain's, and the
+    plugin class that runs it."""
+    if isinstance(step, Block):
+        from .blocks import block_class
+        cls = block_class(step)
+        return (key, cls.Settings, param(
+            default_factory=cls.Settings, label=step.title(), collapsed=True,
+            help=cls.description)), cls
+    cls = step_plugin(step)
+    step_cls = step_settings_class(key, cls, step)
+    return (key, step_cls, param(
+        default_factory=step_cls, label=step.title(), collapsed=True,
+        help=cls.description or step.plugin)), cls
+
+
 def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
     """A `Plugin` subclass that runs ``spec``.
 
@@ -794,23 +813,21 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
         help="whether every step reads merged blinks, unless the step says "
              "otherwise: as each layer has it in the Render tab, or not"))]
     extras: Dict[str, ParamInfo] = {}
+    off: List[tuple] = []
     for key, step in zip(keys, spec.steps):
         if not step.enabled:
+            # its section stays, ticked off, with its values: a step switched
+            # off is still in the chain.  One whose plugin cannot be had is
+            # left out of the form rather than failing a chain it does not run in.
+            try:
+                built = _step_column(key, step)
+            except ChainError:
+                continue
+            columns.append(built[0])
+            off.append((key, step, built[1]))
             continue
-        if isinstance(step, Block):
-            from .blocks import block_class
-            cls = block_class(step)
-            columns.append((key, cls.Settings, param(
-                default_factory=cls.Settings, label=step.title(), collapsed=True,
-                help=cls.description)))
-            extras.update(_flat_infos(cls.specs(), f"{key}."))
-            steps.append((key, step, cls))
-            continue
-        cls = step_plugin(step)
-        step_cls = step_settings_class(key, cls, step)
-        columns.append((key, step_cls, param(
-            default_factory=step_cls, label=step.title(), collapsed=True,
-            help=cls.description or step.plugin)))
+        column, cls = _step_column(key, step)
+        columns.append(column)
         extras.update(_flat_infos(cls.specs(), f"{key}."))
         steps.append((key, step, cls))
     if spec.interface:
@@ -822,7 +839,7 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
                                   namespace={"__module__": __name__})
     name = spec.name
     attrs = {
-        "spec": spec, "steps": steps, "Settings": settings_cls, "params": extras,
+        "spec": spec, "steps": steps, "off": off, "Settings": settings_cls, "params": extras,
         "name": name, "path": path or spec.path or f"{DEFAULT_GROUP}/{name}",
         "description": spec.description or " -> ".join(s.title() for _, s, _ in steps),
         "version": "1",

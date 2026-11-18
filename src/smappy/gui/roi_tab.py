@@ -95,8 +95,22 @@ class ROIHeader(QWidget):
             "that stepping down the list compares like with like.  Only the "
             "tab being looked at is drawn.")
         self.plot.toggled.connect(self._on_plot)
-        slayout.addWidget(self.measure)
-        slayout.addWidget(self.plot)
+        # the steps' settings changed: what they give on the ROI being looked
+        # at, without stepping off it and back or running every ROI
+        self.measure_now = QPushButton("Measure this ROI")
+        self.measure_now.setToolTip(
+            "run the steps on the ROI selected in the ROI manager now: those "
+            "whose result for it is missing or out of date, as after a change "
+            "of their settings")
+        self.measure_now.clicked.connect(self.measure_selected)
+        # with Run, at the top of the steps: what applies to all of them
+        self.steps.controls.insertWidget(1, self.measure_now)
+        ticks = QHBoxLayout()
+        ticks.setContentsMargins(0, 0, 0, 0)
+        ticks.addWidget(self.measure)
+        ticks.addWidget(self.plot)
+        ticks.addStretch(1)
+        self.steps.shared.addLayout(ticks)
         self.summary = QLabel("")
         self.summary.setWordWrap(True)
         self.summary.setStyleSheet("color: gray")
@@ -124,6 +138,8 @@ class ROIHeader(QWidget):
                                      help_tip="what the per-region steps are, and "
                                               "how they run")
         section.help_requested.connect(self._steps_help)
+        # the step list's file and ⋯ menu (open, save as) in the title bar
+        section.add_to_title(self.steps.panel.title_widgets())
         layout.addWidget(section)
 
         # ------------------------------------------------- region filter
@@ -260,6 +276,18 @@ class ROIHeader(QWidget):
             self.session.changed("layer")
 
     # --------------------------------------------------------------- work
+    def measure_selected(self) -> None:
+        """The steps on the selected ROI, now: what is out of date runs."""
+        roi_id = self.project.navigation.get("roi")
+        if roi_id not in self.project.rois:
+            return
+        self.steps.store()
+        self.open_manager()
+        if self.manager.active != roi_id:
+            self.manager.select(roi_id)
+        self.manager.evaluate_active(now=True)
+        self._show_result()
+
     def _on_measure(self, on: bool) -> None:
         if self._loading:
             return
@@ -291,6 +319,9 @@ class ROIHeader(QWidget):
         project = self.project
         active = project.navigation.get("roi")
         roi = project.rois.get(active) if active else None
+        self.measure_now.setEnabled(roi is not None)
+        # each step's title says how its result stands for this ROI
+        self.steps.show_states(project.latest(roi.id)[1] if roi is not None else None)
         self.results.setRowCount(0)
         self.results.setVisible(roi is not None)
         self._show_proposals(roi)
@@ -304,7 +335,7 @@ class ROIHeader(QWidget):
             self.results.setRowCount(1 + len(noted))
             self.results.setItem(0, 0, QTableWidgetItem(
                 "not measured" if self.measure.isChecked()
-                else "not measured: tick measure, or Run"))
+                else "not measured: Measure this ROI, or Run"))
             for row, (name, keyword) in enumerate(noted, 1):
                 self.results.setItem(row, 0, QTableWidgetItem(name))
                 self.results.setItem(row, 1, QTableWidgetItem(keyword))

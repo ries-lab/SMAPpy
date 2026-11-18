@@ -32,7 +32,7 @@ and its vertex -- the peak of a smooth distribution read finer than a bin.
 **Per region** (`per_region`): one run per ROI or cluster, giving the
 count, mean, median, standard deviation and mode of the column in each,
 as ``<column>_mean`` etc. for the first layer and with ``_L2``, ``_L3`` for
-the others -- so *Sort ROIs* or *Filter ROIs* can work on, say, the median z
+the others -- so *Sort regions* or *Filter ROIs* can work on, say, the median z
 of every pore.
 """
 from __future__ import annotations

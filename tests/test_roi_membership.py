@@ -306,11 +306,17 @@ def test_the_frame_and_z_range_are_typed_or_dragged_and_undone(app):
     ranges.fields[("frame", 0)].editingFinished.emit()
     assert project.rois[along_x.id].frames == [3.0, None]
     assert project.indices(project.rois[along_x.id]).tolist() == list(range(3, 10))
-    # the band, let go between frames 2 and 6, its far end at the data's edge
+    # the band, let go from frame 2 to the data's edge: that end is kept as
+    # a number, never opened (only *Clear* opens a range)
     band = ranges.plots["frame"].band
     band.setRegion((2.2, 10))
     band.sigRegionChangeFinished.emit(band)
-    assert project.rois[along_x.id].frames == [2.0, None]
+    assert project.rois[along_x.id].frames == [2.0, 9.0]
+    assert ranges.fields[("frame", 1)].text() == "9"
+    # drawn back over its last bar, so letting it go again changes nothing
+    assert band.getRegion() == (2.0, 10.0)
+    band.sigRegionChangeFinished.emit(band)
+    assert project.rois[along_x.id].frames == [2.0, 9.0]
     band = ranges.plots["z_nm"].band
     band.setRegion((20, 60))
     band.sigRegionChangeFinished.emit(band)
@@ -322,7 +328,7 @@ def test_the_frame_and_z_range_are_typed_or_dragged_and_undone(app):
     assert [r.z for r in project.rois.values()].count(None) == 1
     ranges.buttons[("z_nm", "clear")].click()
     assert project.rois[along_x.id].z is None
-    assert project.rois[along_x.id].frames == [2.0, None]      # the other row's stays
+    assert project.rois[along_x.id].frames == [2.0, 9.0]       # the other row's stays
     ranges.buttons[("frame", "clear")].click()
     assert project.rois[along_x.id].frames is None
     window.close()

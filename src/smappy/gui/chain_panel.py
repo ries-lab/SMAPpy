@@ -1,43 +1,50 @@
 """A chain's panel: the plugin panel it is, and the steps it is made of.
 
-A chain is always one collapsed plugin panel -- its steps are the folded
-sections of its form -- and building one happens in the same place as using
-it: **edit steps** shows a list of the steps with add, move, remove and
-rename, and **Save chain** writes the file.  There is no separate chain
-editor, because a chain one builds somewhere else and then finds again in a
-tab is two things to keep in step, and this is one.
+A chain is one collapsed plugin panel, and its steps are the list: each step
+is a folded section of the form with a tick in its title -- on, it runs;
+off, it stays in the chain with its settings and is skipped -- and unfolding
+it shows that step's settings.  A list of the steps above the form, as there
+was, said the same steps twice and kept the settings away from the step
+they belong to.
 
-Editing rebuilds the plugin class (`chain.chain_class`), so the form below is
+What builds the chain is folded away under **build**: *add...*, *block...*,
+*interface...* and *check*, with rename, move and remove on a right click on
+a step's title.  Opening and saving the chain are in a **⋯** menu with its
+file name beside it, which the tab puts in the section's title bar
+(`title_widgets`), so they are there without unfolding *build*: using a
+chain and building one happen in the same place, and there is no separate
+chain editor to keep in step with what a tab shows.
+
+Editing rebuilds the plugin class (`chain.chain_class`), so the form is
 replaced; the values in it survive, because the edited chain is made from
 `current_spec`, which carries the form's values into the steps.  Until it is
 saved, the edited chain lives in the workspace instance (`Instance.chain`),
 so a restart loses nothing.
 
-The steps are a tree: a block (`docs/regions.md`) holds steps of its own,
-indented under it.  A step is added after the selected one, or into the
-selected block; up and down move a step within its own list.  **interface...** chooses
-the settings the chain asks (`chain_interface.py`).  **check**, on
-a block, times it in a few of its regions and says what the whole will take
-and which columns its steps change without writing them back
-(`blocks.BlockPlugin.estimate`).
+A block (`docs/regions.md`) is a section holding its steps' sections.  A
+step is added after the one last opened or right-clicked (`current_path`),
+or into it if it is a block; up and down move a step within its own list.
+**interface...** chooses the settings the chain asks (`chain_interface.py`).
+**check**, on a block, times it in a few of its regions and says what the
+whole will take and which columns its steps change without writing them
+back (`blocks.BlockPlugin.estimate`).
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
-
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QFileDialog, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
-                               QMessageBox, QPushButton, QToolButton, QTreeWidget,
-                               QTreeWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
+                               QMenu, QMessageBox, QPushButton, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from .. import chain as chains, plugins
 from ..chain import Block, ChainError, ChainSpec, Step
-
-# an item's place in the chain: indices from the top list down into blocks
-PATH = Qt.UserRole
+from ..session import Session
+from ..workspace import Instance
+from .plugin_panel import PluginPanel
+from .widgets import CollapsibleSection, note_style
 
 
 def _steps_at(spec, path: Tuple[int, ...]) -> Tuple[list, int]:
@@ -51,10 +58,6 @@ def _steps_at(spec, path: Tuple[int, ...]) -> Tuple[list, int]:
 def _step_at(spec, path):
     holder, i = _steps_at(spec, path)
     return holder[i]
-from ..session import Session
-from ..workspace import Instance
-from .plugin_panel import PluginPanel
-from .widgets import note_style
 
 
 def spec_of(instance: Instance) -> Optional[ChainSpec]:
@@ -71,89 +74,96 @@ def is_chain(cls) -> bool:
 
 
 class ChainPanel(QWidget):
-    """A `PluginPanel` for a chain, with its steps editable above it."""
+    """A `PluginPanel` for a chain: its steps as ticked sections, the tools
+    that build it folded above them."""
 
     changed = Signal()              # the steps, or where the chain lives, changed
 
     def __init__(self, instance: Instance, session: Session, cls: type, parent=None,
                  root: Tuple[int, ...] = ()):
         """``root`` opens the panel on one block of the chain: its steps are
-        the top of the tree and new steps go into it (the region steps
-        window, `region_steps.py`)."""
+        the top of the list and new steps go into it (the per-region steps,
+        `region_steps.py`)."""
         super().__init__(parent)
         self.root = tuple(root)
         self.instance = instance
         self.session = session
         self.cls = cls
         self.panel: Optional[PluginPanel] = None
+        self._current: Tuple[int, ...] = ()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
 
-        bar = QHBoxLayout()
-        self.edit = QToolButton(text="edit steps", checkable=True)
-        self.edit.setToolTip("add, move, rename or remove the chain's steps")
-        self.edit.toggled.connect(self._show_editor)
-        self.save = QToolButton(text="save chain")
-        self.save.clicked.connect(self.save_chain)
-        self.save_as = QToolButton(text="save as...")
-        self.save_as.clicked.connect(lambda: self.save_chain(ask=True))
+        # the file and the ⋯ menu: in this row until a section's title bar
+        # takes them (`title_widgets`)
+        self.top = QHBoxLayout()
+        self.top.setContentsMargins(0, 0, 0, 0)
         self.where = QLabel("")
         self.where.setStyleSheet(note_style())
-        for w in (self.edit, self.save, self.save_as):
-            bar.addWidget(w)
-        bar.addWidget(self.where, 1)
-        layout.addLayout(bar)
+        self.menu_button = QToolButton(text="⋯", autoRaise=True)
+        self.menu_button.setToolTip("open, save or save the chain as a file")
+        self.menu_button.setPopupMode(QToolButton.InstantPopup)
+        self.chain_menu = QMenu(self)
+        self.open_action = self.chain_menu.addAction("Open chain...", self.open_chain)
+        self.save_action = self.chain_menu.addAction("Save chain", self.save_chain)
+        self.save_as_action = self.chain_menu.addAction(
+            "Save as...", lambda: self.save_chain(ask=True))
+        self.menu_button.setMenu(self.chain_menu)
+        self.top.addWidget(self.where, 1)
+        self.top.addWidget(self.menu_button)
+        layout.addLayout(self.top)
 
+        # ------------------------------------------------------------ build
         self.editor = QWidget()
         column = QVBoxLayout(self.editor)
         column.setContentsMargins(0, 0, 0, 0)
-        self.steps = QTreeWidget()
-        self.steps.setHeaderHidden(True)
-        self.steps.setIndentation(14)
-        self.steps.setMaximumHeight(160)
-        self.steps.itemChanged.connect(self._ticked)
-        self.steps.currentItemChanged.connect(lambda *_: self._selected())
-        column.addWidget(self.steps)
-        # two rows of three: six in one row are wider than the control
-        # column, and were cut to "lock.." and "emove" in it
-        row = QGridLayout()
-        row.setHorizontalSpacing(4)
-        row.setVerticalSpacing(2)
-        for i, (label, slot) in enumerate((
-                ("add...", self.add_step), ("block...", self.add_block),
-                ("rename...", self.rename_step),
-                ("up", lambda: self.move_step(-1)),
-                ("down", lambda: self.move_step(1)), ("remove", self.remove_step))):
+        column.setSpacing(2)
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        for label, slot, tip in (
+                ("add...", self.add_step, "add a plugin as a step, after the step "
+                                          "last opened, or into it if it is a block"),
+                ("block...", self.add_block, "add a block: steps repeated in each "
+                                             "ROI, or each region of an id attribute")):
             button = QPushButton(label)
-            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(label) + 20)
+            button.setToolTip(tip)
             button.clicked.connect(slot)
-            row.addWidget(button, *divmod(i, 3))
-        column.addLayout(row)
-        checking = QHBoxLayout()
-        self.check_button = QPushButton("check")
-        self.check_button.setToolTip("time the selected block in a few of its "
-                                     "regions: what the whole will take, and "
-                                     "the attributes it changes without writing "
-                                     "them back")
-        self.check_button.clicked.connect(self.check_block)
-        self.check_button.setEnabled(bool(self.root))
-        self.checked = QLabel("")
-        self.checked.setWordWrap(True)
-        self.checked.setStyleSheet(note_style())
-        checking.addWidget(self.check_button)
+            row.addWidget(button)
         self.interface_button = QPushButton("interface...")
         self.interface_button.setToolTip("choose the settings this chain asks: shown at the top "
                                          "of its form, the steps folded away")
         self.interface_button.clicked.connect(self.edit_interface)
-        checking.addWidget(self.interface_button)
-        checking.addWidget(self.checked, 1)
-        column.addLayout(checking)
-        self.editor.setVisible(False)
-        layout.addWidget(self.editor)
+        row.addWidget(self.interface_button)
+        self.check_button = QPushButton("check")
+        self.check_button.setToolTip("time the block in a few of its regions: what "
+                                     "the whole will take, and the attributes it "
+                                     "changes without writing them back")
+        self.check_button.clicked.connect(self.check_block)
+        row.addWidget(self.check_button)
+        row.addStretch(1)
+        column.addLayout(row)
+        self.hint = QLabel("right-click a step's title to rename, move or remove it")
+        self.hint.setStyleSheet(note_style())
+        self.hint.setWordWrap(True)
+        column.addWidget(self.hint)
+        self.checked = QLabel("")
+        self.checked.setWordWrap(True)
+        self.checked.setStyleSheet(note_style())
+        column.addWidget(self.checked)
+        self.build = CollapsibleSection("build", self.editor, expanded=False)
+        # what a tab or the batch window ticks to open the tools (an empty chain)
+        self.edit = self.build.button
+        layout.addWidget(self.build)
 
         self.holder = QVBoxLayout()
         layout.addLayout(self.holder)
         self._build(cls)
+
+    def title_widgets(self) -> List[QWidget]:
+        """What a section's title bar shows of the chain: its file and its
+        menu (`CollapsibleSection.add_to_title`)."""
+        return [self.where, self.menu_button]
 
     def runnable(self, on: bool) -> None:
         """Whether the chain can be run on the session from here.  Not in the
@@ -180,7 +190,7 @@ class ChainPanel(QWidget):
         self.panel.refresh_derived()
 
     # ------------------------------------------------------------ building
-    def _build(self, cls: type, relist: bool = True) -> None:
+    def _build(self, cls: type) -> None:
         if self.panel is not None:
             self.panel.release()
             self.holder.removeWidget(self.panel)
@@ -192,72 +202,82 @@ class ChainPanel(QWidget):
         self.panel = PluginPanel(cls, self.session)
         self.holder.addWidget(self.panel)
         self._show_run_controls()
-        if relist:
-            self._list_steps()
+        self._decorate()
         origin = cls.spec.origin
         self.where.setText(("unsaved changes" if self.instance.chain and origin else
                             "not saved" if self.instance.chain else "")
                            + (f"  {origin.name}" if origin else ""))
+        self.check_button.setEnabled(bool(self.root) or any(
+            isinstance(step, Block) for step in cls.spec.steps))
 
-    def _list_steps(self) -> None:
-        blocked = self.steps.blockSignals(True)
-        try:
-            self.steps.clear()
+    def step_sections(self) -> List[tuple]:
+        """``(path, key, step, section)`` for every step the form shows, in
+        order, a block's steps after it."""
+        out = []
 
-            def add(parent, steps, path):
-                for i, step in enumerate(steps):
-                    if isinstance(step, Block):
-                        what = ("each ROI" if step.regions == chains.BLOCK_ROIS
-                                else f"each {step.regions}")
-                        text = (f"{step.label}   (block: {what})" if step.label
-                                else f"{step.title()}   (block)")
-                    else:
-                        text = f"{step.title()}   ({step.plugin})"
-                    item = QTreeWidgetItem(parent, [text])
-                    item.setData(0, PATH, path + (i,))
-                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                    item.setCheckState(0, Qt.Checked if step.enabled else Qt.Unchecked)
-                    if isinstance(step, Block):
-                        add(item, step.steps, path + (i,))
-                        item.setExpanded(True)
-            top = (self.cls.spec.steps if not self.root
-                   else _step_at(self.cls.spec, self.root).steps)
-            add(self.steps, top, self.root)
-        finally:
-            self.steps.blockSignals(blocked)
+        def walk(steps, keys, form, path):
+            if form is None or not hasattr(form, "sections"):
+                return
+            for i, (key, step) in enumerate(zip(keys, steps)):
+                section = form.sections.get(key)
+                if section is None:
+                    continue
+                out.append((path + (i,), key, step, section))
+                if isinstance(step, Block):
+                    walk(step.steps, step.keys(), form.fields.get(key), path + (i,))
+
+        spec = self.cls.spec
+        if self.root:
+            form, steps, keys = self.panel.form, spec.steps, spec.keys()
+            for i in self.root:
+                form = form.fields.get(keys[i]) if form is not None else None
+                block = steps[i]
+                steps, keys = block.steps, block.keys()
+            walk(steps, keys, form, self.root)
+        else:
+            walk(spec.steps, spec.keys(), self.panel.form, ())
+        return out
+
+    def _decorate(self) -> None:
+        """Each step's section: a tick in its title that switches it on and
+        off, its title's right click, and which step was opened last."""
+        for path, key, step, section in self.step_sections():
+            box = QCheckBox()
+            box.setChecked(step.enabled)
+            box.setToolTip("run this step; off, it stays in the chain with its "
+                           "settings and is skipped")
+            box.toggled.connect(lambda on, p=path: self.set_enabled(p, on))
+            section.add_before_title(box)
+            section.tick = box
+            section.content.setEnabled(step.enabled)
+            section.button.setToolTip("right-click to rename, move or remove this step")
+            section.button.setContextMenuPolicy(Qt.CustomContextMenu)
+            section.button.customContextMenuRequested.connect(
+                lambda at, p=path, s=section: self._step_menu(p, s, at))
+            section.toggled.connect(lambda on, p=path: self._opened(p, on))
+
+    def _opened(self, path, on: bool) -> None:
+        if on:
+            self._current = tuple(path)
 
     def current_path(self) -> Tuple[int, ...]:
-        item = self.steps.currentItem()
-        return tuple(item.data(0, PATH)) if item is not None else ()
+        """The step last opened or right-clicked, if it is still there."""
+        path = self._current
+        if not path:
+            return ()
+        try:
+            _step_at(self.cls.spec, path)
+        except (IndexError, AttributeError):
+            return ()
+        return path
 
     def select(self, path: Tuple[int, ...]) -> None:
-        """Select the step at ``path`` in the tree."""
-        def find(item):
-            for k in range(item.childCount()):
-                child = item.child(k)
-                if tuple(child.data(0, PATH)) == tuple(path):
-                    return child
-                found = find(child)
-                if found is not None:
-                    return found
-            return None
-        item = find(self.steps.invisibleRootItem())
-        if item is not None:
-            self.steps.setCurrentItem(item)
-
-    def _selected(self) -> None:
-        path = self.current_path()
-        is_block = False
-        if path:
-            try:
-                is_block = isinstance(_step_at(self.cls.spec, path), Block)
-            except (IndexError, AttributeError):
-                is_block = False
-        self.check_button.setEnabled(bool(self.root) or (is_block and len(path) == 1))
-        self.checked.setText("")
-
-    def _show_editor(self, on: bool) -> None:
-        self.editor.setVisible(on)
+        """Make the step at ``path`` the current one, its section open; ()
+        for none."""
+        self._current = tuple(path)
+        for p, _, _, section in self.step_sections():
+            if p == tuple(path):
+                section.set_expanded(True)
 
     def current_spec(self) -> ChainSpec:
         """The chain with what the form holds: what an edit starts from and
@@ -268,7 +288,7 @@ class ChainPanel(QWidget):
             settings = None              # a half-typed number: the saved values
         return self.cls.current_spec(settings)
 
-    def _apply(self, spec: ChainSpec, relist: bool = True) -> bool:
+    def _apply(self, spec: ChainSpec) -> bool:
         try:
             cls = chains.chain_class(spec, path=self.instance.plugin)
         except ChainError as error:
@@ -280,15 +300,52 @@ class ChainPanel(QWidget):
         self.instance.chain = raw
         self.instance.values = {}        # the values are in the steps now
         path = self.current_path()
-        self._build(cls, relist=relist)
+        self._build(cls)
         if path:
             self.select(path)
         self.changed.emit()
         return True
 
     # ------------------------------------------------------------- editing
+    def step_actions(self, path: Optional[Tuple[int, ...]] = None) -> List[tuple]:
+        """What a right click on a step's title offers: ``(label, slot,
+        enabled)``, for the step at ``path`` (the current one by default)."""
+        if path is not None:
+            self._current = tuple(path)
+        path = self.current_path()
+        if not path:
+            return []
+        holder, at = _steps_at(self.cls.spec, path)
+        out = [("Rename...", self.rename_step, True),
+               ("Move up", lambda: self.move_step(-1), at > 0),
+               ("Move down", lambda: self.move_step(1), at < len(holder) - 1),
+               ("Remove", self.remove_step, True)]
+        if isinstance(holder[at], Block):
+            out.append(("Add a step into it...", self.add_step, True))
+            out.append(("Check", self.check_block, True))
+        return out
+
+    def _step_menu(self, path, section, at) -> None:
+        menu = QMenu(self)
+        for label, slot, enabled in self.step_actions(path):
+            action = menu.addAction(label)
+            action.setEnabled(enabled)
+            action.triggered.connect(lambda _=False, f=slot: f())
+        menu.exec(section.button.mapToGlobal(at))
+
+    def set_enabled(self, path: Tuple[int, ...], on: bool) -> None:
+        """Switch the step at ``path`` on or off: off, it keeps its section
+        and its settings, and is skipped."""
+        spec = self.current_spec()
+        step = _step_at(spec, path)
+        if step.enabled == bool(on):
+            return
+        step.enabled = bool(on)
+        self._current = tuple(path)
+        self._apply(spec)
+
     def _insert(self, step) -> None:
-        """Put ``step`` after the selected one, or into the selected block."""
+        """Put ``step`` after the current one, or into it if it is a block."""
         spec = self.current_spec()
         path = self.current_path()
         if path and isinstance(_step_at(spec, path), Block):
@@ -346,8 +403,8 @@ class ChainPanel(QWidget):
         if not 0 <= to < len(holder):
             return
         holder[at], holder[to] = holder[to], holder[at]
-        if self._apply(spec):
-            self.select(path[:-1] + (to,))
+        self._current = path[:-1] + (to,)
+        self._apply(spec)
 
     def rename_step(self) -> None:
         path = self.current_path()
@@ -370,24 +427,24 @@ class ChainPanel(QWidget):
         spec = self.current_spec()
         holder, at = _steps_at(spec, path)
         holder.pop(at)
+        self._current = ()
         self._apply(spec)
 
-    def _ticked(self, item: QTreeWidgetItem) -> None:
-        path = tuple(item.data(0, PATH))
-        spec = self.current_spec()
-        _step_at(spec, path).enabled = item.checkState(0) == Qt.Checked
-        # The list already shows the tick, and is not rebuilt: this runs
-        # inside the item's own setData, and clearing the tree here deleted
-        # the item Qt was still writing to -- a segfault, now and then, on
-        # every untick (`test_the_region_steps_edit_the_projects_block`).
-        self._apply(spec, relist=False)
-
     def check_block(self) -> None:
-        """Time the selected block in a few regions and say what it found."""
-        path = self.current_path() or self.root
-        if not path:
-            return
-        key = self.cls.spec.keys()[path[0]]
+        """Time a block in a few regions and say what it found: the current
+        step's block, the panel's own (the per-region steps), or the first."""
+        path = self.current_path()
+        spec = self.cls.spec
+        if path and isinstance(spec.steps[path[0]], Block):
+            top = path[0]
+        elif self.root:
+            top = self.root[0]
+        else:
+            top = next((i for i, s in enumerate(spec.steps) if isinstance(s, Block)), None)
+            if top is None:
+                self.checked.setText("no block to check")
+                return
+        key = spec.keys()[top]
         found = next(((k, cls) for k, step, cls in self.cls.steps if k == key), None)
         if found is None:
             self.checked.setText("the block is switched off")
@@ -399,6 +456,7 @@ class ChainPanel(QWidget):
         except Exception as error:
             self.checked.setText(f"cannot check: {error}")
             return
+        self.build.set_expanded(True)          # where the answer is written
         self.checked.setText("no regions to time" if estimate is None
                              else estimate.text())
 
@@ -414,7 +472,35 @@ class ChainPanel(QWidget):
         spec.interface = dialog.chosen()
         return self._apply(spec)
 
-    # -------------------------------------------------------------- saving
+    # ------------------------------------------------------ opening, saving
+    def open_chain(self, target: Optional[Path] = None) -> bool:
+        """Take a saved chain's steps.  For the per-region steps, a chain
+        that is one block gives its steps, any other its steps as they are."""
+        if target is None:
+            folder = plugins.chains_dir()
+            chosen, _ = QFileDialog.getOpenFileName(
+                self, "Open chain", str(folder), f"Chains (*{chains.SUFFIX})")
+            if not chosen:
+                return False
+            target = Path(chosen)
+        try:
+            opened = chains.read(target)
+        except Exception as error:               # a file that is not a chain
+            QMessageBox.warning(self, "Open chain", f"{target.name}: {error}")
+            return False
+        if self.root:
+            spec = self.current_spec()
+            block = _step_at(spec, self.root)
+            inner = opened.steps
+            if len(inner) == 1 and isinstance(inner[0], Block):
+                inner = inner[0].steps
+            block.steps = list(inner)
+            self._current = ()
+            return self._apply(spec)
+        opened.origin = Path(target)
+        self._current = ()
+        return self._apply(opened)
+
     def save_chain(self, ask: bool = False) -> Optional[Path]:
         """Write the chain; to its own file unless ``ask`` or it has none.
 
@@ -443,7 +529,7 @@ class ChainPanel(QWidget):
         ref = next((r for r in plugins.refs().values()
                     if r.kind == "chain" and Path(r.origin).resolve() == target.resolve()),
                    None)
-        if ref is not None:
+        if ref is not None and not self.root:
             self.instance.plugin = ref.path
             self.instance.chain = None
             self.instance.values = {}
@@ -451,7 +537,8 @@ class ChainPanel(QWidget):
         else:
             spec.origin = target
             self._apply(spec)
-            self.where.setText(f"saved to {target}, which is not a plugin folder: "
-                               "it will not appear in the tree")
+            if ref is None:
+                self.where.setText(f"saved to {target}, which is not a plugin folder: "
+                                   "it will not appear in the tree")
         self.changed.emit()
         return target

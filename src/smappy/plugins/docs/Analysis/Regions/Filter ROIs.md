@@ -32,7 +32,7 @@ name has spaces in it -- `NPC Corners.n_corners`, when two steps write
 **What it reads.**  For each ROI, the newest stored values of every
 measurement made in it, current or not, its keywords, and the angle and
 length of each line drawn on it (`direction_angle_deg`,
-`direction_length_nm`), as Sort ROIs reads them -- and where it is:
+`direction_length_nm`), as Sort regions reads them -- and where it is:
 
 * `roi_x_nm`, `roi_y_nm` -- the ROI's centre, in nm.
 * `in_drawn_roi` -- true when the ROI's centre is inside the ROI drawn in

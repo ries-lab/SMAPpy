@@ -237,7 +237,8 @@ class BlockPlugin(ChainPlugin):
         block.write_back = _columns(settings.write_back)
         block.write_values = _columns(settings.write_values)
         block.merge = settings.merge
-        inner = {key: (step, cls) for key, step, cls in self.steps}
+        inner = {key: (step, cls) for key, step, cls in
+                 list(self.steps) + list(getattr(self, "off", ()))}
         steps = []
         for key, step in zip(self.block.keys(), self.block.steps):
             step = copy.deepcopy(step)
@@ -396,8 +397,24 @@ def block_class(block: Block) -> type:
                  "first's, their mean, or any (a flag written back)")),
     ]
     extras: Dict[str, ParamInfo] = {}
+    off: List[tuple] = []
     for key, step in zip(keys, block.steps):
         if not step.enabled:
+            # in the settings, ticked off in the panel, never run (as a
+            # chain's, `chain.chain_class`)
+            try:
+                if isinstance(step, Block):
+                    cls = block_class(step)
+                    step_cls = cls.Settings
+                else:
+                    cls = step_plugin(step)
+                    step_cls = step_settings_class(key, cls, step)
+            except ChainError:
+                continue
+            columns.append((key, step_cls, param(
+                default_factory=step_cls, label=step.title(), collapsed=True,
+                help=cls.description or getattr(step, "plugin", ""))))
+            off.append((key, step, cls))
             continue
         if isinstance(step, Block):
             cls = block_class(step)
@@ -420,7 +437,8 @@ def block_class(block: Block) -> type:
     settings_cls = make_dataclass("BlockSettings", columns,
                                   namespace={"__module__": __name__})
     name = block.title()
-    attrs = {"block": block, "spec": None, "steps": steps, "Settings": settings_cls,
+    attrs = {"block": block, "spec": None, "steps": steps, "off": off,
+             "Settings": settings_cls,
              "params": extras, "name": name, "path": "Chain/Block",
              "description": name + ": " + " -> ".join(s.title() for _, s, _ in steps),
              "version": "1",

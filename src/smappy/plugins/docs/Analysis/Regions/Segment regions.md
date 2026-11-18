@@ -836,6 +836,8 @@ ROIs.
 ### ids.column
 Any attribute of whole numbers: `cluster_id`, an id a dropped-in clusterer
 wrote, or `roi_id` from *Regions to attribute* to bring ROIs back from a table.
+The list offers the table's whole-number attributes, the id attributes
+(`..._id`, `tid`) first; frame, file and channel numbers are left out.
 
 ### ids.min_size
 Large clusters are usually the interesting ones and small ones are noise:
