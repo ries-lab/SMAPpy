@@ -173,8 +173,10 @@ def test_a_step_switched_off_keeps_its_section_and_its_settings(app):
     assert instance.chain["steps"][1]["values"]["bins"] == 33
     # its file and menu are in the tab section's title bar
     section = tab.sections[0]
-    assert panel.menu_button in section.lent_widgets
-    assert [a.text() for a in panel.chain_menu.actions()] == [
+    where, button = section.owned_title             # the section's own copies
+    assert where.text() == panel.where.text() == "not saved"
+    button.menu().aboutToShow.emit()
+    assert [a.text() for a in button.menu().actions()] == [
         "Open chain...", "Save chain", "Save as..."]
     assert panel.build.button.isChecked()                # a new chain: build open
 
@@ -205,7 +207,7 @@ def test_the_per_region_front_repeats_over_a_menu_and_marks_stale_steps(app):
     names = [steps.for_each.itemData(i) for i in range(steps.for_each.count())]
     assert names[0] == "rois" and "track_id" in names and "frame" not in names
     # Run and Measure this ROI side by side, at the top
-    assert steps.controls.indexOf(steps.panel.panel.run_button) == 0
+    assert steps.controls.indexOf(steps.run_button) == 0
     assert steps.controls.indexOf(header.measure_now) == 1
     roi = next(iter(project.rois.values()))
     window.select(roi.id)
@@ -223,4 +225,148 @@ def test_the_per_region_front_repeats_over_a_menu_and_marks_stale_steps(app):
     steps.for_each.setCurrentIndex(names.index("track_id"))
     steps.for_each.activated.emit(names.index("track_id"))
     assert project.block.regions == "track_id"
+    window.close()
+
+
+def test_interface_opens_its_dialog_and_open_chain_asks_for_a_file(app, monkeypatch):
+    """Through the button and the menu, as a click sends them: neither may take
+    the click's checked flag for its argument."""
+    from smappy.chain import Step
+    from smappy.gui import chain_panel
+    from test_chain_gui import new_chain_tab
+    from test_batch_foundations import blinks
+    from smappy.session import Session
+    tab, instance, panel = new_chain_tab(app, Session(blinks()))
+    spec = panel.current_spec()
+    spec.steps.append(Step(plugin="Analysis/Measure/Localization Statistics"))
+    panel._apply(spec)
+    opened = []
+
+    class Dialog:
+        Accepted = 1
+
+        def __init__(self, *a, **k):
+            opened.append(a)
+
+        def exec(self):
+            return 0                                 # cancelled
+    monkeypatch.setattr("smappy.gui.chain_interface.InterfaceDialog", Dialog)
+    panel.interface_button.click()
+    assert opened
+    asked = []
+    monkeypatch.setattr(chain_panel.QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: asked.append(a) or ("", "")))
+    panel.open_action.trigger()
+    assert asked
+    assert panel.add_button in panel.build.owned_title     # add, in build's line
+
+
+def test_the_steps_follow_another_files_project(app):
+    """Opening a file gives the session a new ROI project; the panel shows its
+    steps, and the project has steps to measure a selected ROI with."""
+    from smappy.gui.region_steps import RegionSteps
+    from smappy.io.formats import FileInfo
+    from smappy.session import Session
+    from test_roi_membership import crossing_tracks
+    session = Session(crossing_tracks())
+    steps = RegionSteps(session)
+    assert steps.run_button.text() == "Measure all"
+    assert steps.panel.block_button.isHidden()
+    shown = [s.plugin for s in session.rois.block.steps]
+    session._rois = None                  # what opening another file does
+    assert not session.rois.block.steps
+    steps.follow_project()                # no steps of its own: the panel's
+    assert [s.plugin for s in session.rois.block.steps] == shown
+    assert session.rois.block_steps()
+    # a file with steps of its own shows them, once the event loop is free
+    from smappy.chain import Step
+    session._rois = None
+    session.rois.block.steps = [Step(plugin="Analysis/Measure/Cluster shape")]
+    steps.follow_project()
+    from PySide6.QtCore import QCoreApplication
+    for _ in range(3):
+        QCoreApplication.processEvents()
+    assert [s.title for *_, s in steps.panel.step_sections()] == ["Cluster shape"]
+
+
+def test_up_and_down_step_through_the_rois_from_the_figures(app):
+    from PySide6.QtGui import QShortcut
+    session, project, window = track_window()
+    first = sorted(project.rois.values(), key=lambda r: r.number)[0]
+    window.select(first.id)
+    site = window.site_window()
+    keys = [s for s in site.findChildren(QShortcut)]
+    assert len(keys) == 2
+    down = next(s for s in keys if s.key().toString() == "Down")
+    down.activated.emit()
+    assert window.active != first.id
+    window.close()
+
+
+def test_write_back_is_shown_only_for_a_project_that_has_it(app):
+    from smappy.gui.region_steps import RegionSteps
+    from smappy.session import Session
+    from test_roi_membership import crossing_tracks
+    session = Session(crossing_tracks())
+    steps = RegionSteps(session)
+    steps._fill_block_fields()
+    assert steps.writes_box.isHidden()                  # not offered
+    session.rois.block.write_back = ["x_rot_nm"]        # an older project's
+    steps._fill_block_fields()
+    assert not steps.writes_box.isHidden()
+    assert steps.write_back.text() == "x_rot_nm"
+
+
+# ------------------------------------------------- write results, apply proposals
+
+def test_write_results_writes_onto_the_localizations_or_the_rois(app):
+    from smappy.plugins.region_column import WriteResults
+    session, project, window = track_window()
+    plugin = WriteResults()
+    settings = WriteResults.Settings()
+    assert plugin.changes_locs_for(settings)
+    state = plugin.describe(session.context(grouping="ungrouped"), settings)
+    assert state.shown == {"localizations": True, "rois": False}
+    session.run(plugin, settings)                 # the ROIs' numbers
+    assert "roi_id" in session.locs
+    settings.to = "rois"
+    assert not plugin.changes_locs_for(settings)
+    assert plugin.describe(None, settings).shown["rois"]
+    window.close()
+
+
+def test_an_old_path_is_read_as_write_results_with_its_settings_in_its_part():
+    from smappy import plugins
+    from smappy.chain import Step
+    from smappy.workspace import Workspace
+    step = Step.from_dict({"plugin": "Analysis/Regions/ROIs from results",
+                           "values": {"target": "range", "range.k": 3.0}})
+    assert step.plugin == "Analysis/Regions/Write results"
+    assert step.values == {"to": "rois", "rois.target": "range", "rois.range.k": 3.0}
+    settings = plugins.settings_from(plugins.get(step.plugin).Settings, step.values)
+    assert settings.to == "rois" and settings.rois.range.k == 3.0
+    space = Workspace.from_dict({"tabs": [{"name": "R", "instances": [
+        {"plugin": "Analysis/Regions/Regions to attribute", "values": {"values": "n"}}]}]})
+    instance = space.tabs[0].instances[0]
+    assert instance.plugin == "Analysis/Regions/Write results"
+    assert instance.values == {"to": "localizations", "localizations.values": "n"}
+    assert plugins.get("Analysis/Regions/Regions to attribute") is plugins.get(
+        "Analysis/Regions/Write results")
+
+
+def test_apply_proposals_sets_what_the_steps_proposed_on_the_rois(app, monkeypatch):
+    from smappy.gui.roi_tab import ROIHeader
+    session, project, window = track_window()
+    header = ROIHeader(session)
+    header.manager = window
+    assert not header.proposing_steps()
+    roi = next(iter(project.rois.values()))
+    window.select(roi.id)
+    header._show_result()
+    assert not header.apply_all.isEnabled()
+    applied = []
+    monkeypatch.setattr(header, "proposing_steps", lambda: ["Trace inspector"])
+    monkeypatch.setattr(header, "_apply_proposals", lambda step: applied.append(step))
+    header.apply_proposals()
+    assert applied == ["Trace inspector"]
     window.close()

@@ -409,7 +409,7 @@ steps hardly moves it, and the first and last quarter only decide which
 way it points.  *first to last localization* gives `ends_angle_deg`, which
 is noisier but follows a track that curves.  A track that goes out and
 comes back has no clear direction either way; turn such an ROI by hand in
-the ROI manager, and [ROIs from results](plugin:Analysis/Regions/ROIs from results)
+the ROI manager, and [Write results](plugin:Analysis/Regions/Write results)
 run later leaves it alone.
 
 **The ROI.**  Its centre is the mean position of the cluster's
@@ -835,7 +835,7 @@ ROIs.
 
 ### ids.column
 Any attribute of whole numbers: `cluster_id`, an id a dropped-in clusterer
-wrote, or `roi_id` from *Regions to attribute* to bring ROIs back from a table.
+wrote, or `roi_id` from *Write results* (to the localizations) to bring ROIs back from a table.
 The list offers the table's whole-number attributes, the id attributes
 (`..._id`, `tid`) first; frame, file and channel numbers are left out.
 

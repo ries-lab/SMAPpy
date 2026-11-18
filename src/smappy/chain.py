@@ -137,7 +137,10 @@ class Step:
         values = raw.get("values") or {}
         if not isinstance(values, dict):
             raise ChainError(f"step {raw['plugin']!r}: `values` must be a mapping")
-        return cls(plugin=str(raw["plugin"]), label=str(raw.get("label") or ""),
+        # a plugin merged into another is read as it is now (`plugins.MOVED`)
+        from .plugins import moved
+        plugin, values = moved(str(raw["plugin"]), dict(values))
+        return cls(plugin=plugin, label=str(raw.get("label") or ""),
                    values=dict(values), version=str(raw.get("version") or ""),
                    grouping=grouping, enabled=bool(raw.get("enabled", True)))
 

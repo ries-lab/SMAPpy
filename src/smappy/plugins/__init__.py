@@ -833,14 +833,14 @@ class Result:
     # text}`` each.  Kept with the region's results and drawn over the ROI
     # image in the ROI manager (`overlay_shapes`); a picture only: nothing
     # is measured from them and nothing about the ROI changes.  To make one
-    # the ROI's own line, *ROIs from results*.
+    # the ROI's own line, *Write results* (to the ROIs).
     overlays: List[Dict[str, Any]] = field(default_factory=list)
     # What the run proposes the region's ROI should be, as values ready to
     # take: ``{"angle": deg, "centre": [x, y], "range:<attribute>": [lo, hi],
     # "line:<name>": [[x0, y0], [x1, y1]], "keyword:<list>": word}`` -- the
     # keys `ROI.set_by` names properties by.  Kept with the region's results
     # (`proposal_values`) and taken only when someone applies them: the
-    # Regions tab's *Apply*, or *Accept proposals* in a chain.  A
+    # Regions tab's *Apply*, or *Apply proposals to ROIs* in a chain.  A
     # measurement never changes its ROI by itself.
     proposals: Dict[str, Any] = field(default_factory=dict)
     settings: Any = None                    # what was actually used
@@ -1302,8 +1302,34 @@ def problems() -> List[Diagnostic]:
     return list(_PROBLEMS)
 
 
+#: Plugins merged into another, by their old path: the new path, the part of
+#: its settings the old ones are now, and the settings that choose it.  A
+#: chain step, a pinned plugin or a log naming an old path is read as the new
+#: one (`moved`), so what was saved keeps working.
+MOVED: Dict[str, Tuple[str, str, Dict[str, Any]]] = {
+    "Analysis/Regions/Regions to attribute": (
+        "Analysis/Regions/Write results", "localizations", {"to": "localizations"}),
+    "Analysis/Regions/ROIs from results": (
+        "Analysis/Regions/Write results", "rois", {"to": "rois"}),
+}
+
+
+def moved(path: str, values: Optional[Dict[str, Any]] = None
+          ) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """``(path, values)`` as the plugin now is: an old path (`MOVED`) becomes
+    the new one, its values put under their part.  Anything else unchanged."""
+    if path not in MOVED:
+        return path, values
+    new, part, fixed = MOVED[path]
+    out = dict(fixed)
+    for key, value in (values or {}).items():
+        out[f"{part}.{key}"] = value
+    return new, out
+
+
 def get(path: str) -> Type[Plugin]:
     """The plugin class at ``path``, importing its module the first time."""
+    path = MOVED[path][0] if path in MOVED else path
     if path in _REGISTRY:
         return _REGISTRY[path]
     ref = discover().get(path)

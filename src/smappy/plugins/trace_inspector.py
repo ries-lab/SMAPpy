@@ -86,7 +86,7 @@ class TraceInspector(Plugin):
                                        for q in QUALITY if q in locs})
         values["trace"] = float(r.ids[i])
         # the trace's axis: which way it went, what an ROI of it is oriented
-        # by (*ROIs from results*), and drawn over the ROI image
+        # by (*Write results* (to the ROIs)), and drawn over the ROI image
         overlays, proposals = [], {}
         if "x" in pos and "y" in pos and len(rows) >= 3:
             one = T.runs(np.zeros(len(rows), np.int64), t)

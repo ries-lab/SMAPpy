@@ -148,8 +148,7 @@ list is a *block*, as in a [chain](plugin:Panels/Glossary) (also called a
 pipeline or workflow: plugins run one after another as one): it can repeat
 over the [regions](plugin:Panels/Glossary) of an id attribute instead (a region
 is a set of localizations measured together -- an ROI, or a cluster that an
-attribute such as `cluster_id` names; *for each*), write attributes it makes back
-into the table, and hold a block of its own.  Run measures every ROI; with
+attribute such as `cluster_id` names; *for each*).  *Measure all* measures every ROI; with
 *measure the selected ROI* ticked, an ROI is also measured as soon as it is
 selected or added in the ROI manager, and its numbers appear under the
 steps.
@@ -159,14 +158,15 @@ ROI could be: the [Trace inspector](plugin:Analysis/Tracking/Trace inspector)
 proposes a track's direction as the ROI's angle, its axis as the line
 *axis*, its centre; [Circle fit](plugin:Analysis/Measure/Circle fit) the
 fitted centre.  Under the selected ROI's numbers, a line per step says what
-it proposes, and *Apply* takes it -- on the ROIs selected in the ROI
+it proposes for the ROI ("Trace inspector proposes for the ROI: angle 37°,
+line axis, its centre"), and *Apply* sets it on the ROI -- on the ROIs selected in the ROI
 manager's list, or all of them when none is, each ROI its own proposals --
 as one step of the ROI manager's undo.  What was set by hand (an angle
 turned, a range set, a line drawn) is left alone.  Once applied, they are
 the ROIs' own properties, as if set by hand or by
-[ROIs from results](plugin:Analysis/Regions/ROIs from results); nothing is
+[Write results](plugin:Analysis/Regions/Write results); nothing is
 applied by measuring alone.  In a chain,
-[Accept proposals](plugin:Analysis/Regions/Accept proposals) does the
+[Apply proposals to ROIs](plugin:Analysis/Regions/Accept proposals) does the
 same.
 
 **4. What is still true.**  Each stored measurement remembers what it was made
@@ -207,7 +207,7 @@ ROI keeps its outline when the shape or size is changed here.
 **What is out of date.**  A stored measurement is signed with a digest of its
 inputs -- the data's fingerprint (row count, attributes and a sample of the
 positions; not the attributes written from regions' results, such as those of
-*Regions to attribute*), the ROI's geometry, the filter bounds, whether blinks
+*Write results* (to the localizations)), the ROI's geometry, the filter bounds, whether blinks
 are merged and with which settings -- together with the step's plugin, its
 version and its settings, but not its name.  A step is *current* when that
 signature matches what it would be now, and *stale* when not; the check is
@@ -232,11 +232,12 @@ how many of its ROIs there are and are used.
 
 ### per-region steps
 Folded when the tab opens; unfold it to choose and run the steps.  At the
-top is what applies to every step: Run, *Measure this ROI*, and the ticks
-that measure and draw the ROI selected in the ROI manager.  Run measures
-what is out of date and carries the rest forward.  While it measures, Run
-is Stop: the ROI being measured is finished, the ones measured so far are
-kept, and the rest wait for the next Run.  The grey line under them says
+top is what applies to every step: *Measure all*, *Measure this ROI*, and
+the ticks that measure and draw the ROI selected in the ROI manager.
+*Measure all* runs the steps in every ROI (or region) whose result is
+missing or out of date, and carries the rest forward.  While it measures,
+it is Stop: the ROI being measured is finished, the ones measured so far are
+kept, and the rest wait for the next *Measure all*.  The grey line under them says
 how far a run has got -- the share and number of ROIs (or regions)
 measured, how many a second and about how long is left -- and, after a
 Stop or a failure, how many are still to measure.  A run that will take
@@ -251,7 +252,8 @@ manager, a step's title says how its result for that ROI stands --
 starts with the general measurements, once each, with their own defaults;
 a specialised one, such as NPC Corners, is added there when the data call
 for it.  The list is saved in the file with the results, because the
-results table's columns mean nothing without it.  The **⋯** menu in the
+results table's columns mean nothing without it; a file opened without
+steps of its own takes the ones shown here.  The **⋯** menu in the
 section's title bar opens a saved list (*Open chain...*: a chain's steps, or
 a block's) and keeps this one as a chain (*Save as...*).
 
@@ -260,12 +262,22 @@ What the steps are repeated over: every ROI of the ROI manager, or each
 region of an id attribute of the table (`cluster_id`, `track_id`, `tid`).
 
 ### build
-Folded: the tools that change the steps.  *add...* adds a plugin as a step,
-after the step last opened; *check* times the steps in a few ROIs and says
-what the whole will take.  *write back* names the attributes the steps make
-that go into the real table, *write values* the numbers measured per region
-that are written onto its localizations, and *overlaps* how a localization
-in two regions takes their values (see `docs/regions.md`).
+Folded: the tools that change the steps, but for *add...*, which stands in
+build's own title line and adds a plugin as a step, after the step last
+opened.  *check* times the steps in a few ROIs and says
+what the whole will take.
+
+What a step measures in an ROI stays with that ROI, in the results table.
+To make a measured value one of the ROIs' own properties -- its angle, a
+range, a line, a keyword -- run
+[Write results](plugin:Analysis/Regions/Write results) after the
+steps; to write it onto each ROI's localizations, as an attribute to filter
+or colour by, run [Write results](plugin:Analysis/Regions/Write results).
+A step's own *write ...* settings (Trace statistics' rotated track, say)
+change only the ROI's working copy of the localizations, which the next
+steps of the same ROI read.  A project saved by an earlier version with
+*write back* or *write values* set shows those two fields here, and still
+writes them until they are emptied.
 
 Under it, how many ROIs have a complete, current row in the results table,
 and, once an ROI is selected in the ROI manager, a table of what was
@@ -279,6 +291,14 @@ once: the steps whose result for it is missing or out of date run, and what
 they measure is stored, so the same work is not done on the next visit.
 Untick it to scroll a large project without anything being computed behind
 you; the numbers are then shown as stored.
+
+### Apply proposals
+At the top of the per-region steps, beside *Measure all*: sets on the ROIs
+what the steps proposed for them (see *Proposals* above) -- on the ROIs
+selected in the ROI manager, all of them when none is, each its own -- as
+one undo step.  With several steps proposing, it asks which, or all.
+Greyed while no step has proposed anything.  The line under a selected
+ROI's numbers does the same for that one step.
 
 ### Measure this ROI
 Runs the steps on the ROI selected in the ROI manager now, whether or not

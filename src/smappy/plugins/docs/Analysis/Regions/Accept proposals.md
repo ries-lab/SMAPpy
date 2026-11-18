@@ -38,7 +38,7 @@ is one step of the ROI manager's undo.
 The properties are named as the ROIs keep who set them (`ROI.set_by`):
 `angle`, `centre`, `range:<attribute>`, `line:<name>`, `keyword:<list>`.
 A property taken here is noted as set by the step that proposed it, so
-running it again, or [ROIs from results](plugin:Analysis/Regions/ROIs from results),
+running it again, or [Write results](plugin:Analysis/Regions/Write results),
 may change it, while one set by hand stays.
 
 An angle, a range, a line or a centre is part of what the ROI's results

@@ -74,7 +74,7 @@ not change what is measured), and every table carries it as `x_site_nm` /
 `y_site_nm` beside the absolute `x_nm` / `y_nm` -- SMAP's `xnmrot`; a
 rotated project's square turns with the ROI's angle.  The angle is set by
 hand, by the segmenter that made the ROI (a site's `angle`,
-`ROIProject.add_site`) or by *ROIs from results* from a measured column, as are an ROI's ranges, lines, keywords and centre;
+`ROIProject.add_site`) or by *Write results* (to the ROIs) from a measured column, as are an ROI's ranges, lines, keywords and centre;
 `ROI.set_by` says which (`{"angle": "hand"}`), and a method leaves one set by hand alone.  No drawn ROI or 3D slab narrows
 it.  A layer's grouped table is cut too -- for an ROI by its shape, for an
 id column through `group_id`, so a blink whose localizations fall in two
@@ -239,7 +239,7 @@ To colour localizations by what was measured in their region, to compute
 with it per localization, or to compare two filters in two layers, a
 region's number is written onto its rows as a column
 (`region_runs.write_values`): by *write values* on a block, at the end of
-every run so a chain keeps it current, or by *Regions to attribute* for results
+every run so a chain keeps it current, or by *Write results* (to the localizations) for results
 already there, the ROIs' own numbers (`roi_id`) among them.  NaN outside any
 region or where the region has no value; where ROIs overlap, the last, the
 first or the mean (*any* is for write back, and refused here).  Everything that reads a column then works on it: each layer's
@@ -278,7 +278,7 @@ Analysis/Measure/...                every measurement: on the view, per ROI, per
 Analysis/Regions/Segment regions    ROIs: a circle template (ring, disc), beads, an id column, a file, like examples
 Analysis/Regions/Find clusters      DBSCAN, Voronoi or HDBSCAN (cluster_id)
 Analysis/Regions/Summarize/...      Histograms, Curves, NPC labelling efficiency, qPAINT: read a region table
-Analysis/Regions/Regions to attribute  what was measured per region onto the table
+Analysis/Regions/Write results  what was measured per region onto the table or the ROIs
 Analysis/Regions/Filter regions     keep the regions whose results pass: one flag, region_filter
 Analysis/Regions/Average ROIs       the used ROIs centred, turned and superimposed: a new file
 Analysis/Regions/Workflow/...       NPC Analysis, a shipped chain with a block

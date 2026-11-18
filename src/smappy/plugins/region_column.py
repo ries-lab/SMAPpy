@@ -41,6 +41,7 @@ import numpy as np
 from . import Context, FormState, Plugin, Result, param, register
 from ..region_runs import VALUE_RULES
 from .roi import auto_only
+from .roi_results import ROIsFromResultsSettings
 
 # what *results from* is when it is empty: the ROIs, without an evaluation
 NUMBERS = "the ROIs' numbers"
@@ -109,10 +110,17 @@ def own_rows(project) -> List[Dict[str, Any]]:
     return out
 
 
-@register("Analysis/Regions/Regions to attribute")
 class RegionsToColumn(Plugin):
-    """Writes what was measured per region onto the localizations in it."""
+    """Writes what was measured per region onto the localizations in it.
 
+    *Write results*' destination *the localizations* (`WriteResults`), not a
+    plugin of the tree of its own any more; the class stays for the tests and
+    scripts that call it, and a saved chain naming its old path is read as
+    *Write results* (`plugins.MOVED`)."""
+
+    # the path is the old one, which `MOVED` reads
+    name = "Regions to attribute"
+    path = "Analysis/Regions/Regions to attribute"
     Settings = RegionColumnSettings
     changes_locs = True
     # the values go onto the localizations
@@ -186,6 +194,70 @@ class RegionsToColumn(Plugin):
                            f"{int(inside.sum())} localizations, "
                            f"{n - int(inside.sum())} in none",
                       values={"regions": len(members), "inside": int(inside.sum())})
+
+
+# ------------------------------------------------------------ write results
+
+DESTINATIONS = (("localizations", "the localizations, as attributes"),
+                ("rois", "the ROIs, as their properties"))
+
+
+@dataclass
+class WriteResultsSettings:
+    to: str = param("localizations", label="write to", choices=DESTINATIONS,
+                    help="onto the localizations of each region, as attributes to "
+                         "filter or colour by; or onto each ROI, as its angle, a "
+                         "range, a line, a keyword or its centre")
+    localizations: RegionColumnSettings = param(default_factory=RegionColumnSettings,
+                                                label="to the localizations")
+    rois: ROIsFromResultsSettings = param(default_factory=ROIsFromResultsSettings,
+                                          label="to the ROIs")
+
+
+def _prefixed(state: FormState, prefix: str) -> FormState:
+    """A part's form state as the whole form's: its names under ``prefix``."""
+    out = FormState(notice=state.notice)
+    for name in ("hints", "active", "choices", "shown", "titles"):
+        setattr(out, name, {f"{prefix}.{k}": v for k, v in getattr(state, name).items()})
+    return out
+
+
+@register("Analysis/Regions/Write results")
+class WriteResults(Plugin):
+    """Writes what was measured per region somewhere it is used: onto the
+    localizations, as attributes, or onto the ROIs, as their properties."""
+
+    Settings = WriteResultsSettings
+    changes_locs = True
+    # the attributes go onto the localizations
+    grouping = "ungrouped"
+    version = "1"
+
+    def changes_locs_for(self, settings) -> bool:
+        return settings.to == "localizations"
+
+    def _part(self, settings):
+        from .roi_results import ROIsFromResults
+        if settings.to == "rois":
+            return ROIsFromResults(), settings.rois
+        return RegionsToColumn(), settings.localizations
+
+    def describe(self, ctx, settings) -> FormState:
+        """Only the chosen destination's part, with what its own form says."""
+        plugin, part = self._part(settings)
+        key = "rois" if settings.to == "rois" else "localizations"
+        state = _prefixed(plugin.describe(ctx, part), key)
+        state.shown.update({"localizations": key == "localizations", "rois": key == "rois"})
+        return state
+
+    def run(self, ctx: Context, settings: WriteResultsSettings) -> Result:
+        if settings.to not in dict(DESTINATIONS):
+            raise ValueError(f"write to {settings.to!r}: one of "
+                             + ", ".join(dict(DESTINATIONS)))
+        plugin, part = self._part(settings)
+        result = plugin.run(ctx, part)
+        result.settings = settings
+        return result
 
 
 # ------------------------------------------------------------ column to ROIs

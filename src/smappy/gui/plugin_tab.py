@@ -238,7 +238,7 @@ class PluginTab(QWidget):
         """A chain's file and ⋯ menu in its section's title bar, once its
         panel is built (`ChainPanel.title_widgets`)."""
         panel = slot.panel
-        if isinstance(panel, ChainPanel) and not getattr(section, "lent_widgets", None):
+        if isinstance(panel, ChainPanel) and not getattr(section, "owned_title", None):
             section.add_to_title(panel.title_widgets())
 
     def _detach(self, section: CollapsibleSection, instance: Instance) -> None:
