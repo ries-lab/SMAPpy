@@ -201,6 +201,7 @@ class PluginTab(QWidget):
                 panel = slot.ensure()
                 if isinstance(panel, PluginPanel) and panel.title_buttons:
                     section.put_in_title(panel.title_buttons, ref.description)
+            self._lend_title(section, slot)
             section.toggled.connect(lambda on, s=section, i=instance:
                                     self._toggled(s, i, on))
             section.detach_requested.connect(
@@ -227,9 +228,18 @@ class PluginTab(QWidget):
         if not on:
             return
         self.slots[instance.id].ensure()          # the import happens here
+        self._lend_title(section, self.slots[instance.id])
         for other in self.sections:               # one open at a time
             if other is not section and other.button.isChecked():
                 other.set_expanded(False)
+
+    @staticmethod
+    def _lend_title(section: CollapsibleSection, slot: "_Slot") -> None:
+        """A chain's file and ⋯ menu in its section's title bar, once its
+        panel is built (`ChainPanel.title_widgets`)."""
+        panel = slot.panel
+        if isinstance(panel, ChainPanel) and not getattr(section, "lent_widgets", None):
+            section.add_to_title(panel.title_widgets())
 
     def _detach(self, section: CollapsibleSection, instance: Instance) -> None:
         """Into a window of its own -- the panel made first: one that was

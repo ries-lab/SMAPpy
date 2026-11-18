@@ -26,7 +26,8 @@ settings are shown at the top:
   *method*, centres or G5M.
 
 The pages of the plugins explain the methods; this one what running them
-together does.  Because it is a chain, it can be edited (*edit steps*),
+together does.  Because it is a chain, it can be edited (under *build*, and
+a right click on a step's title),
 saved under another name, and run over many files in a batch.
 
 Use it on DNA-PAINT data whose sites are separate structures -- DNA

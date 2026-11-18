@@ -312,13 +312,33 @@ class CollapsibleSection(QWidget):
         if self.detach_button:
             self.detach_button.hide()
 
+    def add_to_title(self, widgets: List[QWidget]) -> None:
+        """Put ``widgets`` in the title bar, before **?** and the detach
+        arrow, and leave the section unfolding as before: a chain's file
+        and its ⋯ menu (`chain_panel.ChainPanel.title_widgets`).  Given
+        back by `release_title`, like `put_in_title`'s."""
+        at = self._header.count()
+        for button in (self.help_button, self.detach_button):
+            if button is not None:
+                at = min(at, self._header.indexOf(button))
+        for k, widget in enumerate(widgets):
+            self._header.insertWidget(at + k, widget)
+            widget.show()
+        self.lent_widgets = getattr(self, "lent_widgets", []) + list(widgets)
+
+    def add_before_title(self, widget: QWidget) -> None:
+        """A widget left of the arrow -- a step's tick in a chain -- which
+        stays with the section."""
+        self._header.insertWidget(0, widget)
+
     def release_title(self) -> None:
         """Hand the title's widgets back, unparented, before the section is
         deleted: they belong to the panel, which outlives its sections."""
-        for widget in self.title_widgets:
+        for widget in self.title_widgets + getattr(self, "lent_widgets", []):
             self._header.removeWidget(widget)
             widget.setParent(None)
         self.title_widgets = []
+        self.lent_widgets = []
 
     def set_expanded(self, on: bool) -> None:
         if self.title_widgets:               # nothing to unfold, and no arrow

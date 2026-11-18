@@ -243,6 +243,22 @@ def emphasised(snapshot, fov, marks, base=None) -> np.ndarray:
     return np.clip(rgb, 0, 1).astype(np.float32)
 
 
+SCALE_BAR_COLOUR = (255, 255, 255)
+
+
+def scale_bar_length(most: float) -> float:
+    """The longest of 1, 2 and 5 times a power of ten that is at most ``most``."""
+    if not np.isfinite(most) or most <= 0:
+        return 0.0
+    power = 10.0 ** np.floor(np.log10(most))
+    return float(max(k * power for k in (1, 2, 5) if k * power <= most * (1 + 1e-9)))
+
+
+def scale_bar_text(length_nm: float) -> str:
+    return (f"{length_nm / 1000:g} \u00b5m" if length_nm >= 1000
+            else f"{length_nm:g} nm")
+
+
 class ImagePane(QWidget):
     """One rendered quadrant: an image, outlines over it, and clicks."""
 
@@ -266,7 +282,7 @@ class ImagePane(QWidget):
     turned = Signal(float, bool)
 
     def __init__(self, title: str, zoomable: bool = False, pannable: bool = False,
-                 parent=None):
+                 parent=None, scale_bar: bool = False):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -322,6 +338,17 @@ class ImagePane(QWidget):
         for item in (self.handle_stem, self.handle_dot):
             item.setZValue(10)
             self.view.addItem(item)
+        # a scale bar in the bottom-left corner, unturned: the ROI pane
+        # changes its magnification (a track is fitted into it), and without
+        # one nothing said how large what it showed was
+        self.scale_bar = scale_bar
+        self.bar = pg.PlotDataItem(pen=pg.mkPen(SCALE_BAR_COLOUR, width=3))
+        self.bar_text = pg.TextItem(color=SCALE_BAR_COLOUR, anchor=(0, 1))
+        for item in (self.bar, self.bar_text):
+            item.setZValue(9)
+            item.setVisible(False)
+            self.view.addItem(item)
+        self.view.sigRangeChanged.connect(lambda *_: self._place_scale_bar())
         self.handle: Optional[tuple] = None      # (centre, reach in nm) when shown
         self._turning: Optional[float] = None    # the mouse's angle at the press
         self._turned = 0.0
@@ -531,6 +558,25 @@ class ImagePane(QWidget):
         self.view.setRange(QRectF(shown.x0, shown.y0, shown.x1 - shown.x0,
                                   shown.y1 - shown.y0), padding=0)
         self.fov = fov
+        self._place_scale_bar()
+
+    def _place_scale_bar(self) -> None:
+        """A bar of a round length, about a fifth of the pane's width."""
+        on = self.scale_bar and self.fov is not None
+        self.bar.setVisible(on)
+        self.bar_text.setVisible(on)
+        if not on:
+            return
+        (x0, x1), (y0, y1) = self.view.viewRange()
+        width = x1 - x0
+        if not np.isfinite(width) or width <= 0:
+            return
+        length = scale_bar_length(width / 5)
+        margin = 0.05 * width
+        bx, by = x0 + margin, max(y0, y1) - margin
+        self.bar.setData([bx, bx + length], [by, by])
+        self.bar_text.setText(scale_bar_text(length))
+        self.bar_text.setPos(bx, by - 0.01 * width)
 
     def clipboard_image(self):
         """The pane as it is on screen, outlines and all: the outlines are
@@ -540,6 +586,7 @@ class ImagePane(QWidget):
     def clear(self) -> None:
         self.image.clear()
         self.fov = None
+        self._place_scale_bar()
         for item in self.shapes.values():
             item.setData([], [])
         self.label_lines([])
@@ -724,7 +771,7 @@ class ROIManagerWindow(QMainWindow):
 
         self.file_pane = ImagePane("file")
         self.zoom_pane = ImagePane("zoom", zoomable=True, pannable=True)
-        self.roi_pane = ImagePane("ROI", zoomable=True)
+        self.roi_pane = ImagePane("ROI", zoomable=True, scale_bar=True)
 
         # tiles: a grid over the whole file, walked one square at a time, so a
         # dataset can be gone through systematically instead of by eye
@@ -847,7 +894,7 @@ class ROIManagerWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._list_menu)
         # a click on a column sorts by it, again the other way; on *ROI*, back
-        # to the numbers.  The same order as Sort ROIs sets, and kept with it
+        # to the numbers.  The same order as Sort regions sets, and kept with it
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self._sort_by_column)
         self._sorted_column = None
@@ -2458,7 +2505,7 @@ class ROIManagerWindow(QMainWindow):
             self._site.closed.connect(lambda: self.set_plotting(False))
         return self._site
 
-    def evaluate_active(self, label: Optional[str] = None) -> None:
+    def evaluate_active(self, label: Optional[str] = None, now: bool = False) -> None:
         """Measure the ROI being looked at, and draw what its evaluator draws.
 
         On this thread and on one step of one site: an evaluator sees a few
@@ -2469,14 +2516,18 @@ class ROIManagerWindow(QMainWindow):
         step whose stored result is out of date runs, and what runs is kept,
         so the same work is not done again on the next visit; the numbers go
         to the Regions tab.  With *draw* on, the evaluator whose tab is open
-        in the ROI results window runs as well, current or not, because a
-        plot is a closure over the data it drew and nothing stored brings it
-        back.
+        in the ROI results window is drawn as well: from what its row kept
+        (`Plugin.keep` / `restore`) where the plugin keeps it, otherwise by
+        running it again, current or not, since a plot is a closure over the
+        data it drew.
+
+        ``now``: measured whatever *measure* says -- the Regions tab's
+        *Measure this ROI*, after a step's settings were changed.
         """
         from ..roi_manager import pipeline as pipeline_module
         project = self.project
         roi = self._selected()
-        measure, plot = self.measuring(), self.plotting()
+        measure, plot = self.measuring() or now, self.plotting()
         if roi is None or self._evaluating or not (measure or plot):
             return
         steps = project.block_steps()
@@ -2527,7 +2578,7 @@ class ROIManagerWindow(QMainWindow):
         # what just happened to this site is the more useful of the two
         if updated:
             # the Regions tab shows the numbers, and a form that offers the
-            # measured columns (Sort ROIs, Filter ROIs) offers the new ones;
+            # measured columns (Sort regions, Filter ROIs) offers the new ones;
             # this window refreshes its table from it too
             self.session.changed("rois")
         else:

@@ -40,7 +40,7 @@ ROIs*' syntax, decides which become ROIs (`segmentation.judge`): one field
 in place of the ring template's five checks, and the structure's knowledge
 in the preset rather than in the plugin.  The values go with each ROI
 (``origin["values"]``) and are columns of the results table
-(`roi_manager.core.segment_columns`), so *Filter ROIs*, *Sort ROIs* and the
+(`roi_manager.core.segment_columns`), so *Filter ROIs*, *Sort regions* and the
 summaries read them like anything measured.  They are kept in the origin
 rather than as a "segment" evaluation because they describe the candidate
 as it was found, not the ROI as it is now: an evaluation would go stale --
@@ -423,6 +423,12 @@ class SegmentRegions(SegmenterPlugin):
         state.active["ids.draw"] = by_id
         if by_id and settings.ids.draw == "auto":
             state.hints["ids.draw"] = draw_as(settings.ids.column.strip())
+        if settings.method == "ids" and ctx is not None and ctx.session is not None:
+            # the table's id attributes to choose from, rather than a name typed
+            from .region_column import id_attributes
+            found = id_attributes(ctx.locs)
+            if found:
+                state.choices["ids.column"] = [(c, c) for c in found]
         if settings.method == "ids":
             try:
                 segmentation.keep_test(settings.ids.keep, TRACE_VALUES)

@@ -188,8 +188,7 @@ dialog, which takes only one folder.
 
 ### remove
 Removes the selected inputs; a data set selected inside a folder is
-unticked instead, since the folder would find it again.  In the chain's
-step list, removes the selected step.
+unticked instead, since the folder would find it again.
 
 ### clear
 Removes every input.
@@ -206,10 +205,15 @@ live fit: a fitter's *after the fit* runs its steps there already.
 ### chain
 The chain to run: pick a saved one from the list (the chains in the plugin
 folders and the chains folder), open a file, or start a new one.  It shows
-the same panel a chain has in a plugin tab, one folded section per step with
-that step's settings, so a chain is edited here as it is there; it cannot be
-run on the session from here, only saved and run over the files.  To set up
-the layers and filters every file is to get, put a
+the same panel a chain has in a plugin tab, so a chain is edited here as it
+is there; it cannot be run on the session from here, only saved and run over
+the files.  Each step is a folded section with a tick in its title: ticked,
+the step runs; unticked, it stays in the chain with its settings and is
+skipped.  Unfolding a step shows its settings.  A right click on a step's
+title renames it, moves it up or down, or removes it.  The label a step is
+renamed to, made into an identifier, is the step's key: what overrides and
+the summary's columns are named by (`NPC radius` -> `npc_radius`).  To set
+up the layers and filters every file is to get, put a
 [Layers](plugin:Analysis/Process/Layers) step first: without it each file is
 filtered as a freshly opened one is.
 
@@ -217,20 +221,23 @@ filtered as a freshly opened one is.
 Opens a `.chain.yaml` file.
 
 ### new
-Starts an empty chain, with its step list open.
+Starts an empty chain, with *build* open.
 
-### edit steps
-Shows the chain's steps, each with a tick that enables it; an unticked
-step stays in the chain and is skipped.
+### build
+Folded under the chain's file name: the tools that change which steps it
+has.  Opened by itself for a new, empty chain.
 
 ### add...
-Adds a plugin as a step, after the selected one.
+In *build*: adds a plugin as a step, after the step last opened, or into it
+if it is a block.
 
-### up
-Moves the selected step one place earlier.
+### block...
+In *build*: adds a block, steps repeated in each ROI or in each region of
+an id attribute (see `docs/regions.md`).
 
-### down
-Moves the selected step one place later.
+### check
+In *build*: times a block in a few of its regions and says what the whole
+will take, and which attributes its steps change without writing them back.
 
 ### interface...
 Chooses the settings the chain asks: tick a step's setting and type the label
@@ -240,20 +247,19 @@ has: every step's settings are still saved and run, and the tick shows them.
 The batch window shows the chain the same way.  Saved with the chain (`interface:` in its file); see
 `docs/batch.md`, "A chain's interface".
 
-### rename...
-Gives the selected step a label.  The label, made into an identifier, is the
-step's key: what overrides and the summary's columns are named by
-(`NPC radius` -> `npc_radius`).
-
-### save chain
-Writes the chain to its file; one that has none asks where, starting in the
-chains folder.
+### Save chain
+In the ⋯ menu beside the chain's file name.  Writes the chain to its file;
+one that has none asks where, starting in the chains folder.
 Saved in a plugin folder or the chains folder, the chain also appears in the
 plugin tree.  A job refers to a saved, unchanged chain by its file; a chain
 that is not saved or has changes is written into the job itself.
 
-### save as...
-Writes the chain to a new file.
+### Save as...
+In the ⋯ menu.  Writes the chain to a new file.
+
+### Open chain...
+In the ⋯ menu.  Replaces the chain shown by a saved one; the same as
+*open...* above it.
 
 ### merge blinks
 Whether a step reads every localization or the blinks merged -- [merge

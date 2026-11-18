@@ -4,7 +4,7 @@ The shape half of SMAP's ``Analyze/cluster/ClusterStatistics`` (whose pair
 correlation and Ripley's K, despite its description, it never computed).
 ``per_region``, so it measures the view, one ROI, or -- the case it is for --
 every cluster in turn, as a step of a block over ``cluster_id``; the numbers
-land in the region table, where *Sort ROIs*, *Filter ROIs* and *Regions to
+land in the region table, where *Sort regions*, *Filter ROIs* and *Regions to
 column* read them.
 
 **What is measured**, of the positions as the layer shows them (its filter,

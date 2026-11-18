@@ -104,9 +104,8 @@ def make(d) -> None:
     from ...gui.chain_panel import ChainPanel
     panel = [p for p in analysis.findChildren(ChainPanel) if p.isVisible()][-1]
     add = _button(panel.editor, "add...")
-    d.shot("Add puts a plugin in, from the same tree as the tabs; up and down "
-           "change the order.",
-           spot=[add, panel.steps], point=add, click=True, zoom=d.around(panel.editor, 760))
+    d.shot("Under build, Add puts a plugin in, from the same tree as the tabs.",
+           spot=[add], point=add, click=True, zoom=d.around(panel.editor, 760))
     from ... import plugins
     from ...chain import Step
     spec = panel.current_spec()
@@ -114,14 +113,17 @@ def make(d) -> None:
         spec.steps.append(Step(plugin=path, label=label, version=plugins.get(path).version))
     assert panel._apply(spec), "the chain did not take its steps"
     d.settle()
-    d.shot("Here: drift correction, then Localization Statistics. The tick "
-           "turns a step off without removing it.",
-           spot=[panel.steps], zoom=d.around(panel.steps, 760))
     panel.edit.setChecked(False)
     d.settle()
-    d.shot("Each step is a section with that plugin's own settings, set as in "
-           "the plugin itself.",
+    d.shot("Here: drift correction, then Localization Statistics. Each step is a "
+           "section; the tick in its title turns it off without removing it.",
            spot=[panel.panel.form], zoom=d.around(panel.panel.form, 760))
+    first = panel.step_sections()[0][3]
+    first.set_expanded(True)
+    d.settle()
+    d.shot("Opened, a step shows that plugin's own settings. A right click on its "
+           "title moves, renames or removes it.",
+           spot=[first], zoom=d.around(first, 760))
 
     d.chapter("Run it once")
     run = panel.panel.run_button
@@ -138,11 +140,13 @@ def make(d) -> None:
     from ...chain import SUFFIX
     target = plugins.chains_dir() / f"drift_and_statistics{SUFFIX}"
     target.parent.mkdir(parents=True, exist_ok=True)
-    d.shot("Save chain keeps it as a file. Saved, it is a plugin like any other, "
-           "under Analysis, Chains.",
-           spot=[panel.save], point=panel.save, click=True, zoom=d.around(panel.save, 700))
+    menu_button = panel.menu_button
+    d.shot("The menu in the chain's title bar saves it as a file. Saved, it is a "
+           "plugin like any other, under Analysis, Chains.",
+           spot=[menu_button], point=menu_button, click=True,
+           zoom=d.around(menu_button, 700))
     with answering(save=str(target)):
-        panel.save.click()
+        panel.save_action.trigger()
     d.settle()
     assert target.exists(), f"the chain was not saved to {target}"
 

@@ -196,10 +196,13 @@ name the evaluation in the chain.
 
 ### Building a chain in the GUI
 
-A chain is always a single collapsed plugin panel.  **New chain** in a tab's
-add menu creates an empty one; the panel's **edit steps** toggle shows a small
-toolbar -- add a plugin from the tree, move up, move down, delete, enable --
-and **Save chain / Save chain as…** writes the `.chain.yaml`.  A chain that has
+A chain is always a single collapsed plugin panel, and its steps are the
+list: each a folded section of its settings with a tick in its title that
+switches it on or off, and rename, move up, move down and remove on a right
+click on that title.  **New chain** in a tab's add menu creates an empty one,
+with **build** open: *add...* (a plugin from the tree), *block...*,
+*interface...* and *check*.  The **⋯** menu in the section's title bar opens
+a saved chain, and **Save chain / Save as…** writes the `.chain.yaml`.  A chain that has
 not been saved lives in the workspace with its steps inline, like any pinned
 plugin's values, so nothing is lost on restart.  There is no separate chain
 tab: building and using are the same widget.

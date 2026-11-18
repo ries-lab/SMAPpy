@@ -259,8 +259,8 @@ def test_a_block_is_built_in_the_panel_with_its_steps_under_it(app, monkeypatch)
     panel.add_step()
     spec = panel.current_spec()
     assert spec.steps[0].steps[0].plugin == "Analysis/Measure/Localization Statistics"
-    root = panel.steps.invisibleRootItem()
-    assert root.childCount() == 1 and root.child(0).childCount() == 1
+    # the block's section, and its step's inside it
+    assert [path for path, *_ in panel.step_sections()] == [(0,), (0, 0)]
     # with the defaults it has on the view
     assert panel.form.value().for_each_cluster_id.localization_statistics.precision_fit \
         == "histogram"

@@ -35,4 +35,5 @@ tabs:
   header: roi
   instances:
   - plugin: Analysis/Regions/Segment regions
+  - plugin: Analysis/Regions/Sort ROIs
   - plugin: Analysis/Regions/Summarize/Export table

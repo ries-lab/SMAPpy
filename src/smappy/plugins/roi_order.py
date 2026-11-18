@@ -1,4 +1,4 @@
-"""Sort ROIs, Filter ROIs and Remove double ROIs: SMAP's SortROIs,
+"""Sort regions (at Sort ROIs), Filter ROIs and Remove double ROIs: SMAP's SortROIs,
 FilterSites and RemoveDoubleSites, on the results table's columns -- what the
 steps measured, the keywords ROIs were given and where they are.
 
@@ -38,15 +38,15 @@ def no_column():
 class SortROIsSettings:
     by: str = param("", label="sort by", choices=no_column,
                     help="a measured column or a keyword list; none: by ROI number")
-    descending: bool = param(True, label="largest first",
+    descending: bool = param(True, label="largest first", beside=True,
                              help="descending: the largest value, or a list's "
                                   "last keyword, first")
     then_by: str = param("", label="then by", choices=no_column,
                          help="breaks the ties of the first")
-    then_descending: bool = param(True, label="largest first")
-    last_by: str = param("", label="and then by", choices=no_column, advanced=True,
+    then_descending: bool = param(True, label="largest first", beside=True)
+    last_by: str = param("", label="and then by", choices=no_column,
                          help="breaks the ties of the first two")
-    last_descending: bool = param(True, label="largest first", advanced=True)
+    last_descending: bool = param(True, label="largest first", beside=True)
 
 
 def _columns(ctx) -> List[Tuple[str, str]]:
@@ -58,8 +58,12 @@ def _columns(ctx) -> List[Tuple[str, str]]:
 
 @register("Analysis/Regions/Sort ROIs")
 class SortROIs(Plugin):
-    """Orders the ROIs by what was measured in them or the keywords they were
-    given; the list, the results and the summaries follow."""
+    """Orders the ROI manager's list of ROIs by what was measured in them or
+    the keywords they were given; the results and the summaries follow."""
+
+    # the name the tab shows; the path, which saved chains and GUIs name it
+    # by, stays
+    name = "Sort regions"
 
     Settings = SortROIsSettings
     changes_locs = False
@@ -68,16 +72,29 @@ class SortROIs(Plugin):
     def describe(self, ctx, settings) -> FormState:
         found = _columns(ctx)
         choices = [("", "none")] + found
+        # one key to start with, and the next once the one before it is set:
+        # a tie-breaker is wanted now and then, and three keys under a *more*
+        # hid the second as well as the third
+        second = bool(settings.by)
+        third = second and bool(settings.then_by)
         return FormState(choices={"by": [("", "none (by number)")] + found,
-                                  "then_by": choices, "last_by": choices})
+                                  "then_by": choices, "last_by": choices},
+                         shown={"then_by": second, "then_descending": second,
+                                "last_by": third, "last_descending": third})
 
     def run(self, ctx: Context, settings: SortROIsSettings) -> Result:
         project = ctx.rois
         if project is None or not project.rois:
             raise ValueError("there are no ROIs to sort")
-        keys = [(c, d) for c, d in ((settings.by, settings.descending),
-                                    (settings.then_by, settings.then_descending),
-                                    (settings.last_by, settings.last_descending)) if c]
+        keys = []
+        # in order, up to the first left empty: a later key the form hides
+        # (its earlier one emptied) sorts nothing
+        for c, d in ((settings.by, settings.descending),
+                     (settings.then_by, settings.then_descending),
+                     (settings.last_by, settings.last_descending)):
+            if not c:
+                break
+            keys.append((c, d))
         if not keys:
             project.unsort()
             text = f"{len(project.rois)} ROIs in the order of their numbers"

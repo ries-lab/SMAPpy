@@ -190,10 +190,30 @@ class RegionsToColumn(Plugin):
 
 # ------------------------------------------------------------ column to ROIs
 
+#: offered without a session; with one, the table's whole-number attributes
+#: (`id_attributes`), so a name is chosen rather than typed
+COMMON_IDS = ("cluster_id", "track_id", "tid")
+
+
+def common_ids():
+    return [(c, c) for c in COMMON_IDS]
+
+
+def id_attributes(locs) -> List[str]:
+    """The table's whole-number attributes an ROI per id can be made of:
+    the id columns first (`ids.is_id`: cluster_id, track_id, tid, ...), then
+    any other integer column but the ones that only count or index rows."""
+    from ..ids import is_id
+    from ..tracking.columns import integer_columns
+    skip = {"frame", "filenumber", "channel", "group_id", "n_in_group"}
+    names = [n for n in integer_columns(locs) if n not in skip]
+    return sorted(names, key=lambda n: (not is_id(n), n))
+
+
 @dataclass
 class ColumnROIsSettings:
-    column: str = param("cluster_id", label="attribute",
-                        help="an id attribute of the table; 0 and below is in no region")
+    column: str = param("cluster_id", label="attribute", choices=common_ids,
+                        help="an id attribute of the table; -1 is in no region")
     min_size: int = param(10, label="at least", unit="locs", min=1,
                           help="the localizations an id needs to become an ROI")
     outline: bool = param(True, label="the cluster's own outline",

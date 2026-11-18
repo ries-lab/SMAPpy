@@ -75,7 +75,7 @@ evaluation chosen under *results from*.  An ROI whose results no longer
 describe it (it was moved since) gets its number alone.
 
 **The PDF.**  The pictures fill a grid of *columns* by *rows* on each page,
-in the ROI manager's order (as *Sort ROIs* left it).  The outlines and
+in the ROI manager's order (as *Sort regions* left it).  The outlines and
 lines are drawn as lines over the pictures, so they stay sharp at any zoom;
 each picture has a scale bar, and its length is written at the foot of the
 page.

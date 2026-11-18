@@ -19,7 +19,8 @@ settings in a section of this panel -- rather than a plugin of its own:
 [NPC Corners](plugin:Analysis/Measure/NPC Corners) and
 [NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency).
 Their pages explain the methods; this one only what running them together
-changes.  Because it is a chain, it can be edited (*edit steps*), saved
+changes.  Because it is a chain, it can be edited (under *build*, and a right
+click on a step's title), saved
 under another name, and run over many files in a batch.
 
 Use it for the standard analysis, and the three plugins separately to look at
@@ -70,7 +71,7 @@ chain's counts beside the per-region steps' numbers, and NPC labelling
 efficiency run again from the Regions tab finds them, with the cutoffs they
 were counted with.  Running the chain again replaces its counts; to keep a second
 set beside the first -- other cutoffs, to compare -- rename the NPC Corners
-step (*edit steps*).  The chain's analysis reads the chain's own counts,
+step (a right click on its title).  The chain's analysis reads the chain's own counts,
 whatever else is on the ROIs; run from the Regions tab afterwards, it asks which
 set of results to read when there are several.
 

@@ -432,10 +432,12 @@ as NPC labelling efficiency reads its cutoffs from.
 (the Regions tab), the steps whose stored result for the ROI is missing or
 out of date run when it is selected or added, and what runs is stored as a
 one-ROI run, so the same work is not done again on the next visit.  With
-*draw its figures* on, the step whose tab is open is run as well, current or
-not, because a figure cannot be stored and has to be drawn from the data; a
-step re-run only for its figure, with an unchanged result, is not stored
-again.  With both off, selecting an ROI computes nothing: stored results are
+*draw its figures* on, the step whose tab is open is drawn as well.  A step
+that keeps the data its figure is drawn from with its result
+(Localization Statistics, Binding kinetics) draws it from what is stored;
+any other runs again, current or not, since its figure is drawn from the
+localizations.  A step re-run only for its figure, with an unchanged result,
+is not stored again.  With both off, selecting an ROI computes nothing: stored results are
 shown as they are, still marked as out of date.  A step that fails costs its
 own columns, not the ROI or the other steps, and its tab turns orange with
 the error in it.
@@ -456,6 +458,8 @@ when included, grey when excluded and green when selected.
 The selected ROI or the draft, as wide as *ROI view* (two ROI
 sizes by default); the wheel here changes that width for all ROIs.  An ROI of
 an id is shown as wide as its localizations reach, unless *ROI view* is set.
+Since the width changes, a scale bar in the bottom-left corner gives the
+size: a round length, about a fifth of the image.
 The title says what the ROI holds: its shape or id, its range, how many
 localizations over which frames, and for a track the length of its path
 and its median step.  A click centres the draft or the selected ROI
@@ -674,7 +678,7 @@ measured, with everything round the ROI as it is; the file image and the
 zoom show the file whatever an ROI's ranges.
 
 Each row has two fields, the lowest and highest value kept, both included
-(blank is an open end), and *Clear* and *To all used* for that range.
+(blank is an open end, which only a field emptied by hand or *Clear* gives), and *Clear* and *To all used* for that range.
 Under them a plot of the ROI as it is without its
 ranges, in one of two kinds:
 
@@ -687,8 +691,12 @@ ranges, in one of two kinds:
   *line* (*direction* in an older project) when it has one, so a tilted
   structure is seen edge on.
 
-The green band is the range; drag it, or its edges, to set it.  A band let
-go at the edge of the data leaves that end open.  Each change is one step
+The green band is the range; drag its edges to set it.  A drag inside the
+band moves it whole only with Shift held, so a drag near an edge sets that
+end rather than moving the window.  The plot's scale stays where it is
+while an edge is dragged, and takes in a range set beyond the data.  An
+end is kept as it was let go or typed, even at or beyond the edge of the
+data; only *Clear* makes the range all of the attribute again.  Each change is one step
 of the ROI undo, and puts the ROI's results out of date (a draft's, no
 step: it is not stored yet).  An attribute the table does not have is said
 so, and its range cuts nothing.

@@ -20,7 +20,7 @@ spreadsheet, or to put the sites on a map.  A region of an id column has no
 place of its own (its centre is a measurement, Localization Statistics'
 mean position) and gets nothing added.
 
-Rows come in the ROIs' order -- as *Sort ROIs* left it -- and only the
+Rows come in the ROIs' order -- as *Sort regions* left it -- and only the
 included ROIs (*use* ticked) whose results still describe them, as
 everywhere a result is read.
 """

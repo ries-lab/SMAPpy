@@ -29,7 +29,10 @@ through the ROIs from left to right.  A result that is out of date still counts,
 change under the user while the ROIs are measured again.
 
 **The order.**  ROIs are ordered by *sort by*, those with equal values by
-*then by*, then by *and then by*, and finally by their number.  A keyword
+*then by*, then by *and then by*, and finally by their number.  The form
+shows *sort by* alone at first; *then by* appears once *sort by* is
+chosen, and *and then by* once *then by* is.  A key after one left at
+*none* is not used.  A keyword
 sorts by its place in its list: with *quality: good, bad, unsure*, good
 comes first, then bad, then unsure (*largest first* reverses that).  An ROI
 with no value -- not measured, the step failed, no keyword -- goes to the
