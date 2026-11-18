@@ -60,7 +60,10 @@ shown.
   outline and lines; an ROI of an id alone only has its centre set, the
   point its own frame turns about.
 
-**Write it.**  Each ROI it may change gets the value of its row.  An ROI
+**Write it.**  The ROIs selected in the ROI manager's list -- all of them
+when none is, and always all in a chain or a batch -- are the ones it
+changes: *use* is for the analysis, what is changed is chosen by
+selecting.  Each ROI it may change gets the value of its row.  An ROI
 with no value in a column the target reads is left as it is.  All of it is
 one step of the ROI manager's undo.
 
@@ -107,10 +110,6 @@ Only one target per run: in a chain, one step per target.
 after adding ROIs.  *only those not set yet* also keeps what an earlier
 run or a segmenter set.  *all, those set by hand too* starts over -- one
 undo step takes it back.
-
-### used_only
-Off, the excluded ROIs are given the value too, which matters only if they
-are used again later.
 
 ### range.low
 For a track's tail, the frame (or the time) its analysis starts at.  A

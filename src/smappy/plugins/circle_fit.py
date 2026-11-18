@@ -192,6 +192,10 @@ class CircleFit(Plugin):
                      "radius": f["values"]["radius_nm"], "label": f"circle {f['name']}"}
                     for f in fits if np.isfinite(f["values"]["radius_nm"])
                     and np.isfinite(f["values"]["x_nm"]) and np.isfinite(f["values"]["y_nm"])]
+        # in an ROI, the fitted centre (the first layer's) proposed as the ROI's
+        proposals = {}
+        if ctx.per_region and overlays:
+            proposals = {"centre": list(overlays[0]["points"][0])}
         return Result(text="\n".join(lines), plot=Plot(plot, size=(4.6, 4.2)),
                       values=values, data={"fits": fits}, settings=settings,
-                      title="circle fit", overlays=overlays)
+                      title="circle fit", overlays=overlays, proposals=proposals)

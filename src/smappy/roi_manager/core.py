@@ -141,6 +141,38 @@ def overlay_shapes(shapes) -> List[Dict[str, Any]]:
     return out
 
 
+def proposal_values(proposals) -> Dict[str, Any]:
+    """`Result.proposals` checked and made plain, each by what its key says
+    it is: ``angle`` a finite number of degrees (kept between -180 and
+    180), ``centre`` a point, ``range:<attribute>`` a range, ``line:<name>``
+    two points, ``keyword:<list>`` a word.  A key of anything else, or a
+    value that is not what its key says, is refused, naming it."""
+    out: Dict[str, Any] = {}
+    for key, value in (proposals or {}).items():
+        key = str(key)
+        kind, _, name = key.partition(":")
+        try:
+            if key == "angle":
+                out[key] = normal_angle(value)
+            elif key == "centre":
+                out[key] = [float(v) for v in point(value)]
+            elif kind == "range" and name:
+                bounds = value_range(value, f"{name} range")
+                if bounds is None:
+                    raise ValueError("a range proposed is no range: both ends open")
+                out[key] = bounds
+            elif kind == "line" and name:
+                out[key] = line_points(value)
+            elif kind == "keyword" and name and value:
+                out[key] = str(value)
+            else:
+                raise ValueError("not a property: angle, centre, range:<attribute>, "
+                                 "line:<name> or keyword:<list>")
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"proposal {key!r}: {error}") from None
+    return out
+
+
 def region_entry(result, plugin=None, keep: bool = False) -> Dict:
     """What one run in one region stores: its `Result.values`, a number
     each, and its `Result.arrays`.
@@ -167,6 +199,9 @@ def region_entry(result, plugin=None, keep: bool = False) -> Dict:
     overlays = overlay_shapes(getattr(result, "overlays", None) or [])
     if overlays:
         entry["overlays"] = overlays
+    proposals = proposal_values(getattr(result, "proposals", None) or {})
+    if proposals:
+        entry["proposals"] = proposals
     if result.arrays:
         entry["arrays"] = {name: np.asarray(a).tolist()
                            for name, a in result.arrays.items()}
@@ -741,6 +776,10 @@ class ROIProject:
         # the attributes the ROI manager offers ranges of (*ranges*), in
         # order; an ROI keeps a range of one taken out of the list
         self.range_columns: List[str] = list(DEFAULT_RANGES)
+        # the ROIs selected in the ROI manager's list, which an action on
+        # the ROIs takes (`chosen`): a way of looking, never saved, and
+        # empty -- all of them -- with no manager open, in a chain or batch
+        self.selected: List[str] = []
         # The per-region steps, a `chain.Block`: what the steps window edits
         # and runs, and what the ROI manager measures an ROI with.  It
         # travels with the project because the columns of a results table
@@ -887,6 +926,13 @@ class ROIProject:
         longer has them -- a list rewritten by mistake must not wipe a day's
         annotation -- and they show until it is given another."""
         self.annotation_lists = {str(k): [str(w) for w in v] for k, v in lists.items()}
+
+    def chosen(self) -> List[str]:
+        """The ROIs an action on the ROIs takes: the selected ones
+        (`selected`) that still exist, or all of them when none is.  *use*
+        is for the analysis; what is changed is chosen by selecting."""
+        picked = [i for i in self.selected if i in self.rois]
+        return picked or list(self.rois)
 
     def set_range_columns(self, names) -> None:
         """The attributes the ROI manager offers ranges of, in order, each

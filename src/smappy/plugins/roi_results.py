@@ -130,9 +130,8 @@ class ROIsFromResultsSettings:
     keyword: KeywordTarget = param(default_factory=KeywordTarget, label="a keyword")
     centre: CentreTarget = param(default_factory=CentreTarget, label="centre")
     which: str = param("not_hand", label="change", choices=WHICH,
-                       help="which ROIs get the measured value")
-    used_only: bool = param(True, label="used ROIs only",
-                            help="leave the ROIs not ticked *use* as they are")
+                       help="which of the ROIs selected in the ROI manager (all, "
+                            "when none is) get the measured value")
 
 
 # ------------------------------------------------------------------ the values
@@ -291,19 +290,15 @@ def new_values(project, settings: ROIsFromResultsSettings) -> Tuple[dict, dict]:
         part = getattr(settings, t)
         wanted = {roi_id: read(rows.get(roi_id) or {}, part) for roi_id in project.rois}
     out = {}
-    counts = {"by hand": 0, "already set": 0, "not used": 0, "not measured": 0,
+    counts = {"by hand": 0, "already set": 0, "not measured": 0,
               "left as they were": 0}
-    for roi_id, roi in project.rois.items():
-        if settings.used_only and not roi.use:
-            counts["not used"] += 1
-            continue
-        # a centre is never protected: placed by hand it is placed by eye,
-        # roughly, and a measured one is always the better
-        if t != "centre" and settings.which == "not_hand" and roi.source(prop) == "hand":
-            counts["by hand"] += 1
-            continue
-        if t != "centre" and settings.which == "unset" and roi.source(prop):
-            counts["already set"] += 1
+    # the ROIs selected in the ROI manager, all when none is (a chain, a
+    # batch): *use* is for the analysis, what is changed is chosen
+    for roi_id in project.chosen():
+        roi = project.rois[roi_id]
+        why = may_change(roi, prop, settings.which)
+        if why:
+            counts[why] += 1
             continue
         if t == "keyword" and roi_id not in wanted:
             counts["left as they were"] += 1      # *otherwise*: leave it
@@ -315,47 +310,128 @@ def new_values(project, settings: ROIsFromResultsSettings) -> Tuple[dict, dict]:
     return out, counts
 
 
+def write_property(project, roi_id, key: str, value) -> bool:
+    """Write one property onto an ROI (inside the caller's
+    `ROIProject.edit`), by its `ROI.set_by` key: ``angle``, ``centre``,
+    ``range:<attribute>``, ``line:<name>``, ``keyword:<list>`` (None clears
+    the keyword).  A new line name, range attribute or keyword joins the
+    project's, so the ROI manager offers it.  Whether it changed."""
+    from ..roi_manager.core import line_points
+    roi = project.rois[roi_id]
+    kind, _, name = key.partition(":")
+    if key == "angle":
+        before, roi.angle = roi.angle, float(value)
+        after = roi.angle
+    elif kind == "range":
+        before = roi.ranges.get(name)
+        roi.set_range(name, value)                # a new dict: see `copy_rois`
+        after = roi.ranges.get(name)
+        if name not in project.range_columns:
+            project.set_range_columns(list(project.range_columns) + [name])
+    elif kind == "line":
+        before = roi.lines.get(name)
+        roi.lines = {**roi.lines, name: line_points(value)}          # replaced
+        after = roi.lines[name]
+        if name not in project.line_names:
+            project.set_line_names(list(project.line_names) + [name])
+    elif kind == "keyword":
+        before = roi.annotations.get(name)
+        annotations = {k: v for k, v in roi.annotations.items() if k != name}
+        if value:
+            annotations[name] = str(value)
+            words = project.annotation_lists.get(name, [])
+            if value not in words:
+                project.set_annotation_lists({**project.annotation_lists,
+                                              name: list(words) + [str(value)]})
+        roi.annotations = annotations                               # replaced
+        after = roi.annotations.get(name)
+    elif key == "centre":
+        before = list(roi.center)
+        if roi.spatial:
+            project.move_roi(roi_id, value)       # its polygon and lines with it
+        else:
+            roi.center = [float(value[0]), float(value[1])]
+        after = list(roi.center)
+    else:
+        raise ValueError(f"no ROI property {key!r}")
+    return before != after
+
+
+def may_change(roi, key: str, which: str) -> Optional[str]:
+    """None when ``which`` lets a method change this property of the ROI,
+    else why not: set by hand, or already set.  A centre always may: one
+    placed by hand is placed by eye."""
+    if key == "centre":
+        return None
+    if which == "not_hand" and roi.source(key) == "hand":
+        return "by hand"
+    if which == "unset" and roi.source(key):
+        return "already set"
+    return None
+
+
 def apply(project, settings: ROIsFromResultsSettings, values: dict, who: str) -> int:
     """Write ``values`` onto the ROIs (inside the caller's `ROIProject.edit`)
     and note ``who`` set them; how many changed."""
-    from ..roi_manager.core import line_points
-    t, prop = settings.target, prop_of(settings)
+    prop = prop_of(settings)
     changed = 0
     for roi_id, value in values.items():
-        roi = project.rois[roi_id]
-        if t == "angle":
-            before, roi.angle = roi.angle, float(value)
-        elif t == "range":
-            column = settings.range.attribute
-            before = roi.ranges.get(column)
-            roi.set_range(column, value)          # a new dict: see `copy_rois`
-            value = roi.ranges.get(column)
-        elif t == "line":
-            name = settings.line.name
-            before = roi.lines.get(name)
-            roi.lines = {**roi.lines, name: line_points(value)}     # replaced
-            value = roi.lines[name]
-        elif t == "keyword":
-            name = settings.keyword.list_name
-            before = roi.annotations.get(name)
-            annotations = {k: v for k, v in roi.annotations.items() if k != name}
-            if value:
-                annotations[name] = value
-            roi.annotations = annotations                          # replaced
-        else:                                                       # centre
-            before = list(roi.center)
-            if roi.spatial:
-                project.move_roi(roi_id, value)   # its polygon and lines with it
-            else:
-                roi.center = [float(value[0]), float(value[1])]
-            value = list(roi.center)
-        changed += before != value
-        roi.set_source(prop, who)
-    if t == "line" and settings.line.name not in project.line_names:
-        project.set_line_names(list(project.line_names) + [settings.line.name])
-    if t == "range" and settings.range.attribute not in project.range_columns:
-        project.set_range_columns(list(project.range_columns) + [settings.range.attribute])
+        changed += write_property(project, roi_id, prop, value)
+        project.rois[roi_id].set_source(prop, who)
     return changed
+
+
+def proposal_steps(project) -> Dict[str, List[str]]:
+    """``{step: [property, ...]}``: the steps whose results propose
+    something for any ROI, and what."""
+    out: Dict[str, List[str]] = {}
+    for label, table in project.tables.items():
+        keys: List[str] = []
+        for proposals in getattr(table, "proposals", []) or []:
+            for key in proposals or {}:
+                if key not in keys:
+                    keys.append(key)
+        if keys:
+            out[label] = keys
+    return out
+
+
+def apply_proposals(project, step: str, roi_ids, which: str = "not_hand",
+                    keys=None, who: str = "") -> Tuple[int, int, Dict[str, int]]:
+    """Take what ``step`` proposed for each of ``roi_ids`` -- each ROI its own
+    proposals, as its results keep them -- the properties ``keys`` (None:
+    all it proposes), leaving what ``which`` protects; one step of the ROI
+    undo.  ``(ROIs changed, properties written, passed over by reason)``."""
+    if which not in dict(WHICH):
+        raise ValueError(f"change is one of {', '.join(dict(WHICH))}, not {which!r}")
+    table = project.tables.get(step)
+    if table is None:
+        raise ValueError(f"no step {step!r} has measured the ROIs: "
+                         + (", ".join(project.tables) or "none has"))
+    who = who or step
+    counts: Dict[str, int] = {"by hand": 0, "already set": 0, "nothing proposed": 0}
+    rois_changed = written = 0
+    with project.edit(f"Accept {step}'s proposals"):
+        for roi_id in roi_ids:
+            roi = project.rois.get(roi_id)
+            entry = table.entry(roi_id) if roi is not None and roi_id in table else None
+            proposals = dict((entry or {}).get("proposals") or {})
+            if keys is not None:
+                proposals = {k: v for k, v in proposals.items() if k in keys}
+            if not proposals:
+                counts["nothing proposed"] += 1
+                continue
+            touched = False
+            for key, value in proposals.items():
+                why = may_change(roi, key, which)
+                if why:
+                    counts[why] += 1
+                    continue
+                touched |= write_property(project, roi_id, key, value)
+                roi.set_source(key, who)
+                written += 1
+            rois_changed += touched
+    return rois_changed, written, counts
 
 
 # ------------------------------------------------------------------ the plugin
@@ -426,9 +502,78 @@ class ROIsFromResults(Plugin):
         with project.edit(f"{self.name}: {what}"):
             changed = apply(project, settings, values, self.name)
         passed = ", ".join(f"{n} {why}" for why, n in counts.items() if n)
-        text = (f"{what} set on {len(values)} ROIs ({changed} changed)"
+        chosen = len(project.chosen())
+        scope = (f"of {chosen} selected" if chosen < len(project.rois)
+                 else f"of all {chosen}")
+        text = (f"{what} set on {len(values)} ROIs {scope} ({changed} changed)"
                 + (f"; passed over: {passed}" if passed else ""))
         if changed and settings.target != "keyword":
             text += "; their results are out of date: measured in the new frame or cut"
         return Result(text=text, settings=settings, rois=[],
                       values={"set": len(values), "changed": changed})
+
+
+# ------------------------------------------------------- accepting proposals
+
+def no_step():
+    """Without a session there are no steps that propose anything."""
+    return [("", "none")]
+
+
+def any_property():
+    return [("", "all it proposes")]
+
+
+@dataclass
+class AcceptProposalsSettings:
+    step: str = param("", label="step", choices=no_step,
+                      help="the per-region step whose proposals are taken")
+    property: str = param("", label="property", choices=any_property,
+                          help="one of what it proposes, or all of it")
+    which: str = param("not_hand", label="change", choices=WHICH,
+                       help="which of the ROIs selected in the ROI manager (all, "
+                            "when none is) take the proposals")
+
+
+@register("Analysis/Regions/Accept proposals")
+class AcceptProposals(Plugin):
+    """Takes what a per-region step proposed each ROI should be -- its angle,
+    a range, a line, a keyword, its centre -- as the Regions tab's *Apply*
+    does, for a chain or a batch."""
+
+    Settings = AcceptProposalsSettings
+    changes_locs = False
+    version = "1"
+
+    def describe(self, ctx, settings) -> FormState:
+        project = getattr(ctx, "rois", None) if ctx is not None else None
+        steps = proposal_steps(project) if project is not None else {}
+        state = FormState(choices={
+            "step": [(s, s) for s in steps] or no_step(),
+            "property": any_property() + [(k, k) for k in steps.get(settings.step, [])]})
+        if project is not None and not steps:
+            state.notice = Notice("no step has proposed anything yet: run a per-region "
+                                  "step that does (Trace inspector, Circle fit)",
+                                  kind="info")
+        return state
+
+    def run(self, ctx: Context, settings: AcceptProposalsSettings) -> Result:
+        project = ctx.rois
+        if project is None or not project.rois:
+            raise ValueError("there are no ROIs to change")
+        steps = proposal_steps(project)
+        if settings.step not in steps:
+            raise ValueError(f"step {settings.step!r} has proposed nothing: "
+                             + (", ".join(steps) or "no step has"))
+        keys = [settings.property] if settings.property else None
+        chosen = project.chosen()
+        changed, written, counts = apply_proposals(project, settings.step, chosen,
+                                                   settings.which, keys)
+        passed = ", ".join(f"{n} {why}" for why, n in counts.items() if n)
+        scope = (f"{len(chosen)} selected" if len(chosen) < len(project.rois)
+                 else f"all {len(chosen)}")
+        text = (f"{settings.step}'s proposals taken on {scope} ROIs: {written} "
+                f"properties written, {changed} ROIs changed"
+                + (f"; passed over: {passed}" if passed else ""))
+        return Result(text=text, settings=settings, rois=[],
+                      values={"written": written, "changed": changed})

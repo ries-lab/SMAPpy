@@ -835,6 +835,14 @@ class Result:
     # is measured from them and nothing about the ROI changes.  To make one
     # the ROI's own line, *ROIs from results*.
     overlays: List[Dict[str, Any]] = field(default_factory=list)
+    # What the run proposes the region's ROI should be, as values ready to
+    # take: ``{"angle": deg, "centre": [x, y], "range:<attribute>": [lo, hi],
+    # "line:<name>": [[x0, y0], [x1, y1]], "keyword:<list>": word}`` -- the
+    # keys `ROI.set_by` names properties by.  Kept with the region's results
+    # (`proposal_values`) and taken only when someone applies them: the
+    # Regions tab's *Apply*, or *Accept proposals* in a chain.  A
+    # measurement never changes its ROI by itself.
+    proposals: Dict[str, Any] = field(default_factory=dict)
     settings: Any = None                    # what was actually used
     # more for the log entry, beside the path, the text and the settings: a
     # chain puts its steps here, so the history shows what each one did

@@ -14,11 +14,28 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QSize
-from PySide6.QtWidgets import (QCheckBox, QHeaderView, QLabel, QPushButton, QTableWidget,
-                               QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QHeaderView, QLabel, QPushButton,
+                               QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout,
+                               QWidget)
 
 from ..session import Session
 from .widgets import CONTROL_WIDTH, CollapsibleSection
+
+
+def proposal_text(key: str, value) -> str:
+    """A proposal in a few words: ``angle 37\u00b0``, ``line axis``,
+    ``frames 3-``, ``type: motor``, ``centre``."""
+    from ..roi_manager.core import range_description
+    kind, _, name = key.partition(":")
+    if key == "angle":
+        return f"angle {float(value):.0f}\u00b0"
+    if kind == "range":
+        return range_description(name, value)
+    if kind == "line":
+        return f"line {name}"
+    if kind == "keyword":
+        return f"{name}: {value}"
+    return key
 from ..roi_manager.core import annotation_columns
 from .roi_window import COUNT_LIMIT
 
@@ -93,6 +110,13 @@ class ROIHeader(QWidget):
         # the table only once an ROI is selected, and as tall as its rows
         self.results.hide()
         slayout.addWidget(self.results)
+        # what the steps propose the selected ROI be, and a button to take
+        # it: here, beside the steps that measured it, not in the ROI manager
+        self.proposals = QWidget()
+        self.proposals_layout = QVBoxLayout(self.proposals)
+        self.proposals_layout.setContentsMargins(0, 2, 0, 0)
+        self.proposals_layout.setSpacing(2)
+        slayout.addWidget(self.proposals)
         # folded until wanted: the steps' editor is tall, and the tab opens on
         # the geometry and the plugins
         section = CollapsibleSection("per-region steps", steps, expanded=False,
@@ -155,6 +179,8 @@ class ROIHeader(QWidget):
             # the numbers of whichever ROI is selected, measured now or not:
             # they followed only a measurement, and stood on the last ROI
             self.manager.selected.connect(self._on_selected)
+            # what *Apply* takes follows the list's selection
+            self.manager.selection_changed.connect(self._show_result)
         self.manager.show()
         self.manager.raise_()
 
@@ -267,6 +293,7 @@ class ROIHeader(QWidget):
         roi = project.rois.get(active) if active else None
         self.results.setRowCount(0)
         self.results.setVisible(roi is not None)
+        self._show_proposals(roi)
         if roi is None:
             return
         self.results.setHorizontalHeaderLabels(
@@ -302,6 +329,54 @@ class ROIHeader(QWidget):
             self.results.setItem(row, 0, QTableWidgetItem(name))
             self.results.setItem(row, 1, QTableWidgetItem(text))
         self._fit_results()
+
+    def _show_proposals(self, roi) -> None:
+        """A line per step that proposes something for the ROI shown, and
+        *Apply*: to the ROIs selected in the ROI manager, all when none is,
+        each ROI taking its own proposals (`roi_results.apply_proposals`)."""
+        while self.proposals_layout.count():
+            item = self.proposals_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                # out of the panel now, not at the next turn of the event loop
+                widget.setParent(None)
+                widget.deleteLater()
+        if roi is None:
+            return
+        project = self.project
+        chosen = project.chosen()
+        where = (("this ROI" if chosen == [roi.id] else f"{len(chosen)} selected")
+                 if len(chosen) < len(project.rois) else f"all {len(chosen)}")
+        for label, table in project.tables.items():
+            entry = table.entry(roi.id) if roi.id in table else None
+            proposed = (entry or {}).get("proposals")
+            if not proposed:
+                continue
+            text = QLabel(f"{label} proposes: " + ", ".join(
+                proposal_text(k, v) for k, v in proposed.items()))
+            text.setWordWrap(True)
+            text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            button = QPushButton(f"Apply to {where}")
+            button.setToolTip("take these proposals as the ROIs' own -- each ROI its "
+                              "own -- leaving what was set by hand; one undo step")
+            button.clicked.connect(lambda _=False, step=label: self._apply_proposals(step))
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(text, 1)
+            row.addWidget(button)
+            line = QWidget()
+            line.setLayout(row)
+            self.proposals_layout.addWidget(line)
+
+    def _apply_proposals(self, step: str) -> None:
+        from ..plugins.roi_results import apply_proposals
+        changed, written, counts = apply_proposals(self.project, step,
+                                                   self.project.chosen())
+        passed = ", ".join(f"{n} {why}" for why, n in counts.items() if n)
+        self.summary.setText(f"{step}'s proposals: {written} written, {changed} ROIs "
+                             "changed" + (f"; passed over: {passed}" if passed else ""))
+        self._notify()
+        self._show_result()
 
     def _fit_results(self) -> None:
         """As tall as its rows, up to ten: the tab scrolls, the table need not."""
