@@ -19,6 +19,7 @@ interface:
   colours.pairing.max_distance_nm: colours apart
   kinesins.ids.keep: kinesins kept
   kinesins.ids.both_colours: both colours only
+  kinesins.keep_rejected: keep non-tracks
   steps.min_locs: steps from
 steps:
   - plugin: Analysis/Process/Layers
@@ -67,11 +68,11 @@ steps:
       ids.draw: track
       ids.angle: axis
       ids.keep: displacement_nm >= 100 and linearity >= 0.8
-      keep_rejected: true          # every track an ROI, the walkers used
+      keep_rejected: false         # on: every track an ROI, the walkers used
       replace: true
   - plugin: Analysis/Tracking/Find steps
     label: steps
-    version: "6"
+    version: "7"
     values:
       id_column: ""              # auto: pair_id where there are two colours, else tid
       in_rois: true                # the kinesins' ROIs only

@@ -13,7 +13,7 @@ and their steps.
 
 It is a [chain](plugin:Panels/Glossary) (also called a pipeline or
 workflow): the plugins it runs, one after the other, each with its own
-settings in a section of this panel, folded behind *show the steps*.  Five
+settings in a section of this panel, folded behind *show the steps*.  Six
 settings are shown at the top:
 
 * *offset from* -- where [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour)
@@ -24,6 +24,9 @@ settings are shown at the top:
 * *kinesins kept* -- which molecules' ROIs are used, a condition on each
   molecule's track (below);
 * *both colours only* -- only the molecules seen in both colours are used;
+* *keep non-tracks* -- an ROI, not used, for every molecule *kinesins kept*
+  rejects too, to see what was left out and tune the condition on; off,
+  only the walkers get ROIs;
 * *steps from* -- the localizations a molecule needs for its steps.
 
 The pages of the plugins explain the methods; this one what running them
@@ -57,9 +60,10 @@ first, and joins the traces of both colours into molecules, `pair_id`.
 
 **5. Kinesins.**  [Segment regions](plugin:Analysis/Regions/Segment regions)
 with the *MINFLUX kinesin* preset makes an ROI of every molecule of 20
-localizations or more, drawn as its track and turned along it, and
-annotated in the keyword list *colours* (*single*, *dual*; *apart* comes from Find steps); the
-ones that walk are used, the others are there to look at, unused.
+localizations or more that walks, drawn as its track and turned along it,
+and annotated in the keyword list *colours* (*single*, *dual*; *apart*
+comes from Find steps).  With *keep non-tracks* the molecules that do not
+walk get ROIs too, unused, to look at.
 
 **6. Steps.**  [Find steps](plugin:Analysis/Tracking/Find steps) on
 `pair_id`, each colour with its own steps on one clock and in one frame

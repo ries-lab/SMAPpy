@@ -274,9 +274,9 @@ def test_a_bead_measurement_read_with_the_tracking_is_told_by_its_long_traces():
 CHAIN = "Analysis/MINFLUX/Workflow/MINFLUX kinesin"
 
 
-def test_the_kinesin_chain_is_shipped_and_asks_five_settings():
+def test_the_kinesin_chain_is_shipped_and_asks_six_settings():
     found = plugins.get(CHAIN)
-    assert len(found.interface()) == 5
+    assert len(found.interface()) == 6
 
 
 def test_the_kinesin_chain_finds_the_walkers_and_their_steps():
@@ -288,7 +288,9 @@ def test_the_kinesin_chain_finds_the_walkers_and_their_steps():
     chain = plugins.get(CHAIN)
     result = s.run(chain(), chain.Settings())
     walkers = [r for r in s.rois.rois.values() if r.use]
-    assert len(walkers) == 30                          # the still ones not used
-    assert len(s.rois.rois) == 40                      # but there, to look at
+    assert len(walkers) == 30 == len(s.rois.rois)      # the still ones left out
+    # *keep non-tracks* on: the still ones there too, unused, to look at
+    s.run(chain(), plugins.settings_from(chain.Settings, {"kinesins.keep_rejected": True}))
+    assert len(s.rois.rois) == 40 and sum(r.use for r in s.rois.rois.values()) == 30
     assert {r.annotations.get("colours") for r in s.rois.rois.values()} == {"dual"}
     assert "30 traces of pair_id" in result.text
