@@ -15,6 +15,10 @@ U-Net per channel, each frame alone, the offset maps into every stage), its seed
 output on fixed inputs, and the post-processing of a made output whose probabilities have peaks,
 single and side by side, so that ``SpatialIntegration`` has something to join.
 
+``head`` writes a movie's first frames as a TIFF of their own: the oracles read 200 frames, and the
+movies are 2.8 and 3.3 GB, so only their beginnings are fetched (by range requests into the
+archive), which leaves a Micro-Manager file whose index points past its end.
+
 ``model`` runs a published model on the first frames of its movie through the steps of its own
 notebook (``notebook/biplane/challenge.ipynb`` for Fig. 1e, ``2_inference.ipynb`` for the others):
 the network's input and output of the first batches, and all localizations (too large for git:
@@ -47,13 +51,12 @@ RUNS = {
                   trafo=None, flip_lower_half=True, batch=16),
     # the live-cell biplane, window 1, with its registration
     "fig2c": dict(training="outputs/Fig2c-biplane-live_cell-separated_ch-2026-05-15_13-39-38-146351",
-                  frames="Fig2c-240619_NC_LivingCell_HMSir_Tub_i20_2/"
-                         "240619_NC_LivingCell_HMSir_Tub_i20_2_MMStack_Default.ome.tif",
+                  frames="Fig2c-240619_NC_LivingCell_HMSir_Tub_i20_2/first300.tif",
                   trafo="calibration/Fig1c_2c-Pos0_240621_NC_BeadCal_BifocalPlane_Z_1_MMStack_Default.ome_trafo.mat",
                   flip_lower_half=False, batch=4),
     # dual colour, the small test movie
     "fig2a": dict(training="outputs/Fig2a-dual_color-actin_microtubes-separated_ch-2026-05-14_17-22-25-738645",
-                  frames="Fig2a-SmallTest/MM_25ms_638i100_UVi20_focusloci30_1_MMStack_Default_3.ome.tif",
+                  frames="Fig2a-SmallTest/first300.tif",
                   trafo="calibration/Fig2a-Pos0_MM_100ms_638i1_T700(100)_R685(70)_665LP_20nmstep_Z_1_up_noEM_trafo.mat",
                   flip_lower_half=False, batch=4),
 }
@@ -159,6 +162,22 @@ def run_model(run: str, data: pathlib.Path, out: pathlib.Path, device: str, n_fr
     print(json.dumps({k: v for k, v in meta.items() if k != "environment"}, indent=1))
 
 
+def run_head(src: pathlib.Path, dst: pathlib.Path, n: int):
+    """The first ``n`` frames of ``src``, page by page, without its (possibly cut off) index."""
+    import tifffile
+
+    pages = []
+    with tifffile.TiffFile(src, is_ome=False, is_mmstack=False) as t:
+        for page in t.pages:
+            pages.append(page.asarray())
+            if len(pages) == n:
+                break
+    frames = np.stack(pages)
+    tifffile.imwrite(dst, frames)
+    print(json.dumps({"src": src.name, "dst": str(dst), "shape": list(frames.shape), "dtype": str(frames.dtype),
+                      "sha256": sha256(dst)}))
+
+
 def environment() -> dict:
     import importlib.metadata as md
 
@@ -195,8 +214,14 @@ def main():
     m.add_argument("--device", default="cpu")
     m.add_argument("--frames", type=int, default=200)
     m.add_argument("--batches", type=int, default=2, help="batches whose raw input and output are kept")
+    h = sub.add_parser("head")
+    h.add_argument("src", type=pathlib.Path)
+    h.add_argument("dst", type=pathlib.Path)
+    h.add_argument("--frames", type=int, default=300)
     args = ap.parse_args()
-    if args.cmd == "arch":
+    if args.cmd == "head":
+        run_head(args.src, args.dst, args.frames)
+    elif args.cmd == "arch":
         run_arch(args.data, args.out)
     else:
         run_model(args.run, args.data, args.out, args.device, args.frames, args.batches)

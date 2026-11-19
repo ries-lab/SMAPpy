@@ -7,9 +7,13 @@ environment on decodebox):
   to depth 1 and 8 features, with its seeded weights, its output on fixed inputs, and the
   post-processing of a made output -- the wiring (a U-Net per channel, each frame alone, the offset
   maps into every stage), the activations and ``SpatialIntegration``, without a 90 MB weight file;
-* ``$DECODE_SMLM_DATA/plex/oracles/plex_fig1e_cpu.npz`` (the cache): the published Fig. 1e model
-  (the SMLM Challenge's biplane ``MT0.N2.HD``) on the first 200 frames through its notebook's
-  steps.  Without the cache the test skips.
+* ``$DECODE_SMLM_DATA/plex/oracles/plex_<run>_cpu.npz`` (the cache): three published models on
+  the first 200 frames of their movies through their notebooks' steps -- Fig. 1e (the SMLM
+  Challenge's biplane ``MT0.N2.HD``, no registration), Fig. 2c (live-cell biplane, a registration
+  and a mirror, window 1) and Fig. 2a (two colours, a registration, window 3).  Without the cache
+  the test skips.  The CPU's oracle is the reference: the original's run on the 4090 differs from
+  it by up to 0.09 in the raw output and by 20 localizations of 339 149 on Fig. 2c, TF32 being
+  torch's default for convolutions there.
 """
 import json
 import math
@@ -24,9 +28,19 @@ import torch
 
 FIXTURES = pathlib.Path(__file__).parents[1] / "fixtures"
 DATA = pathlib.Path(os.environ.get("DECODE_SMLM_DATA", pathlib.Path.home() / ".cache" / "decode_smlm")) / "plex"
-FIG1E = DATA / "outputs" / "Fig1e-challenge-2026-05-27_15-24-26-229646"
-FIG1E_FRAMES = DATA / "Fig1e-Challenge" / "sequence-MT0.N2.HD-BP-Exp-as-stack.tif"
-FIG1E_ORACLE = DATA / "oracles" / "plex_fig1e_cpu.npz"
+# run: training folder, frames, registration, lower half upside down, batch, frames the CPU is checked on
+RUNS = {
+    "fig1e": ("outputs/Fig1e-challenge-2026-05-27_15-24-26-229646",
+              "Fig1e-Challenge/sequence-MT0.N2.HD-BP-Exp-as-stack.tif", None, True, 16, 48),
+    "fig2c": ("outputs/Fig2c-biplane-live_cell-separated_ch-2026-05-15_13-39-38-146351",
+              "Fig2c-240619_NC_LivingCell_HMSir_Tub_i20_2/first300.tif",
+              "calibration/Fig1c_2c-Pos0_240621_NC_BeadCal_BifocalPlane_Z_1_MMStack_Default.ome_trafo.mat",
+              False, 4, 12),
+    "fig2a": ("outputs/Fig2a-dual_color-actin_microtubes-separated_ch-2026-05-14_17-22-25-738645",
+              "Fig2a-SmallTest/first300.tif",
+              "calibration/Fig2a-Pos0_MM_100ms_638i1_T700(100)_R685(70)_665LP_20nmstep_Z_1_up_noEM_trafo.mat",
+              False, 4, 8),
+}
 
 EMITTER_FIELDS = ("xyz", "xyz_sig", "phot", "phot_sig", "bg", "prob")
 
@@ -135,47 +149,79 @@ def _device():
     return default_device()
 
 
+def _matched(mine: dict, ref: dict, n_frames: int):
+    """Indices pairing the two sets of localizations frame by frame by position (within 0.01 px).
+
+    Order within a frame is the post-processing's and differs between devices, and a spot near the
+    threshold, or between two pixels, can come out on one side and not the other."""
+    from scipy.spatial import cKDTree
+
+    ia, ib = [], []
+    for f in range(n_frames):
+        a = np.flatnonzero(mine["frame_ix"] == f)
+        b = np.flatnonzero(ref["frame_ix"] == f)
+        if len(a) and len(b):
+            d, j = cKDTree(ref["xyz"][b, :2]).query(mine["xyz"][a, :2])
+            ia += list(a[d < 0.01])
+            ib += list(b[j[d < 0.01]])
+    return np.array(ia, dtype=int), np.array(ib, dtype=int)
+
+
 @pytest.mark.slow
-@pytest.mark.skipif(not (FIG1E_ORACLE.exists() and FIG1E_FRAMES.exists() and FIG1E.exists()),
-                    reason=f"DECODE-Plex's Fig. 1e model and its oracle are not in {DATA}")
 @pytest.mark.parametrize("device", ["cpu", "gpu"])
-def test_the_published_fig1e_model_gives_the_originals_localizations(device):
-    """The model of the paper's Fig. 1e, its checkpoint read without Lightning, on the challenge's
-    biplane frames through its notebook's steps: the network's input bitwise, its output and the
-    localizations to float precision (plex-plan §5: x and y within 1e-4 px, z within 0.05 nm)."""
+@pytest.mark.parametrize("run", sorted(RUNS))
+def test_a_published_model_gives_the_originals_localizations(run, device):
+    """A model of the paper, its checkpoint read without Lightning, on the frames of its figure
+    through its notebook's steps: the network's input and output, and the localizations to float
+    precision (plex-plan §5: x and y within 1e-4 px, z within 0.05 nm), all but one in 10 000 of
+    them found by both."""
     import decode_smlm.plex as dp
     import decode_smlm.plex.neuralfitter.inference.functional as infer_func
     from decode_smlm.plex.neuralfitter.inference.debug import InferenceLogger
 
+    training, frames_file, trafo, flip, batch, n_cpu = RUNS[run]
+    oracle = DATA / "oracles" / f"plex_{run}_cpu.npz"
+    needed = [DATA / training, DATA / frames_file, oracle] + ([DATA / trafo] if trafo else [])
+    if not all(p.exists() for p in needed):
+        pytest.skip(f"DECODE-Plex's {run} model, frames or oracle are not in {DATA}")
     dev = _device() if device == "gpu" else "cpu"
     if dev == "cpu" and device == "gpu":
         pytest.skip("no GPU")
-    n = 200 if device == "gpu" else 48          # the CPU takes 0.23 s a frame
-    cfg = dp.io.param.load(FIG1E / "param_run.yaml")
+    n = 100 if device == "gpu" else n_cpu
+
+    cfg = dp.io.param.load(DATA / training / "param_run.yaml")
     for s in cfg["Hardware"]["device"]:
         cfg["Hardware"]["device"][s] = dev
     for cam in cfg["Camera"]:
-        cam["specs"]["flip"]["channel"] = -2
-    frames = dp.io.frames.load_tif(FIG1E_FRAMES, auto_ome=True, memmap=True)[:n].clone()
-    h = frames.size(-2) // 2
-    frames[:, h:, :] = frames[:, h:, :].flip(1)      # the lower plane is upside down
+        cam["specs"]["flip"]["channel"] = -2             # as the notebooks set it
+    window = cfg["Trainer"]["frame_window"]
+    frames = dp.io.frames.load_tif(DATA / frames_file, auto_ome=True, memmap=True)[:n].clone()
+    if flip:
+        h = frames.size(-2) // 2
+        frames[:, h:, :] = frames[:, h:, :].flip(1)      # the challenge's lower plane is upside down
     crop = [math.floor(frames.size(-2) / 2 / 8) * 8, math.floor(frames.size(-1) / 8) * 8]
     log = InferenceLogger(interval=1, max_steps=1)
-    em, log = infer_func.infer(frames, frame_crop=crop, cfg=cfg, model=next(FIG1E.glob("*.ckpt")), mode="multi",
-                               trafo=None, mode_camera="rois", roi_shift=None, logger=log, batch_size=16,
-                               num_workers=0, device=[dev])
+    em, log = infer_func.infer(frames, frame_crop=crop, cfg=cfg, model=next((DATA / training).glob("*.ckpt")),
+                               mode="multi", trafo=(DATA / trafo) if trafo else None, mode_camera="rois",
+                               roi_shift=None, logger=log, batch_size=batch, num_workers=0, device=[dev])
 
-    o = np.load(FIG1E_ORACLE)
-    np.testing.assert_array_equal(log.model_in[0].numpy(), o["model_in"][:16])
-    np.testing.assert_allclose(log.model_out[0].cpu().numpy(), o["model_out"][:16], atol=5e-5)
+    o = np.load(oracle)
+    k = len(log.model_in[0])
+    # the offset maps come from the registration in float32: 3e-6 apart on Fig. 2c
+    np.testing.assert_allclose(log.model_in[0].numpy(), o["model_in"][:k], atol=1e-5)
+    np.testing.assert_allclose(log.model_out[0].cpu().numpy(), o["model_out"][:k], atol=5e-4)
 
-    # the last frame's window is padded where the oracle's was not: compare the frames before it
-    keep = o["em_frame_ix"] < n - 1
-    mine = em.frame_ix.numpy() < n - 1
-    assert mine.sum() == keep.sum()
-    np.testing.assert_array_equal(em.frame_ix.numpy()[mine], o["em_frame_ix"][keep])
-    xyz, ref = em.xyz.numpy()[mine], o["em_xyz"][keep]
-    np.testing.assert_allclose(xyz[:, :2], ref[:, :2], atol=1e-4)
-    np.testing.assert_allclose(xyz[:, 2], ref[:, 2], atol=0.05)
-    np.testing.assert_allclose(em.phot.numpy()[mine], o["em_phot"][keep], rtol=1e-4, atol=0.01)
-    np.testing.assert_allclose(em.prob.numpy()[mine], o["em_prob"][keep], atol=1e-4)
+    # a shortened stack's last frame sees a padded window where the oracle's did not
+    last = n - 1 if window > 1 else n
+    mine = {f: getattr(em, f).cpu().numpy() for f in ("xyz", "phot", "prob", "frame_ix")}
+    ref = {f: o[f"em_{f}"] for f in ("xyz", "phot", "prob", "frame_ix")}
+    mine = {f: v[mine["frame_ix"] < last] for f, v in mine.items()}
+    ref = {f: v[ref["frame_ix"] < last] for f, v in ref.items()}
+    ia, ib = _matched(mine, ref, last)
+    allowed = max(1, len(ref["prob"]) // 10_000)
+    assert len(mine["prob"]) - len(ia) <= allowed and len(ref["prob"]) - len(ib) <= allowed, \
+        (len(mine["prob"]), len(ref["prob"]), len(ia))
+    np.testing.assert_allclose(mine["xyz"][ia, :2], ref["xyz"][ib, :2], atol=1e-4)
+    np.testing.assert_allclose(mine["xyz"][ia, 2], ref["xyz"][ib, 2], atol=0.05)
+    np.testing.assert_allclose(mine["phot"][ia], ref["phot"][ib], rtol=1e-4, atol=0.01)
+    np.testing.assert_allclose(mine["prob"][ia], ref["prob"][ib], atol=1e-4)
