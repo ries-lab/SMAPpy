@@ -536,3 +536,41 @@ The 1.5 % with no candidate on `colour_2a_density_1` are the same: no peak in ei
 So on DECODE-Plex's own CRLB conditions (§12) Spline 3D 2C now detects as well as it (0.95 -- 0.99
 against 0.89 -- 0.95) at the same precision; what is left of its gap at density 1 is overlap, and at
 density 15 and above it is unchanged -- the single-emitter fit's limit, not a detection fault.
+
+## 14. DECODE-Plex's false localizations on the sets are the sets' (2026-11-19)
+
+On `colour_2a_density_1` DECODE-Plex's Fig. 2a model made 0.05 false localizations per 1000 px^2 in the
+fifth of frames with the least background in channel 0 and 3.5 in the fifth with the most (precision
+0.15 there), at about 0.6 true molecules per 1000 px^2.  Run on its own training simulation
+(`scripts/decode/plex_own_frames.py`: DECODE-Plex's sampler, model and post-processing, nothing of
+SMAPpy; scored by matching within 1 px and 500 nm in z, 2 px from the edge), it does not do this:
+
+| frames (40 x 40 px) | Fig. 2a: false per 1000 px^2 | precision | Fig. 2c: false per 1000 px^2 | precision |
+| --- | --- | --- | --- | --- |
+| as trained, 32 molecules a frame | 0.84 -- 0.93 | 0.96 | 1.2 -- 1.4 | 0.92 |
+| sparse, 0.8 a frame | 0.01 -- 0.02 | 0.97 | 0.03 -- 0.06 | 0.91 |
+
+flat over each channel's background in both.  The camera is not the difference (the same EMCCD model;
+DECODE floors where ours rounds, 0.025 photons), nor the level of the background (each half's median in
+our frames is its recorded background within 1 %).  **It is the background's change between frames.**
+DECODE-Plex's training holds each channel's background the same in the frames of a window (one value
+per sample: 0.127, 0.127, 0.127 in the scaled input), where our C = 2 sets draw a new one every frame.
+The Fig. 2a model reads three frames, and a frame brighter than its neighbours is molecules to it: the
+false localizations follow the background less its neighbours' mean (correlation +0.75 in channel 0,
++0.59 for the background alone) -- 257 a frame where a frame is brighter than its neighbours by half
+the range, 0.3 where it is darker -- bright ones (median 7000 photons) at probability 0.6, spread over
+the frame and not near any molecule of this frame or the next.  The same set drawn with one background
+in every frame (90 photons a pixel in both channels, near the top of channel 0's range) gives **0.005
+false per 1000 px^2, precision 0.992, recall 0.997**.
+
+So `colour_2a`'s sets are to be drawn with a background that changes slowly over the movie, as a real
+movie's does; DECODE-Plex's colour results on the present sets understate it.  Fair to netfit too: its
+simulation draws each frame's background on its own (`background_window`), as do DECODE's C = 1
+simulation (`UniformBackground`, one value a frame) and the C = 1 sets (`sets.py`), so a steady
+background is no harder for it, and the C = 1 comparisons stand.
+
+**Biplane is another matter, open.**  The Fig. 2c model reads one frame, yet on `biplane_2c_density_1`
+its precision is 0.59 (0.2 -- 0.8 false per 1000 px^2, against 0.03 -- 0.06 on its own sparse frames).
+Those false localizations lie in a band across the frame at y = 70 -- 100 px and at the smallest x,
+about 20 per cell of 64 x 26 px elsewhere: something of how the sets' biplane frames are cut or
+registered, not their background.
