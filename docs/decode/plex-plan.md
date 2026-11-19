@@ -469,7 +469,16 @@ paper's movies, against DECODE-Plex's localizations of the same frames (the orig
   no EM mirror anywhere (splines and registration as SMAP stored them, the movie as recorded) the fits
   are as bad (-30 to -32, z +380 -- +415 nm from DECODE-Plex's).  Since nothing varied here moves the fit,
   the cause is global: the live cell's high, structured background against a uniform one in the model,
-  or a focus or depth offset (z some 400 nm from DECODE-Plex's throughout).
+  or a focus or depth offset (z some 400 nm from DECODE-Plex's throughout).  Checked since (Jonas: biplane,
+  the focal offset in the two-channel model, photons linked): the fits did link the photons, and Spline 3D
+  2C's link applies no ratio on top of the secondary spline's own share (`photon_factors`, 1 for a spline
+  pair).  The movie's metadata (`Evolve512`, EM gain 100, gain 1, ROI **175**-0-248-512) gives the camera
+  assumed and the ROI the earlier fits guessed wrong; at x = 175 the z agreement with DECODE-Plex is -53
+  nm with 1467 matches (shift 0), but the fits stay at `logl_rel` -31.  The movie's background is 300 --
+  700 photons a pixel and uneven (66 in the frame's left half, 709 in its right; DECODE-Plex's input shows
+  the same level), and even the fits on a background under 60 stay at -16 to -21, a single-channel fit
+  of one half at -30.  Fig. 2c is not a clean test of the conventions with a fitter that takes the
+  background flat in its box; Fig. 2a is.
 - What the affine reading costs DECODE-Plex on real data is not measured yet: on Fig. 2a's narrow chip
   the two readings differ by 0.07 px at most, too little to see here; Fig. 2c's chip is where it would
   show, once that movie fits.
