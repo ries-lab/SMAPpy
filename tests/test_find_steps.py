@@ -100,7 +100,7 @@ def test_the_plateaus_go_on_the_localizations_or_into_a_file():
     assert len(steps) == len(np.unique(plateau)) and "step_level_nm" in steps
 
 
-def test_both_threads_of_a_pair_step_in_the_first_ones_frame():
+def test_both_colours_of_a_molecule_step_in_colour_0s_frame_by_default():
     from smappy import pairing as P
     rng = np.random.default_rng(5)
     # dwells of 60 points, so each thread, seeing every other one, has 30; the
@@ -118,7 +118,7 @@ def test_both_threads_of_a_pair_step_in_the_first_ones_frame():
     session = Session(Localizations(cols, {}))
     session.show_grouped(0, False)
     cls = plugins.get(PLUGIN)
-    result = session.run(cls(), cls.Settings(pairs=True, min_locs=20))
+    result = session.run(cls(), cls.Settings(min_locs=20))     # two colours: auto
     table = session.id_regions["pair_id"]["Find steps"]
     values = dict(zip(table.columns().keys(), [v[0] for v in table.columns().values()]))
     assert values["step_median_thi0_nm"] == pytest.approx(8.0, abs=1.5)
@@ -150,3 +150,41 @@ def test_bnp_step_finds_the_step_size_without_being_told_it():
     assert pooled["step_mean_nm"] == pytest.approx(8.0, abs=1.0)
     # fewer steps fitted to noise: a narrower spread of sizes than AutoStepFinder's
     assert pooled["step_sd_nm"] < greedy["step_sd_nm"]
+
+
+def stuck_then_walking(seed=8, angle_deg=30.0):
+    """A motor stuck for 1 s, wandering slowly across its track, then walking
+    0.5 s at 400 nm/s along ``angle_deg``: 3 ms between localizations."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(0.0, 1.5, 3e-3)
+    a = np.radians(angle_deg)
+    along = np.where(t < 1.0, 0.0, 400.0 * (t - 1.0))
+    wander = np.where(t < 1.0, 25.0 * np.sin(np.pi * t), 0.0)   # slower than it walks
+    x = along * np.cos(a) - wander * np.sin(a) + rng.normal(0, 4, len(t))
+    y = along * np.sin(a) + wander * np.cos(a) + rng.normal(0, 4, len(t))
+    return t, x, y
+
+
+def test_the_track_axis_comes_from_where_the_motor_moves():
+    from smappy import traces as T
+    t, x, y = stuck_then_walking()
+    angle, share = T.moving_direction(t, x, y, window=0.1, min_speed=100.0)
+    assert angle == pytest.approx(30.0, abs=4.0)
+    assert 0.2 < share < 0.5                          # a third of the time it walked
+    # the long axis of all the localizations is pulled across by the wander
+    r = T.runs(np.zeros(len(t), np.int64), t)
+    long_axis = T.axes(r, x, y)["angle_deg"][0]
+    off = abs((long_axis - 30.0 + 180) % 360 - 180)
+    assert off > 5 and off > abs(angle - 30.0)
+
+
+def test_in_an_roi_find_steps_proposes_its_moving_direction_as_the_angle():
+    t, x, y = stuck_then_walking(seed=9, angle_deg=-50.0)
+    locs = Localizations({"x_nm": x.astype(np.float32), "y_nm": y.astype(np.float32),
+                          "time_s": t, "frame": np.arange(len(t)),
+                          "tid": np.zeros(len(t), np.int64)}, {})
+    ctx = plugins.Context(locs=locs, region_id="roi-1")
+    cls = plugins.get(PLUGIN)
+    result = cls().run(ctx, cls.Settings(min_locs=20))
+    assert result.proposals["angle"] == pytest.approx(310.0, abs=4.0)
+    assert result.values["angle_deg"] == pytest.approx(310.0, abs=4.0)

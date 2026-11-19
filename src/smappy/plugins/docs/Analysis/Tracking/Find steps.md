@@ -1,6 +1,6 @@
 ---
-version: "5"
-covers: [smappy.bnp_steps.bnp_steps, smappy.bnp_steps.noise_sd, smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file]
+version: "6"
+covers: [smappy.bnp_steps.bnp_steps, smappy.bnp_steps.noise_sd, smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file, smappy.traces.moving_direction, smappy.plugins.find_steps.draw_steps, smappy.plugins.find_steps.rois_ids]
 ---
 
 ## What it does
@@ -12,8 +12,9 @@ a few hundred localizations per second -- in every
 about the motor: the step size, how long it waits between steps (the dwell
 time), how many hidden sub-steps those waits suggest, and its velocity.
 
-Each trace's positions are turned onto its own long axis, forward in time
-(as *Trace statistics* does), and the steps are found along it with
+Each trace's positions are turned onto the direction it walks in where it
+moves -- the parts where it is stuck left out -- forward in time, and the
+steps are found along it with
 AutoStepFinder (Loeff, Kerssemakers et al. 2021,
 [doi:10.1016/j.patter.2021.100256](https://doi.org/10.1016/j.patter.2021.100256)),
 SMAP's StepsMINFLUX's method, or with BNP-Step (Rojewski et al. 2024,
@@ -50,8 +51,15 @@ bnp = bnp_steps([x], sweeps=200).boundaries[0]
 
 **1. One coordinate per trace.**  The localizations of each trace (at least
 *at least* of them, those the layer's filter keeps) in time order, turned
-onto the trace's long axis pointing the way it went -- or x or y, with
-*steps along*.
+onto the direction the trace walks in -- or x or y, with *steps along*.
+That direction is found where the motor moves: the trace's mean position
+over windows of *moving window* (0.1 s), and between neighbouring windows
+how far it went; the windows it moved in faster than *moving from*
+(100 nm/s) are summed into one direction.  A motor that sits still for
+half its trace, wandering a little across its track, is turned along where
+it walked, where the long axis of all its localizations is pulled across
+by the wander.  A trace that never moves faster gets its long axis
+(*track axis from*: *all its localizations* takes that always).
 
 **2. A greedy fit.**  Starting from one level, the plateau whose best split
 removes the most squared error is split, again and again.  A plateau of
@@ -129,18 +137,26 @@ They are compared by the Akaike information criterion, AIC = 2 x parameters
 - 2 log-likelihood: the lowest is the model the dwells support, and a
 difference of a few units is no evidence either way.
 
-**7. Two colours.**  With *pairs* ticked, on a two-colour MINFLUX
-measurement whose traces [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour)
-joined into molecules (`pair_id`): each molecule is turned onto the long
-axis of its colour-0 localizations, so both colours lie along the same
-line, and each colour's localizations get their own steps.  The colour is
+**7. Two colours.**  On a two-colour MINFLUX measurement, *two colours* on
+*auto*: the traces [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour)
+joined into molecules (`pair_id`, taken when no other id is chosen) are
+turned into one frame -- the direction the molecule walks in, about the
+centre of its colour-0 localizations -- so both colours lie along the same
+line, on one clock, and each colour's localizations get their own steps.  The colour is
 the laser, `channel` (0 the longer wavelength), where the reader knew it,
 else the thread, `thi`.  A motor and its cargo, or the two heads of one
 motor in two colours, then step side by side in one plot (SMAP's
 StepsMINFLUX_dc), and the region table holds the median step of each colour
 (`step_median_channel0_nm`, `step_median_channel1_nm`; `..._thi0_nm` where
 the colour is the thread).  The step count, dwell and velocity in the
-table are colour 0's.
+table are colour 0's.  *as one trace* fits both colours' localizations as
+one, which is only right for one label in two colours.
+
+**8. In an ROI.**  Run as a per-region step in the ROI manager, it measures
+the ROI's molecule and proposes the direction it walks in as the ROI's
+angle -- set only by *Apply proposals* -- which the ROI then shows its
+molecule turned by, and the steps of anything else measured in it are
+along.
 
 ## In detail
 
@@ -227,10 +243,19 @@ numbers never see one.
 8 for kinesin and dynein along microtubules, 36 for myosin V.  Leave it at
 0 to see what the data find without a prior.
 
-### pairs
-Needs `pair_id` and two colours (`channel`, else `thi`).  Each colour of
-a molecule has only its own localizations, about half of the molecule's:
-dwells shorter than a few localizations per colour merge.
+### colours
+Each colour of a molecule has only its own localizations, about half of
+the molecule's: dwells shorter than a few localizations per colour merge.
+
+### window_s
+A few tens of localizations per window: at a few hundred localizations a
+second, 0.1 s.  Shorter windows see a kinesin's single steps and its
+pauses between them as moving and stuck.
+
+### min_speed
+Above the windows' noise (a few nm over 0.1 s, some tens of nm/s) and
+below the motor's: 100 nm/s for kinesin at saturating ATP; lower it for a
+slow motor.
 
 ### output
 *plateaus on the localizations* writes `plateau` (an id per plateau, -1 for
@@ -242,10 +267,17 @@ with its level, dwell and size -- MotorPAINT's map of steps.
 
 A region table of the id attribute, "per tid: Find steps": `n_steps`,
 `step_median_nm`, `step_mean_nm`, `dwell_mean_s`, `velocity_nm_per_s`,
-`erlang_shape`.  The text adds the dwell models, the best first with each
-one's parameters and its AIC above the best.  Four panels: the longest
-traces with their steps, the step sizes, the dwell times with the three
-models (the best drawn thicker), and the velocity.  Steps clustered at the expected size,
+`erlang_shape`, the direction of the track (`angle_deg`) and, from the
+moving parts, the share of windows it moved in (`moving_share`); with two
+colours the median step of each.  The text adds the dwell models, the best
+first with each one's parameters and its AIC above the best.  The figure:
+above, the longest traces (in an ROI, its molecule) each in a panel of its
+own, the localizations as dots joined in time (*localizations as a line*)
+and the steps over them, a two-colour molecule's colours in magenta (colour
+0) and green on one clock from its first localization in either and from
+colour 0's first plateau; below, the step sizes, the dwell times with the
+three models (the best drawn thicker), and the velocity.  The histograms'
+bins grow with the number of steps.  Steps clustered at the expected size,
 mostly forward, and an Erlang shape near the number of events per step
 (about 2 for kinesin's alternating heads) look like a motor; a broad size
 distribution with many backward steps, like steps fitted to noise.

@@ -160,6 +160,46 @@ def _mean_of_ranks(r: Runs, x, y, pick, k) -> Tuple[np.ndarray, np.ndarray]:
     return r.sums(np.where(sel, x, 0)) / m, r.sums(np.where(sel, y, 0)) / m
 
 
+def moving_direction(t, x, y, window: float, min_speed: float) -> Tuple[float, float]:
+    """The direction a motor walks in, from the parts of its trace where it
+    moves: ``(angle_deg, moving_share)``.
+
+    The trace is cut into windows of ``window`` (in the units of ``t``) and
+    each window's mean position taken -- a few tens of localizations, so a
+    nanometre or two of noise; between neighbouring windows the motor moved
+    ``d``, and a window pair moves when ``|d| / window >= min_speed``.  The
+    direction is that of the sum of the moving pairs' ``d``: the stuck parts,
+    where the covariance's long axis is pulled by noise and by any slow
+    wander, count for nothing, and a motor that pauses for half its trace is
+    still turned along where it walked.  NaN where no pair moves;
+    ``moving_share`` the share of the pairs that did."""
+    t = np.asarray(t, float)
+    x = np.asarray(x, float)
+    y = np.asarray(y, float)
+    ok = np.isfinite(t) & np.isfinite(x) & np.isfinite(y)
+    t, x, y = t[ok], x[ok], y[ok]
+    if len(t) < 4 or not window > 0:
+        return np.nan, np.nan
+    k = np.floor((t - t.min()) / window).astype(np.int64)
+    n = np.bincount(k)
+    sx, sy = np.bincount(k, x), np.bincount(k, y)
+    full = n >= 2
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mx, my = sx / n, sy / n
+    pair = full[:-1] & full[1:]
+    if not pair.any():
+        return np.nan, np.nan
+    dx, dy = np.diff(mx)[pair], np.diff(my)[pair]
+    moving = np.hypot(dx, dy) / window >= min_speed
+    share = float(moving.mean())
+    if not moving.any():
+        return np.nan, share
+    vx, vy = dx[moving].sum(), dy[moving].sum()
+    if vx == 0 and vy == 0:
+        return np.nan, share
+    return float(np.degrees(np.arctan2(vy, vx)) % 360.0), share
+
+
 def rotate(r: Runs, x: np.ndarray, y: np.ndarray, a: Dict[str, np.ndarray]
            ) -> Tuple[np.ndarray, np.ndarray]:
     """Each sorted row turned onto its trace's axes (`axes`): x along the

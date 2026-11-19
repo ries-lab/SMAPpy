@@ -110,7 +110,9 @@ def test_the_form_shows_only_the_chosen_methods_part_and_what_keep_can_name():
         for key in ("circle", "beads", "ids", "file"):
             assert state.shown[key] == (key == method)
         measured = method in ("circle", "beads")
-        assert state.shown["keep"] == state.shown["keep_rejected"] == measured
+        assert state.shown["keep"] == measured
+        # an id attribute's own keep (ids.keep) may add what it rejects, unused
+        assert state.shown["keep_rejected"] == (measured or method == "ids")
         assert ("NPC", "NPC") in state.choices["preset"]
     ring = SegmentRegions().describe(None, SegmentSettings(
         circle=CircleSettings(shape="ring")))

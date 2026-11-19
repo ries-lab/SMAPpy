@@ -18,6 +18,7 @@ interface:
   colours.offset.source: offset from
   colours.pairing.max_distance_nm: colours apart
   kinesins.ids.keep: kinesins kept
+  kinesins.ids.both_colours: both colours only
   steps.min_locs: steps from
 steps:
   - plugin: Analysis/Process/Layers
@@ -56,7 +57,7 @@ steps:
     values: {}                     # auto: the bead measurement open, else the molecules
   - plugin: Analysis/Regions/Segment regions
     label: kinesins
-    version: "3"
+    version: "4"
     values:                        # the MINFLUX kinesin preset's
       preset: MINFLUX kinesin
       method: ids
@@ -65,13 +66,13 @@ steps:
       ids.membership: id
       ids.draw: track
       ids.angle: axis
-      ids.keep: n_locs >= 20 and displacement_nm >= 100 and linearity >= 0.8
+      ids.keep: displacement_nm >= 100 and linearity >= 0.8
+      keep_rejected: true          # every track an ROI, the walkers used
       replace: true
   - plugin: Analysis/Tracking/Find steps
     label: steps
-    version: "5"
+    version: "6"
     values:
       id_column: pair_id
-      pairs: true                  # each colour its own steps, side by side
       in_rois: true                # the kinesins' ROIs only
       min_locs: 20

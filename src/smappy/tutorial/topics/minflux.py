@@ -318,9 +318,10 @@ def make(d) -> None:
     pooled = steps.result.data.get("pooled") or {}
     if pooled.get("step_mean_nm") is not None:
         assert abs(pooled["step_mean_nm"] - 8.0) < 1.0, pooled["step_mean_nm"]
-    d.shot("The positions along the track, and the steps found in them.",
-           spot=[_titled(panels, "the longest traces")],
-           zoom=d.around(_titled(panels, "the longest traces"), 900))
+    longest = next(iter(panels.values()))           # the first trace's panel
+    d.shot("The longest trace, its positions along the track and the steps "
+           "found in them.",
+           spot=[longest], zoom=d.around(longest, 900))
     d.shot("The step sizes pooled over the traces, and the dwell times between "
            "steps, with three models compared.",
            spot=[d.window_rect(window)])

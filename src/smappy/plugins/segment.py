@@ -243,6 +243,12 @@ class SegmentSettings:
     replace: bool = replace_param()
 
 
+#: the keyword list an ROI of a two-colour table is annotated in, and its
+#: word for one that holds both colours (the others are named by colour)
+COLOURS_LIST = "colours"
+BOTH_COLOURS = "both"
+
+
 def draw_as(column: str) -> str:
     """How an ROI of this id column alone is drawn on *auto*: a track for a
     column that names tracks, an outline for any other (a cluster)."""
@@ -411,7 +417,7 @@ class SegmentRegions(SegmenterPlugin):
     grouping = "ungrouped"
     # 2: the circle template (ring or disc, over a range of radii) and keep
     # replace the ring template and density peaks; beads; positions
-    version = "3"
+    version = "4"
 
     def describe(self, ctx: Optional[Context], settings: SegmentSettings) -> FormState:
         """Only the chosen method's part; the presets there are; the values
@@ -439,7 +445,7 @@ class SegmentRegions(SegmenterPlugin):
                                       + " (each id as a trace)", kind="info")
         measured = settings.method in MEASURED
         state.shown["keep"] = measured
-        state.shown["keep_rejected"] = measured
+        state.shown["keep_rejected"] = measured or settings.method == "ids"
         state.active["circle.ring_width_nm"] = settings.circle.shape == "ring"
         project = getattr(ctx, "rois", None) if ctx is not None else None
         lists = list(getattr(project, "annotation_lists", {}) or {})
@@ -670,10 +676,11 @@ class SegmentRegions(SegmenterPlugin):
             raise ValueError(f"angle is none, axis or ends, not {ids.angle!r}")
         # each id measured as a trace only when keep or the angle reads it:
         # most id columns (clusters, diffusing tracks) want neither
-        measured = bool(ids.keep.strip()) or ids.angle != "none"
+        measured = bool(ids.keep.strip()) or ids.angle != "none" or ids.both_colours
         values: Dict[int, Dict[str, float]] = {}
         rejected = 0
         reasons: Dict[str, int] = {}
+        left_out: List[Dict[str, Any]] = []
         if measured:
             test, _ = segmentation.keep_test(ids.keep, TRACE_VALUES)
             parts = segmentation.clauses(ids.keep) if ids.keep.strip() else []
@@ -683,21 +690,40 @@ class SegmentRegions(SegmenterPlugin):
             kept = []
             for region in found:
                 v = values.get(region["id"], {})
-                if test(v):
+                failed = [p for p, t in tests if not t(v)] or (
+                    [] if test(v) else [ids.keep.strip()])
+                if ids.both_colours and v.get("n_colours", 1) < 2:
+                    failed.append("in both colours")
+                if not failed:
                     kept.append(region)
                     continue
                 rejected += 1
-                for part in [p for p, t in tests if not t(v)] or [ids.keep.strip()]:
+                left_out.append(region)
+                for part in failed:
                     reasons[part] = reasons.get(part, 0) + 1
             found = kept
+        # a table of two colours: each ROI says which it holds, as a keyword
+        from ..dual_colour import colour_column, colour_names
+        colour_col = colour_column(ctx.locs)
+        colours = (np.asarray(ctx.locs[colour_col], np.int64) if colour_col in ctx.locs
+                   else None)
+        two = colours is not None and len(np.unique(colours)) > 1
+        names = colour_names(ctx.locs, colour_col) if two else {}
+
+        def colour_word(region) -> str:
+            held = np.unique(colours[region["rows"]])
+            if len(held) > 1:
+                return BOTH_COLOURS
+            return names.get(int(held[0]), f"{colour_col} {int(held[0])}")
         angle_key = {"axis": "angle_deg", "ends": "ends_angle_deg"}.get(ids.angle)
 
         def ours(r) -> bool:
             return made_by(r, "ids") and (r.origin or {}).get("column") == column
 
-        def site(region) -> Dict[str, Any]:
+        def site(region, use: bool = True) -> Dict[str, Any]:
             """The ROI of a region, as `ROIProject.add_roi` takes it: what a
-            run adds and a preview proposes."""
+            run adds and a preview proposes; ``use`` False for one *keep*
+            rejected that *keep rejected* adds."""
             origin = {"method": self.path, "segment": "ids",
                       "parameters": settings_values(settings), "column": column,
                       "cluster": region["id"], "localizations": int(len(region["rows"]))}
@@ -708,15 +734,20 @@ class SegmentRegions(SegmenterPlugin):
                                     if np.isfinite(v)}
             if by_id:
                 origin["draw"] = draw
-                out = {"center": region["center"], "use": True, "origin": origin,
+                out = {"center": region["center"], "use": use, "origin": origin,
                        "ids": {column: region["id"]}, "spatial": False}
             else:
-                out = {"center": region["center"], "use": True, "origin": origin,
+                out = {"center": region["center"], "use": use, "origin": origin,
                        "polygon": region["polygon"]}
             if angle_key and measured_here and np.isfinite(measured_here[angle_key]):
                 out["angle"] = measured_here[angle_key]
                 out["angle_by"] = self.name
+            if two:
+                out["annotations"] = {COLOURS_LIST: colour_word(region)}
             return out
+
+        regions = [(r, True) for r in found] + (
+            [(r, False) for r in left_out] if settings.keep_rejected else [])
 
         note = ""
         if rejected:
@@ -729,26 +760,40 @@ class SegmentRegions(SegmenterPlugin):
             file_id = current_file(project)
             replaced = ([r.id for r in project.rois.values()
                          if r.file_id == file_id and ours(r)] if settings.replace else [])
-            sites = [site(r) for r in found if sources.get(r["file"], first) == file_id]
+            sites = [site(r, use) for r, use in regions
+                     if sources.get(r["file"], first) == file_id]
             return Result(text=f"preview: {len(sites)} ROIs of {column} on this file" + note,
                           settings=settings, data={"centers": [s["center"] for s in sites]},
                           roi_preview={"file_id": file_id, "method": self.path,
                                        "sites": sites, "replaces": replaced})
         made, flat = [], 0
+        if two:
+            # the list in a fixed order, both first, then the colours
+            have = list(project.annotation_lists.get(COLOURS_LIST, []))
+            words = [BOTH_COLOURS] + [names[c] for c in sorted(names)]
+            project.set_annotation_lists({**project.annotation_lists, COLOURS_LIST:
+                                          words + [w for w in have if w not in words]})
         with project.edit(f"{self.name}: ROIs") as step:
             replaced = []
             if settings.replace:
                 replaced = [r.id for r in project.rois.values() if ours(r)]
                 for roi_id in replaced:
                     project.rois.pop(roi_id, None)
-            for region in found:
+            for region, use in regions:
                 if outline and region["polygon"] is None:
                     flat += 1                   # no hull: the centre, as without
                 made.append(project.add_site(sources.get(region["file"], first),
-                                             site(region)))
+                                             site(region, use)))
             step.label = f"{self.name}: {len(made)} ROIs" + (
                 f" for {len(replaced)}" if replaced else "")
         text = f"{len(made)} ROIs of {column}, from {ids.min_size} localizations"
+        if settings.keep_rejected and left_out:
+            text += f" ({len(found)} used, {len(left_out)} that keep rejects not used)"
+        if two:
+            words = [site_annotation for site_annotation in
+                     (made_roi.annotations.get(COLOURS_LIST) for made_roi in made)]
+            counts = {w: words.count(w) for w in dict.fromkeys(words)}
+            text += "; colours: " + ", ".join(f"{w} {n}" for w, n in counts.items())
         if replaced:
             text += f", replacing {len(replaced)}"
         if flat:

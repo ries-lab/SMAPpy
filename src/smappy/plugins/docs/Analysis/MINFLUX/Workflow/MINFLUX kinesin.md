@@ -13,7 +13,7 @@ and their steps.
 
 It is a [chain](plugin:Panels/Glossary) (also called a pipeline or
 workflow): the plugins it runs, one after the other, each with its own
-settings in a section of this panel, folded behind *show the steps*.  Four
+settings in a section of this panel, folded behind *show the steps*.  Five
 settings are shown at the top:
 
 * *offset from* -- where [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour)
@@ -21,8 +21,9 @@ settings are shown at the top:
   tracking, else the molecules themselves;
 * *colours apart* -- how far apart the two colours of one molecule
   may be;
-* *kinesins kept* -- which molecules become ROIs, a condition on each
+* *kinesins kept* -- which molecules' ROIs are used, a condition on each
   molecule's track (below);
+* *both colours only* -- only the molecules seen in both colours are used;
 * *steps from* -- the localizations a molecule needs for its steps.
 
 The pages of the plugins explain the methods; this one what running them
@@ -52,13 +53,18 @@ measures the offset between the colours, moves the second colour onto the
 first, and joins the traces of both colours into molecules, `pair_id`.
 
 **5. Kinesins.**  [Segment regions](plugin:Analysis/Regions/Segment regions)
-with the *MINFLUX kinesin* preset makes an ROI of each molecule that walks,
-drawn as its track and turned along it.
+with the *MINFLUX kinesin* preset makes an ROI of every molecule of 20
+localizations or more, drawn as its track and turned along it, and
+annotated in the keyword list *colours* (*both*, *638 nm*, *560 nm*); the
+ones that walk are used, the others are there to look at, unused.
 
 **6. Steps.**  [Find steps](plugin:Analysis/Tracking/Find steps) on
-`pair_id`, each colour with its own steps (*pairs*), on the kinesins' ROIs
-only (*only ROIs' traces*): the step sizes and dwell times pooled over
-them, and a row per kinesin.
+`pair_id`, each colour with its own steps on one clock and in one frame
+(*two colours* on *auto*), along the direction each molecule walks in, on
+the used ROIs only (*only ROIs' traces*): the step sizes and dwell times
+pooled over them, and a row per kinesin.  To orient the ROIs by where each
+moves, run Find steps as a per-region step in the ROI manager and apply its
+proposals.
 
 ## In detail
 
@@ -74,8 +80,8 @@ or diffusing to and fro along its microtubule, which is as elongated.  In
 the two-colour kinesin data this was made on, the 17 tracks that walked
 100 to 270 nm had 0.8 to 0.98, at 200 to 600 nm/s.  Add
 `and n_colours == 2` for the molecules seen in both colours, which a
-two-colour step analysis needs (the *MINFLUX kinesin, both colours*
-preset); leave out the linearity for every longer track.
+two-colour step analysis needs (or tick *both colours only*); leave out
+the linearity for every longer track.
 
 **Why not a region filter before the steps.**  An id column's measurements
 never see the region filter -- a molecule's own numbers do not depend on
@@ -94,7 +100,8 @@ the whole chain has succeeded.
 * **The figures** of each step.
 * **The table**: colour 1 moved onto colour 0, with `in_tail` and
   `pair_id`.
-* **The ROIs**: one per walking kinesin, with its track's values.
+* **The ROIs**: one per molecule, the walking kinesins used, each with its
+  track's values and its colours keyword.
 * **Per molecule**: MINFLUX dual colour's and Find steps' region tables of
   `pair_id`.
 * **The log**: one entry for the chain, with every step's settings.

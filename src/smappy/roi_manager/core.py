@@ -1027,8 +1027,9 @@ class ROIProject:
 
     def add_site(self, file_id, site: dict, by: str = "") -> "ROI":
         """A segmenter's site as an ROI: ``center`` and whichever of
-        ``polygon``, ``ellipse``, ``ids``, ``spatial``, ``origin``, ``use``
-        and ``angle`` it has.  The angle is the segmenter's, measured as it
+        ``polygon``, ``ellipse``, ``ids``, ``spatial``, ``origin``, ``use``,
+        ``annotations`` (``{list: keyword}``, the list made or extended
+        where it lacks the keyword) and ``angle`` it has.  The angle is the segmenter's, measured as it
         measures (``angle_by``, else ``by``, else the origin's method,
         kept in `ROI.set_by`): a
         method that orients what it finds hands it back this way, and none
@@ -1037,6 +1038,16 @@ class ROIProject:
                            ellipse=site.get("ellipse"), origin=site.get("origin"),
                            ids=site.get("ids"), spatial=site.get("spatial", True))
         roi.use = bool(site.get("use", True))
+        for name, keyword in (site.get("annotations") or {}).items():
+            # a segmenter's keyword, as a hand's would be: its list made
+            # where it is missing, and who gave it kept
+            if keyword not in self.annotation_lists.get(name, ()):
+                self.annotation_lists = {**self.annotation_lists,
+                                         name: list(self.annotation_lists.get(name, []))
+                                         + [keyword]}
+            roi.annotations = {**roi.annotations, name: keyword}
+            method = str((roi.origin or {}).get("method", "")).rsplit("/", 1)[-1]
+            roi.set_source(f"keyword:{name}", by or method or "method")
         angle = site.get("angle")
         if angle is not None and np.isfinite(float(angle)):
             roi.angle = normal_angle(angle)

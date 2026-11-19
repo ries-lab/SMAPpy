@@ -65,6 +65,26 @@ def colour_column(locs) -> str:
     return "thi"
 
 
+def colour_names(locs, column: Optional[str] = None) -> Dict[int, str]:
+    """What each colour is called: the laser (``638 nm``) where the reader
+    wrote what each ``channel`` is (`io.msr`), else ``thi 0`` / ``channel 0``."""
+    from .metadata import file_metadata
+    column = column or colour_column(locs)
+    out: Dict[int, str] = {}
+    if column == "channel":
+        files = (np.unique(np.asarray(locs["filenumber"])) if "filenumber" in locs
+                 else np.zeros(1, np.int64))
+        for k in files:
+            mf = file_metadata(locs.metadata, int(k)).get("minflux")
+            for m in (mf.get("measurements") or []) if isinstance(mf, dict) else []:
+                for c in m.get("channels") or []:
+                    out.setdefault(int(c["channel"]), str(c["name"]))
+    if column in locs:
+        for c in np.unique(np.asarray(locs[column], np.int64)):
+            out.setdefault(int(c), f"{column} {int(c)}")
+    return out
+
+
 # ------------------------------------------------------------------- traces
 
 @dataclass

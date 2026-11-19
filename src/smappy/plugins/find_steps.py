@@ -27,6 +27,12 @@ METHODS = (("autostepfinder", "AutoStepFinder"), ("bnp", "BNP-Step (Bayesian)"))
 BNP_BATCH = 128
 OUTPUTS = (("table", "region table"), ("columns", "plateaus on the localizations"),
            ("file", "steps as a file"))
+COLOURS = (("auto", "auto"), ("together", "each its own steps"), ("one", "as one trace"))
+AXES = (("moving", "its moving parts"), ("all", "all its localizations"))
+#: the colours of a two-colour molecule's figure: colour 0 (the longer
+#: wavelength, 638 nm) magenta, colour 1 green -- as the groups draw them
+COLOUR_DOTS = ("#e7a6d3", "#a9dcb0")
+COLOUR_LINES = ("#b0177e", "#1f8a3a")
 
 
 @dataclass
@@ -34,7 +40,17 @@ class FindStepsSettings:
     id_column: str = param("", label="id attribute", choices=_id_choices,
                            help="the traces; auto: tid, else track_id, else cluster_id")
     along: str = param("track", label="steps along", choices=ALONG,
-                       help="the track's long axis (turned forward in time), or x or y")
+                       help="the track's axis (turned forward in time), or x or y")
+    axis: str = param("moving", label="track axis from", choices=AXES,
+                      help="the direction it walks in where it moves, or the long axis "
+                           "of all its localizations, stuck parts included")
+    window_s: float = param(0.1, label="moving window", unit="s", min=1e-4, advanced=True,
+                            help="the trace's mean position over windows this long; "
+                                 "frames where there is no time_s")
+    min_speed: float = param(100.0, label="moving from", unit="nm/s", min=0.0,
+                             advanced=True,
+                             help="a window pair faster than this moves (nm per frame "
+                                  "where there is no time_s)")
     min_locs: int = param(20, label="at least", unit="localizations", min=4,
                           help="shorter traces are passed over")
     method: str = param("autostepfinder", label="method", choices=METHODS,
@@ -57,15 +73,17 @@ class FindStepsSettings:
     step_nm: float = param(0.0, label="split/merge to", unit="nm", min=0.0,
                            help="0: off; else merge steps smaller and split steps larger "
                                 "than this expected size")
-    pairs: bool = param(False, label="pairs", advanced=True,
-                        help="pair_id from MINFLUX dual colour: both colours of a molecule "
-                             "turned into colour 0's frame, each with its own steps")
+    colours: str = param("auto", label="two colours", choices=COLOURS,
+                         help="auto: in a two-colour table each colour of a molecule its "
+                              "own steps, both in colour 0's frame and on one clock")
     in_rois: bool = param(False, label="only ROIs' traces",
                           help="only the ids the ROI manager's used ROIs hold (an ROI of "
                                "its id alone): the kinesins Segment regions found")
     output: str = param("table", label="output", choices=OUTPUTS,
                         help="a region table only; plateau and step_level on the "
                              "localizations; or a file of one localization per plateau")
+    line: bool = param(True, label="localizations as a line",
+                       help="the traces' localizations joined in time order in the figure")
 
 
 def rois_ids(ctx: Context, column: str) -> set:
@@ -87,10 +105,15 @@ class FindSteps(Plugin):
     Settings = FindStepsSettings
     changes_locs = True
     grouping = "ungrouped"
+    # in an ROI (the per-region steps) it measures the ROI's molecule and
+    # proposes its moving direction as the ROI's angle
+    per_region = True
     # 2: pairs -- both threads of a pair in the first one's frame
     # 3: the dwell models fitted by likelihood, compared by AIC
     # 4: BNP-Step as a second method
-    version = "5"
+    # 5: two colours by the laser; only the ROIs' traces
+    # 6: the track's axis from its moving parts; two colours together on auto
+    version = "6"
 
     def changes_locs_for(self, settings: FindStepsSettings) -> bool:
         return settings.output != "table"
@@ -108,6 +131,10 @@ class FindSteps(Plugin):
             state.active[name] = not bnp
         for name in ("sweeps", "height_nm"):
             state.active[name] = bnp
+        track = settings.along == "track"
+        state.shown["axis"] = track
+        for name in ("window_s", "min_speed"):
+            state.shown[name] = track and settings.axis == "moving"
         return state
 
     def run(self, ctx: Context, settings: FindStepsSettings) -> Result:
@@ -115,15 +142,19 @@ class FindSteps(Plugin):
         from .. import traces as T
         from ..region_runs import column_table, layer_mask
         locs = ctx.locs
-        pairs = bool(settings.pairs)
         # the colour: the laser (channel) where the reader knew it, else the thread
-        from ..dual_colour import colour_column
+        from ..dual_colour import colour_column, colour_names
         colour = colour_column(locs)
-        if pairs and (colour not in locs or "pair_id" not in locs):
-            raise ValueError("pairs need pair_id and two colours: run MINFLUX dual colour "
-                             "on a two-colour MINFLUX measurement first")
-        column = "pair_id" if pairs and not settings.id_column else \
-            id_column(locs, settings.id_column)
+        two = colour in locs and len(np.unique(np.asarray(locs[colour]))) > 1
+        if settings.colours not in dict(COLOURS):
+            raise ValueError(f"two colours is auto, together or one, not {settings.colours!r}")
+        if settings.colours == "together" and not two:
+            raise ValueError("each colour its own steps needs two colours: a two-colour "
+                             "MINFLUX table (channel or thi)")
+        pairs = two and settings.colours != "one"
+        names = colour_names(locs, colour) if pairs else {}
+        column = ("pair_id" if pairs and not settings.id_column and "pair_id" in locs
+                  else id_column(locs, settings.id_column))
         clock = "time_s" in locs
         time = np.asarray(locs["time_s"] if clock else locs["frame"], np.float64)
         r = T.runs(locs[column], time, layer_mask(ctx))
@@ -144,12 +175,26 @@ class FindSteps(Plugin):
         t = time[r.order]
         thread = (np.asarray(locs[colour], np.int64)[r.order] if pairs
                   else np.zeros(len(x), np.int64))
+        axis_angle = np.full(len(r.ids), np.nan)
+        moving_share = np.full(len(r.ids), np.nan)
         if settings.along == "track":
             a = T.axes(r, x, y)
             if pairs:
                 # a pair in its colour 0's frame, so both colours' steps line up
                 a0 = T.axes(r, x, y, thread == 0)
                 a = {k: np.where(np.isfinite(a0[k]), a0[k], a[k]) for k in a}
+            if settings.axis == "moving":
+                # the direction it walks in where it walks, both colours
+                # together: the stuck parts pull the long axis, not this
+                window = settings.window_s
+                for i in np.flatnonzero(long_enough):
+                    sl = slice(r.start[i], r.start[i] + r.n[i])
+                    ang, share = T.moving_direction(t[sl], x[sl], y[sl], window,
+                                                    settings.min_speed)
+                    moving_share[i] = share
+                    if np.isfinite(ang):
+                        a["angle_deg"][i] = ang
+            axis_angle = np.asarray(a["angle_deg"], float).copy()
             coord, _ = T.rotate(r, x, y, a)
         else:
             coord = x if settings.along == "x" else y
@@ -251,6 +296,10 @@ class FindSteps(Plugin):
                   "erlang_shape": per["erlang_shape"]}
         for th, med in sorted(by_thread.items()):
             values[f"step_median_{colour}{th}_nm"] = med
+        if settings.along == "track":
+            values["angle_deg"] = axis_angle
+            if settings.axis == "moving":
+                values["moving_share"] = moving_share
         step = {"label": LABEL, "plugin": self.path, "version": self.version,
                 "parameters": settings_values(settings)}
         table = column_table(locs, column, LABEL, r.ids, values, step,
@@ -277,11 +326,27 @@ class FindSteps(Plugin):
         elif settings.output == "file" and rows_file:
             files = [steps_file(rows_file, clock, ctx)]
 
+        # in an ROI: its molecule's numbers, and its direction as the ROI's
+        # angle, set only by *Apply proposals*
+        region_values, proposals = {}, {}
+        if ctx.per_region:
+            done = np.flatnonzero(long_enough)
+            if len(done):
+                i = int(done[np.argmax(r.n[done])])
+                region_values = {k: float(v[i]) for k, v in values.items()}
+                if settings.along == "track" and np.isfinite(axis_angle[i]):
+                    proposals["angle"] = float(axis_angle[i])
+                    lines.append(f"proposes for the ROI: angle {axis_angle[i]:.0f}°")
+        label = f"{column} {{}}"
+        line = settings.line
+
         def draw(figure):
-            draw_steps(figure, examples, sizes, dwells, pooled, unit)
+            draw_steps(figure, examples, sizes, dwells, pooled, unit, names=names,
+                       label=label, line=line, along=settings.along == "track")
 
         return Result(locs=out_locs, files=files, append=bool(files),
-                      text="\n".join(lines), plot=Plot(draw, panels=4, size=(13, 3.2)),
+                      text="\n".join(lines), plot=Plot(draw, panels=6, size=(13, 6.4)),
+                      values=region_values, proposals=proposals,
                       id_regions={column: {LABEL: table}},
                       data={"sizes": sizes, "dwells": dwells, "pooled": pooled},
                       settings=settings, title="find steps")
@@ -344,29 +409,59 @@ def steps_file(rows, clock: bool, ctx: Context):
     return (Localizations(cols, {"units": "nm"}), FileInfo(name, "", "steps"), None)
 
 
-def draw_steps(figure, examples, sizes, dwells, pooled, unit) -> None:
-    a, b, c, d = figure.subplots(1, 4)
-    for k, (shown, n, tid) in enumerate(examples[:3]):
-        off = 30.0 * k
+def draw_steps(figure, examples, sizes, dwells, pooled, unit, names=None,
+               label="{}", line=True, along=True) -> None:
+    """The longest traces, each a panel of its own above, their steps over
+    the localizations; the pooled step sizes, dwells and velocity below.  A
+    two-colour molecule's colours share its clock (time from its first
+    localization in either) and its frame (the position from colour 0's
+    first plateau), each drawn in its colour with its own steps."""
+    names = names or {}
+    grid = figure.add_gridspec(2, 3, height_ratios=(1.7, 1.0), hspace=0.45, wspace=0.3)
+    # the traces share the top row: one (an ROI's) two thirds of it
+    shown_n = max(1, min(3, len(examples)))
+    top = (grid[0, :2] if shown_n == 1 else grid[0, :]).subgridspec(1, shown_n, wspace=0.3)
+    tops = [figure.add_subplot(top[0, k]) for k in range(shown_n)]
+    b, c, d = (figure.add_subplot(grid[1, k]) for k in range(3))
+    for k, ax in enumerate(tops):
+        if k >= len(examples):
+            ax.set_axis_off()
+            continue
+        shown, n, tid = examples[k]
         t0 = min(s[0][0] for s in shown)
-        x0 = shown[0][1][0]
+        first = min(shown, key=lambda s: s[3])            # colour 0 where there is one
+        x0 = first[2][0]
+        counts = []
         for t, x, fit, th in shown:
-            dots, line = ("0.6", "tab:red") if th == 0 else ("#9ec5e8", "tab:blue")
-            a.plot(t - t0, x - x0 + off, ".", ms=1.5, color=dots)
-            a.step(t - t0, fit - x0 + off, where="post", color=line, lw=1)
-    a.set_xlabel(f"time ({unit})")
-    a.set_ylabel("position (nm, offset per trace)")
-    a.set_title("the longest traces and their steps", fontsize=8)
+            two = bool(names)
+            dots = COLOUR_DOTS[th % 2] if two else "0.6"
+            fitc = COLOUR_LINES[th % 2] if two else "tab:red"
+            if line:
+                ax.plot(t - t0, x - x0, "-", lw=0.5, color=dots)
+            ax.plot(t - t0, x - x0, ".", ms=2.5, color=dots)
+            ax.step(t - t0, fit - x0, where="post", color=fitc, lw=1.4,
+                    label=names.get(th) if two else None)
+            counts.append(int(np.count_nonzero(np.diff(fit))))
+        ax.set_xlabel(f"time ({unit})")
+        ax.set_ylabel("position along the track (nm)" if along else "position (nm)")
+        ax.set_title(label.format(tid) + ": " + " + ".join(str(c) for c in counts)
+                     + " steps", fontsize=8)
+        if names:
+            ax.legend(fontsize=6, frameon=False)
     if len(sizes):
-        lim = np.quantile(np.abs(sizes), 0.98) * 1.2
-        b.hist(sizes, bins=np.arange(-lim, lim + 0.5, 0.5), color="0.35")
+        a = np.abs(sizes)
+        lim = np.quantile(a, 0.98) * 1.2
+        # few steps per data set: bins a histogram of them can fill
+        nb = int(np.clip(1.5 * np.sqrt(len(sizes)), 6, 25))
+        b.hist(sizes, bins=np.linspace(-lim, lim, 2 * nb + 1), color="0.35")
         b.set_title(f"|step| {pooled['step_mean_nm']:.1f} ± {pooled['step_sd_nm']:.1f} nm, "
                     f"{100 * pooled['forward']:.0f} % forward", fontsize=8)
     b.set_xlabel("step size (nm)")
     b.set_ylabel("steps")
     if len(dwells):
         hi = np.quantile(dwells, 0.98)
-        c.hist(dwells[dwells <= hi], bins=40, color="0.35", density=True)
+        nb = int(np.clip(np.sqrt(len(dwells)), 5, 30))
+        c.hist(dwells[dwells <= hi], bins=nb, color="0.35", density=True)
         tt = np.linspace(1e-9, hi, 200)
         models = pooled.get("models") or {}
         best = pooled.get("best_model")

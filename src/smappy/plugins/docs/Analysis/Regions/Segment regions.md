@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.plugins.region_column.trace_values, smappy.roi_manager.core.ROIProject.add_site, smappy.plugins.segment.SegmentRegions.run, smappy.plugins.segment.SegmentRegions.react, smappy.plugins.segment.SegmentRegions.replaced, smappy.plugins.segment.SegmentRegions.describe, smappy.plugins.segment.candidates, smappy.plugins.segment.presets, smappy.plugins.segment.made_by, smappy.plugins.segment.draw_as, smappy.plugins.segment.place_positions, smappy.plugins.segment.draw_values, smappy.segmentation.find_circles, smappy.segmentation.ring_kernel, smappy.segmentation.disc_kernel, smappy.segmentation.radii, smappy.segmentation.density_image, smappy.segmentation.filter_radii, smappy.segmentation.peaks, smappy.segmentation.too_close, smappy.segmentation.measure_ring, smappy.segmentation.measure_disc, smappy.segmentation.measure_beads, smappy.segmentation.mark_touching, smappy.segmentation.judge, smappy.segmentation.keep_test, smappy.segmentation.clauses, smappy.segmentation.read_positions, smappy.segmentation.fit_circle, smappy.segmentation.roundness, smappy.fiducials.find_beads, smappy.roi_manager.order.condition, smappy.roi_manager.core.segment_columns, smappy.roi_manager.core.ROIProject.draws_track, smappy.plugins.region_column.column_regions, smappy.plugins.region_column.hull, smappy.roi_manager.core.ROIProject.find, smappy.plugins.segment.learn, smappy.plugins.segment.examples_of, smappy.plugins.segment.similar_shape, smappy.plugins.segment.is_example, smappy.segmentation.measure_rows, smappy.plugins.segment.compared, smappy.plugins.segment.joined_keep, smappy.segmentation.mean_shift, smappy.segmentation.measure_at, smappy.segmentation.similarity_window, smappy.segmentation.window_condition, smappy.segmentation.similar_candidates]
 ---
 
@@ -53,12 +53,12 @@ A **preset** fills the settings for one kind of structure, *keep* included:
   localizations;
 * *Circles* -- rings of 100 to 500 nm, round, with at least 10
   localizations on the ring;
-* *MINFLUX kinesin* -- *from an id attribute*, the molecules of
+* *MINFLUX kinesin* -- *from an id attribute*, every molecule of
   [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour) (`pair_id`)
-  that walk: 20 localizations, 100 nm, `linearity` of 0.8 or more, each
-  drawn as its track and turned along it;
-* *MINFLUX kinesin, both colours* -- the same, and only the molecules seen
-  in both colours.
+  with 20 localizations as an ROI, drawn as its track and turned along it;
+  those that walk -- 100 nm, `linearity` of 0.8 or more -- used, the others
+  added unused (*keep rejected*); tick *only in both colours* for the
+  molecules seen in both.
 
 Without a preset, the settings are discs of 30 to 150 nm with at least 10
 localizations: compact structures of any kind, as a first look.
@@ -410,14 +410,28 @@ ratio `eccentricity`, and `trend_nm`, the short axis' spread beyond the
 scatter between neighbours; and two directions, `angle_deg`, the long axis
 pointing from the trace's first quarter to its last, and `ends_angle_deg`,
 from its first localization to its last.  *keep* is tested on these, and
-an id that fails it gets no ROI; the text counts them, by the clause they
-failed.  The values are kept with each ROI and are columns of the results
+an id that fails it gets no ROI -- or, with *keep rejected*, one that is
+not used; the text counts them, by the clause they failed.  With *only in
+both colours* an id must also hold localizations of both colours
+(`n_colours`, below).  Three more values are there for motors:
+`velocity_nm_per_s`, the displacement over the duration; `linearity`, the
+squared correlation of the position along the long axis with time; and
+`n_colours`.
+
+**Two colours.**  In a table of two colours (`channel`, else `thi`) every
+ROI is annotated in the keyword list *colours*: *both* where its id holds
+localizations of both, else its one colour by name (*638 nm*, or
+*channel 1* where the reader did not name it).  The list is made where it
+is missing, *both* first.  The ROI manager filters and sorts by it, as by
+any keyword.  The values are kept with each ROI and are columns of the results
 table, as the other methods' are.
 
 **The angle.**  *long axis, forward in time* gives each ROI `angle_deg`:
 the axis is fitted to all the localizations, so the jitter of single
 steps hardly moves it, and the first and last quarter only decide which
-way it points.  *first to last localization* gives `ends_angle_deg`, which
+way it points.  A motor that sits still for part of its trace pulls it
+somewhat; [Find steps](plugin:Analysis/Tracking/Find steps) run in the ROI
+proposes the direction from the parts where it moves.  *first to last localization* gives `ends_angle_deg`, which
 is noisier but follows a track that curves.  A track that goes out and
 comes back has no clear direction either way; turn such an ROI by hand in
 the ROI manager, and [Write results](plugin:Analysis/Regions/Write results)

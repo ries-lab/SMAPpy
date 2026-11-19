@@ -1,11 +1,13 @@
-# MINFLUX kinesin: one ROI per molecule that walks -- each pair_id of
-# *MINFLUX dual colour* (a trace in one colour or both), drawn as its track
-# and turned along it.  Walking is told from sticking and from diffusing to
-# and fro along a microtubule, which is as elongated, by the position along
-# the track rising steadily with time (linearity, r^2 of a straight line):
-# in the two-colour kinesin data looked at (2026-11) the tracks that walked
-# 100-270 nm had 0.8-0.98, at 200-600 nm/s.  For every longer track, leave
-# out the linearity; for molecules in both colours, see the preset beside.
+# MINFLUX kinesin: every track of MINFLUX dual colour's pair_id (a molecule
+# in one colour or both) with 20 localizations becomes an ROI, drawn as its
+# track and turned along it; the ones that walk are used, the others added
+# unused (keep rejected), to look at.  Walking is told from sticking and
+# from diffusing to and fro along a microtubule, which is as elongated, by
+# the position along the track rising steadily with time (linearity, r^2 of
+# a straight line): in the two-colour kinesin data looked at (2026-11) the
+# tracks that walked 100-270 nm had 0.8-0.98, at 200-600 nm/s.  In a table
+# of two colours each ROI is annotated in the keyword list "colours" (both,
+# or the one colour); "only in both colours" keeps those alone.
 method: ids
 ids:
   column: pair_id
@@ -13,4 +15,5 @@ ids:
   membership: id
   draw: track
   angle: axis
-  keep: n_locs >= 20 and displacement_nm >= 100 and linearity >= 0.8
+  keep: displacement_nm >= 100 and linearity >= 0.8
+keep_rejected: true

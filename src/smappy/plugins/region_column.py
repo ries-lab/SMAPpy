@@ -307,6 +307,9 @@ class ColumnROIsSettings:
                       help="which ids become ROIs, by their trace's values, e.g. "
                            "eccentricity >= 3 and displacement_nm >= 300 for "
                            "motors; empty: all")
+    both_colours: bool = param(False, label="only in both colours",
+                               help="only the ids seen in both colours of a "
+                                    "two-colour table (MINFLUX dual colour's pair_id)")
     angle: str = param("none", label="angle",
                        choices=[("none", "none"),
                                 ("axis", "long axis, forward in time"),
