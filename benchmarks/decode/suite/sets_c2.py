@@ -27,9 +27,10 @@ offset 398.6), the pixels 117 x 127 nm (x, y) as its runs convert them.  A molec
 main half where its partner lands inside the secondary half.
 
 **Two sweeps a context**, as for C = 1: density 1, 5, 15, 25, 50 molecules per 40 x 40 pixels of the
-main half, photons and background drawn as the context's model was trained (`TRAINING`); photons at
-1000, 3000 and 10 000 at density 1, each channel's background 2 % of its mean photons.  z uniform
-over the model's training range.
+main half, photons and background drawn as the context's model was trained (`TRAINING`), the background
+changing slowly over the movie (`slow_background`: a new level every 50 frames, straight in between);
+photons at 1000, 3000 and 10 000 at density 1, each channel's background 2 % of its mean photons.  z
+uniform over the model's training range.
 
 **Each molecule's CRLB** is kept with its truth: both channels together, one molecule, its spot
 alone and noise-free -- the Fisher matrix of each channel's spot (``training.joint_crlb``'s spots, the
@@ -65,6 +66,7 @@ CRLB_BACKGROUND = 20.0                        # a pixel, each channel, as the pa
 GRID_PX = 32                                  # isolated: a spline's spot is 26 px across
 DENSITIES = (1, 5, 15, 25, 50)
 PHOTONS = (1000, 3000, 10000)
+BACKGROUND_KNOTS = 50                         # frames between the drawn levels of a slow background
 DYES = (0.78, 0.92)                           # fraction of a dye's light in channel 1 (colour_2a)
 
 CONTEXTS = {
@@ -205,6 +207,16 @@ def _inside(xy, region, margin=0.5):
             & (xy[:, 1] >= y0 - 0.5 + margin) & (xy[:, 1] <= y0 + h - 0.5 - margin))
 
 
+def slow_background(lo, hi, n_frames, rng, every=BACKGROUND_KNOTS):
+    """A background that changes slowly over the movie, as a real one does: straight between levels drawn
+    uniformly in [lo, hi] every ``every`` frames, so it moves by at most (hi - lo) / ``every`` a frame.
+    A new level every frame (as the sets were drawn first) put DECODE-Plex's three-frame model 700 times
+    off: its training holds the background over a window, and a frame brighter than its neighbours is
+    molecules to it (plex-plan §14)."""
+    knots = rng.uniform(lo, hi, int(np.ceil((n_frames - 1) / every)) + 1)
+    return np.interp(np.arange(n_frames), every * np.arange(len(knots)), knots)
+
+
 def simulate(spec, cal):
     """Frames (uint16, as the camera records them) and truth of one set."""
     from smappy.simulate.camera import _camera, _draw_spline
@@ -262,7 +274,7 @@ def simulate(spec, cal):
         z0 = [round(s.z0) for s in splines]
         mean_c = [float(splines[c].psf[z0[c]].sum()) for c in range(2)]
     if spec["background"] == "training":
-        bg = np.stack([rng.uniform(*train["background"][c], n_frames) for c in range(2)], 1)
+        bg = np.stack([slow_background(*train["background"][c], n_frames, rng) for c in range(2)], 1)
     elif not isinstance(spec["background"], str):
         bg = np.full((n_frames, 2), float(spec["background"]))
     else:

@@ -569,6 +569,17 @@ simulation draws each frame's background on its own (`background_window`), as do
 simulation (`UniformBackground`, one value a frame) and the C = 1 sets (`sets.py`), so a steady
 background is no harder for it, and the C = 1 comparisons stand.
 
+**Redrawn** (`sets_c2.slow_background`: a level every 50 frames, straight in between, at most 2 % of
+the range a frame), the ten density sets: DECODE-Plex's colour Jaccard 0.805 / 0.943 / 0.907 / 0.872 /
+0.784 at density 1 / 5 / 15 / 25 / 50; on density 1 precision 0.78 (0.47 before), recall 0.995.  What
+false localizations remain are not the frames' any more: they lie in a band along the scored area's
+edge at the split (y = 190 -- 218 px, the last rows `run_c2.both_channels` keeps with its 7-pixel
+margin; about 3 a cell of 27 x 26 px over 653 frames elsewhere, DECODE-Plex's own rate), and grow with
+channel 1's background (0.055 a frame per photon a pixel; its drift adds nothing, channel 0's a
+little).  Most likely the step between the two channels' backgrounds at the secondary half's edge, seen
+inside the network's field: a property of DECODE-Plex at a split, on real movies too, and so scored as
+it is -- netfit meets the same edge.  To compare the two away from it, a wider margin there.
+
 **Biplane is another matter, open.**  The Fig. 2c model reads one frame, yet on `biplane_2c_density_1`
 its precision is 0.59 (0.2 -- 0.8 false per 1000 px^2, against 0.03 -- 0.06 on its own sparse frames).
 Those false localizations lie in a band across the frame at y = 70 -- 100 px and at the smallest x,
