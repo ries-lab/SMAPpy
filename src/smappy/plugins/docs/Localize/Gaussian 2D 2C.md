@@ -1,6 +1,6 @@
 ---
-version: "11"
-covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.geometry_layout, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.multichannel.SplitEngine, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
+version: "12"
+covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.geometry_layout, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.multichannel.SplitEngine, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
 ---
 
 ## What it does
@@ -155,6 +155,16 @@ that pixel is mapped into the secondary channel and rounded again, and a box
 window: *fit box*) is cut at each.  A candidate whose two fit boxes do not
 both lie inside their own channels is dropped -- half a fit box from the
 seam too, where a fit box would reach into the other channel.
+
+A spot that is not round can give one molecule two peaks in a channel -- an
+astigmatic spot far from focus is a streak with a maximum at each end -- and
+the ends of a streak in one half need not lie near those in the other, so they
+are not paired.  Each end is then a candidate, and each fit box holds the whole
+spot.  Their fits all end on the one molecule, so after the fit two
+localizations of a frame **less than a pixel apart are one**: only the one
+nearest its own candidate, whose fit box holds most of the spot, is kept.  A
+single-emitter fit cannot place two molecules that close anyway -- two of them
+are both fitted to the middle of their light.
 
 **4. One fit for both fit boxes.**  Each fit box has its own Gaussian model, as in
 the single-channel fit, and the two are fitted at once by maximum likelihood:

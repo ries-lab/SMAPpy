@@ -200,6 +200,64 @@ def test_the_joint_fit_recovers_position_z_and_the_photon_ratio():
     assert np.median(locs["ratio"]) == pytest.approx(0.35, abs=0.05)
 
 
+def streak_spline(sign=1):
+    """A PSF that, far from focus, is a streak with a maximum at each end, as
+    real astigmatic calibrations are: two spots 2.4 |t| px apart along x on
+    one side of focus and along y on the other (``sign`` swaps them)."""
+    nz, size = 41, 17
+    z, y, x = np.mgrid[:nz, :size, :size].astype(float)
+    t = sign * (z - (nz - 1) / 2) / 8
+    half, along_x, c = 1.2 * np.abs(t), t > 0, size // 2
+    volume = np.zeros_like(x)
+    for s in (-1, 1):
+        dx, dy = np.where(along_x, s * half, 0.0), np.where(along_x, 0.0, s * half)
+        volume += np.exp(-.5 * (((x - c - dx) / 1.3) ** 2 + ((y - c - dy) / 1.3) ** 2))
+    volume /= volume.sum(axis=(1, 2), keepdims=True)
+    return SplineCalibration(spline_coefficients(volume), 10., 20., x0=8.0, psf=volume,
+                             parameters={})
+
+
+@pytest.mark.parametrize("z_index", [2.0, 20.0, 38.0])
+def test_a_streak_far_from_focus_found_at_both_ends_is_fitted_once(z_index):
+    """Each end of the streak is a peak in each channel, the two channels' streaks lie
+    across each other, so the ends do not pair: three candidates a molecule, all three
+    fitted to it.  One localization is kept, and no molecule is lost."""
+    rng = np.random.default_rng(7)
+    base = dual_calibration()
+    cal = DualColorCalibration(streak_spline(1), streak_spline(-1), base.transformation,
+                               base.geometry, base.parameters)
+    truth = np.array([(18.0, 12.0), (44.0, 20.0)])
+    frames = np.stack([split_frame(truth, z_index, 10000., 0.45, 20., rng, cal)
+                       for _ in range(10)])
+    far = z_index != 20.0
+    peaks = [len(f) for f in peaks_of(frames[0], cal)[0]]
+    assert peaks == ([4, 4] if far else [2, 2])     # far from focus: two maxima a spot
+
+    engine = OnTheLayer(camera(), finder(), global_model(cal), cal, FitSettings(roisize=13))
+    engine.push(frames, 0)
+    locs = engine.flush()
+
+    assert len(locs) == len(frames) * len(truth)
+    x, y = in_pixels(locs, "x_pix", "y_pix")
+    for f in range(len(frames)):
+        here = np.asarray(locs["frame"]) == f
+        got = np.c_[x[here], y[here]]
+        nearest = np.hypot(*(got[:, None] - truth[None]).transpose(2, 0, 1)).min(axis=0)
+        assert (nearest < 0.3).all()                 # each molecule has its one fit
+    assert engine.stats["duplicates"] == (2 * len(frames) * len(truth) if far else 0)
+
+
+def test_one_fit_per_molecule_keeps_the_fit_nearest_its_candidate_and_only_within_a_frame():
+    from smappy.multichannel import one_per_molecule
+    x = np.array([10.0, 10.4, 10.8, 10.2, 30.0, 31.5])
+    y = np.array([5.0, 5.0, 5.0, 5.0, 5.0, 5.0])
+    frame = np.array([0, 0, 0, 1, 0, 0])
+    # fit 1 sat nearest its candidate; fit 3 is in another frame; 4 and 5 are 1.5 px apart
+    peak_x = x + np.array([2.0, 0.1, 0.5, 3.0, 0.0, 0.0])
+    keep = one_per_molecule(x, y, frame, peak_x, y)
+    assert keep.tolist() == [False, True, False, True, True, True]
+
+
 def test_the_two_colours_come_apart_in_the_ratio():
     """What the workflow is for: the same structure in two dyes separates on
     the photon ratio, which only a free photon parameter can measure."""

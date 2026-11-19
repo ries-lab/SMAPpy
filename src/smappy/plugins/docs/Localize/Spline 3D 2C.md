@@ -1,6 +1,6 @@
 ---
-version: "14"
-covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus]
+version: "15"
+covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.multichannel.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus]
 ---
 
 ## What it does
@@ -118,7 +118,11 @@ explains them step by step: the halves are cut apart as two channels, each
 searched with its own cutoff, the secondary peaks are mapped onto the main
 channel, peaks within 4 pixels are merged into one candidate and peaks without
 a partner are kept, and a fit box is cut in each channel and both are fitted at
-once by maximum likelihood.  What is
+once by maximum likelihood.  Fits of one frame that end less than a pixel apart
+are one molecule's, and only the one nearest its candidate is kept: far from
+focus an astigmatic spot is a streak whose two ends are both found as peaks, in
+each half, and without this a molecule there was fitted two or three times
+(on simulated two-colour and biplane movies, a fifth of all molecules).  What is
 new here is the model in each fit box, where it comes from, and z.
 
 **1. The calibration.**  The Dual-colour calibration steps the objective

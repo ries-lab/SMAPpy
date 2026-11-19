@@ -494,3 +494,43 @@ paper's movies, against DECODE-Plex's localizations of the same frames (the orig
 - What the affine reading costs DECODE-Plex on real data is not measured yet: on Fig. 2a's narrow chip
   the two readings differ by 0.07 px at most, too little to see here; Fig. 2c's chip is where it would
   show, once that movie fits.
+
+## 14. Spline 3D 2C's duplicates and misses, found and fixed (2026-11-19)
+
+**The duplicates were the peak finder on a streak, not the pairing.**  Far from focus an astigmatic
+spot is a streak, and each channel's peak finder (strict 3 x 3 maxima of a 1.2-px difference of
+Gaussians) finds a maximum at each end of it, 4 -- 5 px apart; the two channels' streaks lie across
+each other, so their ends are not each other's nearest neighbours and are not paired.  A molecule
+there became two or three candidates, every box held the whole spot, and every fit converged to it:
+of the pairs of fits within 100 nm, 97 -- 100 % came from one simulated molecule, a median 15 -- 28 nm
+apart (on `colour_2a_density_1`, 18 % of the molecules had two candidates; 19 -- 29 % of the isolated
+ones in the 10 000-photon and S4 sets were fitted twice).  Candidates cannot be told from two real
+molecules 5 px apart before the fit, so the engine now drops them after it: two fits of a frame less
+than a pixel apart are one molecule's, and the one nearest its own candidate is kept
+(`multichannel.one_per_molecule`, both two-colour fitters; Spline 3D 2C version 15, Gaussian 2D 2C 12;
+`test_a_streak_far_from_focus_found_at_both_ends_is_fitted_once`).  Keeping the better
+log-likelihood instead, or 0.5 / 1.5 / 2 px, changes the misses by less than 0.3 points.
+
+**The misses were not lost candidates.**  After the fix (density 1, inside both halves):
+`colour_2a` misses 9.1 % = 4.4 % with another molecule within 6 px (one fit takes both) + 4.7 % else;
+at 10 000 photons 7.3 % = 4.6 % + 2.8 %, of which most have a neighbour 6 -- 10 px away and a fit with
+1.5 -- 2.5 times the true photons (a defocused neighbour's light), 0.8 % no fit within 400 nm.
+`biplane_2c` 14 % = 3.5 % neighbours + 3.0 % beyond |z| = 900 nm, where the spot is spread so wide
+that neither channel has a peak within 8 px at all (10 000 photons, 2 % background), + 7.5 % mostly
+dim molecules at |z| > 400 (median 2400 photons, background up to 300 a pixel).  The S4 sets miss none.
+The 1.5 % with no candidate on `colour_2a_density_1` are the same: no peak in either channel.
+
+**Jaccard before -> after** (`run_c2.py spline --refit`; precision 0.78 -- 0.98 -> 0.95 -- 1.00 at density
+1 and on the photon and S4 sets, recall within 0.01 of before, RMSE near focus within 0.2 nm or lower):
+
+| set | before | after | | set | before | after |
+|---|---|---|---|---|---|---|
+| biplane density 1 | 0.65 | 0.73 | | colour density 1 | 0.69 | 0.79 |
+| biplane density 5 | 0.55 | 0.56 | | colour density 5 | 0.51 | 0.55 |
+| biplane density 15 / 25 / 50 | 0.41 / 0.27 / 0.02 | 0.42 / 0.26 / 0.02 | | colour density 15 / 25 / 50 | 0.30 / 0.09 / 0.01 | 0.30 / 0.09 / 0.01 |
+| biplane 1000 / 3000 / 10 000 photons | 0.63 / 0.74 / 0.79 | 0.63 / 0.74 / 0.81 | | colour 1000 / 3000 / 10 000 photons | 0.71 / 0.75 / 0.72 | 0.74 / 0.82 / 0.82 |
+| biplane S4 2000 / 5000 / 8000 | 0.96 / 0.94 / 0.89 | 0.98 / 0.99 / 0.99 | | colour S4 2000 / 5000 / 8000 | 0.80 / 0.77 / 0.78 | 0.95 / 0.99 / 0.99 |
+
+So on DECODE-Plex's own CRLB conditions (§12) Spline 3D 2C now detects as well as it (0.95 -- 0.99
+against 0.89 -- 0.95) at the same precision; what is left of its gap at density 1 is overlap, and at
+density 15 and above it is unchanged -- the single-emitter fit's limit, not a detection fault.

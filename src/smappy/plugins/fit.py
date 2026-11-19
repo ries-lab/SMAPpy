@@ -2683,7 +2683,9 @@ class _TwoChannelFit(_FitPlugin):
             engine = self.engine(settings, camera, finder, model, source)
             engine.push(raw[None], index)
             fitted = engine.flush()
-            text += f"; {engine.stats['matched']} paired, {0 if fitted is None else len(fitted)} fitted"
+            text += (f"; {engine.stats['matched']} paired, {0 if fitted is None else len(fitted)} fitted"
+                     + (f" ({engine.stats['duplicates']} fitted twice, kept once)"
+                        if engine.stats.get("duplicates") else ""))
         except Exception as error:
             trouble = str(error)
             text += f"; not fitted -- {error}"
@@ -2772,7 +2774,7 @@ class DualSplineFit(_TwoChannelFit):
     # 13: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`), drawn on either
     # 14: *in the sample* on auto by default: a pupil (Zernike) dual calibration drawn for the focus found from
     #     the main channel's lowest localizations, z the height above the coverslip (`calibrate.depth`)
-    version = "14"
+    version = "15"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -3116,7 +3118,7 @@ class DualGaussianFit(_TwoChannelFit):
     # 9: positions on the camera chip, as Spline 3D 2C's 11
     # 10: the calibration pass a two-channel fit, its pairs one per channel, no seam measured
     # 11: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`), drawn on either
-    version = "11"
+    version = "12"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):
