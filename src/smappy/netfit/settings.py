@@ -34,6 +34,10 @@ class SimulationSettings:
     photons_sd: float = 3000.0
     photons_min: float = 0.0                  # the flux drawn no lower (DECODE's intensity_th, unset there)
     background: tuple = (20.0, 200.0)         # photons a pixel, uniform per frame
+    # below 0: each frame's background drawn on its own (DECODE's way); from 0: one level a movie, each
+    # frame that level times 1 + this times a normal -- a real movie's background drifts slowly, and a
+    # network trained on jumps reads a jump as a molecule (plex-plan §15, the C = 1 pilot)
+    background_jitter: float = -1.0
     z_nm: tuple = (-800.0, 800.0)
     target_photons_min: float = 0.0           # a target is a molecule with at least this many photons in the frame
 

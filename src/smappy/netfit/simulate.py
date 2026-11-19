@@ -9,7 +9,8 @@ number is Poisson with the mean that puts ``density_per_40px`` on in 40 x 40 pix
 over the frame and ``margin_px`` beyond it (pixel centres at whole numbers), z uniform, flux normal
 cut at ``photons_min``.
 
-**Frames**: a background uniform per frame, the spots (`render.SplineRenderer`, the calibration as
+**Frames**: a background uniform per frame -- or, with ``background_jitter`` at 0 or above, uniform per
+movie and jittered by that fraction from frame to frame -- the spots (`render.SplineRenderer`, the calibration as
 the camera reads it), then the camera -- Poisson, the EM register (a gamma of shape the electrons,
 the excess noise), read noise, rounding to ADU -- and back to photons by the fitter's own factor
 (`CameraModel.adu_to_photons`), so the network is trained on what it will be given.
@@ -101,7 +102,11 @@ def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraMod
     W = max(1, int(sim.movie_windows))
     n, L = -(-batch // W), T + W - 1
     sample, x, y, z, _, per_frame = emitters(sim, n, g, device, frames=L)
-    bg = _uniform(*sim.background, n * L, g, device).view(n, L)
+    if sim.background_jitter < 0:
+        bg = _uniform(*sim.background, n * L, g, device).view(n, L)
+    else:
+        level = _uniform(*sim.background, n, g, device)[:, None]
+        bg = (level * (1 + sim.background_jitter * torch.randn((n, L), generator=g, device=device))).clamp_min(0)
     image = bg[:, :, None, None].expand(n, L, s, s).contiguous()
     on = per_frame > 0
     m, f = on.nonzero(as_tuple=True)

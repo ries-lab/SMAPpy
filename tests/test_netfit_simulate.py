@@ -126,3 +126,15 @@ def test_windows_cut_from_one_movie_share_its_frames_shifted_by_one_and_target_t
         a = next(j for j in range(b.mask.shape[1]) if b.mask[0, j] and tuple(b.xyz[0, j].tolist()) == v)
         c = next(j for j in range(b.mask.shape[1]) if b.mask[1, j] and tuple(b.xyz[1, j].tolist()) == v)
         assert torch.equal(b.photons_window[0, a, 1:], b.photons_window[1, c, :-1])
+
+
+def test_a_background_per_movie_is_one_level_jittered_by_the_fraction_asked():
+    cal = _calibration()
+    sim = SimulationSettings(frame_px=16, window=7, movie_windows=4, density_per_40px=1.0, background_jitter=0.02)
+    b = simulate.draw_batch(SplineRenderer(cal), sim, CameraModel(), 64, torch.Generator().manual_seed(5))
+    rel = b.background_window / b.background_window.mean(1, keepdim=True) - 1
+    assert rel.std().item() == pytest.approx(0.02, rel=0.15)
+    assert b.background_window.mean(1).std().item() > 30           # the levels still span 20-200
+    jumpy = simulate.draw_batch(SplineRenderer(cal), SimulationSettings(frame_px=16, window=7), CameraModel(), 64,
+                                torch.Generator().manual_seed(5))
+    assert (jumpy.background_window / jumpy.background_window.mean(1, keepdim=True) - 1).std().item() > 0.3
