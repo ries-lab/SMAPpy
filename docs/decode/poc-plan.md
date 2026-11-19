@@ -2341,3 +2341,32 @@ So on real data the choice is the one simulation gave: GMN7C detects as many, cl
 pixelates more only out of focus and on dim spots; fine-tuning to the measured on-time took that back
 on simulation (step 4's time-model section), not yet tried on real data.  fig4e: needs its own trainings
 (its beads and camera), not run yet.
+
+### Does streaming pixelate? Paired fine-tunes (2026-11-19)
+
+The 2 x 2 on B7 (pixel_mod G7N 0.022, GN7C 0.028, GMN7 0.034, GMN7C 0.047) could not separate
+streaming from seed noise: a bootstrap over test frames gives 0.003 per fit, the seeds 0.012, and the
+setups look bimodal over seeds -- 60 seeds an arm to see 0.006.  So each of the 15 trained models (5
+setups x 3 seeds) went on for 2 M samples at lr 1e-4 from its `model_6M`, twice on the same data seed,
+streamed (`movie_windows` 8, PS) and not (1, PU), on its own on-times; three repeats on another data
+seed give the noise of one fine-tune (pixel_mod within 0.001 - 0.004).
+
+- **Streaming costs a little pixelation, consistently**: PS - PU in pixel_mod +0.0015 +- 0.0006 on B7
+  and +0.0010 +- 0.0004 on B7_l3 (mean +- sem over the 15 pairs); per setup on B7 G7N +0.0005, GN7C
+  +0.0011, GLN7C +0.0002, GMN7 +0.0039 (every seed), GMN7C +0.0017.  Recall falls with it, 0.001 -
+  0.005, most on the mixed on-times (GMN7 -0.005, GMN7C -0.004).  RMSE does not move (within 0.1 nm).
+  That is a fifth of the 0.006 the from-scratch table showed: most of that was seeds.  A fine-tune from
+  a converged model measures the local effect only; a streaming training from scratch may land
+  elsewhere, which only many seeds would show.
+- **The seed decides, the fine-tune does not reshuffle**: across the 15, a model's value before and
+  after correlates at r 0.96 - 1.00 for pixel_mod, lateral and z RMSE (on the 79,193 / 129,639 bright
+  molecules all 48 models found), 0.75 / 0.98 for recall (B7 / B7_l3) and 0.85 / 0.99 for pairs.
+  The weaker gain a little more (r(before, gain) -0.3 to -0.6), but the ranges hardly narrow: pixel_mod
+  0.012 - 0.062 before, 0.010 - 0.060 after on B7.  Recall is the exception at on-time 1, where the
+  mixed-on-time seeds catch up (GMN7C 0.597 - 0.607 -> 0.611 - 0.626, GN7C_s1 0.613 -> 0.631).
+
+So the mixture, not streaming, is what pixelates; streaming stays (1.7 x faster) at a cost of about
+0.001 - 0.002.  And a good seed stays good through a fine-tune on the same task: worth choosing the
+base model by its pixel_mod.  Open: whether a seed keeps its properties through a strong change (another
+PSF, brightness or on-time), and whether a well-chosen base beats training from scratch there on RMSE,
+Jaccard and pixelation.
