@@ -122,6 +122,20 @@ def load_spline_calibration(path) -> SplineCalibration:
         raise ValueError(f"{path.name}: no 'SXY' or 'cspline' found; not a 3D "
                          "calibration file")
 
+    par = {}
+    if params is not None:
+        params = _as_struct(params)
+        for name in getattr(params, "_fieldnames", []):
+            par[name] = getattr(params, name)
+    return smap_spline(cspline, psf, em_on, par, path)
+
+
+def smap_spline(cspline, psf, em_on, par: dict, path) -> SplineCalibration:
+    """One spline of a SMAP ``_3dcal.mat``, in the camera's orientation: ``cspline`` an ``SXY``
+    entry's (or the flat layout's), ``psf`` its averaged bead stack, ``em_on`` its ``EMon``, ``par``
+    the calibrator's parameters.  `load_spline_calibration` reads the first entry with it, and
+    `calibrate.smap_dual` both entries of a two-channel calibration."""
+    path = Path(path)
     coeff = _as_struct(cspline.coeff)
     if isinstance(coeff, np.ndarray) and coeff.dtype == object:
         coeff = coeff.flat[0]  # cell array: single channel -> first cell
@@ -138,12 +152,6 @@ def load_spline_calibration(path) -> SplineCalibration:
             psf = np.ascontiguousarray(psf.transpose(2, 0, 1))  # -> (nz, ny, nx)
         else:
             psf = None
-
-    par = {}
-    if params is not None:
-        params = _as_struct(params)
-        for name in getattr(params, "_fieldnames", []):
-            par[name] = getattr(params, name)
 
     flipped = _smap_flipped(_to_scalar(par.get("emmirror")), em_on, path)
     pixelsize = par.get("pixelsize")
