@@ -239,8 +239,13 @@ class DualColour(Plugin):
                                  + ", ".join(sorted(locs.keys())))
         colour = np.asarray(locs[column], np.int64)
         if not ((colour == 0).any() and (colour == 1).any()):
-            raise ValueError("needs two colours: two threads (thi 0 and 1) or two lasers "
-                             "(channel 0 and 1); this table has one")
+            # one colour: nothing to register or join -- said, not refused, so
+            # that a chain made for two colours runs on one as well
+            ctx.warn("one colour: nothing to register or join into molecules; the "
+                     "table is handed back as it was")
+            return Result(text="one colour: nothing to pair (two threads, thi 0 and 1, "
+                               "or two lasers, channel 0 and 1, are needed)",
+                          settings=settings, title="MINFLUX dual colour")
         o, p = settings.offset, settings.pairing
         mask = np.asarray(ctx.selection.mask, bool)
         found = _measurements(ctx)

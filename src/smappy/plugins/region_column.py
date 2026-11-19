@@ -265,10 +265,23 @@ class WriteResults(Plugin):
 #: offered without a session; with one, the table's whole-number attributes
 #: (`id_attributes`), so a name is chosen rather than typed
 COMMON_IDS = ("cluster_id", "track_id", "tid")
+#: what an empty *attribute* resolves to, the first the table has: a
+#: two-colour MINFLUX molecule (MINFLUX dual colour's pair_id), else a
+#: MINFLUX trace, a linked track, a cluster
+AUTO_COLUMNS = ("pair_id", "tid", "track_id", "cluster_id")
 
 
 def common_ids():
-    return [(c, c) for c in COMMON_IDS]
+    return [("", "auto")] + [(c, c) for c in COMMON_IDS]
+
+
+def auto_column(locs, column: str) -> str:
+    """``column``, or on *auto* (empty) the first of `AUTO_COLUMNS` the table
+    has; empty where it has none."""
+    column = (column or "").strip()
+    if column:
+        return column
+    return next((c for c in AUTO_COLUMNS if c in locs), "")
 
 
 def id_attributes(locs) -> List[str]:

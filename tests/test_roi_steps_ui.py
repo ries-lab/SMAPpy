@@ -30,7 +30,10 @@ def test_segment_offers_the_tables_id_attributes_ids_first():
     session = Session(locs)
     context = session.context(grouping=SegmentRegions.grouping)    # as the form asks
     state = SegmentRegions().describe(context, SegmentSettings(method="ids"))
-    assert [v for v, _ in state.choices["ids.column"]] == names
+    # auto first, naming what it resolves to, then the table's id attributes
+    assert [v for v, _ in state.choices["ids.column"]] == [""] + names
+    label = state.choices["ids.column"][0][1]
+    assert label.startswith("auto (") and label[6:-1] in names
     # another method: no list worked out for a part that is not shown
     state = SegmentRegions().describe(context, SegmentSettings(method="circle"))
     assert "ids.column" not in state.choices

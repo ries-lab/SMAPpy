@@ -427,14 +427,17 @@ class SegmentRegions(SegmenterPlugin):
         by_id = settings.ids.membership == "id"
         state.active["ids.outline"] = not by_id
         state.active["ids.draw"] = by_id
-        if by_id and settings.ids.draw == "auto":
-            state.hints["ids.draw"] = draw_as(settings.ids.column.strip())
+        column = settings.ids.column.strip()
         if settings.method == "ids" and ctx is not None and ctx.session is not None:
             # the table's id attributes to choose from, rather than a name typed
-            from .region_column import id_attributes
+            from .region_column import auto_column, id_attributes
             found = id_attributes(ctx.locs)
+            column = auto_column(ctx.locs, column)
             if found:
-                state.choices["ids.column"] = [(c, c) for c in found]
+                state.choices["ids.column"] = ([("", f"auto ({column})" if column else "auto")]
+                                               + [(c, c) for c in found])
+        if by_id and settings.ids.draw == "auto":
+            state.hints["ids.draw"] = draw_as(column)
         if settings.method == "ids":
             try:
                 segmentation.keep_test(settings.ids.keep, TRACE_VALUES)
@@ -663,7 +666,11 @@ class SegmentRegions(SegmenterPlugin):
         if not sources:
             raise ValueError("the ROI manager has no file to add ROIs to")
         ids = settings.ids
-        column = ids.column.strip()
+        from .region_column import AUTO_COLUMNS, auto_column
+        column = auto_column(ctx.locs, ids.column)
+        if not column:
+            raise ValueError("no id attribute: choose one, or open a table with "
+                             + ", ".join(AUTO_COLUMNS))
         by_id = ids.membership == "id"
         if ids.membership not in ("shape", "id"):
             raise ValueError(f"an ROI holds 'shape' or 'id', not {ids.membership!r}")

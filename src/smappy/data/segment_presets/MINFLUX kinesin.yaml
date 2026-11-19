@@ -1,5 +1,6 @@
-# MINFLUX kinesin: every track of MINFLUX dual colour's pair_id (a molecule
-# in one colour or both) with 20 localizations becomes an ROI, drawn as its
+# MINFLUX kinesin: every track with 20 localizations becomes an ROI -- of
+# MINFLUX dual colour's pair_id (a molecule in one colour or both) where it
+# was run, else of the traces, tid (attribute on auto), drawn as its
 # track and turned along it; the ones that walk are used, the others added
 # unused (keep rejected), to look at.  Walking is told from sticking and
 # from diffusing to and fro along a microtubule, which is as elongated, by
@@ -10,7 +11,7 @@
 # or the one colour); "only in both colours" keeps those alone.
 method: ids
 ids:
-  column: pair_id
+  column: ""                # auto: pair_id, else tid
   min_size: 20
   membership: id
   draw: track

@@ -61,7 +61,7 @@ steps:
     values:                        # the MINFLUX kinesin preset's
       preset: MINFLUX kinesin
       method: ids
-      ids.column: pair_id
+      ids.column: ""             # auto: pair_id, else tid
       ids.min_size: 20
       ids.membership: id
       ids.draw: track
@@ -73,6 +73,6 @@ steps:
     label: steps
     version: "6"
     values:
-      id_column: pair_id
+      id_column: ""              # auto: pair_id where there are two colours, else tid
       in_rois: true                # the kinesins' ROIs only
       min_locs: 20

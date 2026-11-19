@@ -30,6 +30,9 @@ The pages of the plugins explain the methods; this one what running them
 together does.  Because it is a chain, it can be edited, saved under
 another name, and run over many files in a batch.
 
+It runs on one colour too: there step 4 has nothing to join, and the ROIs
+and steps are of each trace (`tid`).
+
 Open the tracking measurement and, beside it, the bead measurement taken
 before it (File > Open: both measurements of the `.msr`, or both files),
 and run it on a layer that shows the tracking.

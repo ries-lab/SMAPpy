@@ -54,8 +54,8 @@ A **preset** fills the settings for one kind of structure, *keep* included:
 * *Circles* -- rings of 100 to 500 nm, round, with at least 10
   localizations on the ring;
 * *MINFLUX kinesin* -- *from an id attribute*, every molecule of
-  [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour) (`pair_id`)
-  with 20 localizations as an ROI, drawn as its track and turned along it;
+  [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour) (`pair_id`;
+  on one colour, every trace, `tid`) with 20 localizations as an ROI, drawn as its track and turned along it;
   those that walk -- 100 nm, `linearity` of 0.8 or more -- used, the others
   added unused (*keep rejected*); tick *only in both colours* for the
   molecules seen in both.
@@ -375,7 +375,9 @@ drift.  *keep* then decides, as for the circle template.
 ### From an id attribute
 
 **The regions.**  The localizations are sorted by their id; each id above
-0 with enough localizations is one region.  Membership is the attribute alone:
+0 with enough localizations is one region.  *attribute* on *auto* takes the
+first the table has of `pair_id` (a two-colour MINFLUX molecule), `tid`
+(a MINFLUX trace), `track_id` and `cluster_id`.  Membership is the attribute alone:
 the layers' filters do not decide which localizations a cluster has.
 
 **The outline.**  With *the cluster's own outline* ticked (the default), the

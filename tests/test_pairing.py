@@ -73,9 +73,10 @@ def test_the_plugin_writes_pair_id_and_keeps_the_offset_for_transform():
     assert "30 in both colours" in result.text
 
 
-def test_the_plugin_refuses_one_thread():
+def test_on_one_colour_the_plugin_says_so_and_changes_nothing():
     locs = two_threads()
     locs.columns["thi"] = np.zeros(len(locs), np.int64)
     cls = plugins.get("Analysis/MINFLUX/MINFLUX dual colour")
-    with pytest.raises(ValueError, match="two threads"):
-        Session(locs).run(cls(), cls.Settings())
+    session = Session(locs)
+    result = session.run(cls(), cls.Settings())
+    assert "one colour" in result.text and "pair_id" not in session.locs

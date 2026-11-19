@@ -40,7 +40,9 @@ inspector need.  The [MINFLUX kinesin](plugin:Analysis/MINFLUX/Workflow/MINFLUX 
 chain runs it with the steps before and after.
 
 It reads the localizations the layer's filter keeps, of the measurements
-the selection holds; a bead measurement is read whole.
+the selection holds; a bead measurement is read whole.  On a table of one
+colour it says so and changes nothing, so that a chain made for two colours
+runs on one as well.
 
 ## How it works
 
