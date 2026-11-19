@@ -72,7 +72,7 @@ steps:
       replace: true
   - plugin: Analysis/Tracking/Find steps
     label: steps
-    version: "7"
+    version: "8"
     values:
       id_column: ""              # auto: pair_id where there are two colours, else tid
       in_rois: true                # the kinesins' ROIs only

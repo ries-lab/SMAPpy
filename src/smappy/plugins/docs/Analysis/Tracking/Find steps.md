@@ -1,6 +1,6 @@
 ---
-version: "7"
-covers: [smappy.bnp_steps.bnp_steps, smappy.bnp_steps.noise_sd, smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file, smappy.traces.moving_direction, smappy.plugins.find_steps.draw_steps, smappy.plugins.find_steps.rois_ids, smappy.dual_colour.co_movement]
+version: "8"
+covers: [smappy.bnp_steps.bnp_steps, smappy.bnp_steps.noise_sd, smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.smoothed, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file, smappy.traces.moving_direction, smappy.plugins.find_steps.draw_steps, smappy.plugins.find_steps.rois_ids, smappy.dual_colour.co_movement]
 ---
 
 ## What it does
@@ -51,7 +51,7 @@ bnp = bnp_steps([x], sweeps=200).boundaries[0]
 
 **1. One coordinate per trace.**  The localizations of each trace (at least
 *at least* of them, those the layer's filter keeps) in time order, turned
-onto the direction the trace walks in -- or x or y, with *steps along*.
+onto the direction the trace walks in.
 That direction is found where the motor moves: the trace's mean position
 over windows of *moving window* (0.1 s), and between neighbouring windows
 how far it went; the windows it moved in faster than *moving from*
@@ -230,11 +230,6 @@ its bootstrap errors; from StepsMINFLUX: the running-window smoothing, the
 
 ## Parameters
 
-### along
-Along the track for motors on straight filaments; x or y where the motion
-is known to be along an axis, or the track bends so its long axis means
-little.
-
 ### min_locs
 A trace must hold several steps for the S-score to peak: 20 localizations
 at least, more for small steps in large noise.
@@ -244,20 +239,21 @@ AutoStepFinder takes a second for a hundred traces; BNP-Step tens of
 seconds, and is the better choice for small steps in noisy traces, or when
 the number of steps should not hang on a threshold.
 
-### sweeps
-A few hundred from AutoStepFinder's start is usually enough; more where the
+### bnp.sweeps
+In the *BNP-Step* part, shown while it is the *method*.  A few hundred from AutoStepFinder's start is usually enough; more where the
 traces are long and the steps many.  The run time grows with it linearly.
 
-### height_nm
+### bnp.height_nm
 Steps much smaller than it cost more prior than they gain in fit, so they
 are dropped; on *auto* three times the noise.  Set it near the expected
 step (8 nm for kinesin) when the noise is small.
 
-### threshold
-0.15 is AutoStepFinder's.  Lower finds steps in noisier traces and
+### autostepfinder.threshold
+In the *AutoStepFinder* part, shown while it is the *method*.  0.15 is
+AutoStepFinder's.  Lower finds steps in noisier traces and
 starts finding noise.
 
-### overshoot
+### autostepfinder.overshoot
 Below 1 takes fewer, more certain steps; above 1 more, splitting dwells.
 
 ### stat
@@ -299,6 +295,30 @@ Above the windows' noise (a few nm over 0.1 s, some tens of nm/s) and
 below the motor's: 100 nm/s for kinesin at saturating ATP; lower it for a
 slow motor.
 
+### smooth_stat
+The smoothed line is the figure's: its *smoothed* tick shows it, for the
+eye.  A running median follows the trace through a step without rounding
+it, which a mean cannot, so a step the fit missed or made up shows where
+the smoothed line and the steps part.  Nothing measured changes.
+
+### smooth_n
+Shorter than the shortest dwell, or the smoothed line rounds the steps
+away: 9 localizations at a few hundred a second is a few tens of
+milliseconds.
+
+### axis
+*its moving parts* for a motor that pauses; *all its localizations* when
+it walks the whole time, or moves too little for windows to tell.
+
+### guide_nm
+16 nm for a kinesin whose one head is labelled (it moves 16 nm a step), 8
+for a label on the stalk, 36 for myosin V.  The lines start at the first
+plateau, so a motor walking in whole steps follows them.
+
+### line
+Off, each localization is a dot: for sparse traces, where a line between
+far-apart points draws a path nobody saw.
+
 ### output
 *plateaus on the localizations* writes `plateau` (an id per plateau, -1 for
 none) and `step_level_nm`, to colour by or to filter on; *steps as a file*
@@ -320,8 +340,11 @@ two-colour molecules that move and those of them that do not move
 together.  The text adds the dwell models, the best
 first with each one's parameters and its AIC above the best.  The figure:
 the upper half, the longest traces (in an ROI, its molecule) side by side,
-the localizations as dots joined in time by a thin line (*localizations as
-a line*) and the steps over them, a two-colour molecule's colours in
+the localizations joined in time by a line (dots with *localizations as a
+line* off), the steps over them in a thin line and grey lines every
+*guide lines every* behind; the figure's own ticks show or hide the
+*steps* and the *smoothed* trace (the localizations then faint behind it)
+without running again -- a two-colour molecule's colours in
 magenta (colour 0) and green on one clock from its first localization in
 either and from colour 0's first plateau; below, the step sizes, and the
 dwell times with the three models (the best drawn thicker), the mean dwell

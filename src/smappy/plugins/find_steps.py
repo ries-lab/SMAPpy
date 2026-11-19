@@ -4,7 +4,7 @@ pooled step sizes and dwell times, and MotorPAINT's steps as a file.
 
 Per trace (an id column: MINFLUX's ``tid``, a linked ``track_id``) the
 position along the track (the trace turned onto its long axis, forward in
-time, `traces.rotate`) or along x or y is fitted with AutoStepFinder
+time, `traces.rotate`) is fitted with AutoStepFinder
 (`smappy.steps`) or BNP-Step (`smappy.bnp_steps`, every trace in one
 batched sampler), optionally split and merged to an expected step size.
 The per-trace numbers are a region table; the pooled step sizes and dwell
@@ -21,13 +21,13 @@ from . import Context, FormState, Plot, Plugin, Result, param, register, setting
 from .id_statistics import _id_choices, id_column
 
 LABEL = "Find steps"
-ALONG = (("track", "along the track"), ("x", "x"), ("y", "y"))
 METHODS = (("autostepfinder", "AutoStepFinder"), ("bnp", "BNP-Step (Bayesian)"))
 #: traces sampled together by BNP-Step: memory is (traces, steps, steps)
 BNP_BATCH = 128
 OUTPUTS = (("table", "region table"), ("columns", "plateaus on the localizations"),
            ("file", "steps as a file"))
 COLOURS = (("auto", "auto"), ("together", "each its own steps"), ("one", "as one trace"))
+SMOOTHING = (("median", "running median"), ("mean", "running mean"))
 AXES = (("moving", "its moving parts"), ("all", "all its localizations"))
 #: the colours of a two-colour molecule's figure: colour 0 (the longer
 #: wavelength, 638 nm) magenta, colour 1 green -- as the groups draw them
@@ -59,37 +59,39 @@ class CoMoveSettings:
 
 
 @dataclass
+class AutoStepFinderSettings:
+    threshold: float = param(0.15, label="threshold", min=0.0, max=10.0,
+                             help="a round is accepted when its S-score peaks above this; "
+                                  "lower finds more steps")
+    overshoot: float = param(1.0, label="overshoot", min=0.1, max=3.0,
+                             help="takes this many times the steps the S-score finds "
+                                  "(SMAP's coarseness)")
+
+
+@dataclass
+class BnpSettings:
+    sweeps: int = param(400, label="sweeps", min=20, max=100000,
+                        help="Gibbs sampling sweeps, started from AutoStepFinder's steps; "
+                             "more is slower and settles better")
+    height_nm: float = param(0.0, label="step prior", unit="nm", min=0.0,
+                             help="the prior width of a step; 0: three times each "
+                                  "trace's noise")
+
+
+@dataclass
 class FindStepsSettings:
     id_column: str = param("", label="id attribute", choices=_id_choices,
                            help="the traces; auto: tid, else track_id, else cluster_id")
-    along: str = param("track", label="steps along", choices=ALONG,
-                       help="the track's axis (turned forward in time), or x or y")
-    axis: str = param("moving", label="track axis from", choices=AXES,
-                      help="the direction it walks in where it moves, or the long axis "
-                           "of all its localizations, stuck parts included")
-    window_s: float = param(0.1, label="moving window", unit="s", min=1e-4, advanced=True,
-                            help="the trace's mean position over windows this long; "
-                                 "frames where there is no time_s")
-    min_speed: float = param(100.0, label="moving from", unit="nm/s", min=0.0,
-                             advanced=True,
-                             help="a window pair faster than this moves (nm per frame "
-                                  "where there is no time_s)")
     min_locs: int = param(20, label="at least", unit="localizations", min=4,
                           help="shorter traces are passed over")
     method: str = param("autostepfinder", label="method", choices=METHODS,
                         help="AutoStepFinder: greedy fit and S-score, fast; BNP-Step: the "
                              "number of steps learned by Bayesian sampling, slower")
-    sweeps: int = param(400, label="sweeps", min=20, max=100000, advanced=True,
-                        help="BNP-Step's Gibbs sweeps, from AutoStepFinder's steps")
-    height_nm: float = param(0.0, label="step prior", unit="nm", min=0.0, advanced=True,
-                             help="BNP-Step's prior width of a step; 0: three times each "
-                                  "trace's noise")
-    threshold: float = param(0.15, label="threshold", min=0.0, max=10.0, advanced=True,
-                             help="AutoStepFinder accepts a round whose S-score peaks above "
-                                  "this")
-    overshoot: float = param(1.0, label="overshoot", min=0.1, max=3.0, advanced=True,
-                             help="takes this many times the steps the S-score finds "
-                                  "(SMAP's coarseness)")
+    # each method's own settings, a part titled by it and shown only while it
+    # is the method: under one *more* they read as everyone's (2026-11)
+    autostepfinder: AutoStepFinderSettings = param(
+        default_factory=AutoStepFinderSettings, label="AutoStepFinder", collapsed=True)
+    bnp: BnpSettings = param(default_factory=BnpSettings, label="BNP-Step", collapsed=True)
     stat: str = param("mean", label="levels", choices=(("mean", "mean"),
                                                        ("median", "median")),
                       help="a plateau's level: its points' mean or median")
@@ -104,11 +106,36 @@ class FindStepsSettings:
     in_rois: bool = param(False, label="only ROIs' traces",
                           help="only the ids the ROI manager's used ROIs hold (an ROI of "
                                "its id alone): the kinesins Segment regions found")
-    output: str = param("table", label="output", choices=OUTPUTS,
+    # the steps are always along the track: x or y alone measured a motor's
+    # steps shortened by its angle, which nobody wanted (2026-11)
+    axis: str = param("moving", label="track axis from", choices=AXES, advanced=True,
+                      help="the direction it walks in where it moves, or the long axis "
+                           "of all its localizations, stuck parts included")
+    window_s: float = param(0.1, label="moving window", unit="s", min=1e-4,
+                            advanced=True, under="axis",
+                            help="where it moves is judged from its mean position over "
+                                 "windows this long (frames where there is no time_s)")
+    min_speed: float = param(100.0, label="moving from", unit="nm/s", min=0.0,
+                             advanced=True, under="axis",
+                             help="two windows in a row this much faster than standing "
+                                  "still count as moving (nm per frame where there is no "
+                                  "time_s)")
+    output: str = param("table", label="output", choices=OUTPUTS, advanced=True,
                         help="a region table only; plateau and step_level on the "
                              "localizations; or a file of one localization per plateau")
-    line: bool = param(True, label="localizations as a line",
-                       help="the traces' localizations joined in time order in the figure")
+    line: bool = param(True, label="localizations as a line", advanced=True,
+                       help="the traces' localizations joined in time order in the "
+                            "figure; off, as dots")
+    guide_nm: float = param(16.0, label="guide lines every", unit="nm", min=0.0,
+                            advanced=True,
+                            help="thin grey lines behind the traces this far apart, from "
+                                 "the first plateau: a ruler for the steps; 0: none")
+    smooth_stat: str = param("median", label="smoothing", choices=SMOOTHING, advanced=True,
+                             help="the figure's smoothed line (its 'smoothed' tick): a "
+                                  "running median or mean")
+    smooth_n: int = param(9, label="smooth over", unit="localizations", min=2,
+                          max=1000, advanced=True,
+                          help="the running window of the smoothed line")
 
 
 def rois_ids(ctx: Context, column: str) -> set:
@@ -139,7 +166,7 @@ class FindSteps(Plugin):
     # 5: two colours by the laser; only the ROIs' traces
     # 6: the track's axis from its moving parts; two colours together on auto
     # 7: two colours: whether they move together, and a keyword proposed
-    version = "7"
+    version = "8"
 
     def changes_locs_for(self, settings: FindStepsSettings) -> bool:
         return settings.output != "table"
@@ -153,14 +180,10 @@ class FindSteps(Plugin):
             state.choices["id_column"] = ([("", f"auto ({found})" if found else "auto")]
                                           + [(c, c) for c in integer_columns(ctx.locs)])
         bnp = settings.method == "bnp"
-        for name in ("threshold", "overshoot"):
-            state.active[name] = not bnp
-        for name in ("sweeps", "height_nm"):
-            state.active[name] = bnp
-        track = settings.along == "track"
-        state.shown["axis"] = track
+        state.shown["autostepfinder"] = not bnp
+        state.shown["bnp"] = bnp
         for name in ("window_s", "min_speed"):
-            state.shown[name] = track and settings.axis == "moving"
+            state.shown[name] = settings.axis == "moving"
         state.shown["comove"] = settings.colours != "one"
         return state
 
@@ -204,27 +227,24 @@ class FindSteps(Plugin):
                   else np.zeros(len(x), np.int64))
         axis_angle = np.full(len(r.ids), np.nan)
         moving_share = np.full(len(r.ids), np.nan)
-        if settings.along == "track":
-            a = T.axes(r, x, y)
-            if pairs:
-                # a pair in its colour 0's frame, so both colours' steps line up
-                a0 = T.axes(r, x, y, thread == 0)
-                a = {k: np.where(np.isfinite(a0[k]), a0[k], a[k]) for k in a}
-            if settings.axis == "moving":
-                # the direction it walks in where it walks, both colours
-                # together: the stuck parts pull the long axis, not this
-                window = settings.window_s
-                for i in np.flatnonzero(long_enough):
-                    sl = slice(r.start[i], r.start[i] + r.n[i])
-                    ang, share = T.moving_direction(t[sl], x[sl], y[sl], window,
-                                                    settings.min_speed)
-                    moving_share[i] = share
-                    if np.isfinite(ang):
-                        a["angle_deg"][i] = ang
-            axis_angle = np.asarray(a["angle_deg"], float).copy()
-            coord, _ = T.rotate(r, x, y, a)
-        else:
-            coord = x if settings.along == "x" else y
+        a = T.axes(r, x, y)
+        if pairs:
+            # a pair in its colour 0's frame, so both colours' steps line up
+            a0 = T.axes(r, x, y, thread == 0)
+            a = {k: np.where(np.isfinite(a0[k]), a0[k], a[k]) for k in a}
+        if settings.axis == "moving":
+            # the direction it walks in where it walks, both colours
+            # together: the stuck parts pull the long axis, not this
+            window = settings.window_s
+            for i in np.flatnonzero(long_enough):
+                sl = slice(r.start[i], r.start[i] + r.n[i])
+                ang, share = T.moving_direction(t[sl], x[sl], y[sl], window,
+                                                settings.min_speed)
+                moving_share[i] = share
+                if np.isfinite(ang):
+                    a["angle_deg"][i] = ang
+        axis_angle = np.asarray(a["angle_deg"], float).copy()
+        coord, _ = T.rotate(r, x, y, a)
         per = {k: np.full(len(r.ids), np.nan) for k in
                ("n_steps", "step_median_nm", "step_mean_nm", "dwell_mean", "velocity_steps",
                 "erlang_shape")}
@@ -274,8 +294,8 @@ class FindSteps(Plugin):
                 ctx.report(f"BNP-Step: traces {start + 1}-"
                            f"{min(start + BNP_BATCH, len(todo))} of {len(todo)}")
                 chunk = todo[start:start + BNP_BATCH]
-                res = bnp_steps([p[2] for p in chunk], sweeps=settings.sweeps,
-                                height_sd=settings.height_nm or None, seed=start)
+                res = bnp_steps([p[2] for p in chunk], sweeps=settings.bnp.sweeps,
+                                height_sd=settings.bnp.height_nm or None, seed=start)
                 for (i, th, _), bound in zip(chunk, res.boundaries):
                     sampled[(i, th)] = bound
         for i in np.flatnonzero(long_enough):
@@ -292,7 +312,8 @@ class FindSteps(Plugin):
                 if settings.method == "bnp":
                     b = sampled.get((i, int(th)), np.zeros(0, np.int64))
                 else:
-                    b = S.autostepfinder(xi, settings.threshold, settings.overshoot,
+                    b = S.autostepfinder(xi, settings.autostepfinder.threshold,
+                                         settings.autostepfinder.overshoot,
                                          stat=settings.stat).boundaries
                 if settings.step_nm > 0 and len(b):
                     b = S.split_merge(xi, b, settings.step_nm, settings.stat)
@@ -345,10 +366,9 @@ class FindSteps(Plugin):
             values[f"step_median_{colour}{th}_nm"] = med
         if pairs:
             values.update(comove)
-        if settings.along == "track":
-            values["angle_deg"] = axis_angle
-            if settings.axis == "moving":
-                values["moving_share"] = moving_share
+        values["angle_deg"] = axis_angle
+        if settings.axis == "moving":
+            values["moving_share"] = moving_share
         step = {"label": LABEL, "plugin": self.path, "version": self.version,
                 "parameters": settings_values(settings)}
         table = column_table(locs, column, LABEL, r.ids, values, step,
@@ -391,7 +411,7 @@ class FindSteps(Plugin):
             if len(done):
                 i = int(done[np.argmax(r.n[done])])
                 region_values = {k: float(v[i]) for k, v in values.items()}
-                if settings.along == "track" and np.isfinite(axis_angle[i]):
+                if np.isfinite(axis_angle[i]):
                     proposals["angle"] = float(axis_angle[i])
                     lines.append(f"proposes for the ROI: angle {axis_angle[i]:.0f}°")
                 share = comove["comove_share"][i]
@@ -403,13 +423,18 @@ class FindSteps(Plugin):
                                  f"proposes {COLOURS_LIST} '{word}'")
         label = f"{column} {{}}"
         line = settings.line
+        smoothing = (settings.smooth_n, settings.smooth_stat)
+        guide = settings.guide_nm
 
-        def draw(figure):
+        def draw(figure, switches):
             draw_steps(figure, examples, sizes, dwells, pooled, unit, names=names,
-                       label=label, line=line, along=settings.along == "track")
+                       label=label, line=line, steps=switches.get("steps", True),
+                       guide=guide,
+                       smoothed=smoothing if switches.get("smoothed") else None)
 
         return Result(locs=out_locs, files=files, append=bool(files),
-                      text="\n".join(lines), plot=Plot(draw, panels=6, size=(13, 6.4)),
+                      text="\n".join(lines), plot=Plot(draw, panels=6, size=(13, 6.4),
+                                                     switches={"steps": True, "smoothed": False}),
                       values=region_values, proposals=proposals,
                       id_regions={column: {LABEL: table}},
                       data={"sizes": sizes, "dwells": dwells, "pooled": pooled},
@@ -474,12 +499,23 @@ def steps_file(rows, clock: bool, ctx: Context):
 
 
 def draw_steps(figure, examples, sizes, dwells, pooled, unit, names=None,
-               label="{}", line=True, along=True) -> None:
+               label="{}", line=True, steps=True, smoothed=None,
+               guide=0.0) -> None:
     """The longest traces, each a panel of its own above, their steps over
     the localizations; the pooled step sizes, dwells and velocity below.  A
     two-colour molecule's colours share its clock (time from its first
     localization in either) and its frame (the position from colour 0's
-    first plateau), each drawn in its colour with its own steps."""
+    first plateau), each drawn in its colour with its own steps.
+
+    ``line``: the localizations joined in time order, solid, no dots (dots
+    on a line hid it at a motor's rates); else dots.  ``steps``: the fitted
+    steps over them.  ``smoothed``: ``(n, "median" | "mean")``, the trace
+    run through that window drawn as the localizations are, and the
+    localizations behind it faint.  ``guide``: thin grey lines behind it
+    all this far apart (nm), from the first plateau -- a ruler a step of
+    that size is read against.  The steps are drawn thin: a thick line hid
+    the localizations it was fitted to (2026-11)."""
+    from ..steps import smoothed as smooth
     names = names or {}
     # the traces fill the upper half, side by side; the pooled numbers below
     grid = figure.add_gridspec(2, 2, height_ratios=(1.3, 1.0), hspace=0.32, wspace=0.18,
@@ -502,17 +538,29 @@ def draw_steps(figure, examples, sizes, dwells, pooled, unit, names=None,
             dots = COLOUR_DOTS[th % 2] if two else "0.65"
             join = COLOUR_JOIN[th % 2] if two else "0.45"
             fitc = COLOUR_LINES[th % 2] if two else "tab:red"
+            faint = 0.25 if smoothed else 1.0
             if line:
-                ax.plot(t - t0, x - x0, "-", lw=0.6, color=join, alpha=0.9)
-            ax.plot(t - t0, x - x0, ".", ms=3, color=join if line else dots)
-            ax.step(t - t0, fit - x0, where="post", color=fitc, lw=1.8,
-                    label=names.get(th) if two else None)
+                ax.plot(t - t0, x - x0, "-", lw=0.7, color=join, alpha=faint)
+            else:
+                ax.plot(t - t0, x - x0, ".", ms=3, color=dots, alpha=faint)
+            if smoothed:
+                ax.plot(t - t0, smooth(x, *smoothed) - x0, "-", lw=0.9, color=join)
+            if steps:
+                ax.step(t - t0, fit - x0, where="post", color=fitc, lw=0.9,
+                        label=names.get(th) if two else None)
             counts.append(int(np.count_nonzero(np.diff(fit))))
         ax.set_xlabel(f"time ({unit})")
-        ax.set_ylabel("position along the track (nm)" if along else "position (nm)")
+        if guide > 0:
+            lo, hi = ax.get_ylim()
+            ys = np.arange(np.ceil(lo / guide), np.floor(hi / guide) + 1) * guide
+            if len(ys) <= 200:               # a ruler, not a grey fill
+                for y in ys:
+                    ax.axhline(y, color="0.82", lw=0.5, zorder=0)
+            ax.set_ylim(lo, hi)
+        ax.set_ylabel("position along the track (nm)")
         ax.set_title(label.format(tid) + ": " + " + ".join(str(c) for c in counts)
                      + " steps", fontsize=8)
-        if names:
+        if names and steps:                  # the colours are named on the steps
             ax.legend(fontsize=6, frameon=False)
     if len(sizes):
         a = np.abs(sizes)

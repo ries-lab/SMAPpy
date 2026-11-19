@@ -243,6 +243,21 @@ def split_merge(x, boundaries, step: float, stat: str = "mean", rounds: int = 10
     return b
 
 
+def smoothed(x, n: int, stat: str = "median") -> np.ndarray:
+    """``x`` run through a window of ``n`` points, centred: its running
+    median or mean, for the eye beside the steps.  The ends take the nearest
+    points (``mode="nearest"``), so a trace keeps its length and its first
+    and last levels are not pulled towards zero."""
+    from scipy.ndimage import median_filter, uniform_filter1d
+    x = np.asarray(x, np.float64)
+    n = int(max(1, min(n, len(x))))
+    if n < 2:
+        return x.copy()
+    if stat == "median":
+        return median_filter(x, size=n, mode="nearest")
+    return uniform_filter1d(x, size=n, mode="nearest")
+
+
 def step_table(x, t, boundaries, stat: str = "mean") -> Dict[str, np.ndarray]:
     """The plateaus and steps: per plateau ``level``, ``start_time``,
     ``dwell`` (from its first point to the next plateau's), ``n``, ``std``

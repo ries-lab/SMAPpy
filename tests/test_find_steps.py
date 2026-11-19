@@ -146,7 +146,7 @@ def test_bnp_step_finds_the_step_size_without_being_told_it():
     session.show_grouped(0, False)
     cls = plugins.get(PLUGIN)
     greedy = session.run(cls(), cls.Settings()).data["pooled"]
-    pooled = session.run(cls(), cls.Settings(method="bnp", sweeps=150)).data["pooled"]
+    pooled = session.run(cls(), plugins.settings_from(cls.Settings, {"method": "bnp", "bnp.sweeps": 150})).data["pooled"]
     assert pooled["step_mean_nm"] == pytest.approx(8.0, abs=1.0)
     # fewer steps fitted to noise: a narrower spread of sizes than AutoStepFinder's
     assert pooled["step_sd_nm"] < greedy["step_sd_nm"]
@@ -238,3 +238,69 @@ def test_in_an_roi_a_two_colour_molecule_is_proposed_both_or_apart(apart, word):
     result = cls().run(ctx, cls.Settings(min_locs=20))
     assert result.proposals["keyword:colours"] == word
     assert result.values["comove_share"] == (0.0 if apart else 1.0)
+
+
+def test_the_smoothed_line_keeps_a_steps_levels_and_the_traces_length():
+    x = np.r_[np.zeros(30), np.full(30, 8.0)] + np.random.default_rng(0).normal(0, 1, 60)
+    for stat in ("median", "mean"):
+        sm = S.smoothed(x, 9, stat)
+        assert len(sm) == len(x)
+        assert np.median(sm[:20]) == pytest.approx(0, abs=0.8)
+        assert np.median(sm[-20:]) == pytest.approx(8, abs=0.8)
+        assert np.std(np.diff(sm[:25])) < np.std(np.diff(x[:25]))
+    assert np.array_equal(S.smoothed(x, 1), x)
+
+
+def test_only_the_chosen_methods_part_is_shown():
+    cls = plugins.get(PLUGIN)
+    state = cls().describe(None, cls.Settings())
+    assert state.shown["autostepfinder"] and not state.shown["bnp"]
+    state = cls().describe(None, cls.Settings(method="bnp"))
+    assert state.shown["bnp"] and not state.shown["autostepfinder"]
+    assert "smooth" not in cls.specs()        # the figure's tick, not a setting
+
+
+def test_the_figures_ticks_hide_the_steps_and_show_the_smoothed_line():
+    from matplotlib.figure import Figure
+    session = Session(motors())
+    session.show_grouped(0, False)
+    cls = plugins.get(PLUGIN)
+    plot = session.run(cls(), cls.Settings()).plot
+    assert plot.switches == {"steps": True, "smoothed": False}
+
+    def lines(switches):
+        figure = Figure()
+        plot.draw_into(figure, switches)
+        ax = figure.axes[0]
+        return ([ln.get_alpha() for ln in ax.lines if ln.get_drawstyle() == "default"],
+                sum(ln.get_drawstyle() == "steps-post" for ln in ax.lines))
+
+    raw, n_steps = lines(None)                      # as declared
+    assert n_steps >= 1 and all(a in (None, 1.0) for a in raw)
+    raw, n_steps = lines({"steps": False, "smoothed": True})
+    assert n_steps == 0
+    assert 0.25 in raw and None in raw              # the localizations faint, the smoothed not
+
+
+def test_the_track_axis_options_are_set_in_under_it_and_a_ruler_is_drawn():
+    pytest.importorskip("PySide6")
+    from matplotlib.figure import Figure
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.params import SUB_INDENT, SettingsForm
+    cls = plugins.get(PLUGIN)
+    form = SettingsForm(cls.Settings)
+    assert form.labels["window_s"].indent() == SUB_INDENT
+    assert form.labels["min_speed"].indent() == SUB_INDENT
+    assert form.labels["axis"].indent() <= 0
+    session = Session(motors())
+    session.show_grouped(0, False)
+    for guide, ruled in ((16.0, True), (0.0, False)):
+        plot = session.run(cls(), cls.Settings(guide_nm=guide)).plot
+        figure = Figure()
+        plot.draw_into(figure)
+        greys = [ln for ln in figure.axes[0].lines if ln.get_color() == "0.82"]
+        assert bool(greys) == ruled
+        if ruled:
+            ys = np.array([ln.get_ydata()[0] for ln in greys])
+            assert np.allclose(np.diff(ys), 16.0)
