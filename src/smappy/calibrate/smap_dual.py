@@ -9,13 +9,15 @@ data among it -- can be fitted (Spline 3D 2C) and simulated (`simulate.camera.sp
 (docs/decode/plex-plan.md §6).
 
 **The splines.**  Each ``SXY`` entry is a spline as SMAPpy's single reader reads one
-(`io.calibration.smap_spline`): its ``coeff`` is the channel as the camera saw it (the global
-calibration's ``coeffrawref`` / ``coeffrawtar``, the secondary channel not flipped back), un-mirrored
-in x where SMAP built it from x-mirrored beads (``EMon``).  So the main one is ``main`` and the other
-``secondary``, as `dual.build_dual_calibration` keeps them.  SMAP's averaged bead stacks are not the
+(`io.calibration.smap_spline`), un-mirrored in x where SMAP built it from x-mirrored beads (``EMon``).
+The mirrored channel's is kept un-mirrored along the split -- SMAP's ``cspline.mirror`` says so (2:
+along y, 1: along x) -- so it is flipped back here to the camera's orientation, as
+`dual.build_dual_calibration` keeps a secondary spline.  How that was settled (docs/decode/
+plex-plan.md §12): DECODE-Plex's two models of real movies (Figs. 2a and 2c), whose settings flip
+channel 1 along the split, render it as the camera shows it only with this flip.  SMAP's averaged bead stacks are not the
 splines' knots, which SMAPpy's format holds, so the knots are drawn from the splines.
 
-**The registration.**  ``trafo_raw.tar`` maps a position in the secondary channel to the main one
+**The registration** (``reading="smap"``, the default).  ``trafo_raw.tar`` maps a position in the secondary channel to the main one
 (``trafo_inv_raw.tar`` the other way), as MATLAB's ``affine2d`` / ``projective2d`` do: a row vector
 ``[x y 1]`` times the matrix, then divided by its third element, with ``x`` along the columns.  Its
 coordinates are SMAP's: pixels from 1, in units of 1000 pixels (DECODE-Plex reads it so, and its
@@ -25,6 +27,12 @@ orientation and the chip's pixels from 0, so the matrix is moved through those: 
 units, the EM mirror about the bead image's width, and the bead image's camera ROI (``roi``, x, y,
 width, height) onto the chip.  It stays projective (SMAP's ``Tform``; DECODE-Plex drops the division,
 which moves a point by 0.04 px at the centre of Fig. 2a's chip).
+
+``reading="decode-plex"`` reads it as DECODE-Plex does instead: ``trafo_inv_raw.tar`` (main to
+secondary) applied without the division, an affine map -- the registration its models were trained
+and run with, up to 0.29 px from SMAP's own on a 512-pixel chip.  The C = 2 benchmark draws its sets
+so (plex-plan §12): with SMAP's reading under them, its biplane CRLB model is 3 -- 7 times the bound
+where it is otherwise at it.
 
 **The split** is SMAP's ``Tmode`` (``up-down mirror``, ``right-left mirror``, without the mirror) at
 ``Tsplitpos``, the main channel the half of ``SXY(1)``'s range; `dual.split_geometry` writes it.
@@ -39,9 +47,12 @@ import numpy as np
 SCALE = 1e-3              # SMAP's registration works on pixels / 1000
 
 
-def load_smap_dual_calibration(path, trafo=None):
+def load_smap_dual_calibration(path, trafo=None, reading: str = "smap"):
     """``path``, a SMAP global two-channel ``_3dcal.mat``, with its registration ``trafo`` (default:
-    the ``_trafo.mat`` beside it) as a `dual.DualColorCalibration` in SMAPpy's conventions."""
+    the ``_trafo.mat`` beside it) as a `dual.DualColorCalibration` in SMAPpy's conventions; ``reading``
+    "smap" (projective, as SMAP applies it) or "decode-plex" (affine, as DECODE-Plex does)."""
+    if reading not in ("smap", "decode-plex"):
+        raise ValueError(f"reading {reading!r}: 'smap' or 'decode-plex'")
     import scipy.io
 
     from ..io.calibration import _as_struct, _smap_flipped, _to_scalar, smap_spline
@@ -62,7 +73,12 @@ def load_smap_dual_calibration(path, trafo=None):
     splines, em = [], []
     for entry, par in zip(entries, pars, strict=True):
         em_on = _to_scalar(getattr(entry, "EMon", None))
-        cal = smap_spline(_as_struct(entry.cspline), getattr(entry, "PSF", None), em_on, par, path)
+        cspline = _as_struct(entry.cspline)
+        cal = smap_spline(cspline, getattr(entry, "PSF", None), em_on, par, path)
+        mirror = int(_scalar(getattr(cspline, "mirror", 0)) or 0)
+        if mirror in (1, 2):                 # kept un-mirrored along the split: the camera's, flipped
+            from .dual import mirrored_spline
+            cal = mirrored_spline(cal, axis=2 if mirror == 1 else 1)
         splines.append(_with_knots(cal, path))
         em.append(_smap_flipped(_to_scalar(par.get("emmirror")), em_on, path))
     if em[0] != em[1]:
@@ -70,7 +86,11 @@ def load_smap_dual_calibration(path, trafo=None):
     main, secondary = splines
 
     x0, y0, width, height = _roi(par_g, path)
-    h = chip_transformation(_trafo_matrix(trafo), roi=(x0, y0, width, height), em_mirrored=em[0])
+    if reading == "smap":
+        h = chip_transformation(_trafo_matrix(trafo), roi=(x0, y0, width, height), em_mirrored=em[0])
+    else:
+        h = decode_plex_transformation(_trafo_matrix(trafo, "trafo_inv_raw"), roi=(x0, y0, width, height),
+                                       em_mirrored=em[0])
 
     mode = str(par_g.get("Tmode", "up-down mirror"))
     across = mode.startswith("right-left")
@@ -90,7 +110,7 @@ def load_smap_dual_calibration(path, trafo=None):
                               split_position=split)
     geometry["sources"][0]["path"] = str(path)
     parameters = {
-        "source": str(path), "trafo": str(trafo),
+        "source": str(path), "trafo": str(trafo), "reading": reading,
         "smappy_conversion": "SMAP global two-channel calibration read by calibrate.smap_dual",
         "smap": {"Tmode": mode, "Tform": str(par_g.get("Tform", "")), "Tsplitpos": _scalar(par_g.get("Tsplitpos")),
                  "emmirror": _scalar(par_g.get("emmirror")), "EMon": [bool(e) for e in em],
@@ -112,6 +132,23 @@ def chip_transformation(trafo_raw: np.ndarray, roi, em_mirrored: bool) -> np.nda
         h = mirror @ h @ mirror
     corner = np.array([[1, 0, x0], [0, 1, y0], [0, 0, 1]], float)
     h = corner @ h @ np.linalg.inv(corner)
+    return h / h[2, 2]
+
+
+def decode_plex_transformation(trafo_inv_raw: np.ndarray, roi, em_mirrored: bool) -> np.ndarray:
+    """SMAP's ``trafo_inv_raw.tar`` (main to secondary) as DECODE-Plex applies it -- the row vector
+    times the matrix, the first two elements kept, no division (`XYZTransformationMatrix`) -- an
+    affine map, turned into SMAPpy's 3x3, secondary to main, on the chip's pixels from 0."""
+    x0, y0, width, _ = (float(v) for v in roi)
+    t = np.asarray(trafo_inv_raw, float).copy()
+    t[:, 2] = [0.0, 0.0, 1.0]                      # the third element dropped: no division
+    to_smap = np.array([[SCALE, 0, SCALE], [0, SCALE, SCALE], [0, 0, 1]])
+    forward = np.linalg.inv(to_smap) @ t.T @ to_smap
+    if em_mirrored:
+        mirror = np.array([[-1, 0, width - 1], [0, 1, 0], [0, 0, 1]], float)
+        forward = mirror @ forward @ mirror
+    corner = np.array([[1, 0, x0], [0, 1, y0], [0, 0, 1]], float)
+    h = np.linalg.inv(corner @ forward @ np.linalg.inv(corner))
     return h / h[2, 2]
 
 
@@ -153,17 +190,18 @@ def _trafo_beside(path: Path) -> Path:
                             "object, which has to be exported as trafo_raw / trafo_inv_raw (ref, tar)")
 
 
-def _trafo_matrix(trafo: Path) -> np.ndarray:
+def _trafo_matrix(trafo: Path, which: str = "trafo_raw") -> np.ndarray:
     import scipy.io
 
     t = scipy.io.loadmat(trafo, struct_as_record=False, squeeze_me=True)
-    raw = t["trafo_raw"]
+    raw = t[which]
     ref, tar = np.asarray(raw.ref, float), np.asarray(raw.tar, float)
     if not np.allclose(ref, np.eye(3)):
-        raise ValueError(f"{trafo.name}: trafo_raw.ref is not the identity; only the main channel as "
+        raise ValueError(f"{trafo.name}: {which}.ref is not the identity; only the main channel as "
                          "reference is read")
-    if "trafo_inv_raw" in t:   # the other direction, fitted separately by SMAP: a check of the reading
-        inv = np.asarray(t["trafo_inv_raw"].tar, float)
+    other = "trafo_inv_raw" if which == "trafo_raw" else "trafo_raw"
+    if other in t:   # the other direction, fitted separately by SMAP: a check of the reading
+        inv = np.asarray(t[other].tar, float)
         product = tar @ inv
         if np.abs(product / product[2, 2] - np.eye(3)).max() > 0.01:
             raise ValueError(f"{trafo.name}: trafo_raw and trafo_inv_raw are not each other's inverse")

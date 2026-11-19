@@ -92,6 +92,26 @@ def test_the_registration_takes_a_molecules_secondary_image_to_its_main_one_on_t
     np.testing.assert_allclose(cal.to_secondary(upper + [x0, y0]), lower + [x0, y0], atol=1e-9)
 
 
+@pytest.mark.parametrize("em", [False, True])
+def test_the_decode_plex_reading_is_its_affine_map_without_the_division(tmp_path, em):
+    """``reading="decode-plex"``: trafo_inv_raw (main to secondary) times the row vector, the first two
+    elements kept -- DECODE-Plex's XYZTransformationMatrix -- on the un-mirrored bead image."""
+    cal_path, _ = _write(tmp_path, em)
+    cal = load_smap_dual_calibration(cal_path, reading="decode-plex")
+    assert cal.parameters["reading"] == "decode-plex"
+    t = scipy.io.loadmat(tmp_path / "beads_trafo.mat", struct_as_record=False, squeeze_me=True)["trafo_inv_raw"].tar
+    x0, y0, w, _ = ROI
+    upper = np.array([[3.0, 10.0], [20.5, 22.25], [27.0, 30.0]])            # bead image, camera pixels
+    xs = (w - 1 - upper[:, 0]) if em else upper[:, 0]
+    r = np.c_[(xs + 1) / 1000, (upper[:, 1] + 1) / 1000, np.ones(len(upper))] @ t
+    expected = np.c_[r[:, 0] * 1000 - 1, r[:, 1] * 1000 - 1]
+    if em:
+        expected[:, 0] = w - 1 - expected[:, 0]
+    np.testing.assert_allclose(cal.to_secondary(upper + [x0, y0]), expected + [x0, y0], atol=1e-9)
+    # an affine map, which SMAP's projective one is not
+    np.testing.assert_allclose(cal.transformation[2], [0, 0, 1], atol=1e-12)
+
+
 def test_chip_transformation_reads_smaps_matrix_as_matlab_applies_it():
     """A row vector times SMAP's matrix, then the division: x' = (x T)[:2] / (x T)[2]."""
     t = np.array([[1.001, -0.036, 0.002], [-0.036, -1.0009, 0.0012], [0.0174, 0.5653, 1.0]])
@@ -105,7 +125,10 @@ def test_chip_transformation_reads_smaps_matrix_as_matlab_applies_it():
 @pytest.mark.parametrize("em", [False, True])
 def test_the_splines_are_each_channel_as_the_camera_saw_it(tmp_path, em):
     """Each SXY entry read as SMAPpy reads a single SMAP spline, un-mirrored where SMAP mirrored the
-    beads; the secondary kept as its channel is, mirrored against the main one."""
+    beads; the secondary, which SMAP keeps un-mirrored along the split (its ``mirror`` 2), flipped
+    back along y to the camera's orientation."""
+    from smappy.calibrate.dual import mirrored_spline
+
     cal_path, coeffs = _write(tmp_path, em)
     cal = load_smap_dual_calibration(cal_path)
     for k, model in enumerate((cal.main, cal.secondary)):
@@ -113,7 +136,10 @@ def test_the_splines_are_each_channel_as_the_camera_saw_it(tmp_path, em):
         scipy.io.savemat(single, {"SXY": {"cspline": {"coeff": coeffs[k], "dz": 20.0, "z0": 3.0, "x0": 5.0},
                                           "EMon": float(em)},
                                   "parameters": {"emmirror": 1.0 if em else 2.0}})
-        np.testing.assert_array_equal(model.coeff, load_spline_calibration(single).coeff)
+        expected = load_spline_calibration(single)
+        if k == 1:
+            expected = mirrored_spline(expected, axis=1)
+        np.testing.assert_allclose(model.coeff, expected.coeff, rtol=1e-6, atol=1e-7)
         assert model.dz == 20.0 and model.z0 == 3.0
     assert cal.parameters["smap"]["EMon"] == [em, em]
     assert cal.parameters["smap"]["normf"] == [1.0, 0.8]
