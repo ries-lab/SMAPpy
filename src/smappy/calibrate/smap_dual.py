@@ -92,7 +92,7 @@ def load_smap_dual_calibration(path, trafo=None):
     parameters = {
         "source": str(path), "trafo": str(trafo),
         "smappy_conversion": "SMAP global two-channel calibration read by calibrate.smap_dual",
-        "smap": {"Tmode": mode, "Tform": str(par_g.get("Tform", "")), "Tsplitpos": _to_scalar(par_g.get("Tsplitpos")),
+        "smap": {"Tmode": mode, "Tform": str(par_g.get("Tform", "")), "Tsplitpos": _scalar(par_g.get("Tsplitpos")),
                  "emmirror": _scalar(par_g.get("emmirror")), "EMon": [bool(e) for e in em],
                  "roi": [x0, y0, width, height], "pixelsize_um": _list(par_g.get("pixelsize")),
                  "normf": [_scalar(getattr(_as_struct(e.cspline), "normf", None)) for e in entries],
