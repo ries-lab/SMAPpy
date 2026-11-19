@@ -83,7 +83,10 @@ def install(app, path: Optional[Path] = None) -> Optional[Path]:
         watch(name)
 
     def focused(window) -> None:
-        title = window.title() if window is not None else "(none: another application)"
+        # the widget's class beside the title (Qt names a widget's window
+        # `<Class>ClassWindow`): an untitled window is otherwise anonymous
+        title = (f"{window.title()} ({window.objectName().removesuffix('ClassWindow')})"
+                 if window is not None else "(none: another application)")
         note(f"{'FOCUS':<15} {title[:60]}  <- {_where() or 'Qt / the window system'}")
     app.focusWindowChanged.connect(focused)
     return path
