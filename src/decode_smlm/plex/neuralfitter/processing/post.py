@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod  # abstract class
 from typing import Optional, Union
 
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 import decode_smlm.plex.neuralfitter.scaling.base
 from ...emitter import emitter

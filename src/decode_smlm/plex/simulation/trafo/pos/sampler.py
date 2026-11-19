@@ -2,7 +2,7 @@ from abc import abstractmethod
 from typing import Protocol, Optional, Union, Sequence, List, Callable
 
 import torch
-from structlog import get_logger
+from decode_smlm.plex.generic.logging import get_logger
 
 from . import trafo
 from ....utils import future

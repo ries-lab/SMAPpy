@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Union, Optional, Iterable
 
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 from ..emitter import process as process_em
 from ..emitter.emitter import EmitterSet

@@ -1,4 +1,4 @@
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 from pathlib import Path
 from typing import Union, Optional
 

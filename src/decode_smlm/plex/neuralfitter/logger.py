@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import torch
 from pytorch_lightning import loggers
 from pytorch_lightning.utilities import rank_zero_only
-from structlog import get_logger
+from decode_smlm.plex.generic.logging import get_logger
 
 try:
     import wandb

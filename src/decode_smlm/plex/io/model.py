@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Union
 
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 from . import param
 from ..generic.logging import get_logger

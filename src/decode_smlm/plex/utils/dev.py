@@ -1,7 +1,7 @@
 import functools
 from typing import Optional
 
-from structlog import get_logger
+from decode_smlm.plex.generic.logging import get_logger
 
 logger = get_logger()
 

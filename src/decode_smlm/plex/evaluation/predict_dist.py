@@ -3,7 +3,7 @@ import warnings
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 from . import utils
 

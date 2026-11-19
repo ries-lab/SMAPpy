@@ -4,7 +4,7 @@ from typing import Any, IO, Union, Literal
 
 import hydra
 import pydantic
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 from omegaconf import OmegaConf
 
 

@@ -1,4 +1,4 @@
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 
 @deprecated(version="0.11", reason="Deprecated in favor of `Microscope`")

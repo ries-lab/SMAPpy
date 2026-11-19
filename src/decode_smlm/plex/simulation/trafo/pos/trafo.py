@@ -4,7 +4,7 @@ from typing import Optional, Union, Callable, Tuple, Sequence, Literal
 
 import numpy as np
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 from scipy.spatial.transform import Rotation as SciRot
 
 from ....generic import mixin

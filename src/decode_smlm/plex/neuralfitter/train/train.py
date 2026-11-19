@@ -8,7 +8,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 import hydra
 import omegaconf
 import pytorch_lightning as pl
-import structlog
+from decode_smlm.plex.generic.logging import get_logger
 import torch
 
 import decode_smlm.plex
@@ -17,7 +17,7 @@ from decode_smlm.plex.neuralfitter.data import datamodel
 from decode_smlm.plex.neuralfitter.train import setup_cfg, auto_lr
 from decode_smlm.plex.utils import param_auto, system, hardware
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 def log(cfg_raw, cfg_filled):

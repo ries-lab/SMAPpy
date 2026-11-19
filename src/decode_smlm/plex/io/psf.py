@@ -7,9 +7,9 @@ try:
 except ImportError:
     pass
 import scipy.io
-import structlog
+from decode_smlm.plex.generic.logging import get_logger
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 import h5py
 from omegaconf import OmegaConf, DictConfig
 from dotted_dict import DottedDict
@@ -20,7 +20,7 @@ from ..simulation import psf_kernel
 from ..utils import types
 from ..utils import spline
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 @deploy.raise_optional_deps(

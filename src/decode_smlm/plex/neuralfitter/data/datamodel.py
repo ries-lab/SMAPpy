@@ -3,14 +3,14 @@ from pathlib import Path
 from typing import Any
 
 import pytorch_lightning as pl
-import structlog
+from decode_smlm.plex.generic.logging import get_logger
 import torch.utils.data
 from torch.utils import data
 
 from . import dataset
 from . import experiment
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class DataModel(pl.LightningDataModule):

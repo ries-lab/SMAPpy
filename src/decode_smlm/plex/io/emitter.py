@@ -8,7 +8,7 @@ import h5py
 import numpy as np
 import pandas as pd
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 from decode_smlm.plex.utils import bookkeeping
 from ..emitter.emitter import EmitterSet

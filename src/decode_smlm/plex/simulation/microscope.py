@@ -1,8 +1,8 @@
 from typing import Any, Optional, Iterable, Callable, Union, Sequence, Protocol
 
 import torch
-from deprecated import deprecated
-from structlog import get_logger
+from decode_smlm.plex.generic.deprecation import deprecated
+from decode_smlm.plex.generic.logging import get_logger
 
 from . import noise as noise_lib
 from . import psf_kernel

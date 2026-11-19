@@ -2,7 +2,7 @@ import copy
 from typing import TypeVar, Optional, Union, Sequence, Iterable
 
 import torch
-from structlog import get_logger
+from decode_smlm.plex.generic.logging import get_logger
 
 from . import process
 from .data import dataset

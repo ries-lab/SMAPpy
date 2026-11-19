@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 
 @deprecated(version="0.11", reason="use coordinate based solution instead")

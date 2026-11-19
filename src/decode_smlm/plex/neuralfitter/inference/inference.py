@@ -5,7 +5,7 @@ from typing import Any, Callable, Optional, Union
 from typing import Literal
 
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 from tqdm import tqdm
 
 from . import debug

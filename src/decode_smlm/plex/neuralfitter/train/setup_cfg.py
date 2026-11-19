@@ -5,9 +5,9 @@ from typing import Optional, Sequence, Any, Union, Literal
 
 import pydantic
 import pytorch_lightning as pl
-import structlog
+from decode_smlm.plex.generic.logging import get_logger
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 from pytorch_lightning import loggers
 from torch import nn
 
@@ -27,7 +27,7 @@ from decode_smlm.plex import validation as val
 from decode_smlm.plex.io.psf import load_h5
 from pathlib import Path
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 # common derived parameters
 

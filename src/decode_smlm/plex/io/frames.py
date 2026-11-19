@@ -7,7 +7,7 @@ from typing import Callable, Union, Optional, Any
 
 import tifffile
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 from ..generic import slicing, tensor
 from ..utils import dev

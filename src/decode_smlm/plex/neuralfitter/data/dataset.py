@@ -1,7 +1,7 @@
 from typing import Any, Optional, Sequence, Union
 
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 from decode_smlm.plex.emitter import emitter
 from decode_smlm.plex.generic import delay, protocols, indexing

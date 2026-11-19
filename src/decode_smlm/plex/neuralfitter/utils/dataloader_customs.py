@@ -1,5 +1,5 @@
 import torch.utils.data
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 from ... import emitter
 

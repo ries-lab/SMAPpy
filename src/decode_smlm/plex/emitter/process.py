@@ -4,7 +4,7 @@ from typing import Any, Optional, Union, Literal
 import numpy as np
 import scipy.spatial
 import torch
-from deprecated import deprecated
+from decode_smlm.plex.generic.deprecation import deprecated
 
 from .emitter import EmitterSet
 from ..generic.processing import FilterXYZ
