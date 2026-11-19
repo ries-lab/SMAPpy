@@ -68,6 +68,18 @@ class SiteWindow(QMainWindow):
         if labels == self._labels:
             return
         keep = self.tabs.currentIndex()
+        # quietly: each tab removed and added changes the current one, which
+        # says "shown" -- and the manager, measuring for it, asks for these
+        # steps again before `_labels` holds them: a step added to the
+        # pipeline with this window open recursed until Python's stack ran
+        # out, the window frozen meanwhile (2026-11)
+        self.tabs.blockSignals(True)
+        try:
+            self._rebuild_tabs(labels, keep)
+        finally:
+            self.tabs.blockSignals(False)
+
+    def _rebuild_tabs(self, labels: list, keep: int) -> None:
         while self.tabs.count():
             self.tabs.removeTab(0)
         for label in list(self.figures):

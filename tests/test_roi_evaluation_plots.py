@@ -428,3 +428,29 @@ def test_the_figures_show_without_taking_the_keyboard_and_step_with_every_arrow(
         if shortcut.key().toString() == "Down":
             shortcut.activated.emit()
     assert project.navigation.get("roi") == ids[1]
+
+
+def test_a_step_added_with_the_figures_open_draws_without_recursing(app, monkeypatch):
+    # the tabs rebuilt for the new step each said "shown", and the manager,
+    # measuring for it, rebuilt them again before they were stored: a
+    # RecursionError and a frozen window when Find steps was added (2026-11)
+    import sys
+    pipeline = [steps(Drawing)]
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: pipeline[0])
+    window, project = a_window(app)
+    window.set_plotting(True)
+    ids = list(project.rois)
+    window.select(ids[0])
+    site = window._site
+    shown = []
+    site.shown.connect(shown.append)
+    pipeline[0] = two_steps()
+    limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(400)              # a loop fails at once, not after 1000 levels
+    try:
+        window.select(ids[1])
+    finally:
+        sys.setrecursionlimit(limit)
+    assert [site.tabs.tabText(i) for i in range(site.tabs.count())] == ["Drawing", "Failing"]
+    assert not shown                        # the rebuild said nothing
+    assert "ROI 2" in site.windowTitle()
