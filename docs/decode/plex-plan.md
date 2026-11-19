@@ -2,8 +2,8 @@
 
 Status, 2026-11-19: planned and agreed with Jonas; the port's inference done -- the paper's three
 published models tested (Fig. 1e, 2c, 2a) give the original's localizations here (§9).  The reader of SMAP's two-channel calibrations and the C = 2 sets
-followed the same day (§10).  Next: the baselines' runs on the sets (DECODE-Plex, Spline 3D 2C), then
-the study (§7).  It details
+followed the same day (§10), and the baselines' first runs on them (§11).  Next: the two open
+findings of §11, then the study (§7).  It details
 `docs/decode.md` §10, step 5 (C = 2, biplane and colour), as `poc-plan.md` detailed §9 for C = 1.
 Written after reading `ries-lab/DECODE-Plex` at 6138472 (2026-10-20) and its data release
 (Zenodo 10.5281/zenodo.20088009, record 21348704).
@@ -329,3 +329,55 @@ things the benchmark's scoring has to know:
   probability about 0.6; 2447 against 1783 molecules on the trial) inside that area.  Not yet
   understood: it may be the training's sampled ROI positions never covering that part of the chip,
   or something the real movie has and the simulation lacks.
+
+## 11. The baselines on the C = 2 sets, first round (2026-11-19)
+
+`benchmarks/decode/suite/run_c2.py` (`plex`, `spline`, `table`): DECODE-Plex's published model of each
+context through its notebook's steps, on MPS (raw threshold 0.1, kept at prob >= 0.5), and SMAPpy's
+Spline 3D 2C with the converted calibration written ROI-local (photons linked for biplane, free for
+colour; kept within 3 MADs of the median log-likelihood and below the iteration limit), both scored
+by `report.score_truth` where both channels see the sample, the network reads, and a 13-pixel fit box
+stays inside both halves (7 pixels from their edges: 76 % of the molecules nearer an edge are not fitted
+by Spline 3D 2C).  Frames read: DECODE-Plex 1 (biplane) and 3 (colour), Spline 3D 2C 1.  The reports
+are `reports/{plex,spline}_c2.json`.
+
+| set | fitter | frames | Jaccard | RMSE lat / ax (nm) | \|z\| < 300: lat / ax | its error / CRLB, \|z\| < 300 (robust) |
+|---|---|---|---|---|---|---|
+| biplane density 1 | DECODE-Plex | 1 | 0.50 | 48 / 61 | 24 / 55 | 2.8 / 2.0 |
+| | Spline 3D 2C | 1 | 0.64 | 22 / 29 | 9 / 20 | 1.07 / 1.09 |
+| biplane density 15 | DECODE-Plex | 1 | 0.69 | 56 / 80 | 29 / 73 | 3.2 / 2.7 |
+| | Spline 3D 2C | 1 | 0.41 | 74 / 89 | 47 / 72 | 6.1 / 3.2 |
+| biplane density 50 | DECODE-Plex | 1 | 0.65 | 67 / 107 | 36 / 96 | 4.7 / 5.4 |
+| | Spline 3D 2C | 1 | 0.02 | 70 / 130 | 66 / 114 | 21 / 13 |
+| biplane 10 000 photons | DECODE-Plex | 1 | 0.43 | 51 / 49 | 21 / 27 | 2.5 / 1.8 |
+| | Spline 3D 2C | 1 | 0.79 | 26 / 31 | 6 / 12 | 1.09 / 1.04 |
+| colour density 1 | DECODE-Plex | 3 | 0.27 | 47 / 43 | 24 / 34 | 1.9 / 1.9 |
+| | Spline 3D 2C | 1 | 0.69 | 18 / 23 | 11 / 18 | 1.14 / 1.07 |
+| colour density 15 | DECODE-Plex | 3 | 0.69 | 58 / 66 | 37 / 56 | 2.8 / 2.9 |
+| | Spline 3D 2C | 1 | 0.30 | 84 / 130 | 78 / 131 | 9.0 / 9.8 |
+| colour density 50 | DECODE-Plex | 3 | 0.70 | 78 / 104 | 59 / 97 | 5.6 / 6.3 |
+| | Spline 3D 2C | 1 | 0.01 | 102 / 167 | -- | -- |
+| colour 3000 photons | DECODE-Plex | 3 | 0.98 | 44 / 48 | 22 / 37 | 1.2 / 1.2 |
+| | Spline 3D 2C | 1 | 0.76 | 35 / 45 | 25 / 39 | 1.04 / 1.10 |
+| colour 10 000 photons | DECODE-Plex | 3 | 0.84 | 42 / 33 | 17 / 24 | 1.4 / 1.3 |
+| | Spline 3D 2C | 1 | 0.72 | 20 / 22 | 12 / 18 | 1.09 / 1.08 |
+
+All 16 sets are in the reports (`run_c2.py table`).  Speed on the Mac: DECODE-Plex 100 -- 320 ms a frame of
+512 x 512 or 512 x 226 (MPS), Spline 3D 2C 3 -- 90 ms (CPU).
+
+**What it says, with two findings open:**
+- **Near the focus Spline 3D 2C is at the bound** (1.04 -- 1.14 of the CRLB) while the molecules are
+  isolated, and collapses with density (Jaccard 0.41 / 0.30 at 15, 0.02 / 0.01 at 50), as Spline 3D does
+  for one channel.  DECODE-Plex holds its detection at density (Jaccard 0.65 -- 0.73 from 15 to 50) but
+  never reaches the bound: 1.2 -- 2.9 times it near the focus at low density, 5 -- 6 at density 50.
+- **Spline 3D 2C fits about 15 % of the molecules twice** (density 1, both contexts), most of them far
+  from focus, where the two channels' spots differ enough that the detection does not pair them, and
+  misses about 7 % of those well inside both halves even at 10 000 photons.  Its Jaccard is understated
+  by both: a property of its detection on these PSFs, worth fixing in SMAPpy, not a limit of the fit.
+- **DECODE-Plex's false positives grow with the background, inside its training range**: on
+  `colour_2a_density_1`, 7 a frame where channel 0's background is 0 -- 25 photons a pixel, 174 where it
+  is 75 -- 100 (its training drew 0 -- 100); precision 0.26 there against 0.99 at the photon sweep's low
+  background.  Not understood: a difference between these frames and its training's (the camera's noise,
+  the background's form) is as likely as the model's own behaviour, and the Jaccards of the density sweep
+  depend on it, so they are not yet the baseline's.  The biplane model's band of false localizations
+  (§10) is part of the same question.
