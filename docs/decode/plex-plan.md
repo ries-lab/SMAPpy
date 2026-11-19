@@ -537,7 +537,7 @@ So on DECODE-Plex's own CRLB conditions (§12) Spline 3D 2C now detects as well 
 against 0.89 -- 0.95) at the same precision; what is left of its gap at density 1 is overlap, and at
 density 15 and above it is unchanged -- the single-emitter fit's limit, not a detection fault.
 
-## 14. DECODE-Plex's false localizations on the sets are the sets' (2026-11-19)
+## 15. DECODE-Plex's false localizations on the sets (2026-11-19 -- 20)
 
 On `colour_2a_density_1` DECODE-Plex's Fig. 2a model made 0.05 false localizations per 1000 px^2 in the
 fifth of frames with the least background in channel 0 and 3.5 in the fifth with the most (precision
@@ -580,8 +580,53 @@ little).  Most likely the step between the two channels' backgrounds at the seco
 inside the network's field: a property of DECODE-Plex at a split, on real movies too, and so scored as
 it is -- netfit meets the same edge.  To compare the two away from it, a wider margin there.
 
-**Biplane is another matter, open.**  The Fig. 2c model reads one frame, yet on `biplane_2c_density_1`
-its precision is 0.59 (0.2 -- 0.8 false per 1000 px^2, against 0.03 -- 0.06 on its own sparse frames).
-Those false localizations lie in a band across the frame at y = 70 -- 100 px and at the smallest x,
-about 20 per cell of 64 x 26 px elsewhere: something of how the sets' biplane frames are cut or
-registered, not their background.
+**Biplane: DECODE-Plex's inference pads channel 1 with zeros (2026-11-20).**  The Fig. 2c model reads
+one frame, yet on `biplane_2c_density_1` its precision was 0.54 at probability 0.5 (DECODE-Plex's own
+sparse frames: 0.91).  Ruled out, in turn:
+
+- *The PSF.*  The sets drew spots in smappy's box of the spline grid less 3 pixels (23 of 26), which
+  cut 4 -- 8 % of the light at +-1000 nm; DECODE-Plex draws the whole grid.  The sets now draw the
+  whole grid (`sets_c2.draw_spline_whole`): totals within 0.4 % of DECODE-Plex's at every z, shapes
+  within 0.3 -- 1 % near focus and 1 -- 3 % at +-1000 nm.  The scores did not move.
+- *The registration.*  Channel 1's place in the sets agrees with DECODE-Plex's offset maps within
+  0.02 px over the chip; the maps `infer` builds (`trafo_aux_factory`) are its training sampler's, times
+  the configuration's aux scale of 20, which the inference pre-processing divides out.
+- *Whole-chip frames.*  DECODE-Plex's own sampler drawing 256 x 512 frames at the chip's corner
+  (`plex_own_frames.py ... 80 256x512`, 300 frames, 0.6 molecules per 1000 px^2): precision 0.905,
+  recall 0.806 at 0.5, as on its 40 x 40 crops, false localizations even over the chip.
+
+What remained were two bands, rows y = 67 -- 93 px and columns x = 17 -- 78 px, holding 10,600 of the
+13,000 false localizations, with no light under them in channel 0 (the 5 x 5 pixels' excess -580 ADU
+against +71,000 for a molecule) and next to none in channel 1, reported bright (21,000 photons) and far
+from focus (|z| 760 nm).  The tensor `infer` hands the network says why: **channel 1's first 47 rows and
+last 13 columns are exactly zero photons.**  `dual_splitter_factory` moves channel 1 by the
+transformation's global offset (`FrameShiftCropPad`, x 47, y -13 for this calibration) before the crop
+and pads what comes from beyond the chip with zeros; its comment hopes the padding is cropped away, which
+on a whole chip it cannot be.  Training never shows a channel without background, and the network
+answers the step with molecules 5 -- 65 px inside it.  A property of DECODE-Plex's inference, so of its
+use on real whole-chip movies of this camera too; `colour_2a` is not touched (its model's offset moves
+nothing beyond the chip).
+
+The fill decides the scores (`scratchpad` test, monkey-patching `FrameShiftCropPad`), DECODE-Plex Jaccard
+on the biplane density sets 1 / 5 / 15 / 25 / 50, and z RMSE at |z| < 300 nm on density 1:
+
+| fill of channel 1's shifted-in pixels | Jaccard | z RMSE, density 1 |
+| --- | --- | --- |
+| zeros (as published) | 0.512 / 0.752 / 0.882 / 0.765 / 0.731 | 59.1 nm |
+| the edge row or column copied | 0.883 / 0.910 / 0.884 / 0.836 / 0.676 | 22.4 nm |
+| each frame's median | 0.811 / 0.914 / 0.891 / 0.851 / 0.696 | 24.9 nm |
+| a random pixel of the frame's channel 1 | 0.778 / 0.867 / 0.801 / 0.758 / 0.621 | 30.0 nm |
+
+With the edge copied, density 1 gives precision 0.901 and recall 0.963 at 0.5: DECODE-Plex on its own
+frames.  No fill is right at density 50, where copying an edge copies molecules.  Open: which the
+baseline uses -- as published, scored away from the bands; a fill; or the sets' biplane frames widened
+by the offset so that channel 1 has real pixels to shift in.
+
+**C = 1 is not sensitive to the background's regime.**  netfit's GMN7C_s0 (trained on a background
+drawn per frame) on B7 drawn again with a steady one (`SimulationSettings.background_jitter` 0.02: one
+level a movie, 2 % from frame to frame; same molecules' statistics): Jaccard 0.568 on both, and on
+sparse twins (2 per 40 x 40 px, 8192 samples) precision 0.961 / 0.961, recall 0.786 / 0.787.  So
+DECODE-Plex's colour false localizations (above) are its training's steady window meeting jumps, not a
+general weakness of multi-frame networks.  Whether training on a steady background gains anything is
+the pilot running on gpuvm (`sbg_queue.sh`: GMN7C with `background_jitter` 0.02, three seeds, 6 M
+samples, each scored on B7, B7_l3 and B7_d2, each with the background jumping and steady).

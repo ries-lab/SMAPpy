@@ -1,6 +1,6 @@
 """A published DECODE-Plex model on frames drawn by its own training simulator (plex-plan §14).
 
-    PYTHONPATH=~/decode_plex/DECODE-Plex python plex_own_frames.py DATA RUN N_FRAMES OUT.npz [EMITTER_AVG]
+    PYTHONPATH=~/decode_plex/DECODE-Plex python plex_own_frames.py DATA RUN N_FRAMES OUT.npz [EMITTER_AVG [ROWSxCOLS]]
 
 Runs in DECODE-Plex's environment (the compiled ``spline`` draws the frames) and imports nothing of
 SMAPpy, so the frames, the network and the post-processing are all the original's, exactly as its
@@ -12,6 +12,9 @@ the difference lies in how the sets are drawn.
 Writes per frame each channel's background and the localizations (prob, xyz in px of channel 0's
 40 x 40 frame) and the truth (filtered as the training's target is: ``setup_em_filter``).
 EMITTER_AVG replaces the training's molecules a frame (40), to compare at the benchmark's density.
+ROWSxCOLS draws frames of that size at the chip's corner instead of the training's 40 x 40 crops at
+random places on it -- the frames the benchmark gives the model (plex-plan §15: does the biplane
+model find molecules that are not there on whole-chip frames of its own?).
 """
 import pathlib
 import sys
@@ -38,6 +41,14 @@ for key in ("calibration", "trafo"):
 cfg["Simulation"]["samples"] = n
 if len(sys.argv) > 5:
     cfg["Simulation"]["emitter_avg"] = float(sys.argv[5])
+if len(sys.argv) > 6:
+    size = [int(v) for v in sys.argv[6].split("x")]
+    sim = cfg["Simulation"]
+    sim["img_size"] = size
+    for key in ("emitter_extent", "frame_extent", "psf_extent"):
+        sim[key]["x"], sim[key]["y"] = [-0.5, size[0] - 0.5], [-0.5, size[1] - 0.5]
+    sim["Transformation"]["Pos"]["sampled"]["offset"]["x"] = None     # the chip's corner, as the
+    sim["Transformation"]["Pos"]["sampled"]["offset"]["y"] = None     # benchmark's frames are read
 torch.manual_seed(20261119)
 torch.set_num_threads(8)
 

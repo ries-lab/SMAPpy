@@ -217,9 +217,42 @@ def slow_background(lo, hi, n_frames, rng, every=BACKGROUND_KNOTS):
     return np.interp(np.arange(n_frames), every * np.arange(len(knots)), knots)
 
 
+def draw_spline_whole(image, frame, xy_px, z_nm, photons, cal) -> None:
+    """Add each spot into ``image`` (n, y, x) over the spline's whole grid, as DECODE-Plex's
+    ``CubicSplinePSF`` draws it (its native ROI, the grid's size), where smappy's `_draw_spline` and
+    netfit's renderer keep a square 3 cells smaller: far from focus that square cut 4 -- 8 % of the light
+    and narrowed the spot by 5 % (z = +-1000 nm, Fig. 1c's spline), so the sets were not the spots
+    DECODE-Plex is trained on (it changed no score: plex-plan §15).  The same pixel-to-spline map as theirs -- spline coordinate u = pixel - x + n / 2
+    -- with a pixel outside the grid drawn as nothing, not as the edge cell's polynomial extended."""
+    from smappy.io.calibration import compute_delta3d
+    if len(frame) == 0:
+        return
+    height, width = image.shape[1:]
+    _, nz, ny, nx = cal.coeff.shape
+    size_x, size_y = nx, ny                          # the grid's size, around the spot's nearest pixel:
+    zi = cal.z_nm_to_index(np.asarray(z_nm, float))  # DECODE-Plex's totals to 0.4 % at every z
+    for k in range(len(frame)):
+        cx, cy = xy_px[k]
+        ox, oy = int(np.rint(cx)) - nx // 2, int(np.rint(cy)) - ny // 2
+        u0, v0 = ox - cx + nx / 2, oy - cy + ny / 2     # spline coordinates of the square's first pixel
+        iu = np.floor(u0).astype(int) + np.arange(size_x)
+        iv = np.floor(v0).astype(int) + np.arange(size_y)
+        iz = int(np.clip(np.floor(zi[k]), 0, nz - 1))
+        delta = compute_delta3d(u0 - np.floor(u0), v0 - np.floor(v0), zi[k] - np.floor(zi[k])).astype(np.float32)
+        okx, oky = (iu >= 0) & (iu < nx), (iv >= 0) & (iv < ny)
+        spot = np.zeros((size_y, size_x), np.float32)
+        block = cal.coeff[:, iz][:, iv[oky][:, None], iu[okx][None, :]]
+        spot[np.ix_(oky, okx)] = np.tensordot(delta, block, axes=(0, 0))
+        x0, y0 = max(ox, 0), max(oy, 0)
+        x1, y1 = min(ox + size_x, width), min(oy + size_y, height)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        image[frame[k], y0:y1, x0:x1] += photons[k] * np.clip(spot[y0 - oy:y1 - oy, x0 - ox:x1 - ox], 0, None)
+
+
 def simulate(spec, cal):
     """Frames (uint16, as the camera records them) and truth of one set."""
-    from smappy.simulate.camera import _camera, _draw_spline
+    from smappy.simulate.camera import _camera
     ctx = CONTEXTS[spec["context"]]
     colour = ctx["kind"] == "colour"
     rng = np.random.default_rng(spec["seed"])
@@ -287,7 +320,7 @@ def simulate(spec, cal):
         x0, y0, w, h = region
         half = np.empty((n_frames, h, w))
         half[:] = bg[:, c, None, None]
-        _draw_spline(half, frame, pos - [x0, y0], z, phot[:, c], splines[c])
+        draw_spline_whole(half, frame, pos - [x0, y0], z, phot[:, c], splines[c])
         image[:, y0:y0 + h, x0:x0 + w] = half
     c = camera_of(spec["context"])
     frames = np.empty(image.shape, np.uint16)
