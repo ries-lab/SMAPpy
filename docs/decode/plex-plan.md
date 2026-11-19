@@ -1,12 +1,9 @@
 # DECODE-Plex in SMAPpy: the port, and step 5's plan
 
 Status, 2026-11-19: planned and agreed with Jonas; the port's inference done -- the paper's three
-published models tested (Fig. 1e, 2c, 2a) give the original's localizations here (§9).  The reader of SMAP's two-channel calibrations and the C = 2 sets
-followed the same day (§10), and the baselines' first runs on them (§11).  Next: the two open
-findings of §11, then the study (§7).  It details
-`docs/decode.md` §10, step 5 (C = 2, biplane and colour), as `poc-plan.md` detailed §9 for C = 1.
-Written after reading `ries-lab/DECODE-Plex` at 6138472 (2026-10-20) and its data release
-(Zenodo 10.5281/zenodo.20088009, record 21348704).
+published models tested (Fig. 1e, 2c, 2a) give the original's localizations here (§9); SMAP's
+two-channel calibrations read (§10); the C = 2 baseline on 22 sets, which reproduces the paper's CRLB
+demonstration (§12; §11 is the first round, superseded).  Next: the study (§7).
 
 Decided (Jonas, 2026-11-19):
 - **The licence.**  DECODE-Plex is his group's code: GPL-3, as it is published, is fine.  It goes
@@ -330,7 +327,7 @@ things the benchmark's scoring has to know:
   understood: it may be the training's sampled ROI positions never covering that part of the chip,
   or something the real movie has and the simulation lacks.
 
-## 11. The baselines on the C = 2 sets, first round (2026-11-19)
+## 11. The baselines on the C = 2 sets, first round (2026-11-19; superseded by §12)
 
 `benchmarks/decode/suite/run_c2.py` (`plex`, `spline`, `table`): DECODE-Plex's published model of each
 context through its notebook's steps, on MPS (raw threshold 0.1, kept at prob >= 0.5), and SMAPpy's
@@ -381,3 +378,69 @@ All 16 sets are in the reports (`run_c2.py table`).  Speed on the Mac: DECODE-Pl
   the background's form) is as likely as the model's own behaviour, and the Jaccards of the density sweep
   depend on it, so they are not yet the baseline's.  The biplane model's band of false localizations
   (§10) is part of the same question.
+
+## 12. The baseline reflects DECODE-Plex's CRLB demonstration (2026-11-19)
+
+Jonas pointed out that DECODE-Plex was shown to reach the two-channel CRLB on single emitters (the
+paper's Fig. S4, `notebook/crlb.ipynb`), which §11's numbers did not show.  The demonstration uses its
+own two models (*FigS4-biplane-crlb*, *FigS4-dual_color-crlb*), trained with a perfect camera on single
+frames, photons 2000 -- 8000, background 0 -- 40; the colour one with channel 0's spline in both
+channels (`channels_out [0, 0]`).  Reproducing it found three differences between §11's sets and the
+world DECODE-Plex's models were trained in, each settled on DECODE-Plex's own code:
+
+1. **DECODE-Plex reads SMAP's projective registration as affine** (`XYZTransformationMatrix`: the row
+   vector times `trafo_inv_raw`, the third element dropped).  On Fig. 1c's 512-pixel chip that differs
+   from SMAP's own by up to 0.29 px, in training as in inference.  The decisive test: the S4 biplane
+   model on isolated molecules at 5000 photons, channel 1 placed by SMAP's map against DECODE-Plex's --
+   RMSE / CRLB 3.1 -- 6.9 (x, y) with biases up to 29 nm, against **1.02 -- 1.27 with no bias**.  So the
+   sets now place channel 1 as DECODE-Plex reads the registration (`smap_dual`, `reading="decode-plex"`).
+   On real data the projective map is the microscope's: what the affine reading costs DECODE-Plex there,
+   where the two differ, is a finding for netfit, which takes the registration with its division.
+2. **SMAP keeps the mirrored channel's spline un-mirrored along the split** (`cspline.mirror` 2).
+   DECODE-Plex's own splines, rendered on decodebox for each run's settings (`plex_psf.py`) and compared
+   with SMAPpy's under every flip, show it: the two models of real movies (Figs. 2a, 2c), whose settings
+   flip channel 1 along the split, see the camera only if the converter flips it back -- which it now
+   does (`smap_dual`; this also fixes Spline 3D 2C on real data read through it).  The S4 models were
+   trained differently -- biplane with channel 1 not flipped, colour with channel 0's spline mirrored --
+   and their sets are drawn so (`sets_c2.CONTEXTS[...]["channel_1"]`).  The splines agree with
+   DECODE-Plex's to 1 % near focus and 3 -- 8 % in shape at z = -600 nm, where SMAPpy's renderer cuts the
+   spot to the spline's size less 3 pixels (DECODE-Plex draws it whole); position, z and brightness agree.
+3. **The S4 colour model was trained on a 256 x 256 sensor** (its run's `sensor_size`): it misses 94 --
+   100 % of the molecules beyond it.  The scoring keeps to the sensor each model was trained on
+   (`run_c2.trained_sensor`); the other models' is 512 x 512.
+
+**The baseline** (`run_c2.py table`, all 22 sets; Spline 3D 2C fitted with the same splines and map):
+
+| set | fitter | frames | Jaccard | \|z\| < 300 nm: RMSE lat / ax (nm) | RMSE / CRLB lat / ax |
+|---|---|---|---|---|---|
+| biplane S4, 2000 photons | DECODE-Plex | 1 | 0.95 | 8.1 / 17.4 | 1.08 / 1.10 |
+| | Spline 3D 2C | 1 | 0.96 | 7.6 / 16.1 | 1.06 / 1.13 |
+| biplane S4, 5000 photons | DECODE-Plex | 1 | 0.95 | 4.7 / 9.6 | 1.12 / 1.13 |
+| | Spline 3D 2C | 1 | 0.94 | 4.3 / 8.9 | 1.09 / 1.14 |
+| biplane S4, 8000 photons | DECODE-Plex | 1 | 0.93 | 3.9 / 8.1 | 1.23 / 1.26 |
+| | Spline 3D 2C | 1 | 0.89 | 3.3 / 6.7 | 1.13 / 1.15 |
+| colour S4, 2000 photons | DECODE-Plex | 1 | 0.93 | 14.7 / 24.2 | 1.04 / 1.02 |
+| | Spline 3D 2C | 1 | 0.80 | 14.5 / 24.0 | 1.14 / 1.27 |
+| colour S4, 5000 photons | DECODE-Plex | 1 | 0.93 | 7.7 / 12.0 | 1.05 / 1.02 |
+| | Spline 3D 2C | 1 | 0.77 | 7.5 / 11.9 | 1.06 / 1.18 |
+| colour S4, 8000 photons | DECODE-Plex | 1 | 0.89 | 6.0 / 10.5 | 1.08 / 1.27 |
+| | Spline 3D 2C | 1 | 0.78 | 5.5 / 8.5 | 1.07 / 1.19 |
+| biplane Fig. 2c, density 1 | DECODE-Plex | 1 | 0.56 | 15.3 / 50.6 | 1.61 / 2.34 |
+| | Spline 3D 2C | 1 | 0.65 | 8.3 / 18.5 | 1.48 / 1.53 |
+| biplane Fig. 2c, density 25 | DECODE-Plex | 1 | 0.81 | 22.3 / 62.7 | 2.95 / 3.74 |
+| | Spline 3D 2C | 1 | 0.27 | 56.4 / 87.3 | 11.6 / 10.8 |
+| colour Fig. 2a, 10 000 photons | DECODE-Plex | 3 | 0.92 | 11.5 / 18.8 | 1.37 / 1.37 |
+| | Spline 3D 2C | 1 | 0.72 | 12.1 / 18.6 | 1.46 / 1.32 |
+| colour Fig. 2a, density 25 | DECODE-Plex | 3 | 0.82 | 33.3 / 57.1 | 3.75 / 4.07 |
+| | Spline 3D 2C | 1 | 0.09 | 91.2 / 150.3 | 17.5 / 19.1 |
+
+RMSE / CRLB is over all z; near the focus (its robust width, `crlb width ... |z| < 300` in the table) the
+S4 models are at 1.02 -- 1.22 and Fig. 2's at 1.17 -- 1.5 at low density.
+
+**What it says.**  On the conditions it was demonstrated on, DECODE-Plex reaches the two-channel CRLB,
+as the paper shows, and so does Spline 3D 2C on isolated molecules; DECODE-Plex holds its detection and
+much of its precision at density (Jaccard 0.78 -- 0.82 at 15 -- 25, Spline 3D 2C 0.09 -- 0.41).  Its
+real-data models (EM camera, Fig. 2) are 1.2 -- 1.5 times the bound near focus at low density.
+**Still open:** Spline 3D 2C's duplicates far from focus (its Jaccard of 0.77 -- 0.80 on isolated
+molecules, §11), the Fig. 2 models' false positives at high background (§11), and the biplane band of
+§10 -- each to look at again on these sets before the study.

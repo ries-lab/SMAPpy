@@ -13,8 +13,8 @@ or CUDA where there is one; the device is recorded.
 frames that carry no camera ROI (the same map, the beads' corner taken off); photons linked for
 biplane (one count, each plane's share in its spline), free for colour (a count per channel).
 
-**The scoring** is `report.score_truth`, where both channels see the sample and the published
-network reads -- the same area for the truth and every fitter's localizations: a molecule's partner
+**The scoring** is `report.score_truth`, where both channels see the sample, the published
+network reads and its model was trained (`trained_sensor`) -- the same area for the truth and every fitter's localizations: a molecule's partner
 inside the secondary half (7 pixels in, where Spline 3D 2C's 13-pixel box fits; 76 % of the
 molecules nearer a half's edge are not fitted), inside the main half's crop a network reads (DECODE-Plex
 cuts the frame to a multiple of 8, from its own corner, after its EM mirror).  ``keep``: the
@@ -161,17 +161,29 @@ def fit_spline(name, out):
 FITTERS = {"plex": fit_plex, "spline": fit_spline}
 
 
+def trained_sensor(context):
+    """The camera the context's model was trained on (``Camera[0].specs.sensor_size``, rows and columns
+    in DECODE-Plex's frame): its training placed the frame anywhere on it, and nowhere else -- the
+    Fig. S4 colour model's is 256 x 256, and it misses 94 -- 100 % of the molecules beyond it."""
+    import yaml
+    run = yaml.safe_load((S.CONTEXTS[context]["model"] / "param_run.yaml").read_text())
+    return tuple(int(v) for v in run["Camera"][0]["specs"]["sensor_size"])
+
+
 def both_channels(context, shape, flip_x: bool):
-    """A mask maker on main-channel frame pixels: inside the area both channels see and a network reads."""
+    """A mask maker on main-channel frame pixels: inside the area both channels see, a network reads
+    and its model was trained on (`trained_sensor`, in DECODE-Plex's frame: x mirrored for EM)."""
     cal = S.calibration(context)
     _, regions, to_sec, _ = S._layout(cal)
     crop = crop_of(shape)
     w = shape[1]
+    rows, cols = trained_sensor(context)
 
     def mask(x, y):
-        ok = S._inside(to_sec(np.c_[x, y]), regions[1], margin=EDGE) & (y > EDGE) & (y < crop[0] - EDGE)
+        ok = S._inside(to_sec(np.c_[x, y]), regions[1], margin=EDGE) & (y > EDGE) & (y < min(crop[0], rows) - EDGE)
         lo, hi = (w - crop[1], w) if flip_x else (0, crop[1])
-        return ok & (x > lo + EDGE) & (x < hi - 1 - EDGE)
+        xd = (w - 1 - x) if flip_x else x                 # the column in DECODE-Plex's frame
+        return ok & (x > lo + EDGE) & (x < hi - 1 - EDGE) & (xd < cols - EDGE)
     return mask
 
 
