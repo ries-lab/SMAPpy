@@ -2289,3 +2289,105 @@ scratchpad, published as an artifact).
 So the time model is GMN7C, trained once over on-times 1-3, and fine-tuned for 1-2 M samples at lr
 1e-4 to the on-time the prefit measures.  Open: real data (G7N against GMN7C on pixelation), the
 on-time from the prefit, densities above the training's, the fitting speed.
+
+### The time models on real data: the example (2026-11-18)
+
+G7N and GMN7C (3 seeds each) against the 1-frame base (`A_eosr`, 3 seeds), the base at 3 frames
+(`T3_eosr`) and v1f at 3 frames (`nt_t3_pk`, 2 seeds), on the example movie's first 5000 frames, fitted
+on the Mac through the benchmark (`run.py`, runs `nf_<job>`; scored by `real_time_models.py`, as
+`report.score_real`: p >= 0.5, >= 1000 photons, |z| <= 700 nm).  The predictor keeps the mixture's sigma
+beside the reporting head's (`x_err_mix_pix`, `z_err_mix_nm`).  KS is the larger of x and y; the pair
+check the robust width of each pair's difference over the root of its two claims, at the frames apart
+where the two fits share no frame (7 for a 7-frame model), and at 7 for all as a like-for-like check --
+on real data it grows with the lag, the sample moving between frames.  Mean over seeds:
+
+| model | kept a frame | KS | KS by \|z\| 0-150 / 150-300 / 300-450 / 450-600 / 600-700 | pairs x / z, own lag | at lag 7 | mixture's sigma, own lag |
+|---|---:|---:|---|---|---|---|
+| G7N | 248 | 0.007 (0.006 - 0.009) | 0.007 / 0.010 / 0.026 / 0.028 / 0.056 | 1.14 / 1.00 (7) | 1.14 / 1.00 | 1.33 / 1.23 |
+| GMN7C | 252 | 0.009 (0.007 - 0.013) | 0.008 / 0.013 / 0.053 / 0.038 / 0.059 | 1.10 / 0.98 (7) | 1.10 / 0.98 | 1.28 / 1.19 |
+| base, 1 frame | 227 | 0.005 (0.004 - 0.006) | 0.004 / 0.009 / 0.023 / 0.026 / 0.053 | 0.95 / 0.87 (1) | 1.14 / 1.07 | 1.10 / 1.07 |
+| base, 3 frames | 240 | 0.006 | 0.007 / 0.008 / 0.019 / 0.047 / 0.036 | 1.12 / 0.96 (3) | 1.25 / 1.11 | 1.31 / 1.15 |
+| v1f, 3 frames | 246 | 0.016 | 0.008 / 0.019 / 0.068 / 0.087 / 0.079 | 1.39 / 1.23 (3) | 1.51 / 1.41 | -- |
+| port `decode_B`, 1 frame | 220 | 0.010 | 0.013 / 0.016 / 0.061 / 0.039 / 0.065 | 1.13 / 1.18 (1) | 1.39 / 1.47 | -- |
+| Spline 3D | 120 | 0.002 | 0.002 / 0.008 / 0.008 / 0.005 / 0.017 | 1.91 / 1.75 (1) | 2.75 / 2.67 | -- |
+
+By photons (1000 - 2000 / 2000 - 4000 / 4000 - 8000 / 8000 - 16 000; above 16 000 too few in some
+fits): G7N 0.008 / 0.011 / 0.006 / 0.014, GMN7C 0.019 / 0.011 / 0.007 / 0.009, the 1-frame base
+0.010 / 0.007 / 0.006 / 0.008.  The pair check by the claim in x (0-5 / 5-10 / 10-15 / 15-20 / 20-30 /
+30-50 nm), the head's against the mixture's:
+
+| | reported | mixture's |
+|---|---|---|
+| G7N | 1.53 / 1.51 / 1.31 / 1.16 / 1.00 / 0.84 | 1.75 / 1.69 / 1.42 / 1.26 / 1.13 / 0.95 |
+| GMN7C | 1.45 / 1.43 / 1.25 / 1.11 / 0.99 / 0.85 | 1.74 / 1.64 / 1.35 / 1.22 / 1.10 / 0.93 |
+
+In z the head's ratio is 0.91 - 1.08 in every bin (the mixture's 1.14 - 1.25).  Median claims: x 11.6
+/ 12.0 nm reported against 10.1 / 10.5 by the mixture, z 34 / 35 against 28 / 30.
+
+- **Both pixelate little on the example**, below the port and v1f, above Spline 3D: 0.007 and 0.009
+  overall, within each other's seeds.  Where they differ is where simulation said: GMN7C pixelates
+  twice as much at |z| 300 - 450 nm (0.048 - 0.062 against G7N's 0.019 - 0.032, every seed) and at
+  1000 - 2000 photons (0.019 against 0.008) -- the mixed on-times' cost on brief blinks.  Both stay
+  below the target of 0.053 except GMN7C at 300 - 450 nm and both at 600 - 700 nm, as the 1-frame base.
+- **The time models find 10 % more** than the 1-frame base (250 against 227 a frame) and 14 % more
+  than the port.
+- **The reporting head is honest** at the frames apart where the fits are independent: x 1.10 - 1.14,
+  z 0.98 - 1.00, as the 1-frame base at the same lag (1.14 / 1.07) and far better than v1f without it
+  (1.51 / 1.41).  The mixture's sigma is 15 - 20 % too small (1.28 - 1.33).  The smallest claims are
+  still too small (x 1.45 - 1.53 below 10 nm) -- part of that is the sample's movement over 7 frames,
+  which no claim includes and which matters most where the claim is smallest.
+
+So on real data the choice is the one simulation gave: GMN7C detects as many, claims as honestly, and
+pixelates more only out of focus and on dim spots; fine-tuning to the measured on-time took that back
+on simulation (step 4's time-model section), not yet tried on real data.  fig4e: needs its own trainings
+(its beads and camera), not run yet.
+
+### Does streaming pixelate? Paired fine-tunes (2026-11-19)
+
+The 2 x 2 on B7 (pixel_mod G7N 0.022, GN7C 0.028, GMN7 0.034, GMN7C 0.047) could not separate
+streaming from seed noise: a bootstrap over test frames gives 0.003 per fit, the seeds 0.012, and the
+setups look bimodal over seeds -- 60 seeds an arm to see 0.006.  So each of the 15 trained models (5
+setups x 3 seeds) went on for 2 M samples at lr 1e-4 from its `model_6M`, twice on the same data seed,
+streamed (`movie_windows` 8, PS) and not (1, PU), on its own on-times; three repeats on another data
+seed give the noise of one fine-tune (pixel_mod within 0.001 - 0.004).
+
+- **Streaming costs a little pixelation, consistently**: PS - PU in pixel_mod +0.0015 +- 0.0006 on B7
+  and +0.0010 +- 0.0004 on B7_l3 (mean +- sem over the 15 pairs); per setup on B7 G7N +0.0005, GN7C
+  +0.0011, GLN7C +0.0002, GMN7 +0.0039 (every seed), GMN7C +0.0017.  Recall falls with it, 0.001 -
+  0.005, most on the mixed on-times (GMN7 -0.005, GMN7C -0.004).  RMSE does not move (within 0.1 nm).
+  That is a fifth of the 0.006 the from-scratch table showed: most of that was seeds.  A fine-tune from
+  a converged model measures the local effect only; a streaming training from scratch may land
+  elsewhere, which only many seeds would show.
+- **The seed decides, the fine-tune does not reshuffle**: across the 15, a model's value before and
+  after correlates at r 0.96 - 1.00 for pixel_mod, lateral and z RMSE (on the 79,193 / 129,639 bright
+  molecules all 48 models found), 0.75 / 0.98 for recall (B7 / B7_l3) and 0.85 / 0.99 for pairs.
+  The weaker gain a little more (r(before, gain) -0.3 to -0.6), but the ranges hardly narrow: pixel_mod
+  0.012 - 0.062 before, 0.010 - 0.060 after on B7.  Recall is the exception at on-time 1, where the
+  mixed-on-time seeds catch up (GMN7C 0.597 - 0.607 -> 0.611 - 0.626, GN7C_s1 0.613 -> 0.631).
+
+So the mixture, not streaming, is what pixelates; streaming stays (1.7 x faster) at a cost of about
+0.001 - 0.002.  And a good seed stays good through a fine-tune on the same task: worth choosing the
+base model by its pixel_mod.  Open: whether a seed keeps its properties through a strong change (another
+PSF, brightness or on-time), and whether a well-chosen base beats training from scratch there on RMSE,
+Jaccard and pixelation.
+
+**How early a good seed shows** (the training logs' pixel_mod, 90 runs in 30 setups of 3 seeds, 6 M
+schedules; streamed on the H100 0.1 M samples a minute, so 6 M is 60 min, 95 % of the final Jaccard
+after 8 - 9).  The seed with the lowest pixel_mod at an early point, against the best at 6 M:
+
+| decided at | min | r with 6 M (within setups) | the best at 6 M | its 6 M pixel_mod below the setup mean |
+|---|---|---|---|---|
+| 0.15 M | 1.5 | -0.17 | 6 / 28 | -0.002 |
+| 0.25 M | 2.5 | +0.09 | 10 / 29 | +0.001 |
+| 0.5 M | 5 | +0.46 | 12 / 29 | +0.002 |
+| 1 M | 10 | +0.56 | 16 / 29 | +0.004 |
+| 1.5 M | 15 | +0.68 | 21 / 29 | +0.006 |
+| 3 M | 30 | +0.84 | 23 / 30 | +0.006 |
+| 4 M | 40 | +0.90 | 25 / 30 | +0.007 |
+
+Chance is 1 in 3; knowing the best gains 0.0076 (the seeds' sd at 6 M is 0.008).  Nothing shows in the
+first minutes; from 1.5 M (15 min) a pick takes three quarters of the gain, four times what streaming
+costs.  Since a fine-tune keeps its seed's pixelation, the shipped base can be chosen once from many
+seeds, and users only fine-tune.  Pixelation falls with the learning rate's decay rather than with the
+samples (GMN7CL_s0, a 12 M schedule, 0.035 at 6 M; GMN7C_s0's 6 M schedule ends at 0.020), so a short
+schedule with its own decay (1.5 - 3 M) may pixelate nearly as little in a quarter of the time: open.
