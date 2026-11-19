@@ -481,8 +481,13 @@ paper's movies, against DECODE-Plex's localizations of the same frames (the orig
   best of every variant tried, Spline 3D 2C puts the molecules where DECODE-Plex does, offset by
   +16 / +7 / -53 nm (x / y / z; every other variant moves z by 120 -- 1500 nm).  What is not alike is
   the precision: spread by 73 / 71 / 201 nm (1.48 MAD), where DECODE-Plex's own uncertainties are
-  27 / 28 / 74 nm, and 39 % of Spline 3D 2C's fits have no partner within 150 nm -- the poor fits of a
-  model that takes the background flat in its box, under the live cell's.  The paper's own fit of the
+  27 / 28 / 74 nm, and 39 % of Spline 3D 2C's fits have no partner within 150 nm.  **The cause is the
+  density, not a background:** DECODE-Plex finds 1260 molecules a frame (1.3 per um^2, nearest
+  neighbour 340 nm at the median, 42 % of them at probability 0.6 -- 0.9), Spline 3D 2C 35; each of its
+  fits has 6 -- 13 of DECODE-Plex's within 800 nm, and the 700 -- 2000 photons a pixel it fits as
+  background are those neighbours' light (DECODE-Plex's own background there is 10 -- 95).  So Spline 3D
+  2C is no baseline on this movie: Fig. 2c is DECODE-Plex against netfit only, and a fitter's
+  conventions are tested on sparse data (S4's sets, Fig. 2a).  The paper's own fit of the
   movie (`results.zip`, all 10 000 frames) is the run of §9: on the first 200 frames 99.9 % of its
   localizations lie within 0.05 px of ours, differing by 0.002 px and 1.7 nm (99th percentile), as
   much as the original's own run on the 4090 does (TF32).
