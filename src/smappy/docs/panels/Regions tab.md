@@ -315,8 +315,12 @@ it is not open): what the steps draw for the selected ROI, a tab per
 enabled step, redrawn in place by the next ROI.  A step that keeps the data
 its figure is drawn from with its result -- Localization Statistics,
 Binding kinetics -- draws it from what is stored, without measuring again;
-any other step whose tab is open runs again for its figure.  Closing that
-window unticks it.
+any other step whose tab is open runs again for its figure.  Ticking it
+brings the window to the front with the keyboard, so ↑ and ↓ step through
+the ROIs from there (← and → through the tiles), as they do in the ROI
+manager; redrawn as the ROIs are stepped, from either window, it never takes
+the keyboard from the one the keys are pressed in.  Closing that window
+unticks it.
 
 ### region filter
 Keeps the localizations of the [regions](plugin:Panels/Glossary) whose

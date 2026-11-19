@@ -299,7 +299,7 @@ def test_up_and_down_step_through_the_rois_from_the_figures(app):
     window.select(first.id)
     site = window.site_window()
     keys = [s for s in site.findChildren(QShortcut)]
-    assert len(keys) == 2
+    assert len(keys) == 4                       # up and down the ROIs, left and right the tiles
     down = next(s for s in keys if s.key().toString() == "Down")
     down.activated.emit()
     assert window.active != first.id

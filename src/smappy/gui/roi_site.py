@@ -40,6 +40,11 @@ class SiteWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlag(Qt.Window, True)
+        # redrawn as the ROIs are stepped through, from the ROI manager or
+        # from here: showing it must not take the keyboard from whichever
+        # window the arrows are pressed in (`ROIManagerWindow.set_plotting`
+        # brings it forward when it is asked for)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setWindowTitle("ROI results")
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)

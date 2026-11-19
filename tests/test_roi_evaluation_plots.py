@@ -407,3 +407,24 @@ def test_an_roi_shown_in_the_2d_view_becomes_its_roi_along_its_line_on_its_own_f
     assert session.slab.angle == pytest.approx(0.0)
     assert all(layer.files == [1] for layer in session.layers if not layer.is_image)
     header.manager.close()
+
+
+def test_the_figures_show_without_taking_the_keyboard_and_step_with_every_arrow(app, monkeypatch):
+    """Stepping the ROIs from the figures, or from the manager, redraws them
+    in place: their window shows without activating, so the arrows stay with
+    the window they are pressed in; and all four arrows work from it."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QShortcut
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
+    window, project = a_window(app)
+    window.set_plotting(True)
+    site = window._site
+    assert site.testAttribute(Qt.WA_ShowWithoutActivating)
+    keys = {s.key().toString() for s in site.findChildren(QShortcut)}
+    assert {"Up", "Down", "Left", "Right"} <= keys
+    ids = list(project.rois)
+    window.select(ids[0])
+    for shortcut in site.findChildren(QShortcut):
+        if shortcut.key().toString() == "Down":
+            shortcut.activated.emit()
+    assert project.navigation.get("roi") == ids[1]

@@ -2483,10 +2483,18 @@ class ROIManagerWindow(QMainWindow):
             self.evaluate_active()
         self.changed.emit()
 
-    def set_plotting(self, on: bool) -> None:
+    def set_plotting(self, on: bool, bring_forward: bool = True) -> None:
+        """Draw the selected ROI's figures, or stop.  Asked for -- the Regions
+        tab's *draw its figures* -- the figures come to the front and take the
+        keyboard, so the arrows step the ROIs from there; never again while
+        stepping (`SiteWindow` shows without activating)."""
         self.project.navigation["plot_evaluation"] = bool(on)
         if on:
-            self.site_window().show()
+            site = self.site_window()
+            site.show()
+            if bring_forward:
+                site.raise_()
+                site.activateWindow()
             self.evaluate_active()
         elif self._site is not None:
             self._site.hide()
@@ -2510,6 +2518,11 @@ class ROIManagerWindow(QMainWindow):
                 walk = QShortcut(QKeySequence(key), self._site)
                 walk.setContext(Qt.WindowShortcut)
                 walk.activated.connect(lambda step=step: self.step_roi(step))
+            # and Left and Right through the tiles, as in the manager
+            for key, step in ((Qt.Key_Right, 1), (Qt.Key_Left, -1)):
+                walk = QShortcut(QKeySequence(key), self._site)
+                walk.setContext(Qt.WindowShortcut)
+                walk.activated.connect(lambda step=step: self._step_tile(step))
         return self._site
 
     def evaluate_active(self, label: Optional[str] = None, now: bool = False) -> None:
