@@ -1,6 +1,8 @@
 # DECODE-Plex in SMAPpy: the port, and step 5's plan
 
-Status, 2026-11-19: planned, agreed with Jonas the same day; the port started.  It details
+Status, 2026-11-19: planned and agreed with Jonas; the port's inference done -- the paper's three
+published models tested (Fig. 1e, 2c, 2a) give the original's localizations here (§9).  Next: the
+reader of SMAP's two-channel calibrations, then the C = 2 sets (§6).  It details
 `docs/decode.md` §10, step 5 (C = 2, biplane and colour), as `poc-plan.md` detailed §9 for C = 1.
 Written after reading `ries-lab/DECODE-Plex` at 6138472 (2026-10-20) and its data release
 (Zenodo 10.5281/zenodo.20088009, record 21348704).
@@ -177,9 +179,15 @@ in the cache; the paper's localizations beside them.
 
 **The reference fitter** is Spline 3D 2C, with the same calibration and registration.
 
-**To check before drawing:** that SMAPpy reads these SMAP two-channel calibrations and `_trafo.mat`
-as one dual calibration (`load_dual_color_calibration`), mirror included; if not, the reader is
-added first, and is tested against DECODE-Plex's offset maps (§5, item 2).
+**First, a reader** (checked 2026-11-19: SMAPpy reads none).  The paper's calibrations are SMAP's
+global two-channel files: `SXY(2)`, a spline per channel (Fig. 1c: 26 x 26 x 198, 20 nm steps,
+`z0` 100, `x0` 14, the chip split at row 245, `EMon` 1), with `normf`, `mirror` and `global`, beside
+`parameters1/2/_g` and `SXY_g`; the `_trafo.mat` holds `trafo_raw` and `trafo_inv_raw`, each an
+affine `ref` / `tar` pair in micrometres, the mirror inside it.  SMAPpy's dual calibration
+(`calibrate.dual.load_dual_color_calibration`) is its own HDF5, so a converter comes first -- the two
+splines in SMAPpy's orientation, the map as a projective `transformation` in its pixel convention,
+the geometry -- tested against DECODE-Plex's offset maps of the same registration, which the model
+oracles record as the network's input (§9).
 
 ## 7. After the port: the study, then netfit's C = 2
 
@@ -212,3 +220,53 @@ drawn over the chip), and the maps as the mechanism for chip coordinates in step
   movie: about 1.5 GB) and under `~/decode_plex/` on decodebox (the movies whole).
 - `~/datalocal/decode_plex ` -- its name ends in a space -- holds DECODE-Plex's localizations of our
   own two-colour movies (2025-09), not the paper's.
+
+## 9. As done (2026-11-19)
+
+**The port** (`src/decode_smlm/plex/`), in commits of one kind each, as `decode_smlm` was: the tree
+verbatim (ed938712); `decode.` renamed; the package's `__init__` and every subpackage's made lazy
+(`plex/_lazy.py`); structlog and Deprecated replaced by the standard library; pydantic 1 by
+`generic/validated.py` (fields with coercion, `validator`, `root_validator`, `construct`,
+`validate_model`, `validate_arguments`, `StrictInt`); Lightning, Hydra, omegaconf, dotted_dict and
+the compiled spline imported where used, and a run's YAML read under OmegaConf's two loader rules;
+the checkpoint read without Lightning (`io/model.load_state_dict`, `weights_only`, the one
+`pathlib.PosixPath` read as `PurePosixPath`); ruff's safe fixes, then the rest by hand.  Reading a
+model and inferring imports torch, numpy, scipy, h5py and yaml only (a test checks).  No API break
+of torch 2.14 or numpy 2.5 showed on the inference path.
+
+**The oracles** (`scripts/decode/reference_plex.py`), from DECODE-Plex at 6138472 in
+`~/miniforge3/envs/decode_plex` on decodebox -- a clone of `decode_dev` plus `dotted-dict`: torch
+2.1.2, Lightning 1.8.6, pydantic 1.10.17, omegaconf 2.3, spline 0.11.2.dev0 (the versions are
+recorded in each oracle's JSON).  The architecture fixture (0.7 MB, in git) is bitwise equal over
+two runs.  The movies' first 300 frames come from range requests into the archives
+(`reference_plex.py head`), so 250 MB of each is fetched, not 2.8 and 3.3 GB.
+
+**The published models, 200 frames each, the port on MPS against the original on the CPU:**
+
+| run | channels, window | localizations | found by both | max x, y (px) | max z (nm) | photons (rel.) |
+|---|---|---|---|---|---|---|
+| Fig. 1e, challenge biplane, no registration | 2 planes, 3 | 2 913 | 2 913 | 3.8e-6 | 0.0004 | 1.7e-6 |
+| Fig. 2c, live-cell biplane, registration and mirror | 2 planes, 1 | 339 169 | 339 168 | 3.1e-5 | 0.034 | 4.1e-5 |
+| Fig. 2a, two colours, registration | 2 colours, 3 | 146 466 | 146 465 | 2.1e-5 | 0.043 | 4.0e-5 |
+
+The network's input is equal to 3e-6 (the offset maps, float32 on both sides) and its output to
+1.2e-4.  The one localization each run leaves unpaired is a spot the post-processing put on a
+neighbouring pixel (probabilities 0.27 -- 0.39), not one near the threshold.  The port on the CPU
+matches as closely (Fig. 1e: x, y within 3.8e-6 px, z within 0.002 nm); MPS is ten times faster
+(Fig. 1e: 4.4 s against 46 s for 200 frames).
+
+**The original's own GPU is the looser reference.**  Its 4090 run differs from its CPU run by up to
+0.09 in the raw output and by 20 of 339 149 localizations (Fig. 2c; Fig. 2a 7 of 146 466, Fig. 1e
+1 of 2 913): torch uses TF32 for convolutions on Ampere and later by default.  The port on MPS
+reproduces the CPU's counts exactly, so the CPU is the reference, and a comparison of fits made on
+NVIDIA GPUs should allow for this.
+
+**Tests** (`tests/decode_tests/plex/`): the wiring and the post-processing against the fixture, the
+imports, the YAML loader, the pydantic replacement (fast); the three models on the CPU and on a GPU
+(slow, from the cache, skipped without it).  The live-cell model finds 1 700 localizations a frame
+at the notebook's threshold (0.1): most are at low probability, which the benchmark's filter, not
+the port, has to deal with.
+
+**Not done yet:** training (§4); uiPSF's `.h5` calibrations (Fig. 2b), which need omegaconf and
+dotted_dict at the call; the multi-GPU path (`DataParallel`), untested; the de-biasing
+(`de_bias.py`), not on the notebooks' path.
