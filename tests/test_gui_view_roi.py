@@ -102,10 +102,24 @@ def test_the_status_line_shows_the_roi_size_and_follows_a_drag(app):
 
 def test_every_region_says_its_size_in_nm_or_um():
     assert Region.line((0, 0), (300, 400), 50).size_text() == "length 500 nm, width 50 nm"
-    assert Region.rect(0, 0, 12_000, 800).size_text() == "12.00 x 0.80 µm"
+    assert Region.rect(0, 0, 12_000, 800).size_text() == "12.0 x 0.80 µm"
     assert Region.ellipse((0, 0), 100, 50, 30).size_text() == "200 x 100 nm"
     square = Region.polygon([(0, 0), (1000, 0), (1000, 1000), (0, 1000)])
-    assert square.size_text() == "area 1 µm²"
+    assert square.size_text() == "area 1.00 µm²"
+
+
+@pytest.mark.parametrize("length, shown", [
+    (523.7, "524 nm"), (17.4, "17 nm"), (12.34, "12.3 nm"), (5.34, "5.3 nm"),
+    (1.2, "1.20 nm"), (0.534, "0.53 nm"), (12_345, "12.3 µm"), (123_456, "123 µm"),
+])
+def test_a_length_has_the_fewest_decimals_that_keep_it_within_3_percent(length, shown):
+    assert Region.line((0, 0), (length, 0), 50).size_text().startswith(f"length {shown},")
+
+
+def test_the_rounding_never_hides_more_than_3_percent():
+    from smappy.regions import readable
+    for v in np.geomspace(0.01, 1e6, 2001):
+        assert abs(float(readable(v)) - v) <= 0.03 * v
 
 
 def test_the_pixel_size_shows_the_zoom_and_typing_one_zooms_to_it(app):
@@ -117,7 +131,8 @@ def test_the_pixel_size_shows_the_zoom_and_typing_one_zooms_to_it(app):
     view.resize(400, 300)
     bar = RenderToolBar(view)
     view.reset()
-    assert bar.pixel.value() == pytest.approx(view.pixel_size(), abs=0.05)  # shown to 0.1 nm
+    assert bar.pixel.value() == pytest.approx(view.pixel_size(), rel=0.03)
+    assert float(bar.pixel.text().split()[0]) == bar.pixel.value()   # as written
 
     centre = view.view.viewRect().center()
     bar.pixel.setValue(4.0)
@@ -126,6 +141,10 @@ def test_the_pixel_size_shows_the_zoom_and_typing_one_zooms_to_it(app):
 
     view.view.scaleBy((2, 2))                  # a zoom moves the number
     assert bar.pixel.value() == pytest.approx(8.0, rel=0.02)
+
+    view.view.scaleBy((0.01, 0.01))            # far in: two digits, not 0.1 nm
+    assert "." in bar.pixel.text() and bar.pixel.value() < 1
+    assert bar.pixel.value() == pytest.approx(0.08, rel=0.05)
 
     bar.zoom_to_default()                      # its right-click menu
     assert view.pixel_size() == pytest.approx(DEFAULT_PIXEL, rel=0.01)

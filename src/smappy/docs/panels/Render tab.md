@@ -31,7 +31,8 @@ right-click on the ROI deletes it.  While
 the kind is a line, the field beside it is the line's width.  ⤢ (*Reset view*,
 Ctrl+0) shows everything; *3D* opens the [3D view](plugin:Panels/3D view);
 with two layers or more, the layout button chooses overlay or side by side; the field after it is
-what one screen pixel is -- the zoom, as a number.  Type a size to zoom to
+what one screen pixel is -- the zoom, as a number, with as many decimals as keep
+it within 3 % (524, 17, 12.3, 0.53 nm).  Type a size to zoom to
 it, or right-click it to go to 10 nm.  Right-click the picture to move that
 place to the middle (on the ROI, to delete it); double-click it to show everything.  At the right edge
 are the [assistant](plugin:Panels/Assistant)'s button and ⋯ (*more*): saving
@@ -41,7 +42,7 @@ many localizations each layer draws in the view -- counted again after every
 zoom -- or in the ROI when one is drawn, followed by the ROI's size: a line's
 length and width (a line ROI measures a distance, as in SMAP), a rectangle's
 or an ellipse's sides, a circle's diameter, a polygon's area, all following a
-drag as it happens.  Every control below the layer strip edits one layer,
+drag as it happens and written, as the pixel size is, within 3 %.  Every control below the layer strip edits one layer,
 the one selected in the strip.
 
 What a layer shows is also what the rest of the program works on.  A plugin

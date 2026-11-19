@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (QApplication, QDoubleSpinBox, QFileDialog, QGraph
 from ..layer_state import LayerSnapshot, render_panels, snapshot_layers
 from ..picture import (FrameSource, ViewFrame, bar_label, colour_bar_labels, colour_scales,
                        nice_below, nice_step)
-from ..regions import Region
+from ..regions import Region, readable
 from ..render import FieldOfView, axis_unit
 from ..session import Session
 from . import folders
@@ -1156,6 +1156,15 @@ def frame_canvas(graphics) -> None:
     graphics.setStyleSheet("QGraphicsView { border: 1px solid #808080; }")
 
 
+class PixelSizeBox(CompactSpinBox):
+    """The pixel size as the ROI sizes are written (`regions.readable`):
+    the decimals that keep it within 3 % -- the ones a zoom far in needs,
+    without 523.7 at an ordinary one."""
+
+    def textFromValue(self, value: float) -> str:
+        return readable(value).replace(".", self.locale().decimalPoint())
+
+
 class RenderToolBar(QToolBar):
     """What is done to the picture, in groups: draw an ROI, then look --
     everything, 3D, the layers' layout, the zoom -- then, at the right edge,
@@ -1262,7 +1271,7 @@ class RenderToolBar(QToolBar):
         # The size of a screen pixel, as SMAP shows it: the zoom, written as a
         # number, its unit after it.  Typing one zooms to it; its right-click
         # menu goes to DEFAULT_PIXEL, which was a button of its own
-        self.pixel = CompactSpinBox(minimum=0.1, maximum=1e6, decimals=1)
+        self.pixel = PixelSizeBox(minimum=0.01, maximum=1e6, decimals=4)
         self.pixel.setKeyboardTracking(False)
         self.pixel.setMaximumWidth(FIELD_WIDTH + 40)
         self.pixel.valueChanged.connect(view.set_pixel_size)
@@ -1430,7 +1439,8 @@ class RenderToolBar(QToolBar):
     def _show_pixel(self, *_) -> None:
         """The pixel size after a zoom, written without zooming again."""
         blocked = self.pixel.blockSignals(True)
-        self.pixel.setValue(self.view.pixel_size())
+        # the value as written, so leaving the field unedited zooms nowhere
+        self.pixel.setValue(float(readable(self.view.pixel_size())))
         self.pixel.blockSignals(blocked)
 
     def _set_kind(self, kind: str, name: str) -> None:

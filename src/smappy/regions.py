@@ -258,7 +258,7 @@ class Region:
             return _pair(x1 - x0, y1 - y0)
         x, y = self.points[:, 0], self.points[:, 1]
         area = 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
-        return f"area {area / 1e6:.3g} µm²"
+        return f"area {readable(area / 1e6)} µm²"
 
     def __str__(self) -> str:
         if self.kind == "ellipse":
@@ -268,17 +268,32 @@ class Region:
         return f"{self.kind} ROI {x1 - x0:.0f} x {y1 - y0:.0f}"
 
 
+# the most a written size may be off by its rounding: 12.3, not 12 (4 %)
+ROUNDING = 0.03
+
+
+def readable(value: float) -> str:
+    """A number to read off, with the fewest decimals that keep its rounding
+    under `ROUNDING`: 524, 17, 12.3, 5.3, 1.20, 0.53.  The ROI sizes and the
+    render window's pixel size are written so."""
+    v = abs(value)
+    if v == 0 or not np.isfinite(v):
+        return f"{value:.0f}"
+    # half the last digit, 0.5 * 10**-d, at most ROUNDING of the value
+    decimals = max(0, int(np.ceil(-np.log10(2 * ROUNDING * v) - 1e-9)))
+    return f"{value:.{decimals}f}"
+
+
 def _nm(value: float) -> str:
-    """A length to read off: nm below 10 µm, where a structure is measured,
-    µm above it."""
-    return f"{value / 1000:.2f} µm" if abs(value) >= 10_000 else f"{value:.0f} nm"
+    """A length: nm below 10 µm, where a structure is measured, µm above it."""
+    return f"{readable(value / 1000)} µm" if abs(value) >= 10_000 else f"{readable(value)} nm"
 
 
 def _pair(a: float, b: float) -> str:
-    """Two sides in one unit, the larger's."""
+    """Two sides in one unit, the larger's, each to its own precision."""
     if max(abs(a), abs(b)) >= 10_000:
-        return f"{a / 1000:.2f} x {b / 1000:.2f} µm"
-    return f"{a:.0f} x {b:.0f} nm"
+        return f"{readable(a / 1000)} x {readable(b / 1000)} µm"
+    return f"{readable(a)} x {readable(b)} nm"
 
 
 # the columns of an ROI's own frame (`SiteFrame`) that a measurement in an
