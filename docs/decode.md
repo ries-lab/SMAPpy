@@ -10,7 +10,7 @@ first (§9).  This page is the design to start from.  It is written from five so
 - the published DECODE, `TuragaLab/DECODE` (Speiser et al. 2021);
 - SMAPpy's and uipsf's own multi-channel and 4Pi code;
 - DECODE-Plex's localizations of our dual-colour data, in
-  `~/datalocal/decode_plex`.
+  `~/datalocal/decode_plex ` (the folder's name ends in a space).
 
 The point is one framework for single-channel, multi-channel and 4Pi DECODE
 inside SMAPpy, not a port of the DECODE package.  Where the existing code did
@@ -773,7 +773,8 @@ the baselines on the benchmark, not reproduce their outputs.
    sigma (weight 0.1) and variant 1's reporting head.  At 3 frames it detects as v1f does, with a third
    of its pixelation and the same RMSE on the molecules both find.
 5. **C = 2.**  Biplane and colour.  At least DECODE-Plex's numbers on the
-   benchmark.
+   benchmark.  The port of DECODE-Plex as its baseline, the sets and the study
+   before netfit's C = 2: [`decode/plex-plan.md`](decode/plex-plan.md) (2026-11-19).
 6. **C = 4 with phase.**  No working baseline: against Spline 4Pi and its
    CRLB on the same simulations, then on Nup96.  Hao's branch is read for
    parts and ideas only.
