@@ -1,8 +1,9 @@
 import hashlib
 import pathlib
-import requests
 import shutil
 from pathlib import Path
+
+import requests
 
 
 def check_file(path: (str, pathlib.Path), hash=None) -> bool:

@@ -1,4 +1,5 @@
 import torch
+
 from ..emitter.emitter import EmitterSet
 
 # Predefined transformations, e.g. for the SMLM challenge.

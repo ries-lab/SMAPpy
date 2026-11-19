@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Optional, Union
 
 import torch
 
@@ -28,7 +27,7 @@ class TensorMemoryMapped(ABC, Sequence):
         return self
 
     @abstractmethod
-    def size(self, dim: Optional[int]) -> Union[int, torch.Size]:
+    def size(self, dim: int | None) -> int | torch.Size:
         raise NotImplementedError
 
     @abstractmethod

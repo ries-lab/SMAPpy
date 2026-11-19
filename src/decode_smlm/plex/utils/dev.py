@@ -1,12 +1,11 @@
 import functools
-from typing import Optional
 
 from decode_smlm.plex.generic.logging import get_logger
 
 logger = get_logger()
 
 
-def experimental(tested: bool = False, level: Optional[str] = "info"):
+def experimental(tested: bool = False, level: str | None = "info"):
     """
     Decorator for experimental functions.
 

@@ -1,7 +1,8 @@
 import warnings
 from collections import namedtuple
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Union, Optional, Callable, Literal
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import scipy.stats
@@ -9,20 +10,22 @@ import seaborn as sns
 import torch
 import torchmetrics
 
+from ..emitter import EmitterSet, process
+from . import match_emittersets
 from .metric import (
-    precision,
-    recall,
-    jaccard,
-    efficiency,
-    f1,
+    Metric,
     bootstrap_counts_se,
     bootstrap_matching_se,
-    Metric,
+    efficiency,
+    f1,
+    jaccard,
+    mad,
+    mae,
+    precision,
+    recall,
+    rmse,
+    rmse_generic,
 )
-from .metric import rmse, mae, mad, rmse_generic
-from ..emitter import EmitterSet
-from ..emitter import process
-from . import match_emittersets
 
 
 @dataclass
@@ -34,10 +37,10 @@ class ClassifiedEmitters:
 
 @dataclass
 class Classification:
-    prec: Union[float, torch.Tensor]
-    rec: Union[float, torch.Tensor]
-    jac: Union[float, torch.Tensor]
-    f1: Union[float, torch.Tensor]
+    prec: float | torch.Tensor
+    rec: float | torch.Tensor
+    jac: float | torch.Tensor
+    f1: float | torch.Tensor
 
 
 class DetectionEvaluation:
@@ -158,7 +161,7 @@ class DistanceEvaluation:
         ],
     )
 
-    def __init__(self, num_codes: Optional[int] = None):
+    def __init__(self, num_codes: int | None = None):
         self._rmse_lat = None
         self._rmse_ax = None
         self._rmse_vol = None
@@ -591,22 +594,22 @@ class SMLMEvaluation:
 
     def __str__(self):
         str = "------------------------ Evaluation Set ------------------------\n"
-        str += "Precision {}\n".format(self.prec.to_str())
-        str += "Recall {}\n".format(self.rec.to_str())
-        str += "Jaccard {}\n".format(self.jac.to_str())
-        str += "F1Score {}\n".format(self.f1.to_str())
-        str += "RMSE lat. {}\n".format(self.rmse_lat.to_str())
-        str += "RMSE ax. {}\n".format(self.rmse_ax.to_str())
-        str += "RMSE vol. {}\n".format(self.rmse_vol.to_str())
-        str += "MAE lat. {}\n".format(self.mae_lat.to_str())
-        str += "MAE ax. {}\n".format(self.mae_ax.to_str())
-        str += "MAE vol. {}\n".format(self.mae_vol.to_str())
-        str += "MAD lat. {}\n".format(self.mad_lat.to_str())
-        str += "MAD ax. {}\n".format(self.mad_ax.to_str())
-        str += "MAD vol. {}\n".format(self.mad_vol.to_str())
-        str += "Efficiency lat. {}\n".format(self.effcy_lat.to_str())
-        str += "Efficiency ax. {}\n".format(self.effcy_ax.to_str())
-        str += "Efficiency vol. {}\n".format(self.effcy_vol.to_str())
+        str += f"Precision {self.prec.to_str()}\n"
+        str += f"Recall {self.rec.to_str()}\n"
+        str += f"Jaccard {self.jac.to_str()}\n"
+        str += f"F1Score {self.f1.to_str()}\n"
+        str += f"RMSE lat. {self.rmse_lat.to_str()}\n"
+        str += f"RMSE ax. {self.rmse_ax.to_str()}\n"
+        str += f"RMSE vol. {self.rmse_vol.to_str()}\n"
+        str += f"MAE lat. {self.mae_lat.to_str()}\n"
+        str += f"MAE ax. {self.mae_ax.to_str()}\n"
+        str += f"MAE vol. {self.mae_vol.to_str()}\n"
+        str += f"MAD lat. {self.mad_lat.to_str()}\n"
+        str += f"MAD ax. {self.mad_ax.to_str()}\n"
+        str += f"MAD vol. {self.mad_vol.to_str()}\n"
+        str += f"Efficiency lat. {self.effcy_lat.to_str()}\n"
+        str += f"Efficiency ax. {self.effcy_ax.to_str()}\n"
+        str += f"Efficiency vol. {self.effcy_vol.to_str()}\n"
         str += "-----------------------------------------------------------------"
         return str
 
@@ -709,7 +712,7 @@ class EvaluationSMLM:  #  ToDo: Better name
         self,
         matcher: match_emittersets.EmitterMatcher,
         eval_matched: DistanceEvaluation,
-        em_filter: Optional[process.EmitterProcess] = None,
+        em_filter: process.EmitterProcess | None = None,
     ):
         self._matcher = matcher
         self._em_filter = em_filter

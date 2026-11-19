@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Union
 
 import torch
 
@@ -28,13 +27,13 @@ class Camera(ABC):
 
     @abstractmethod
     def forward(
-        self, x: torch.Tensor, device: Union[str, torch.device] = None
+        self, x: torch.Tensor, device: str | torch.device = None
     ) -> torch.Tensor:
         raise NotImplementedError
 
     @abstractmethod
     def backward(
-        self, x: torch.Tensor, device: Union[str, torch.device] = None
+        self, x: torch.Tensor, device: str | torch.device = None
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -42,12 +41,12 @@ class Camera(ABC):
 class CameraNoOp(Camera):
     # a do nothing camera
     def forward(
-        self, x: torch.Tensor, device: Union[str, torch.device] = None
+        self, x: torch.Tensor, device: str | torch.device = None
     ) -> torch.Tensor:
         return x.to(device)
 
     def backward(
-        self, x: torch.Tensor, device: Union[str, torch.device] = None
+        self, x: torch.Tensor, device: str | torch.device = None
     ) -> torch.Tensor:
         return x.to(device)
 
@@ -58,13 +57,13 @@ class CameraEMCCD(Camera):
         *,
         qe: float,
         spur_noise: float,
-        em_gain: Union[float, None],
+        em_gain: float | None,
         e_per_adu: float,
         baseline: float,
         read_sigma: float,
         photon_units: bool,
         sensor_size: tuple[int, int] | None = None,
-        device: Union[str, torch.device] = "cpu",
+        device: str | torch.device = "cpu",
     ):
         """
         Simulates a physical EM-CCD camera device.
@@ -97,14 +96,14 @@ class CameraEMCCD(Camera):
 
     def __str__(self):
         return (
-            f"Photon to Camera Converter.\n"
+            "Photon to Camera Converter.\n"
             + f"Camera: QE {self.qe} | Spur noise {self.spur} | EM Gain {self._em_gain} | "
             + f"e_per_adu {self.e_per_adu} | Baseline {self.baseline} | Readnoise {self._read_sigma}\n"
             + f"Output in Photon units: {self.photon_units}"
         )
 
     def forward(
-        self, x: torch.Tensor, device: Union[str, torch.device] = None
+        self, x: torch.Tensor, device: str | torch.device = None
     ) -> torch.Tensor:
         """
         Forwards frame through camera
@@ -148,7 +147,7 @@ class CameraEMCCD(Camera):
         return camera
 
     def backward(
-        self, x: torch.Tensor, device: Union[str, torch.device] = None
+        self, x: torch.Tensor, device: str | torch.device = None
     ) -> torch.Tensor:
         """Calculates the expected number of photons from a noisy image."""
 
@@ -177,7 +176,7 @@ class CameraSCMOS(CameraEMCCD):
         read_sigma: float,
         photon_units: bool,
         sensor_size: tuple[int, int] | None = None,
-        device: Union[str, torch.device] = "cpu",
+        device: str | torch.device = "cpu",
     ):
         """
         Simulates a sCMOS camera device.
@@ -212,7 +211,7 @@ class CameraPerfect(CameraEMCCD):
     def __init__(
         self,
         sensor_size: tuple[int, int] | None,
-        device: Union[str, torch.device] = "cpu",
+        device: str | torch.device = "cpu",
     ):
         """
         Convenience wrapper for perfect camera, i.e. only shot noise.

@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Any, Union, Optional, Iterable
+from collections.abc import Iterable
+from typing import Any, Optional
 
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 
 from ..emitter import process as process_em
@@ -13,11 +15,9 @@ from ..simulation import psf_kernel
 class TargetGenerator(ABC):
     def __init__(
         self,
-        ix_low: Optional[int],
-        ix_high: Optional[int],
-        filter: Optional[
-            Union[process_em.EmitterProcess, Iterable[process_em.EmitterProcess]]
-        ],
+        ix_low: int | None,
+        ix_high: int | None,
+        filter: process_em.EmitterProcess | Iterable[process_em.EmitterProcess] | None,
         scaler: Optional,
     ):
         """
@@ -55,7 +55,7 @@ class TargetGenerator(ABC):
         return em.get_subset_frame(self._ix_low, self._ix_high, -self._ix_low)
 
     @abstractmethod
-    def forward(self, em: EmitterSet, aux: Optional[Any] = None) -> Any:
+    def forward(self, em: EmitterSet, aux: Any | None = None) -> Any:
         """
         Forward calculate target as by the emitters and auxiliary input
         (e.g. background).
@@ -72,8 +72,8 @@ class ParameterList:
     def __init__(
         self,
         n_max: int,
-        range_frame: Optional[tuple[Optional[int], Optional[int]]] = None,
-        range_code: Optional[tuple[Optional[int], Optional[int]]] = None,
+        range_frame: tuple[int | None, int | None] | None = None,
+        range_code: tuple[int | None, int | None] | None = None,
         xy_unit: str = "px",
     ):
         """
@@ -170,7 +170,7 @@ class ParameterList:
 
 
 class DisableAttributes:
-    def __init__(self, attr_ix: Union[None, int, tuple, list], val: Union[float] = 0.0):
+    def __init__(self, attr_ix: None | int | tuple | list, val: float = 0.0):
         """
         Allows to disable attribute prediction of parameter list target;
         e.g. when you don't want to predict z.
@@ -202,14 +202,12 @@ class TargetGaussianMixture(TargetGenerator):
     def __init__(
         self,
         n_max: int,
-        ix_low: Optional[int],
-        ix_high: Optional[int],
-        ignore_ix: Optional[bool] = False,
-        range_code: Optional[tuple[Optional[int], Optional[int]]] = None,
+        ix_low: int | None,
+        ix_high: int | None,
+        ignore_ix: bool | None = False,
+        range_code: tuple[int | None, int | None] | None = None,
         xy_unit: str = "px",
-        filter: Optional[
-            Union[process_em.EmitterProcess, Iterable[process_em.EmitterProcess]]
-        ] = None,
+        filter: process_em.EmitterProcess | Iterable[process_em.EmitterProcess] | None = None,
         scaler: Optional = None,
         switch: Optional = None,
         aux_lane: Optional = None,
@@ -243,7 +241,7 @@ class TargetGaussianMixture(TargetGenerator):
         self._bg_lane = aux_lane
 
     def forward(
-        self, em: EmitterSet, aux: Optional[torch.Tensor] = None
+        self, em: EmitterSet, aux: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.BoolTensor, torch.Tensor]:
         em = self._filter_emitters(em)
         tar_list, tar_mask = self._list_impl.forward(em)
@@ -511,7 +509,7 @@ class EmbeddingTarget(TargetGenerator):
     def forward(
         self,
         em: EmitterSet,
-        aux: Optional[torch.Tensor] = None,
+        aux: torch.Tensor | None = None,
     ) -> tuple[[torch.Tensor, torch.BoolTensor], torch.Tensor]:
         em = self._filter_emitters(em)
 

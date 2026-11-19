@@ -4,10 +4,9 @@ from typing import Literal
 import scipy.io
 import torch
 
+from decode_smlm.plex.io.psf import load_h5
 from decode_smlm.plex.simulation.trafo.pos import trafo
 from decode_smlm.plex.utils import dev
-
-from decode_smlm.plex.io.psf import load_h5
 
 
 def _coord_permute_smap(xyz: torch.Tensor) -> torch.Tensor:
@@ -116,13 +115,13 @@ def load_trafo_h5(
     data, p = load_h5(path)
     trafo_mat = torch.tensor(data.res.T)
     trafo_mat = trafo_mat.unsqueeze(0) if trafo_mat.dim()==2 else trafo_mat
-    trafo_mat = torch.cat([torch.eye(3).unsqueeze(0),trafo_mat]) # save the first channel 
-    
+    trafo_mat = torch.cat([torch.eye(3).unsqueeze(0),trafo_mat]) # save the first channel
+
     if shift is None and data.res.imgcenter is not None:
         shift = (-data.res.imgcenter[1], -data.res.imgcenter[0], 0) if switch_xy else  (-data.res.imgcenter[0], -data.res.imgcenter[1], 0)
 
     t = trafo.XYZTransformationMatrix(trafo_mat)
- 
+
     if scale is not None:
         scale_in = trafo.XYZScaleTransformation(scale, device=device)
         scale_out = trafo.XYZScaleTransformation(1 / scale, device=device)
@@ -134,7 +133,7 @@ def load_trafo_h5(
             device_arbitrary=True,
         )
         permute_out = permute_in
-    
+
     if scale is not None or switch_xy:
         t = [t]
         if switch_xy:
@@ -145,7 +144,7 @@ def load_trafo_h5(
             t.append(scale_out)
 
         t = trafo.XYZCompositTransformation(t)
-    
+
     if shift is not None:
         t = trafo.offset_trafo(t, offset=shift, rebound=True)
 
@@ -185,10 +184,10 @@ def load_xyz_trafo(
     # ToDo: Change: Load transformation from bead cal directly
 
     path = path if isinstance(path, Path) else Path(path)
-    
+
     match path.suffix:
         case ".mat":
-            return load_trafo_smap(path, 
+            return load_trafo_smap(path,
                                    shift=shift,
                                    scale=scale,
                                    switch_xy=switch_xy,

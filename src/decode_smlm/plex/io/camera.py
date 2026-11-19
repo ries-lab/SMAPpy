@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from decode_smlm.plex.generic import validated as pydantic
-
 from decode_smlm.plex.hardware import camera as cam
 
 

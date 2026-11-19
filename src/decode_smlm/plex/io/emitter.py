@@ -2,15 +2,15 @@ import copy
 import json
 import linecache
 import pathlib
-from typing import Union, Tuple, Optional
 
 import h5py
 import numpy as np
 import pandas as pd
 import torch
-from decode_smlm.plex.generic.deprecation import deprecated
 
+from decode_smlm.plex.generic.deprecation import deprecated
 from decode_smlm.plex.utils import bookkeeping
+
 from ..emitter.emitter import EmitterSet
 
 minimal_mapping = {k: k for k in ("x", "y", "z", "phot", "frame_ix")}
@@ -51,8 +51,8 @@ def get_decode_meta() -> dict:
     return {"version": bookkeeping.decode_state()}
 
 
-def save_h5(path: Union[str, pathlib.Path], data: dict, metadata: dict) -> None:
-    def create_volatile_dataset(group, name, tensor: Optional[torch.Tensor]):
+def save_h5(path: str | pathlib.Path, data: dict, metadata: dict) -> None:
+    def create_volatile_dataset(group, name, tensor: torch.Tensor | None):
         """Empty DS if all nan"""
         if tensor is None:
             group.create_dataset(name, data=h5py.Empty("f"))
@@ -76,7 +76,7 @@ def save_h5(path: Union[str, pathlib.Path], data: dict, metadata: dict) -> None:
             create_volatile_dataset(g, k, v)
 
 
-def load_h5(path) -> Tuple[dict, dict, dict]:
+def load_h5(path) -> tuple[dict, dict, dict]:
     """
     Loads a hdf5 file and returns data, metadata and decode meta.
 
@@ -106,7 +106,7 @@ def load_h5(path) -> Tuple[dict, dict, dict]:
     return data, meta_data, meta_decode
 
 
-def save_torch(path: Union[str, pathlib.Path], data: dict, metadata: dict):
+def save_torch(path: str | pathlib.Path, data: dict, metadata: dict):
     torch.save(
         {
             "data": data,
@@ -117,7 +117,7 @@ def save_torch(path: Union[str, pathlib.Path], data: dict, metadata: dict):
     )
 
 
-def load_torch(path) -> Tuple[dict, dict, dict]:
+def load_torch(path) -> tuple[dict, dict, dict]:
     """
     Loads a torch saved emitterset and returns data, metadata and decode meta.
 
@@ -213,10 +213,10 @@ def load_csv(
     path: str | pathlib.Path,
     mapping: None | dict = None,
     skiprows: int = 4,
-    line_em_meta: Optional[int] = 2,
-    line_decode_meta: Optional[int] = 1,
+    line_em_meta: int | None = 2,
+    line_decode_meta: int | None = 1,
     **pd_csv_args,
-) -> Tuple[dict, dict | None, dict | None]:
+) -> tuple[dict, dict | None, dict | None]:
     """
     Loads a CSV file which does provide a header.
 
@@ -309,7 +309,7 @@ def load_csv(
     return data_dict, em_meta, decode_meta
 
 
-def load_challenge(path: str | pathlib.Path) -> Tuple[dict, None, None]:
+def load_challenge(path: str | pathlib.Path) -> tuple[dict, None, None]:
     """
     Load challenge data from a csv file.
 
@@ -337,7 +337,7 @@ def load_smap(
     mapping: (dict, None) = None,
     shift_frame_ix: int = -1,
     return_raw: bool = False,
-) -> Tuple[dict, dict, dict]:
+) -> tuple[dict, dict, dict]:
     """
 
     Args:

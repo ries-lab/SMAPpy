@@ -1,12 +1,11 @@
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 
-from .. import frame_processing as fp
-from ...generic import lazy
-from ...generic import protocols
+from ...generic import lazy, protocols
 from ...simulation import camera as cam
 from ...simulation.trafo import pos
+from .. import frame_processing as fp
 
 
 class MultiChannelSplitter:

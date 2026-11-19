@@ -1,7 +1,7 @@
 from typing import Any
 
-from . import emitter
 from ..generic import protocols
+from . import emitter
 
 
 class ForwardableEmitter(protocols.Forwardable):

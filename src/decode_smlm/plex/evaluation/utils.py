@@ -1,14 +1,13 @@
 import math
+import warnings
 
 import numpy as np
 import seaborn as sns
 import torch
-
 from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator
 from scipy import stats
 from scipy.stats import gaussian_kde
-import warnings
 
 
 def kde_sorted(
@@ -155,7 +154,7 @@ class MetricMeter:
         if fit is not None:
             (mu, sigma) = stats.norm.fit(vals)
             plt.legend(
-                ["N $ (\mu$ = {0:.3g}, $\sigma^2$ = {1:.3g}$^2$)".format(mu, sigma)],
+                [rf"N $ (\mu$ = {mu:.3g}, $\sigma^2$ = {sigma:.3g}$^2$)"],
                 frameon=False,
             )
 
@@ -182,9 +181,9 @@ class MetricMeter:
 
     def __str__(self):
         if self.count >= 2:
-            return "{:.3f} +/- {:.3f}".format(self.avg, self.std)
+            return f"{self.avg:.3f} +/- {self.std:.3f}"
         else:
-            return "{:.3f}".format(self.avg)
+            return f"{self.avg:.3f}"
 
     def __neg__(self):
         m = MetricMeter(reduce_nan=self.reduce_nan)

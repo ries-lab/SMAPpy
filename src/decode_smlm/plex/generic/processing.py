@@ -1,4 +1,4 @@
-from typing import Literal, Union, Optional
+from typing import Literal
 
 import torch
 
@@ -6,10 +6,10 @@ import torch
 class FilterXYZ:
     def __init__(
         self,
-        xextent: Union[tuple, torch.Tensor],
-        yextent: Union[tuple, torch.Tensor],
-        zextent: Optional[Union[tuple, torch.Tensor]] = None,
-        mode: Optional[Literal["any", "all"]] = None,
+        xextent: tuple | torch.Tensor,
+        yextent: tuple | torch.Tensor,
+        zextent: tuple | torch.Tensor | None = None,
+        mode: Literal["any", "all"] | None = None,
     ):
         self.xextent = torch.as_tensor(xextent)
         self.yextent = torch.as_tensor(yextent)

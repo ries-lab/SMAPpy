@@ -1,4 +1,3 @@
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import torch
@@ -45,10 +44,10 @@ class PlotFrame:
     def __init__(
         self,
         frame: torch.Tensor,
-        extent: Optional[tuple] = None,
+        extent: tuple | None = None,
         clim=None,
         plot_colorbar: bool = False,
-        axes_order: Optional[str] = None,
+        axes_order: str | None = None,
     ):
         """
         Plots a frame.
@@ -102,7 +101,7 @@ class PlotFrame:
             plt.colorbar(fraction=0.046, pad=0.04)
         plt.xlabel("x")
         plt.ylabel("y")
-        
+
         plt.colorbar(im, ax=plt.gca(), fraction=0.046, pad=0.04)
 
         return plt.gca()
@@ -122,7 +121,7 @@ class PlotCoordinates:
         extent_limit=None,
         match_lines=False,
         labels=None,
-        axes_order: Optional[str] = None,
+        axes_order: str | None = None,
     ):
         """
         Plots points in 2D projection.
@@ -323,7 +322,7 @@ class PlotFrameCoord(PlotCoordinates, PlotFrame):
         match_lines=False,
         labels=None,
         plot_colorbar_frame: bool = False,
-        axes_order: Optional[str] = None,
+        axes_order: str | None = None,
     ):
         PlotCoordinates.__init__(
             self,

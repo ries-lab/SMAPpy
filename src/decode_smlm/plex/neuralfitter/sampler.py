@@ -1,19 +1,20 @@
 import copy
-from typing import TypeVar, Optional, Union, Sequence, Iterable
+from collections.abc import Iterable, Sequence
+from typing import TypeVar
 
 import torch
+
 from decode_smlm.plex.generic.logging import get_logger
 
-from . import process
-from .data import dataset
 from ..emitter import emitter
-from ..generic import indexing, protocols
-from ..generic import lazy
-from ..generic.delay import _DelayedSlicer, _DelayedTensor
-from ..simulation import trafo, sampler as em_sampler
+from ..generic import indexing, lazy, protocols
+from ..generic.delay import _DelayedSlicer
+from ..simulation import sampler as em_sampler
+from ..simulation import trafo
 from ..simulation.microscope import Microscope, MicroscopeMultiChannel
 from ..simulation.trafo.pos import trafo
 from ..utils import future
+from . import process
 from .sample import samplers
 
 logger = get_logger()
@@ -59,12 +60,12 @@ class SamplerMicroscope:
 
     def forward(
         self,
-        em: Union[emitter.EmitterSet, Sequence[emitter.EmitterSet]],
-        bg: Optional[Iterable[torch.Tensor]],
-        trafo_xyz: Optional[Sequence[trafo.XYZTransformation]],
-        ix_low: Optional[int] = None,
-        ix_high: Optional[int] = None,
-    ) -> Union[torch.Tensor, Sequence[torch.Tensor]]:
+        em: emitter.EmitterSet | Sequence[emitter.EmitterSet],
+        bg: Iterable[torch.Tensor] | None,
+        trafo_xyz: Sequence[trafo.XYZTransformation] | None,
+        ix_low: int | None = None,
+        ix_high: int | None = None,
+    ) -> torch.Tensor | Sequence[torch.Tensor]:
         """
         Forward emitters through sampler and return frames.
         Output will be a sequence of frames per channel. Per channel the frames will
@@ -99,8 +100,8 @@ class SamplerMicroscope:
                 e.xyz = t_xyz.forward(e.xyz)
         else:
             logger.warning(
-                f"Using `SamplerMicroscope` without xyz transformations is "
-                f"possible but without point."
+                "Using `SamplerMicroscope` without xyz transformations is "
+                "possible but without point."
             )
 
         # background needs to be repeated to account for linearization
@@ -120,7 +121,7 @@ class SamplerMicroscope:
 
     def _window_emitters(
         self,
-        em: Union[emitter.EmitterSet, Sequence[emitter.EmitterSet]],
+        em: emitter.EmitterSet | Sequence[emitter.EmitterSet],
         ix_low: int,
         ix_high,
     ) -> Sequence[emitter.EmitterSet]:
@@ -139,8 +140,8 @@ class SamplerMicroscope:
                         or e.frame_ix.max() > self._win_limit
                     ):
                         raise ValueError(
-                            f"EmitterSet.frame_ix must be between -win_limit and "
-                            f"win_limit (including)."
+                            "EmitterSet.frame_ix must be between -win_limit and "
+                            "win_limit (including)."
                         )
                 e.frame_ix += self._win // 2 + i * self._win
             return em
@@ -184,8 +185,8 @@ class SamplerMicroscope:
         return bg
 
     def _unstack(
-        self, frames: Union[torch.Tensor, Sequence[torch.Tensor]]
-    ) -> Union[torch.Tensor, Sequence[torch.Tensor]]:
+        self, frames: torch.Tensor | Sequence[torch.Tensor]
+    ) -> torch.Tensor | Sequence[torch.Tensor]:
         # could be list of tensors (channel-wise) or tensor with channels (in dim 1)
         if isinstance(frames, torch.Tensor):
             frames = frames.unfold(0, self._win, self._win).permute(0, -1, 1, 2, 3)
@@ -202,8 +203,8 @@ class SamplerIndependents:  # ToDo: Naming
     def __init__(
         self,
         em: [em_sampler.EmitterSampler],
-        bg: [Union[protocols.SampleableTensor, Sequence[protocols.SampleableTensor]]],
-        trafo: Optional[protocols.Sampleable] = None,
+        bg: [protocols.SampleableTensor | Sequence[protocols.SampleableTensor]],
+        trafo: protocols.Sampleable | None = None,
     ):
         """
         This samples the `independent` variables of a physical experiment.
@@ -221,8 +222,8 @@ class SamplerIndependents:  # ToDo: Naming
         self,
     ) -> tuple[
         emitter.EmitterSet,
-        Union[torch.Tensor, Sequence[torch.Tensor]],
-        Optional[Sequence[trafo.XYZTransformation]],
+        torch.Tensor | Sequence[torch.Tensor],
+        Sequence[trafo.XYZTransformation] | None,
     ]:
         em = self._em.sample()
         bg = (
@@ -239,13 +240,13 @@ class SamplerTraining:
     def __init__(
         self,
         proc: process.Processing,
-        sampler_physical: Optional[SamplerIndependents] = None,
-        sampler_microscope: Optional[SamplerMicroscope] = None,
-        window: Optional[int] = 1,
-        ix_low: Optional[int] = None,
-        ix_high: Optional[int] = None,
-        device: Union[str, torch.device] = "cpu",
-        _device_storage: Union[str, torch.device] = "cpu",
+        sampler_physical: SamplerIndependents | None = None,
+        sampler_microscope: SamplerMicroscope | None = None,
+        window: int | None = 1,
+        ix_low: int | None = None,
+        ix_high: int | None = None,
+        device: str | torch.device = "cpu",
+        _device_storage: str | torch.device = "cpu",
     ):
         """
         The purpose of this is to attach processing to an experiment to generate input
@@ -270,11 +271,11 @@ class SamplerTraining:
         self._device_storage = _device_storage
         self._device_storage_to = lazy.To(_device_storage)
 
-        self.em: Optional[emitter.EmitterSet] = None
-        self.bg: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None
-        self.frame: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None
-        self.trafo: Optional[Sequence[trafo.XYZTransformation]] = None
-        self.indicator: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None
+        self.em: emitter.EmitterSet | None = None
+        self.bg: torch.Tensor | Sequence[torch.Tensor] | None = None
+        self.frame: torch.Tensor | Sequence[torch.Tensor] | None = None
+        self.trafo: Sequence[trafo.XYZTransformation] | None = None
+        self.indicator: torch.Tensor | Sequence[torch.Tensor] | None = None
 
     def __len__(self) -> int:
         if self.frame is None:
@@ -357,7 +358,7 @@ class SamplerTraining:
             # else None,
         )
 
-    def inference_samples(self, frame, trafo: Optional[int] = None) -> _DelayedSlicer:
+    def inference_samples(self, frame, trafo: int | None = None) -> _DelayedSlicer:
         return samplers.inference_samples(
             samples=samplers.frame_samples(frame),
             aux=trafo,
@@ -369,7 +370,7 @@ class SamplerTraining:
         em: emitter.EmitterSet,
         bg: torch.Tensor,
         frame: torch.Tensor,
-        trafo: Optional[Sequence[trafo.XYZTransformation]] = None,
+        trafo: Sequence[trafo.XYZTransformation] | None = None,
     ) -> None:  # ToDo: This should be obsolete
         """
         Register the data that is used for generating the samples.
@@ -390,7 +391,7 @@ class SamplerTraining:
         # ToDo: make em, bg, trafo arguments to function and remove sampler attributes
 
         if self._ix_low is None or self._ix_high is None:
-            raise ValueError(f"ix_low and ix_high need to be set for sampling.")
+            raise ValueError("ix_low and ix_high need to be set for sampling.")
 
         em, bg, trafo = self._sampler.sample()
 

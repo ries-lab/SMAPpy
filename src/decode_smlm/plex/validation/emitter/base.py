@@ -1,6 +1,6 @@
-from ... import emitter
-
 from abc import abstractmethod
+
+from ... import emitter
 
 
 class EmitterValidator:

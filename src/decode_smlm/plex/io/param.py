@@ -1,8 +1,7 @@
 import copy
-from pathlib import Path
-from typing import Any, IO, Union, Literal
-
 import re
+from pathlib import Path
+from typing import IO, Any, Literal
 
 import yaml
 
@@ -38,9 +37,9 @@ _OmegaConfLoader.yaml_implicit_resolvers = {
 }
 
 
-def load(p: Union[str, Path, IO[Any]]) -> dict:
+def load(p: str | Path | IO[Any]) -> dict:
     if isinstance(p, (str, Path)):
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             return yaml.load(f, Loader=_OmegaConfLoader)
     return yaml.load(p, Loader=_OmegaConfLoader)
 

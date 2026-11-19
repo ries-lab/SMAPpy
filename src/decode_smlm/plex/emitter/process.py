@@ -1,13 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Union, Literal
+from typing import Any, Literal
 
 import numpy as np
 import scipy.spatial
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 
-from .emitter import EmitterSet
 from ..generic.processing import FilterXYZ
+from .emitter import EmitterSet
 
 
 class EmitterProcess(ABC):
@@ -82,9 +83,9 @@ class EmitterFilterGeneric(ArgForwardableMixin, EmitterProcess):
 class EmitterFilterFoV(ArgForwardableMixin, EmitterProcess):
     def __init__(
         self,
-        xextent: Union[tuple, torch.Tensor],
-        yextent: Union[tuple, torch.Tensor],
-        zextent: Union[tuple, torch.Tensor] | None = None,
+        xextent: tuple | torch.Tensor,
+        yextent: tuple | torch.Tensor,
+        zextent: tuple | torch.Tensor | None = None,
         xy_unit: str = "px",
         mode: Literal["any", "all"] | None = None,
     ):
@@ -184,8 +185,8 @@ class EmitterFilterFrame(EmitterProcess):
 class _RangeFilter:
     def __init__(
         self,
-        low: Optional[Any],
-        high: Optional[Any],
+        low: Any | None,
+        high: Any | None,
         inverse: bool = False,
         agg: Literal["any", "all"] | None = None,
         pre_agg: Literal["sum"] | None = None,

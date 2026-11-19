@@ -1,12 +1,10 @@
 from abc import ABC
-from typing import Tuple
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from matplotlib.colors import hsv_to_rgb
-from matplotlib.colors import rgb_to_hsv
+from matplotlib.colors import hsv_to_rgb, rgb_to_hsv
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
@@ -273,7 +271,7 @@ class Renderer2D(Renderer):
             hist = np.clip(hist, 0, hist.max() / self.contrast)
             return torch.from_numpy(hist)
 
-    def get_extent(self, em) -> Tuple[tuple, tuple, tuple]:
+    def get_extent(self, em) -> tuple[tuple, tuple, tuple]:
         xextent = (
             (em.xyz_nm[:, 0].min(), em.xyz_nm[:, 0].max())
             if self.xextent is None

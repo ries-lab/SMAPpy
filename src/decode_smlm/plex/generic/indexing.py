@@ -1,10 +1,11 @@
-from typing import Optional, Union, Any, Callable, TypeVar, Sequence
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import torch
 
 
 class IxWindow:
-    def __init__(self, win: int, n: Optional[int]):
+    def __init__(self, win: int, n: int | None):
         """
         'Window' an index, i.e. make convolution like.
 
@@ -25,10 +26,10 @@ class IxWindow:
         self._win = win
         self._n = n
 
-    def __call__(self, ix: Union[int, slice]) -> Union[list[int], list[list[int]]]:
+    def __call__(self, ix: int | slice) -> list[int] | list[list[int]]:
         return self._compute(ix)
 
-    def __getitem__(self, ix: Union[int, slice]) -> Union[list[int], list[list[int]]]:
+    def __getitem__(self, ix: int | slice) -> list[int] | list[list[int]]:
         return self._compute(ix)
 
     def __len__(self) -> int:
@@ -37,7 +38,7 @@ class IxWindow:
 
         return self._n
 
-    def _compute(self, ix: Union[int, slice]) -> Union[list[int], list[list[int]]]:
+    def _compute(self, ix: int | slice) -> list[int] | list[list[int]]:
         if isinstance(ix, slice):
             # for slice, recurse via ints
             ix = list(
@@ -74,7 +75,7 @@ T = TypeVar("T")
 class _WindowDelayed:
     def __init__(
         self,
-        obj: Union[torch.Tensor, tuple[torch.Tensor], list[torch.Tensor]],
+        obj: torch.Tensor | tuple[torch.Tensor] | list[torch.Tensor],
         fn: Callable[..., T],
         auto_recurse: bool = True,
     ):
@@ -93,7 +94,7 @@ class _WindowDelayed:
     def __len__(self) -> int:
         return len(self._obj)
 
-    def __getitem__(self, item: int) -> Union[T, tuple[T, ...]]:
+    def __getitem__(self, item: int) -> T | tuple[T, ...]:
         if not isinstance(self._obj, torch.Tensor) and self._auto_recurse:
             return tuple(t[self._fn(item), ...] for t in self._obj)
 

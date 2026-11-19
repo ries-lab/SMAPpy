@@ -1,4 +1,5 @@
-from typing import Any, Optional, Protocol, Sequence, Union, Literal
+from collections.abc import Sequence
+from typing import Any, Literal, Protocol
 
 import torch
 
@@ -18,12 +19,12 @@ _mode = Literal["train", "val"]
 class Processing:
     def __init__(
         self,
-        coupled: Optional[_Forwardable] = None,
-        m_input: Optional[_Forwardable] = None,
-        tar: Optional[_Forwardable] = None,
-        tar_em: Optional[_Forwardable] = None,
-        post_model: Optional[_Forwardable] = None,
-        post: Optional[_Forwardable] = None,
+        coupled: _Forwardable | None = None,
+        m_input: _Forwardable | None = None,
+        tar: _Forwardable | None = None,
+        tar_em: _Forwardable | None = None,
+        post_model: _Forwardable | None = None,
+        post: _Forwardable | None = None,
         mode: _mode = "train",
         on_coupled: _on_coupled = "raise",
     ):
@@ -53,10 +54,10 @@ class Processing:
 
     def pre_train(
         self,
-        frame: Union[torch.Tensor, Sequence[torch.Tensor]],
+        frame: torch.Tensor | Sequence[torch.Tensor],
         em: emitter.EmitterSet,
-        bg: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
-        aux: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
+        bg: torch.Tensor | Sequence[torch.Tensor] | None = None,
+        aux: torch.Tensor | Sequence[torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, Any]:
         """Preprocessing for training step. Returns input and target."""
         x, y, _ = self.pre_val(frame, em, bg, aux)
@@ -64,10 +65,10 @@ class Processing:
 
     def pre_val(
         self,
-        frame: Union[torch.Tensor, Sequence[torch.Tensor]],
+        frame: torch.Tensor | Sequence[torch.Tensor],
         em: emitter.EmitterSet,
-        bg: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
-        aux: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
+        bg: torch.Tensor | Sequence[torch.Tensor] | None = None,
+        aux: torch.Tensor | Sequence[torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, Any, emitter.EmitterSet]:
         """Preprocessing for validation step. Returns input, target and emitters."""
         if self._coupled is not None:
@@ -81,8 +82,8 @@ class Processing:
 
     def pre_inference(
         self,
-        frame: Union[torch.Tensor, Sequence[torch.Tensor]],
-        aux: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
+        frame: torch.Tensor | Sequence[torch.Tensor],
+        aux: torch.Tensor | Sequence[torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """Preprocessing for inference step. Returns model input."""
         return self._m_input.forward(frame=frame, em=None, bg=None, aux=aux)

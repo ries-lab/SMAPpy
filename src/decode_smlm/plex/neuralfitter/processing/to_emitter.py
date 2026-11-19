@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 
@@ -10,8 +11,8 @@ from .. import spec
 class ToEmitter(ABC):
     def __init__(
         self,
-        xy_unit: Optional[str] = None,
-        px_size: Optional[tuple[float, float]] = None,
+        xy_unit: str | None = None,
+        px_size: tuple[float, float] | None = None,
     ):
         """
         Transforms any into emitters, e.g. model output.
@@ -25,17 +26,17 @@ class ToEmitter(ABC):
 
 
 class ToEmitterEmpty(ToEmitter):
-    def forward(self, x: Optional[Any] = None) -> emitter.EmitterSet:
+    def forward(self, x: Any | None = None) -> emitter.EmitterSet:
         return emitter.factory(0)
 
 
 class ToEmitterLookUpPixelwise(ToEmitter):
     def __init__(
         self,
-        mask: Union[float, Callable[..., torch.BoolTensor]],
+        mask: float | Callable[..., torch.BoolTensor],
         ch_map: spec.ModelChannelMap,
         xy_unit: str,
-        px_size: Optional[tuple[float, float]] = None,
+        px_size: tuple[float, float] | None = None,
         device="cpu",
     ):
         """
@@ -166,7 +167,7 @@ class ToEmitterSpatialIntegration(ToEmitterLookUpPixelwise):
         ch_map: spec.ModelChannelMap,
         xy_unit: str,
         px_size: tuple[float, float] = None,
-        p_aggregation: Union[str, Callable] = "norm_sum",
+        p_aggregation: str | Callable = "norm_sum",
         _split_th: float = 0.6,
     ):
         """
@@ -252,7 +253,7 @@ class ToEmitterSpatialIntegration(ToEmitterLookUpPixelwise):
             return p_ps
 
     @classmethod
-    def _set_p_aggregation(cls, p_aggr: Union[str, Callable]) -> Callable:
+    def _set_p_aggregation(cls, p_aggr: str | Callable) -> Callable:
         """
         Returns the p_aggregation callable
 

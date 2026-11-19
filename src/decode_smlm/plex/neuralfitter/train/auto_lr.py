@@ -1,12 +1,13 @@
 import copy
 import logging
+from typing import Literal
+
 import numpy as np
 import pytorch_lightning as pl
-from pytorch_lightning.utilities.seed import isolate_rng
 from pytorch_lightning.loggers.logger import DummyLogger
-from pytorch_lightning.utilities.parsing import lightning_setattr
 from pytorch_lightning.tuner.lr_finder import _LRFinder
-from typing import Literal
+from pytorch_lightning.utilities.parsing import lightning_setattr
+from pytorch_lightning.utilities.seed import isolate_rng
 
 
 class _AltLRFinder(_LRFinder):

@@ -1,15 +1,15 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Union, Optional
+from collections.abc import Callable
 
 import torch
 from torch import distributions
 
-from . import spec
 from ..generic import utils
+from . import spec
 
 
 class Reduction:
-    def __init__(self, reduction: Union[str, Callable]):
+    def __init__(self, reduction: str | Callable):
         """
         Reduction, mainly for loss
 
@@ -30,7 +30,7 @@ class Reduction:
 
 
 class Loss(ABC):
-    def __init__(self, return_loggable: bool, reduction: Optional[str]):
+    def __init__(self, return_loggable: bool, reduction: str | None):
         super().__init__()
         self._return_loggable = return_loggable
         self._reduction = Reduction(reduction)
@@ -87,8 +87,8 @@ class PPXYZBLoss(Loss):
 
     def __init__(
         self,
-        device: Union[str, torch.device],
-        chweight_stat: Union[None, tuple, list, torch.Tensor] = None,
+        device: str | torch.device,
+        chweight_stat: None | tuple | list | torch.Tensor = None,
         p_fg_weight: float = 1.0,
         forward_safety: bool = True,
         return_loggable: bool = False,
@@ -155,8 +155,8 @@ class GaussianMMLoss(Loss):
         yextent: tuple,
         img_shape: tuple,
         ch_map: spec.ModelChannelMapGMM,
-        device: Union[str, torch.device],
-        chweight_stat: Union[None, tuple, list, torch.Tensor] = None,
+        device: str | torch.device,
+        chweight_stat: None | tuple | list | torch.Tensor = None,
         forward_safety: bool = True,
         reduction: str = "mean",
         return_loggable: bool = False,
@@ -197,7 +197,7 @@ class GaussianMMLoss(Loss):
         self.forward_safety = forward_safety
 
     @property
-    def _n_codes(self) -> Optional[int]:
+    def _n_codes(self) -> int | None:
         # we do this because for channel map 1 and None is equal, but not for the loss
         return self._ch_map.n_codes if self._ch_map.n_codes != 1 else None
 
@@ -205,7 +205,7 @@ class GaussianMMLoss(Loss):
         self,
         output: torch.Tensor,
         target: tuple[torch.Tensor, torch.BoolTensor, torch.Tensor],
-        weight: Optional[torch.Tensor] = None,
+        weight: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Forwards output and target through loss.
@@ -228,7 +228,7 @@ class GaussianMMLoss(Loss):
 
         tar_param, tar_mask, tar_bg = target
         p, pxyz_mu, pxyz_sig, bg = self._format_model_output(output)
-        
+
         # pxyz_mu[:,:2,:,:] = pxyz_mu[:,:2,:,:] * 2 # phot
         # bg = bg * 2 # bg
 
@@ -346,7 +346,7 @@ class GaussianMMLoss(Loss):
         pxyz_tar: torch.Tensor,
         pxyz_mu: torch.Tensor,
         pxyz_sig: torch.Tensor,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, dict]]:
+    ) -> torch.Tensor | tuple[torch.Tensor, dict]:
         """
         Calculate gaussian mixture component. Evaluates likelihood of true emitters by
         mixture model.
@@ -419,24 +419,24 @@ class GaussianMMLoss(Loss):
     def _forward_checks(self, output: torch.Tensor, target: tuple, weight: None):
         if weight is not None:
             raise NotImplementedError(
-                f"Weight must be None for this loss implementation."
+                "Weight must be None for this loss implementation."
             )
 
         if output.dim() != 4:
-            raise ValueError(f"Output must have 4 dimensions (N,C,H,W).")
+            raise ValueError("Output must have 4 dimensions (N,C,H,W).")
 
         if output.size(1) != self._ch_map.n:
-            raise ValueError(f"Wrong number of channels.")
+            raise ValueError("Wrong number of channels.")
 
         if len(target) != 3:
-            raise ValueError(f"Wrong length of target.")
+            raise ValueError("Wrong length of target.")
 
         tar_em, tar_mask, tar_bg = target
         if tar_em.dim() != 3:
-            raise ValueError(f"Target emitter must have 3 dimensions (N,N_em,N_attr).")
+            raise ValueError("Target emitter must have 3 dimensions (N,N_em,N_attr).")
         if tar_em.size()[:-1] != tar_mask.size()[:2]:
             raise ValueError(
-                f"Target emitter attrs and mask must have same N and N_em."
+                "Target emitter attrs and mask must have same N and N_em."
             )
 
         if self._ch_map.n_codes is None or self._ch_map.n_codes == 1:
@@ -454,5 +454,5 @@ class GaussianMMLoss(Loss):
 
         if tar_bg.dim() != 4:
             raise ValueError(
-                f"Target background without channel dimension is deprecated as of v0.11"
+                "Target background without channel dimension is deprecated as of v0.11"
             )

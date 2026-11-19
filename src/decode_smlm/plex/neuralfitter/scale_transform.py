@@ -1,4 +1,5 @@
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 
 from . import spec

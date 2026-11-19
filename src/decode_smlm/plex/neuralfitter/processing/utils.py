@@ -2,7 +2,6 @@ from typing import Literal
 
 from ... import emitter
 
-
 _on_missing = Literal["raise", "ignore"]
 
 

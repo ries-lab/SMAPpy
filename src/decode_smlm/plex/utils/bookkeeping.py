@@ -10,6 +10,8 @@ except ImportError:
     _git_available = False
 
 import decode_smlm.plex
+
+
 def decode_state() -> str:
     """Get version tag of decode.
 

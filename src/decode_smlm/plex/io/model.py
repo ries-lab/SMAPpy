@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-import copy
 import contextlib
+import copy
 import pathlib
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 
-from . import param
 from ..generic.logging import get_logger
 from ..neuralfitter.train import setup_cfg
+from . import param
 
 if TYPE_CHECKING:
     from ..neuralfitter import model as model_lightning
@@ -37,9 +38,9 @@ def _patch_posix_path_unpickling_on_windows():
 
 @dev.experimental()
 def load_model(
-    path_weights: Union[str, Path],
-    cfg: Union[dict, str, Path] = None,
-    device: Union[str, torch.device] = "cpu",
+    path_weights: str | Path,
+    cfg: dict | str | Path = None,
+    device: str | torch.device = "cpu",
     scenario: str = "Test",
     img_size: tuple[int, int] | None = None,
     frame_extent: dict[str, tuple[float, float]] | None = None,
@@ -59,7 +60,7 @@ def load_model(
     return model.to(device)
 
 
-def load_state_dict(path_ckpt: Union[str, Path], device: Union[str, torch.device] = "cpu") -> dict:
+def load_state_dict(path_ckpt: str | Path, device: str | torch.device = "cpu") -> dict:
     """The network's weights from a Lightning checkpoint, without Lightning.
 
     decode_smlm.plex (docs/decode/plex-plan.md §3): the checkpoint's ``state_dict`` holds the
@@ -77,9 +78,9 @@ def load_state_dict(path_ckpt: Union[str, Path], device: Union[str, torch.device
 
 @dev.experimental(level="warning")
 def load_pipeline(
-    path_ckpt: Union[str, Path],
-    cfg: Union[dict, str, Path] = None,
-    device: Union[str, torch.device] = "cpu",
+    path_ckpt: str | Path,
+    cfg: dict | str | Path = None,
+    device: str | torch.device = "cpu",
     scenario: str = "Test",
     img_size: tuple[int, int] | None = None,
     frame_extent: dict[str, tuple[float, float]] | None = None,

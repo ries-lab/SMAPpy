@@ -12,7 +12,7 @@ class MapListTar:
         self._n_z = _n_z
 
         self._ch_map = list(range(n_phot + 2 + _n_z))
-        
+
     @property
     def n(self) -> int:
         return len(self._ch_map)

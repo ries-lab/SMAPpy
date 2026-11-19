@@ -8,16 +8,13 @@ import torch
 if TYPE_CHECKING:
     import omegaconf  # an annotation; reading a run's settings needs no omegaconf
 
-from . import debug
-from . import inference
+from ... import emitter, io
+from ... import validation as val
+from ...simulation.trafo.pos import trafo as pos_trafo
+from ...utils import dev, param_auto
 from .. import indicator
 from ..train import setup_cfg
-from ... import emitter
-from ... import io
-from ...simulation.trafo.pos import trafo as pos_trafo
-from ...utils import dev
-from ...utils import param_auto
-from ... import validation as val
+from . import debug, inference
 
 
 @dev.experimental(tested=False)

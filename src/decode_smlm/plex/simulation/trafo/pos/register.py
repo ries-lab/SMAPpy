@@ -1,9 +1,9 @@
-from typing import Callable
-
-from . import trafo
-from ....neuralfitter import indicator
+from collections.abc import Callable
 
 import torch
+
+from ....neuralfitter import indicator
+from . import trafo
 
 
 class Register:

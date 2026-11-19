@@ -1,7 +1,8 @@
-import requests
 import pathlib
-import yaml
 import zipfile
+
+import requests
+import yaml
 
 import decode_smlm.plex
 from decode_smlm.plex.utils import files

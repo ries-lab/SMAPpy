@@ -1,4 +1,3 @@
-import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -63,7 +62,7 @@ class MetaDataLoader(base.MetaDataLoader):
         return m
 
     def load(self, path: Path, encoding="ISO-8859-1") -> dict[str, str]:
-        with open(path, "r", encoding=encoding) as f:
+        with open(path, encoding=encoding) as f:
             content = json.load(f)
         return content
 

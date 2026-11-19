@@ -3,6 +3,7 @@ import warnings
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 
 from . import utils
@@ -22,7 +23,7 @@ def xy_kerneled(x, y, kde=True, ax=None, nan_okay=True):
             ax.plot(x, y, "x")
     else:
         if not nan_okay:
-            raise ValueError(f"Some of the values are NaN.")
+            raise ValueError("Some of the values are NaN.")
 
     return ax
 
@@ -57,7 +58,7 @@ def deviation_dist(
 
     else:
         if not nan_okay:
-            raise ValueError(f"Some of the values are NaN.")
+            raise ValueError("Some of the values are NaN.")
 
     if residuals:
         ax.plot([x_gt.min(), x_gt.max()], [0, 0], "green")

@@ -1,11 +1,13 @@
 from abc import abstractmethod
-from typing import Protocol, Optional, Union, Sequence, List, Callable
+from collections.abc import Callable, Sequence
+from typing import Protocol
 
 import torch
+
 from decode_smlm.plex.generic.logging import get_logger
 
-from . import trafo
 from ....utils import future
+from . import trafo
 
 logger = get_logger(__name__)
 
@@ -13,8 +15,8 @@ logger = get_logger(__name__)
 class XYZTransformationSamplerProtocol(Protocol):
     @abstractmethod
     def sample(
-        self, n: Optional[int] = None
-    ) -> Union[trafo.XYZTransformation, Sequence[trafo.XYZTransformation]]:
+        self, n: int | None = None
+    ) -> trafo.XYZTransformation | Sequence[trafo.XYZTransformation]:
         """
         Samples, a transformation or multiple transformations.
         """
@@ -38,7 +40,7 @@ class TransformationOffsetSampler(XYZTransformationSamplerProtocol):
         offset: tuple[float, ...] | Callable[[], torch.Tensor],
         rebound: bool = True,
         n: int = 1,
-        device: Union[str, torch.device] = "cpu",
+        device: str | torch.device = "cpu",
     ):
         """
         Samples a random offset and adds it to the xyz to fake a different
@@ -71,7 +73,7 @@ class TransformationOffsetSampler(XYZTransformationSamplerProtocol):
             )
             self._trafo = self._trafo.to(self._device)
 
-    def sample(self, n: Optional[int] = None) -> List[trafo.XYZCompositTransformation]:
+    def sample(self, n: int | None = None) -> list[trafo.XYZCompositTransformation]:
         n = n if n is not None else self._n
         t = [self._trafo_factory() for _ in range(n)]
         return t
@@ -87,11 +89,11 @@ class TransformationOffsetSampler(XYZTransformationSamplerProtocol):
 class TransformationRotSampler(XYZTransformationSamplerProtocol):
     def __init__(
         self,
-        angle: Optional[Union[Sequence[float], Callable[[int], torch.Tensor]]],
-        offset: Optional[Union[Sequence[float], Callable[[int], torch.Tensor]]],
+        angle: Sequence[float] | Callable[[int], torch.Tensor] | None,
+        offset: Sequence[float] | Callable[[int], torch.Tensor] | None,
         rebound: bool = True,
         n: int = 1,
-        device: Union[str, torch.device] = "cpu",
+        device: str | torch.device = "cpu",
     ):
         """
         Samples a random rotation and adds it to the xyz to fake a different
@@ -111,7 +113,7 @@ class TransformationRotSampler(XYZTransformationSamplerProtocol):
         self._n = n
         self._device = device
 
-    def sample(self, n: Optional[int] = None) -> List[trafo.XYZRotation]:
+    def sample(self, n: int | None = None) -> list[trafo.XYZRotation]:
         n = n if n is not None else self._n
 
         angle = [self._angle] * n if not callable(self._angle) else self._angle(n)

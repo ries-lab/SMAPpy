@@ -1,8 +1,8 @@
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
-from decode_smlm.plex.emitter import emitter
-from decode_smlm.plex.emitter import process
+from decode_smlm.plex.emitter import emitter, process
 
 try:
     import skopt

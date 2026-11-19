@@ -1,5 +1,6 @@
 from abc import ABC
-from typing import Union, Literal, Optional, Sequence, TypeVar
+from collections.abc import Sequence
+from typing import Literal, TypeVar
 
 import torch
 
@@ -25,9 +26,9 @@ class ROIBlock(ROI):
         self,
         ix_x: tuple[int, int],
         ix_y: tuple[int, int],
-        xextent: Optional[tuple[float, float]] = None,
-        yextent: Optional[tuple[float, float]] = None,
-        img_shape: Optional[tuple[int, int]] = None,
+        xextent: tuple[float, float] | None = None,
+        yextent: tuple[float, float] | None = None,
+        img_shape: tuple[int, int] | None = None,
         rref_pos: bool = False,
     ):
         """
@@ -90,8 +91,8 @@ class ROISampler:
         sampler: torch.distributions.Distribution,
         roi_shape: tuple[int, int],
         img_shape: tuple[int, int],
-        xextent: Optional[tuple[float, float]] = None,
-        yextent: Optional[tuple[float, float]] = None,
+        xextent: tuple[float, float] | None = None,
+        yextent: tuple[float, float] | None = None,
         rref_pos: bool = False,
     ):
         """Sample ROIs from an image.
@@ -111,7 +112,7 @@ class ROISampler:
         self._yextent = yextent
         self._rref_pos = rref_pos
 
-    def sample(self, n: int = None) -> Union[ROI, list[ROI]]:
+    def sample(self, n: int = None) -> ROI | list[ROI]:
         """Sample ROIs.
 
         Args:
@@ -142,8 +143,8 @@ class ROISampler:
         cls,
         roi_shape: tuple[int, int],
         img_shape: tuple[int, int],
-        xextent: Optional[tuple[float, float]] = None,
-        yextent: Optional[tuple[float, float]] = None,
+        xextent: tuple[float, float] | None = None,
+        yextent: tuple[float, float] | None = None,
         mode: roi_sampler_mode = "inner",
         strategy: roi_sampler_strategy = "uniform",
         rref_pos: bool = False,

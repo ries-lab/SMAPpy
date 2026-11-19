@@ -1,4 +1,5 @@
-from typing import TypeVar, Callable, Optional, Sequence, Union
+from collections.abc import Callable, Sequence
+from typing import TypeVar
 
 import torch
 
@@ -11,9 +12,9 @@ class _DelayedSlicer:
     def __init__(
         self,
         fn: Callable[..., TDelayed],
-        args: Optional[Sequence] = None,
-        kwargs: Optional[dict] = None,
-        kwargs_static: Optional[dict] = None,
+        args: Sequence | None = None,
+        kwargs: dict | None = None,
+        kwargs_static: dict | None = None,
         indexer: protocols.TypedSequence[int] = None,
     ):
         """
@@ -61,11 +62,11 @@ class _DelayedTensor(_DelayedSlicer):
     def __init__(
         self,
         fn: Callable[..., torch.Tensor],
-        size: Optional[torch.Size] = None,
+        size: torch.Size | None = None,
         *,
-        args: Optional[Union[list, tuple]] = None,
-        kwargs: Optional[dict] = None,
-        kwargs_static: Optional[dict] = None,
+        args: list | tuple | None = None,
+        kwargs: dict | None = None,
+        kwargs_static: dict | None = None,
     ):
         """
         Delay a callable on a tensor.
@@ -114,7 +115,7 @@ class _DelayedTensor(_DelayedSlicer):
         else:
             return self._size[dim]
 
-    def auto_size(self, n: Optional[int] = None) -> "_DelayedTensor":
+    def auto_size(self, n: int | None = None) -> "_DelayedTensor":
         """
         Automatically determine, by running the callable on the first element,
         inspecting output and concatenating this to batch dim.

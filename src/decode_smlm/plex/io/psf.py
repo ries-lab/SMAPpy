@@ -1,24 +1,24 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Union, Literal, Sequence
+from typing import Literal
 
 try:
     import mat73
 except ImportError:
     pass
-import scipy.io
-from decode_smlm.plex.generic.logging import get_logger
-import torch
-from decode_smlm.plex.generic.deprecation import deprecated
 import h5py
-import numpy as np
+import scipy.io
+import torch
+
+from decode_smlm.plex.generic.deprecation import deprecated
+from decode_smlm.plex.generic.logging import get_logger
 
 from ..generic import deploy
 from ..simulation import psf_kernel
-from ..utils import types
-from ..utils import spline
+from ..utils import spline, types
 
 logger = get_logger(__name__)
 
@@ -27,7 +27,7 @@ logger = get_logger(__name__)
     "mat73", "mat73 not available, please use `pip install mat73`."
 )
 def load_spline_smap(
-    path: Union[str, Path],
+    path: str | Path,
     xextent: tuple[float, float] | tuple[tuple[float, float], ...],
     yextent: tuple[float, float] | tuple[tuple[float, float], ...],
     img_shape: tuple[int, int] | tuple[tuple[int, int], ...],
@@ -140,7 +140,7 @@ def h5_to_dict(group):
     return DottedDict(result)
 
 
-def load_h5(path: Union[str, Path]) -> DictConfig:
+def load_h5(path: str | Path) -> DictConfig:
     # uiPSF's result files only (Fig. 2b): omegaconf is imported here, not with the module
     from omegaconf import OmegaConf
 
@@ -153,7 +153,7 @@ def load_h5(path: Union[str, Path]) -> DictConfig:
     "h5py", "h5py not available, please use `pip install h5py`."
 )
 def load_spline_uiPSF(
-    path: Union[str, Path],
+    path: str | Path,
     xextent: tuple[float, float] | tuple[tuple[float, float], ...],
     yextent: tuple[float, float] | tuple[tuple[float, float], ...],
     img_shape: tuple[int, int] | tuple[tuple[int, int], ...],
@@ -195,7 +195,7 @@ def load_spline_uiPSF(
                 coeff.append(
                     torch.from_numpy(
                         spline.psf_to_cspline(
-                             f.res[channel].I_model.transpose(1, 2, 0) # f.res[channel].I_model.transpose(2, 1, 0) / 2  
+                             f.res[channel].I_model.transpose(1, 2, 0) # f.res[channel].I_model.transpose(2, 1, 0) / 2
                         ).transpose(1, 2, 3, 0)
                     )
                 )
@@ -222,7 +222,7 @@ def load_spline_uiPSF(
 
     if norm is not None and multi_channel:
         kwargs_multi["norm"] = norm
-            
+
     if multi_channel:
         kwargs_static.setdefault(
             "ref0",
@@ -268,7 +268,7 @@ def load_spline_uiPSF(
     "mat73", "mat73 not available, please use `pip install mat73`."
 )
 def load_spline(
-    path: Union[str, Path],
+    path: str | Path,
     xextent: tuple[float, float] | tuple[tuple[float, float], ...],
     yextent: tuple[float, float] | tuple[tuple[float, float], ...],
     img_shape: tuple[int, int] | tuple[tuple[int, int], ...],
@@ -327,7 +327,7 @@ def load_spline(
             )
         case _:
             raise ValueError("Unknown calibration file format.")
-            
+
 
 @deprecated(version="0.11.0", reason="use functional interface `load_spline` instead.")
 class SMAPSplineCoefficient:

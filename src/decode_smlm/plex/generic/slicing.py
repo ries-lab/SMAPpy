@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
-from typing import Callable
-from typing import Optional, Union, Any
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 
 from . import dtype
@@ -138,7 +138,7 @@ class _LinearGetitemMixin(ABC):
     def __len__(self) -> int:
         pass
 
-    def __getitem__(self, item: Union[int, slice, tuple[int, slice]]):
+    def __getitem__(self, item: int | slice | tuple[int, slice]):
         # convert to tuple if not already
         if not isinstance(item, tuple):
             item = list([item])
@@ -147,7 +147,7 @@ class _LinearGetitemMixin(ABC):
 
         # ellipsis not supported as of now
         if isinstance(item[0], type(...)):
-            raise NotImplementedError(f"Ellipsis not yet supported in first dimension.")
+            raise NotImplementedError("Ellipsis not yet supported in first dimension.")
 
         # case A: batch dim is reduced (e.g. because of integer access in first dim)
         if isinstance(item[0], int):
@@ -182,7 +182,7 @@ class _SizebyFirstMixin(ABC):
     def __len__(self) -> int:
         pass
 
-    def size(self, dim: Optional[int] = None) -> torch.Size:
+    def size(self, dim: int | None = None) -> torch.Size:
         s = torch.Size([len(self), *tuple(self[0].size())])
 
         if dim is None:

@@ -1,16 +1,15 @@
 import copy
 import warnings
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Callable, Union, Optional, Sequence
 
 import numpy as np
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 from decode_smlm.plex.generic.validated import BaseModel, validate_model
 
-from ..generic import models
-from ..generic import slicing
-from ..generic import test_utils
+from ..generic import models, slicing, test_utils
 from ..generic import utils as gen_utils
 
 
@@ -24,19 +23,19 @@ class EmitterData(models.MixinEqualLength, models.MixinEqualDevice, BaseModel):
     phot: models.Tensor
     frame_ix: models.LongTensor
 
-    id: Optional[models.LongTensor]
-    code: Optional[models.LongTensor]
-    prob: Optional[models.Tensor]
-    prob_code: Optional[models.Tensor]
-    bg: Optional[models.Tensor]
+    id: models.LongTensor | None
+    code: models.LongTensor | None
+    prob: models.Tensor | None
+    prob_code: models.Tensor | None
+    bg: models.Tensor | None
 
-    xyz_cr: Optional[models.Coordinate]
-    phot_cr: Optional[models.Tensor]
-    bg_cr: Optional[models.Tensor]
+    xyz_cr: models.Coordinate | None
+    phot_cr: models.Tensor | None
+    bg_cr: models.Tensor | None
 
-    xyz_sig: Optional[models.Coordinate]
-    phot_sig: Optional[models.Tensor]
-    bg_sig: Optional[models.Tensor]
+    xyz_sig: models.Coordinate | None
+    phot_sig: models.Tensor | None
+    bg_sig: models.Tensor | None
 
 
 class EmitterSet:
@@ -91,20 +90,20 @@ class EmitterSet:
         xyz: torch.Tensor,
         phot: torch.Tensor,
         frame_ix: torch.LongTensor,
-        id: Optional[torch.LongTensor] = None,
+        id: torch.LongTensor | None = None,
         *,
-        code: Optional[torch.Tensor] = None,
-        prob: Optional[torch.Tensor] = None,
-        prob_code: Optional[torch.Tensor] = None,
-        bg: Optional[torch.Tensor] = None,
-        xyz_cr: Optional[torch.Tensor] = None,
-        phot_cr: Optional[torch.Tensor] = None,
-        bg_cr: Optional[torch.Tensor] = None,
-        xyz_sig: Optional[torch.Tensor] = None,
-        phot_sig: Optional[torch.Tensor] = None,
-        bg_sig: Optional[torch.Tensor] = None,
+        code: torch.Tensor | None = None,
+        prob: torch.Tensor | None = None,
+        prob_code: torch.Tensor | None = None,
+        bg: torch.Tensor | None = None,
+        xyz_cr: torch.Tensor | None = None,
+        phot_cr: torch.Tensor | None = None,
+        bg_cr: torch.Tensor | None = None,
+        xyz_sig: torch.Tensor | None = None,
+        phot_sig: torch.Tensor | None = None,
+        bg_sig: torch.Tensor | None = None,
         xy_unit: str = None,
-        px_size: Union[tuple, torch.Tensor] = None,
+        px_size: tuple | torch.Tensor = None,
         sanity_check: bool = True,
     ):
         """
@@ -326,7 +325,7 @@ class EmitterSet:
 
         _ = self._get_subset(slice(None), sanity_check=True)
 
-    def save(self, file: Union[str, Path]):
+    def save(self, file: str | Path):
         """
         Pickle save's the dictionary of this instance. No legacy guarantees given.
         Should only be used for short-term storage.
@@ -350,7 +349,7 @@ class EmitterSet:
             raise ValueError
 
     @staticmethod
-    def load(file: Union[str, Path]):
+    def load(file: str | Path):
         """
         Loads the set of emitters which was saved by the 'save' method.
 
@@ -505,7 +504,7 @@ class EmitterSet:
         else:
             raise StopIteration
 
-    def __getitem__(self, item: Union[int, slice]):
+    def __getitem__(self, item: int | slice):
         """
         Implements array indexing for this class.
 
@@ -557,7 +556,7 @@ class EmitterSet:
 
         return torch.sqrt(tot_var)
 
-    def to(self, d: Union[str, torch.dtype, torch.device]):
+    def to(self, d: str | torch.dtype | torch.device):
         em = self.clone()
         # use keys of dictionary data to get those properties into this method
         for k, v in em.data.items():  # .items returns kv pair
@@ -570,7 +569,7 @@ class EmitterSet:
     def cat(
         cls,
         emittersets: Sequence,
-        remap_frame_ix: Union[None, torch.Tensor] = None,
+        remap_frame_ix: None | torch.Tensor = None,
         step_frame_ix: int = None,
         sanity_check: bool = False,
     ):
@@ -660,7 +659,7 @@ class EmitterSet:
 
         return em
 
-    def _get_subset(self, ix: Union[int, slice], sanity_check: bool = False):
+    def _get_subset(self, ix: int | slice, sanity_check: bool = False):
         """
         Returns subset of emitterset. Implementation of __getitem__ and __next__ methods.
         Args:
@@ -697,7 +696,7 @@ class EmitterSet:
         )
 
     def get_subset_frame(
-        self, frame_start: Optional[int], frame_end: Optional[int], frame_ix_shift=None
+        self, frame_start: int | None, frame_end: int | None, frame_ix_shift=None
     ):
         """
         Returns emitters that are in the frame range as specified.
@@ -1017,7 +1016,7 @@ class EmitterSet:
         ]
 
     def filter_by_sigma(
-        self, fraction: float, dim: Optional[int] = None, return_low=True
+        self, fraction: float, dim: int | None = None, return_low=True
     ):
         """
         Filter by sigma values. Returns EmitterSet.
@@ -1160,7 +1159,7 @@ class EmitterSet:
 
         return xyz
 
-    def populate_crlb(self, psf, inversion: Optional[Callable] = None, **kwargs):
+    def populate_crlb(self, psf, inversion: Callable | None = None, **kwargs):
         """
         Populate the CRLB values by the PSF function.
 
@@ -1190,8 +1189,8 @@ class EmitterSet:
         fisher, _ = psf.fisher(self.xyz, self.phot/2, self.bg/2) # only for biplane data
         return fisher
 
-    
-    def populate_crlb_(self, psf, inversion: Optional[Callable] = None, **kwargs):
+
+    def populate_crlb_(self, psf, inversion: Callable | None = None, **kwargs):
         """
         Populate the CRLB values by the PSF function.
 
@@ -1208,7 +1207,7 @@ class EmitterSet:
         self.phot_cr = crlb[:, 3]
         self.bg_cr = crlb[:, 4]
 
-    def repeat(self, repeats: Union[int, torch.Tensor], step_frames: bool):
+    def repeat(self, repeats: int | torch.Tensor, step_frames: bool):
         """
         Repeat EmitterSet in interleave style
 
@@ -1331,7 +1330,7 @@ class EmitterSet:
 
 
 def factory(
-    n: Optional[int] = None,
+    n: int | None = None,
     extent: float = 32.0,
     sanity_check: bool = True,
     device: str = "cpu",

@@ -1,20 +1,21 @@
 import time
 import warnings
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Optional, Union
-from typing import Literal
+from typing import Any, Literal
 
 import torch
-from decode_smlm.plex.generic.deprecation import deprecated
 from tqdm import tqdm
 
-from . import debug
+from decode_smlm.plex.generic.deprecation import deprecated
+
+from ...emitter import emitter
+from ...generic import logging
+from ...utils import hardware
 from ...validation import base as val_base
 from ..data import dataset
 from ..sample import samplers
-from ...emitter import emitter
-from ...utils import hardware
-from ...generic import logging
+from . import debug
 
 logger = logging.get_logger(__name__)
 
@@ -24,13 +25,13 @@ class Infer:
         self,
         model,
         window: int,
-        device: Union[str, torch.device, list],
-        pre: Optional[Callable] = None,
-        post: Optional[Callable] = None,
-        batch_size: Union[int, Literal["auto"]] = "auto",
+        device: str | torch.device | list,
+        pre: Callable | None = None,
+        post: Callable | None = None,
+        batch_size: int | Literal["auto"] = "auto",
         num_workers: int = 0,
         pin_memory: bool = False,
-        forward_cat: Union[str, Callable] = "emitter",
+        forward_cat: str | Callable = "emitter",
         logger: debug.InferenceLogger | Literal["debug"] | None = None,
         validator: val_base.PipelineValidator | None = None,
     ):
@@ -82,7 +83,7 @@ class Infer:
     def forward(
         self,
         frames: torch.Tensor | list[torch.Tensor] | tuple[torch.Tensor],
-        aux: Optional[Any] = None,
+        aux: Any | None = None,
     ) -> emitter.EmitterSet | torch.Tensor:
         """
         Forward frames through model, pre- and post-processing and output EmitterSet
@@ -108,18 +109,18 @@ class Infer:
         model = self.model.to(self.device[0])
         model = model.eval()
 
-        
-            
+
+
         def _normalized_device_list(dev):
             if isinstance(dev, (list, tuple)):
                 return list(dev)
             if isinstance(dev, str) and "," in dev:
                return [s.strip() for s in dev.split(",")]
             return dev
-        
+
         dev_spec = _normalized_device_list(self.device)
         is_multi = isinstance(dev_spec, (list, tuple)) and len(dev_spec) > 1
-        
+
         if is_multi:
             # convert to integer device ids for DataParallel
             device_ids = []
@@ -165,7 +166,7 @@ class Infer:
         #     logger.info("Inferred batch size as", batch_size=bs)
         # else:
         #     bs = self.batch_size
-        
+
         # batch size auto: compute per-GPU max and multiply by num gpus when using DataParallel
         if self.batch_size == "auto":
             # pick underlying module for get_max_batch_size if wrapped in DataParallel
@@ -219,7 +220,7 @@ class Infer:
     @staticmethod
     def get_max_batch_size(
         model: torch.nn.Module,
-        frame_size: Union[tuple, torch.Size],
+        frame_size: tuple | torch.Size,
         limit_low: int,
         limit_high: int,
     ):
@@ -266,8 +267,8 @@ class Infer:
             return forward_cat
 
         else:
-            raise TypeError(f"Specified forward cat method was wrong.")
-        raise ValueError(f"Unsupported forward_cat value.")
+            raise TypeError("Specified forward cat method was wrong.")
+        raise ValueError("Unsupported forward_cat value.")
 
 
 @deprecated(reason="Change this implementation on use.", version="1.0")
@@ -282,13 +283,13 @@ class LiveInfer(Infer):
         safety_buffer: int = 20,
         frame_proc=None,
         post_proc=None,
-        device: Union[str, torch.device] = "cuda:0"
+        device: str | torch.device = "cuda:0"
         if torch.cuda.is_available()
         else "cpu",
-        batch_size: Union[int, str] = "auto",
+        batch_size: int | str = "auto",
         num_workers: int = 0,
         pin_memory: bool = False,
-        forward_cat: Union[str, Callable] = "emitter",
+        forward_cat: str | Callable = "emitter",
     ):
         """
         Inference from memmory mapped tensor, where the mapped file is possibly live being written to.
@@ -324,7 +325,7 @@ class LiveInfer(Infer):
         self._time_wait = time_wait
         self._buffer_length = safety_buffer
 
-    def forward(self, frames: Union[torch.Tensor], aux: Any = None):
+    def forward(self, frames: torch.Tensor, aux: Any = None):
         # ToDo: Deprecate this in favor of a new inference method for streaming data
         # then impelment an input stream (incoming live data)
         # and an output stream

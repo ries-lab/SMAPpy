@@ -1,5 +1,6 @@
 import copy
-from typing import Tuple, Any, Callable, Union, Optional
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import torch
@@ -37,14 +38,14 @@ def cum_count_per_group(arr: torch.Tensor):
 
 
 def frame_grid(
-    img_size: Tuple[int, int],
-    xextent: Optional[Tuple[float, float]] = None,
-    yextent: Optional[Tuple[float, float]] = None,
+    img_size: tuple[int, int],
+    xextent: tuple[float, float] | None = None,
+    yextent: tuple[float, float] | None = None,
     # *,
-    origin: Optional[Tuple[float, float]] = None,
-    px_size: Optional[Tuple[float, float]] = None,
-    device: Union[str, torch.device] = "cpu",
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    origin: tuple[float, float] | None = None,
+    px_size: tuple[float, float] | None = None,
+    device: str | torch.device = "cpu",
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Get pixel center coordinates based on extent and img shape.
     Either specify extents XOR origin and px size.
@@ -78,10 +79,10 @@ def frame_grid(
 
 
 def extent_by_sizes(
-    img_size: int | Tuple[int, int],
-    px_size: float | Tuple[float, float] = (1, 1),
-    origin: float | Tuple[float, float] = (-0.5, -0.5),
-) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    img_size: int | tuple[int, int],
+    px_size: float | tuple[float, float] = (1, 1),
+    origin: float | tuple[float, float] = (-0.5, -0.5),
+) -> tuple[tuple[float, float], tuple[float, float]]:
     """
     Get extent by image size and pixel size. If no tuple are specified,
     the same value is used for both dimensions which
@@ -108,11 +109,11 @@ def extent_by_sizes(
 
 @torch.jit.script
 def frame_grid_kernel(
-    img_size: Tuple[int, int],
-    xextent: Tuple[float, float],
-    yextent: Tuple[float, float],
+    img_size: tuple[int, int],
+    xextent: tuple[float, float],
+    yextent: tuple[float, float],
     device: torch.device = "cpu",
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     # see frame_grid for docs
     bin_x = torch.linspace(*xextent, steps=img_size[0] + 1, device=device)
     bin_y = torch.linspace(*yextent, steps=img_size[1] + 1, device=device)

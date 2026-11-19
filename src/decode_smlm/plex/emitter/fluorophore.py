@@ -1,11 +1,11 @@
-from typing import Optional, Union
 
 import torch
+
 from decode_smlm.plex.generic.validated import BaseModel, validator
 
-from .emitter import EmitterSet
 from ..generic import models
 from ..generic import utils as gen_utils
+from .emitter import EmitterSet
 
 
 class FluorophoreData(models.MixinEqualDevice, models.MixinEqualLength, BaseModel):
@@ -19,15 +19,15 @@ class FluorophoreData(models.MixinEqualDevice, models.MixinEqualLength, BaseMode
     t0: models.Tensor
     ontime: models.Tensor
     id: models.LongTensor
-    code: Optional[models.Tensor]
-    prob: Optional[models.Tensor]
-    bg: Optional[models.Tensor]
-    xyz_cr: Optional[models.Tensor]
-    phot_cr: Optional[models.Tensor]
-    bg_cr: Optional[models.Tensor]
-    xyz_sig: Optional[models.Tensor]
-    phot_sig: Optional[models.Tensor]
-    bg_sig: Optional[models.Tensor]
+    code: models.Tensor | None
+    prob: models.Tensor | None
+    bg: models.Tensor | None
+    xyz_cr: models.Tensor | None
+    phot_cr: models.Tensor | None
+    bg_cr: models.Tensor | None
+    xyz_sig: models.Tensor | None
+    phot_sig: models.Tensor | None
+    bg_sig: models.Tensor | None
 
     @validator("flux")
     def flux_non_negative(cls, v):
@@ -75,17 +75,17 @@ class FluorophoreSet:
         t0: torch.Tensor,
         ontime: torch.Tensor,
         xy_unit: str,
-        px_size: Union[tuple, torch.Tensor] = None,
-        id: Optional[torch.LongTensor] = None,
-        code: Optional[torch.Tensor] = None,
-        prob: Optional[torch.Tensor] = None,
-        bg: Optional[torch.Tensor] = None,
-        xyz_cr: Optional[torch.Tensor] = None,
-        phot_cr: Optional[torch.Tensor] = None,
-        bg_cr: Optional[torch.Tensor] = None,
-        xyz_sig: Optional[torch.Tensor] = None,
-        phot_sig: Optional[torch.Tensor] = None,
-        bg_sig: Optional[torch.Tensor] = None,
+        px_size: tuple | torch.Tensor = None,
+        id: torch.LongTensor | None = None,
+        code: torch.Tensor | None = None,
+        prob: torch.Tensor | None = None,
+        bg: torch.Tensor | None = None,
+        xyz_cr: torch.Tensor | None = None,
+        phot_cr: torch.Tensor | None = None,
+        bg_cr: torch.Tensor | None = None,
+        xyz_sig: torch.Tensor | None = None,
+        phot_sig: torch.Tensor | None = None,
+        bg_sig: torch.Tensor | None = None,
         sanity_check=True,
     ):
         """

@@ -1,20 +1,21 @@
 from abc import abstractmethod
-from typing import Any, Callable, Union, Sequence, Optional, Protocol, TypeVar
+from collections.abc import Callable, Sequence
+from typing import Any, Protocol, TypeVar
 
 import torch
 
-from ...generic import protocols
 from ... import emitter
-from .. import scaling
-from ...simulation import camera, background
+from ...generic import protocols
+from ...simulation import background, camera
 from ...utils import future
+from .. import scaling
 
 
 class ModelInput(Protocol):
     @abstractmethod
     def forward(
         self,
-        frame: Union[torch.Tensor, Sequence[torch.Tensor]],
+        frame: torch.Tensor | Sequence[torch.Tensor],
         em: emitter.EmitterSet,
         aux: dict[str, Any],
     ) -> torch.Tensor:
@@ -31,11 +32,9 @@ class ModelInputPostponed(ModelInput):
         frame_pre: protocols.Forwardable
         | Sequence[protocols.Forwardable]
         | None = None,
-        cam: Optional[Union[camera.Camera, Sequence[camera.Camera]]] = None,
-        aux: Optional[
-            Callable[[T], Union[torch.Tensor, Sequence[torch.Tensor]]]
-        ] = None,
-        merger_bg: Optional[background.Merger] = None,
+        cam: camera.Camera | Sequence[camera.Camera] | None = None,
+        aux: Callable[[T], torch.Tensor | Sequence[torch.Tensor]] | None = None,
+        merger_bg: background.Merger | None = None,
         scaler: scaling.base.ScalerModelChannel | None = None
     ):
         """
@@ -65,7 +64,7 @@ class ModelInputPostponed(ModelInput):
             if frame_pre is not None and not isinstance(frame_pre, Sequence)
             else frame_pre
         )
-        self._noise: Optional[list[cam.Camera]] = (
+        self._noise: list[cam.Camera] | None = (
             [cam] if cam is not None and not isinstance(cam, Sequence) else cam
         )
         self._aux = aux
@@ -74,10 +73,10 @@ class ModelInputPostponed(ModelInput):
 
     def forward(
         self,
-        frame: Union[torch.Tensor, Sequence[torch.Tensor]],
+        frame: torch.Tensor | Sequence[torch.Tensor],
         em: emitter.EmitterSet | None,
-        bg: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
-        aux: Optional[Union[torch.Tensor, Sequence[torch.Tensor], T]] = None,
+        bg: torch.Tensor | Sequence[torch.Tensor] | None = None,
+        aux: torch.Tensor | Sequence[torch.Tensor] | T | None = None,
     ) -> torch.Tensor:
         """
         Combines bg with frame, applies camera noise, combines with auxiliaries,

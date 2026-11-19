@@ -1,4 +1,3 @@
-from typing import Optional, Union
 
 import torch
 
@@ -6,10 +5,10 @@ import torch
 class ScalerModelChannel:
     def __init__(
         self,
-        factor: Optional[torch.Tensor],
-        offset: Optional[torch.Tensor],
+        factor: torch.Tensor | None,
+        offset: torch.Tensor | None,
         auto_view: bool = True,
-        device: Optional[Union[str, torch.device]] = None,
+        device: str | torch.device | None = None,
     ):
         """
         Scaling of channeled tensors.

@@ -1,7 +1,8 @@
+import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import warnings
 
 # by constantin pape
 # from https://github.com/constantinpape/mu-net

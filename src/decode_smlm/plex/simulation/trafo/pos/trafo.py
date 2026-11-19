@@ -1,11 +1,13 @@
-from abc import abstractmethod
 import copy
-from typing import Optional, Union, Callable, Tuple, Sequence, Literal
+from abc import abstractmethod
+from collections.abc import Callable, Sequence
+from typing import Literal
 
 import numpy as np
 import torch
-from decode_smlm.plex.generic.deprecation import deprecated
 from scipy.spatial.transform import Rotation as SciRot
+
+from decode_smlm.plex.generic.deprecation import deprecated
 
 from ....generic import mixin
 
@@ -30,7 +32,7 @@ class XYZTransformation(mixin.ForwardCallAlias, mixin.MultiDevice):
 
 class XYZTransformationNoOp(XYZTransformation):
     def __init__(
-        self, n_channels: Optional[int] = None, device: Union[str, torch.device] = "cpu"
+        self, n_channels: int | None = None, device: str | torch.device = "cpu"
     ):
         """
         No-op transformation.
@@ -94,7 +96,7 @@ class XYZCompositTransformation(XYZTransformation):
     def device(self) -> torch.device:
         return self._trafo[0].device
 
-    def to(self, device: Union[str, torch.device]) -> "XYZCompositTransformation":
+    def to(self, device: str | torch.device) -> "XYZCompositTransformation":
         return XYZCompositTransformation([t.to(device) for t in self._trafo])
 
     def append(self, trafo: XYZTransformation):
@@ -145,7 +147,7 @@ class XYZTransformationGeneric(XYZTransformation):
     def __init__(
         self,
         fn: Callable[[torch.Tensor], torch.Tensor],
-        len: Optional[int] = None,
+        len: int | None = None,
         device: str | torch.device | None = "cpu",
         device_arbitrary: bool = False,
     ):
@@ -179,7 +181,7 @@ class XYZTransformationGeneric(XYZTransformation):
             raise ValueError("Device not specified.")
         return self._device
 
-    def to(self, device: Union[str, torch.device]) -> "XYZTransformationGeneric":
+    def to(self, device: str | torch.device) -> "XYZTransformationGeneric":
         """
         Change the device of the transformation. This is somewhat generic on generic
         functions and only does something if in no-op (i.e. same device) or if the
@@ -262,7 +264,7 @@ class XYZScaleTransformation(XYZTransformation):
     def device(self) -> torch.device:
         return self._scale.device
 
-    def to(self, device: Union[str, torch.device]) -> "XYZScaleTransformation":
+    def to(self, device: str | torch.device) -> "XYZScaleTransformation":
         return XYZScaleTransformation(
             scale=self._scale, scope=self._scope, device=device
         )
@@ -316,7 +318,7 @@ class XYZMirrorAt(XYZTransformation):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: Union[str, torch.device]) -> "XYZMirrorAt":
+    def to(self, device: str | torch.device) -> "XYZMirrorAt":
         # no real device here, so we can just modify inplace.
         self._device = torch.device(device) if isinstance(device, str) else device
         return self
@@ -364,7 +366,7 @@ class XYZTransformationMatrix(XYZTransformation):
     def __repr__(self) -> str:
         return f"XYZTransformationMatrix({self._m})"
 
-    def to(self, device: Union[str, torch.device]) -> "XYZTransformationMatrix":
+    def to(self, device: str | torch.device) -> "XYZTransformationMatrix":
         return XYZTransformationMatrix(self._m.to(device))
 
     @property
@@ -402,9 +404,9 @@ class XYZRotation(XYZTransformation):
     def __init__(
         self,
         angle: Sequence[float],
-        offset: Optional[Sequence[float]] = None,
+        offset: Sequence[float] | None = None,
         rebound: bool = True,
-        device: Union[str, torch.device] = "cpu",
+        device: str | torch.device = "cpu",
     ):
         self._angle = angle
         self._offset = offset
@@ -427,7 +429,7 @@ class XYZRotation(XYZTransformation):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: Union[str, torch.device]) -> "XYZRotation":
+    def to(self, device: str | torch.device) -> "XYZRotation":
         return XYZRotation(
             self._angle, self._offset, rebound=self._rebound, device=device
         )
@@ -444,7 +446,7 @@ class XYZRotation(XYZTransformation):
 
 def offset_trafo(
     t: XYZTransformation,
-    offset: Union[Tuple[float, ...], torch.Tensor],
+    offset: tuple[float, ...] | torch.Tensor,
     rebound: bool = True,
 ) -> XYZCompositTransformation:
     """

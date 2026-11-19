@@ -1,6 +1,5 @@
 # Stuff that handles the example notebooks
 import argparse
-from typing import Union
 from pathlib import Path
 
 import notebooks
@@ -26,7 +25,7 @@ def parse_args():
     )
 
 
-def load_examples(path: Union[str, Path]):
+def load_examples(path: str | Path):
     """Load example notebooks to destination dir."""
     path = path if isinstance(path, Path) else Path(path)
 

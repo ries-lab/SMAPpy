@@ -1,14 +1,15 @@
-from typing import Any, Optional, Iterable, Callable, Union, Sequence, Protocol
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, Protocol
 
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 from decode_smlm.plex.generic.logging import get_logger
 
-from . import noise as noise_lib
-from . import psf_kernel
-from . import trafo
 from ..emitter.emitter import EmitterSet
 from ..generic import utils
+from . import noise as noise_lib
+from . import psf_kernel, trafo
 
 logger = get_logger(__name__)
 
@@ -18,10 +19,10 @@ class MicroscopeProtocol(Protocol):
     def forward(
         self,
         em: EmitterSet,
-        bg: Optional[torch.Tensor] = None,
-        ix_low: Optional[int] = None,
-        ix_high: Optional[int] = None,
-    ) -> Union[torch.Tensor, Sequence[torch.Tensor]]:
+        bg: torch.Tensor | None = None,
+        ix_low: int | None = None,
+        ix_high: int | None = None,
+    ) -> torch.Tensor | Sequence[torch.Tensor]:
         ...
 
 
@@ -29,8 +30,8 @@ class Microscope(MicroscopeProtocol):
     def __init__(
         self,
         psf: psf_kernel.PSF,
-        noise: Optional[noise_lib.NoiseDistribution] = None,
-        frame_range: Optional[Union[int, tuple[int, int]]] = None,
+        noise: noise_lib.NoiseDistribution | None = None,
+        frame_range: int | tuple[int, int] | None = None,
     ):
         """
         Microscope consisting of psf and noise model.
@@ -50,9 +51,9 @@ class Microscope(MicroscopeProtocol):
     def forward(
         self,
         em: EmitterSet,
-        bg: Optional[torch.Tensor] = None,
-        ix_low: Optional[int] = None,
-        ix_high: Optional[int] = None,
+        bg: torch.Tensor | None = None,
+        ix_low: int | None = None,
+        ix_high: int | None = None,
     ) -> torch.Tensor:
         """
         Forward emitter and background through microscope and return frames.
@@ -83,12 +84,12 @@ class MicroscopeMultiChannel:
     def __init__(
         self,
         psf: list[psf_kernel.PSF],
-        noise: list[Optional[noise_lib.NoiseDistribution]],
-        frame_range: Optional[tuple[int, int]],
-        ch_range: Optional[Union[int, tuple[int, int]]],
-        trafo_xyz: Optional[trafo.pos.trafo.XYZTransformation] = None,
-        trafo_phot: Optional[trafo.photon.trafo.ChoricTransformation] = None,
-        stack: Optional[Union[str, Callable]] = None,
+        noise: list[noise_lib.NoiseDistribution | None],
+        frame_range: tuple[int, int] | None,
+        ch_range: int | tuple[int, int] | None,
+        trafo_xyz: trafo.pos.trafo.XYZTransformation | None = None,
+        trafo_phot: trafo.photon.trafo.ChoricTransformation | None = None,
+        stack: str | Callable | None = None,
     ):
         """
         A microscope that has multi channels. Internally this is modelled as a list
@@ -122,9 +123,9 @@ class MicroscopeMultiChannel:
     def forward(
         self,
         em: EmitterSet,
-        bg: Optional[Iterable[torch.Tensor]] = None,
-        ix_low: Optional[int] = None,
-        ix_high: Optional[int] = None,
+        bg: Iterable[torch.Tensor] | None = None,
+        ix_low: int | None = None,
+        ix_high: int | None = None,
     ) -> Any:
         """
         Forward emitters through multichannel microscope

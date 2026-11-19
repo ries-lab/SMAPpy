@@ -30,11 +30,10 @@ import pathlib
 import platform
 import sys
 
-import numpy as np
-import torch
-
 import decode
 import decode.neuralfitter.inference.functional as infer_func
+import numpy as np
+import torch
 from decode.neuralfitter.inference.debug import InferenceLogger
 from decode.neuralfitter.train import setup_cfg
 

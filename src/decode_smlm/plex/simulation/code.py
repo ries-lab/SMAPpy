@@ -1,13 +1,14 @@
-import numpy as np
-from typing import Optional, Hashable, TypeVar
+from collections.abc import Hashable
+from typing import TypeVar
 
+import numpy as np
 import torch
 
 CodeType = TypeVar("CodeType")
 
 
 class Code:
-    def __init__(self, codes: list[int], rng: Optional[np.random.Generator] = None):
+    def __init__(self, codes: list[int], rng: np.random.Generator | None = None):
         """
         Sample codes
 
@@ -28,7 +29,7 @@ class CodeBook:
     def __init__(
         self,
         code_map: dict[Hashable, Hashable],
-        rng: Optional[np.random.Generator] = None,
+        rng: np.random.Generator | None = None,
     ):
         """
         Codebook that holds a map from codes to bits

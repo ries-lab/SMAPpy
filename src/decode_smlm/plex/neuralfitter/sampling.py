@@ -1,7 +1,7 @@
+from collections.abc import Sequence
+
 import torch
 from skimage.util.shape import view_as_windows
-
-from typing import Sequence
 
 
 def sample_crop(x_in: torch.Tensor, sample_size: Sequence[int]) -> torch.Tensor:

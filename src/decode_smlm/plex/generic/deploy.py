@@ -1,9 +1,8 @@
-from importlib import import_module
-from typing import Optional
 from functools import wraps
+from importlib import import_module
 
 
-def raise_optional_deps(lib: str, msg: Optional[str] = ""):
+def raise_optional_deps(lib: str, msg: str | None = ""):
     """
     Decorator that checks if an import is available or otherwise raises an ImportError
     along with an optional message.

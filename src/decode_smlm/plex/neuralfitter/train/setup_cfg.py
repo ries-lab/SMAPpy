@@ -2,30 +2,23 @@ from __future__ import annotations
 
 import copy
 import functools
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Sequence, Any, Union, Literal
+from typing import Any, Literal
 
-from decode_smlm.plex.generic import validated as pydantic
-from decode_smlm.plex.generic.logging import get_logger
 import torch
-from decode_smlm.plex.generic.deprecation import deprecated
 from torch import nn
 
 import decode_smlm.plex.simulation.trafo
 import decode_smlm.plex.simulation.trafo.photon.trafo
 import decode_smlm.plex.simulation.trafo.pos.sampler
-from decode_smlm.plex import emitter
-from decode_smlm.plex import evaluation
-from decode_smlm.plex import generic
-from decode_smlm.plex import neuralfitter
-from decode_smlm.plex import simulation
-from decode_smlm.plex import utils
-from decode_smlm.plex.neuralfitter import models
-from decode_smlm.plex.neuralfitter import scaling
+from decode_smlm.plex import emitter, evaluation, generic, neuralfitter, simulation, utils
 from decode_smlm.plex import validation as val
-
+from decode_smlm.plex.generic import validated as pydantic
+from decode_smlm.plex.generic.deprecation import deprecated
+from decode_smlm.plex.generic.logging import get_logger
 from decode_smlm.plex.io.psf import load_h5
-from pathlib import Path
+from decode_smlm.plex.neuralfitter import models, scaling
 
 logger = get_logger(__name__)
 
@@ -76,8 +69,8 @@ def px_size(cfg_cam):
 
 def setup_logger(
     cfg,
-    version: Optional[str] = None,
-) -> Union[loggers.logger.Logger, list[loggers.logger.Logger]]:
+    version: str | None = None,
+) -> loggers.logger.Logger | list[loggers.logger.Logger]:
     """
     Set up logging.
 
@@ -290,7 +283,7 @@ def setup_trafo(
 
     path_trafo = cfg["Paths"]["trafo"]
     path = path_trafo if isinstance(path_trafo, Path) else Path(path_trafo)
-    
+
     if path.suffix == ".mat":
         shift_ch0 = [p[0] for p in cfg_trafo_pos["glob"]["offset"].values()]
         shift_ch1 = [p[1] for p in cfg_trafo_pos["glob"]["offset"].values()]
@@ -298,7 +291,7 @@ def setup_trafo(
     elif path.suffix == ".h5":
         f, p = load_h5(path)
         offset = (f.res.xyshift[:,[1,0]]-0.5).astype(int).tolist()
-        
+
 
         shift_ch0 = [0,0,0]
         shift_ch1 = offset[1] + [0]
@@ -306,7 +299,7 @@ def setup_trafo(
         shift_ch1[0] = -shift_ch1[0]
 
         logger.info("Offsets as specified in .h5 file.")
-    
+
     # # apply global shift of channel 1 to register both channels
     # shift_ch0 = [p[0] for p in cfg_trafo_pos["glob"]["offset"].values()]
     # shift_ch1 = [p[1] for p in cfg_trafo_pos["glob"]["offset"].values()]
@@ -434,7 +427,7 @@ def setup_roi(cfg, cfg_sim) -> simulation.roi.ROISampler:
 
 def setup_coupled_crop(
     cfg, cfg_sim
-) -> Optional[neuralfitter.processing.coupled.CoupledCrop]:
+) -> neuralfitter.processing.coupled.CoupledCrop | None:
     if cfg["Processing"]["input"] is None or "crop" not in cfg["Processing"]["input"]:
         return None
 
@@ -471,7 +464,7 @@ def _setup_background_core(cfg, cfg_sim, cfg_bg) -> simulation.background.Backgr
 
 def setup_cameras(
     cfg, device: str | torch.device
-) -> Union[simulation.camera.CameraEMCCD, list[simulation.camera.CameraEMCCD]]:
+) -> simulation.camera.CameraEMCCD | list[simulation.camera.CameraEMCCD]:
     cam = []
     for cfg_cam in cfg["Camera"]:
         cam_type_str = cfg_cam["name"]
@@ -505,7 +498,7 @@ def setup_structure(cfg_sim) -> simulation.structures.StructurePrior:
     )
 
 
-def setup_code(cfg_sim) -> Optional[simulation.code.Code]:
+def setup_code(cfg_sim) -> simulation.code.Code | None:
     if n_codes(cfg_sim) is None:
         return None
     return simulation.code.Code(codes=codes(cfg_sim))
@@ -775,7 +768,7 @@ def setup_frame_scaling(cfg) -> neuralfitter.scaling.base.ScalerAmplitude:
     raise DeprecationWarning("Use setup_input_scaling instead.")
 
 
-def setup_aux_scaling(cfg) -> Optional[scaling.base.ScalerAmplitude]:
+def setup_aux_scaling(cfg) -> scaling.base.ScalerAmplitude | None:
     raise DeprecationWarning("Use setup_input_scaling instead.")
 
 
@@ -817,10 +810,10 @@ def setup_frame_pre_single_channel():
 
 
 def setup_frame_pre_multi_roi(cfg, cfg_cam, device, scope, crop_to):
-    
+
     path_trafo = cfg["Paths"]["trafo"]
     path = path_trafo if isinstance(path_trafo, Path) or path_trafo is None else Path(path_trafo)
-    
+
     logger.info(
         "Setting up frame pre-processing in multi-roi mode, on a single camera."
     )
@@ -859,10 +852,10 @@ def setup_frame_pre_multi_roi(cfg, cfg_cam, device, scope, crop_to):
 
 def setup_frame_pre_multi_camera(cfg, cfg_cams, device, scope, crop_to):
     logger.info("Setting up frame pre-processing in multi-camera mode.")
-    
+
     path_trafo = cfg["Paths"]["trafo"]
     path = path_trafo if isinstance(path_trafo, Path) else Path(path_trafo)
-    
+
     if path.suffix == ".mat" and cfg[scope]["Transformation"]["Pos"]["glob"]["offset"] is not None:
         offset = cfg[scope]["Transformation"]["Pos"]["glob"]["offset"]
         xy = [(x, y) for x, y in zip(offset["x"], offset["y"], strict=True)]
@@ -1011,7 +1004,7 @@ def _extent_on_crop(cfg, cfg_sim):
     img_shape = cfg_sim["img_size"]
 
     if cfg["Processing"]["input"] is not None and "crop" in cfg["Processing"]["input"]:
-        raise NotImplementedError(f"Not used anymore.")
+        raise NotImplementedError("Not used anymore.")
         crop = cfg["Processing"]["input"]["crop"]
         logger.info(
             "Inferring extent automatically from crop, assuming px_size of 1.",
@@ -1095,7 +1088,7 @@ def setup_emitter_flux(cfg_sim):
     allowed_dist = {"Normal", "Uniform", "normal", "uniform"}
 
     if len(dist := cfg_sim["Photon"]["distribution"]) >= 2:
-        raise ValueError(f"Setup not implemented for multiple distributions.")
+        raise ValueError("Setup not implemented for multiple distributions.")
     if (k := next(iter(dist))) not in allowed_dist:
         raise ValueError(f"Setup not implemented for {k} distribution.")
 
@@ -1138,9 +1131,7 @@ def setup_emitter_sampler(
 
 def setup_microscope(
     cfg, cfg_sim, cam, ignore_trafo: bool = True
-) -> Union[
-    simulation.microscope.Microscope, simulation.microscope.MicroscopeMultiChannel
-]:
+) -> simulation.microscope.Microscope | simulation.microscope.MicroscopeMultiChannel:
     if n_channels(cfg) == 1:
         return simulation.microscope.Microscope(
             psf=setup_psf(cfg, cfg_sim),

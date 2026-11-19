@@ -1,6 +1,6 @@
+from collections.abc import Callable, Iterable
 from operator import itemgetter
-from typing import Any, Callable, Iterable, Optional, Union, Protocol, TypeVar, Sequence
-
+from typing import Any, Protocol, TypeVar
 
 T = TypeVar("T")
 
@@ -14,7 +14,7 @@ class TransformSequence:
     def __init__(
         self,
         components: tuple[..., _Forwardable[T]],
-        input_slice: Optional[list[list]] = None,
+        input_slice: list[list] | None = None,
     ):
         """
         Simple class which calls forward method of all it's components sequentially.
@@ -74,8 +74,8 @@ class ParallelTransformSequence(TransformSequence):
     def __init__(
         self,
         components: Iterable,
-        input_slice: Optional[list[Union[list, int]]],
-        merger: Optional[Callable] = None,
+        input_slice: list[list | int] | None,
+        merger: Callable | None = None,
     ):
         """
         Simple processing class that forwards data through all of its components

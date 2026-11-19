@@ -1,7 +1,7 @@
 import builtins
 import functools
 import sys
-from typing import Sequence
+from collections.abc import Sequence
 
 from packaging import version
 

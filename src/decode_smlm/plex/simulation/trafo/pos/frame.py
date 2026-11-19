@@ -1,7 +1,8 @@
 from abc import abstractmethod
-from typing import Callable
+from collections.abc import Callable
 
 import torch
+
 from decode_smlm.plex.generic import validated as pydantic
 
 from ....generic import mixin

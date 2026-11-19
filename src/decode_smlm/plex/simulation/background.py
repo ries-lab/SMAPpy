@@ -1,14 +1,14 @@
-from abc import ABC, abstractmethod  # abstract class
-from typing import Callable, Iterable, Optional, Union, Sequence
-
 import math
+from abc import ABC, abstractmethod  # abstract class
+from collections.abc import Callable, Iterable, Sequence
+
 import torch
 
 from ..utils import dev
 
 
 class Background(ABC):
-    def __init__(self, size: Union[tuple[int, ...], torch.Size], device: str = "cpu"):
+    def __init__(self, size: tuple[int, ...] | torch.Size, device: str = "cpu"):
         """
         Background
         """
@@ -19,7 +19,7 @@ class Background(ABC):
 
     @abstractmethod
     def sample(
-        self, size: Union[tuple[int, ...], torch.Size], device: str = "cpu"
+        self, size: tuple[int, ...] | torch.Size, device: str = "cpu"
     ) -> torch.Tensor:
         """
         Samples from background implementation in the specified size.
@@ -45,7 +45,7 @@ class Background(ABC):
         return self.sample(size=x.size(), device=x.device)
 
     def _arg_defaults(
-        self, size: Optional[Union[tuple[int, ...], torch.Size]], device: str
+        self, size: tuple[int, ...] | torch.Size | None, device: str
     ):
         """Overwrite optional args with instance defaults."""
         size = self._size if size is None else size
@@ -57,8 +57,8 @@ class Background(ABC):
 class BackgroundUniform(Background):
     def __init__(
         self,
-        bg: Union[float, tuple, Callable],
-        size: Optional[Union[tuple[int, ...], torch.Size]] = None,
+        bg: float | tuple | Callable,
+        size: tuple[int, ...] | torch.Size | None = None,
         device: str = "cpu",
     ):
         """
@@ -86,8 +86,8 @@ class BackgroundUniform(Background):
 
     def sample(
         self,
-        size: Optional[Union[tuple[int, ...], torch.Size]] = None,
-        device: Optional[Union[str, torch.device]] = None,
+        size: tuple[int, ...] | torch.Size | None = None,
+        device: str | torch.device | None = None,
     ):
         size = size if size is not None else self._size
         device = device if device is not None else self._device
@@ -200,7 +200,7 @@ class PerlinBackground(Background):
 
         assert (
             len(size) == 3
-        ), f"Assuming size specification to be N x H x W (first is batch dimension)."
+        ), "Assuming size specification to be N x H x W (first is batch dimension)."
         assert (
             size[-2:] == self._size
         ), "Perlin background initialised with different img_shape specification."
@@ -223,7 +223,7 @@ class PerlinBackground(Background):
 
 
 class Merger:
-    def __init__(self, kernel: Optional[Callable] = None):
+    def __init__(self, kernel: Callable | None = None):
         """
         Combine frame and background
 
@@ -234,8 +234,8 @@ class Merger:
 
     def forward(
         self,
-        frame: Union[torch.Tensor, Sequence[torch.Tensor]],
-        bg: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]],
+        frame: torch.Tensor | Sequence[torch.Tensor],
+        bg: torch.Tensor | Sequence[torch.Tensor] | None,
     ) -> torch.Tensor:
         if bg is None:
             return frame

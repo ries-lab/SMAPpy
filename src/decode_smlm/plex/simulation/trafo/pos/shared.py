@@ -2,9 +2,8 @@
 
 import torch
 
-from . import trafo
-from . import frame
 from ... import psf_kernel
+from . import frame, trafo
 
 
 class PipedTransformation:

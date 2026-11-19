@@ -1,7 +1,6 @@
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
-
 from torch import nn
 
 from . import unet_param

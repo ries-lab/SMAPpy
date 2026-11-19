@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod  # abstract class
-from typing import Optional, Union, Protocol
+from typing import Protocol
 
-from decode_smlm.plex.generic import validated as pydantic
 import torch
 
-from . import code
-from . import structures
+from decode_smlm.plex.generic import validated as pydantic
+
 from ..emitter import EmitterSet, FluorophoreSet
 from ..utils import torch as torch_utils
+from . import code, structures
 
 
 class Sampleable(Protocol):
@@ -45,9 +45,9 @@ class _SingletonEmitterSamplerMixin:
     """
     def __init__(
         self,
-        structure: Union[structures.StructurePrior, Sampleable],
-        code: Union[code.CodeBook, Sampleable],
-        frame_range: Union[int, tuple[int, int]],
+        structure: structures.StructurePrior | Sampleable,
+        code: code.CodeBook | Sampleable,
+        frame_range: int | tuple[int, int],
         xy_unit,
         px_size,
     ):
@@ -68,15 +68,15 @@ class _SingletonEmitterSamplerMixin:
 class EmitterSamplerStatic(_SingletonEmitterSamplerMixin, EmitterSampler):
     def __init__(
         self,
-        structure: Union[structures.StructurePrior, Sampleable],
+        structure: structures.StructurePrior | Sampleable,
         phot: Sampleable | tuple[int, int],
         em_num: float,
-        frame: Union[tuple[int, int], Sampleable],
-        frame_range: Union[int, tuple[int, int]],
-        code: Optional[Union[code.CodeBook, Sampleable]] = None,
+        frame: tuple[int, int] | Sampleable,
+        frame_range: int | tuple[int, int],
+        code: code.CodeBook | Sampleable | None = None,
         n_channels: int | None = None,
-        xy_unit: Optional[str] = None,
-        px_size: Optional[tuple[float, float]] = None,
+        xy_unit: str | None = None,
+        px_size: tuple[float, float] | None = None,
     ):
         """
         Emitter sampler that does not model temporal dynamics.
@@ -160,15 +160,15 @@ class EmitterSamplerBlinking(_SingletonEmitterSamplerMixin, EmitterSampler):
     def __init__(
         self,
         *,
-        structure: Union[structures.StructurePrior, Sampleable],
+        structure: structures.StructurePrior | Sampleable,
         flux: Sampleable | tuple[float, float],
         em_num: float,
         lifetime: float,
-        frame_range: Union[int, tuple[int, int]],
-        code: Optional[Union[code.CodeBook, Sampleable]] = None,
+        frame_range: int | tuple[int, int],
+        code: code.CodeBook | Sampleable | None = None,
         n_channels: int | None = None,
-        xy_unit: Optional[str] = None,
-        px_size: Optional[tuple[float, float]] = None,
+        xy_unit: str | None = None,
+        px_size: tuple[float, float] | None = None,
     ):
         """
         Emitter sampler that models the blinking dynamics of fluorophores.

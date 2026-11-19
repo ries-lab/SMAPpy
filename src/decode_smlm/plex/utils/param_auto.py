@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import copy
 import statistics
-from typing import Literal, Union
-from typing import Optional, Sequence
-
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import omegaconf  # annotations; omegaconf is imported where a DictConfig is asked for
 
-from . import dev
 from ..io import param
+from . import dev
 
 
 def _autofill_dict(
@@ -53,8 +51,8 @@ def _autofill_dict(
                 out[k] = x[k]
             else:
                 raise ValueError(
-                    f"x cuts away deeper nested values of reference but "
-                    f"cutting is not allowed."
+                    "x cuts away deeper nested values of reference but "
+                    "cutting is not allowed."
                 )
         elif isinstance(v, dict):
             out[k] = _autofill_dict(
@@ -90,7 +88,7 @@ def auto_scale(cfg: dict) -> dict:
 
     if cfg_scale["input"]["frame"]["scale"] is None:
         if len_dist >= 2:
-            raise NotImplementedError(f"Cannot infer scale from ambigous distribution")
+            raise NotImplementedError("Cannot infer scale from ambigous distribution")
         elif "Normal" in cfg_sim["Photon"]["distribution"]:
             cfg_scale["input"]["frame"]["scale"] = [
                 # possibly change to / 10
@@ -115,7 +113,7 @@ def auto_scale(cfg: dict) -> dict:
     if cfg_scale["output"]["phot"]["max"] is None:
         if len_dist >= 2:
             raise NotImplementedError(
-                f"Cannot infer phot scale from ambigous distribution"
+                "Cannot infer phot scale from ambigous distribution"
             )
         elif "Normal" in cfg_sim["Photon"]["distribution"]:
             cfg_scale["output"]["phot"]["max"] = [
@@ -149,9 +147,9 @@ class AutoConfig:
         fill_test: bool = True,
         auto_scale: bool = True,
         auto_ch_maps: bool = True,
-        ref: Optional[dict] = None,
-        static: Sequence[Union[str, dict]] = ("Camera",),
-        return_type: Optional[Literal[dict, omegaconf.DictConfig]] = None,
+        ref: dict | None = None,
+        static: Sequence[str | dict] = ("Camera",),
+        return_type: Literal[dict, omegaconf.DictConfig] | None = None,
     ):
         """
         Automate config handling
@@ -178,7 +176,7 @@ class AutoConfig:
         self._static = static
         self._store = {}
 
-    def parse(self, cfg: dict) -> Union[dict, omegaconf.DictConfig]:
+    def parse(self, cfg: dict) -> dict | omegaconf.DictConfig:
         self._store_static(cfg)
 
         cfg = self._fill(cfg)  # if self._do_fill else cfg
@@ -190,7 +188,7 @@ class AutoConfig:
 
         return self._convert_return_type(cfg)
 
-    def _convert_return_type(self, cfg: dict) -> Union[dict, omegaconf.DictConfig]:
+    def _convert_return_type(self, cfg: dict) -> dict | omegaconf.DictConfig:
         if self._return_type is dict:
             return cfg
         import omegaconf

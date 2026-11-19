@@ -1,9 +1,9 @@
-from typing import Tuple, Union, Optional, Callable
+from collections.abc import Callable
 
 import torch
 
 
-def _specific_device_by_str(device: str) -> Tuple[str, Optional[int]]:
+def _specific_device_by_str(device: str) -> tuple[str, int | None]:
     """
     Converts torch compatible device string to device name and device index
 
@@ -39,8 +39,8 @@ def get_device_capability() -> str:
 
 def get_max_batch_size(
     fn: Callable,
-    x_size: Tuple,
-    device: Union[str, torch.device],
+    x_size: tuple,
+    device: str | torch.device,
     size_low: int,
     size_high: int,
 ) -> int:

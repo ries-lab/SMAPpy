@@ -1,11 +1,11 @@
 # here we define pydantic custom types and models
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from decode_smlm.plex.generic import validated as pydantic
 import torch
 
 from decode_smlm.plex.generic import dtype
+from decode_smlm.plex.generic import validated as pydantic
 
 
 class Tensor(torch.Tensor):
@@ -14,14 +14,14 @@ class Tensor(torch.Tensor):
         yield cls.validate
 
     @classmethod
-    def validate(cls, v: Union[torch.Tensor, Sequence]) -> torch.Tensor:
+    def validate(cls, v: torch.Tensor | Sequence) -> torch.Tensor:
         v = torch.as_tensor(v)
         return v
 
 
 class LongTensor(Tensor):
     @classmethod
-    def validate(cls, v: Union[torch.Tensor, Sequence[int]]) -> torch.Tensor:
+    def validate(cls, v: torch.Tensor | Sequence[int]) -> torch.Tensor:
         v = super().validate(v)
         v_long = torch.as_tensor(v, dtype=torch.long)
 

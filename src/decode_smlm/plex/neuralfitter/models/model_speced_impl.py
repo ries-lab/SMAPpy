@@ -1,10 +1,10 @@
-from typing import Callable, Sequence, Union, Optional
+from collections.abc import Callable, Sequence
 
 import torch
 from torch import nn
 
-from . import model_param
 from .. import spec
+from . import model_param
 
 
 class SigmaMUNet(model_param.DoubleMUnet):
@@ -26,9 +26,9 @@ class SigmaMUNet(model_param.DoubleMUnet):
         norm_head_groups=None,
         pool_mode="StrideConv",
         upsample_mode="bilinear",
-        skip_gn_level: Union[None, bool] = None,
+        skip_gn_level: None | bool = None,
         activation=nn.ReLU(),
-        activation_last: Optional[dict[Union[str, Callable], list[int]]] = None,
+        activation_last: dict[str | Callable, list[int]] | None = None,
         disabled_attributes=None,
         kaiming_normal=True,
     ):
@@ -139,7 +139,7 @@ class SigmaMUNet(model_param.DoubleMUnet):
 
         # disabled attributes get set to constants
         if self.disabled_attr_ix is not None:
-            raise NotImplementedError(f"This needs to be adapted to multi-code model.")
+            raise NotImplementedError("This needs to be adapted to multi-code model.")
             for ix in self.disabled_attr_ix:
                 # Set means to 0
                 x[:, 1 + ix] = x[:, 1 + ix] * 0

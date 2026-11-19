@@ -1,5 +1,6 @@
 import functools
-from typing import Any, Optional, Union, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import torch
 
@@ -37,7 +38,7 @@ def no_op_on(attr: str):
 
 
 class To(mixin.ForwardCallAlias):
-    def __init__(self, device: Union[str, torch.device]):
+    def __init__(self, device: str | torch.device):
         """
         Moves stuff (recursively) to specified device.
         Arguments or childs need to implement `.to` method.
@@ -59,8 +60,8 @@ class To(mixin.ForwardCallAlias):
         return out if len(out) >= 2 else out[0]
 
     def kernel(
-        self, arg: Optional[Union[torch.Tensor, Sequence]]
-    ) -> Optional[Union[torch.Tensor, Sequence]]:
+        self, arg: torch.Tensor | Sequence | None
+    ) -> torch.Tensor | Sequence | None:
         if arg is None:
             return None
         if hasattr(arg, "to"):

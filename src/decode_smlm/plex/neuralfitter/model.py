@@ -1,12 +1,12 @@
-from typing import Any, Optional, Protocol, Sequence
+from typing import Any
 
 import pytorch_lightning as pl
 import torch
 
-from decode_smlm.plex.emitter import emitter, process as em_process
+from decode_smlm.plex.emitter import emitter
+from decode_smlm.plex.emitter import process as em_process
+from decode_smlm.plex.evaluation import evaluation, predict_dist
 from decode_smlm.plex.neuralfitter import logger, process
-from decode_smlm.plex.evaluation import evaluation
-from decode_smlm.plex.evaluation import predict_dist
 
 
 class Model(pl.LightningModule):
@@ -16,16 +16,16 @@ class Model(pl.LightningModule):
         proc_train: process.Processing,
         proc_val: process.Processing,
         batch_size: int,
-        optimizer: Optional[type] = None,
-        optimizer_specs: Optional[dict[str, Any]] = None,
-        lr: Optional[float] = None,
-        lr_sched: Optional[type] = None,
-        lr_sched_specs: Optional[dict[str, Any]] = None,
-        loss_train: Optional[torch.nn.Module] = None,
-        loss_val: Optional[torch.nn.Module] = None,
-        matcher: Optional[evaluation.match_emittersets.EmitterMatcher] = None,
-        evaluator: Optional[evaluation.SMLMEvaluation] = None,
-        eval_filter: Optional[em_process.EmitterProcess] = None,
+        optimizer: type | None = None,
+        optimizer_specs: dict[str, Any] | None = None,
+        lr: float | None = None,
+        lr_sched: type | None = None,
+        lr_sched_specs: dict[str, Any] | None = None,
+        loss_train: torch.nn.Module | None = None,
+        loss_val: torch.nn.Module | None = None,
+        matcher: evaluation.match_emittersets.EmitterMatcher | None = None,
+        evaluator: evaluation.SMLMEvaluation | None = None,
+        eval_filter: em_process.EmitterProcess | None = None,
         ix_tar: int = 1,
     ):
         """
@@ -66,7 +66,7 @@ class Model(pl.LightningModule):
         self._ix_tar = ix_tar
 
     @property
-    def logger(self) -> Optional[logger.TensorboardLogger]:
+    def logger(self) -> logger.TensorboardLogger | None:
         return super().logger
 
     def configure_optimizers(

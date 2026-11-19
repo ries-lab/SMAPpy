@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Union, Sequence, Optional
+from collections.abc import Sequence
 
 import torch
 
@@ -12,8 +12,8 @@ class Coupled(ABC):
     def forward(
         self,
         em: emitter.EmitterSet,
-        frame: Union[torch.Tensor, Sequence[torch.Tensor]],
-        bg: Union[torch.Tensor, Sequence[torch.Tensor]],
+        frame: torch.Tensor | Sequence[torch.Tensor],
+        bg: torch.Tensor | Sequence[torch.Tensor],
         aux: [torch.Tensor, Sequence[torch.Tensor]],
     ):
         raise NotImplementedError
@@ -22,7 +22,7 @@ class Coupled(ABC):
 class CoupledCrop(Coupled):
     def __init__(
         self,
-        roi: Optional[Union[roi.ROI, roi.ROISampler]] = None,
+        roi: roi.ROI | roi.ROISampler | None = None,
     ):
         """
         Crops frames and emitters to a given ROI.
@@ -35,10 +35,10 @@ class CoupledCrop(Coupled):
 
     def forward(
         self,
-        em: Optional[emitter.EmitterSet],
-        frame: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]],
-        bg: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]],
-        aux: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]],
+        em: emitter.EmitterSet | None,
+        frame: torch.Tensor | Sequence[torch.Tensor] | None,
+        bg: torch.Tensor | Sequence[torch.Tensor] | None,
+        aux: torch.Tensor | Sequence[torch.Tensor] | None,
     ):
         if self._roi is None:
             return em, frame, bg, aux

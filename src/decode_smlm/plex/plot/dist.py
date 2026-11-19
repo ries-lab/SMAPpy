@@ -1,16 +1,15 @@
 # some default plotting for deviations
+
 import matplotlib.pyplot as plt
 import scipy.stats
 import seaborn as sns
 import torch
 
-from typing import Optional
-
 
 def deviation(
     diff: torch.Tensor,
     stat="density",
-    fit: Optional[str] = "norm",
+    fit: str | None = "norm",
     kde=False,
     ax=None,
     alpha_hist: float = 0.4,

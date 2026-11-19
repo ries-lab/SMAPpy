@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import runtime_checkable, Protocol, Optional, Sequence
+from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
 
 import torch
 
@@ -66,7 +67,7 @@ class ModelChannelMapGMM(_ModelChannelMapInferredAttr, ModelChannelMap):
         n_codes: int,
         n_channels: int,
         n_phot: int,
-        ch_map_out: Optional[Sequence[int]] = None,
+        ch_map_out: Sequence[int] | None = None,
     ):
         """
         Helper to map model output of gaussian mixture model to semantic channels.

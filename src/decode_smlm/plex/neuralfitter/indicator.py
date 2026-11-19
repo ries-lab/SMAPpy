@@ -1,5 +1,5 @@
-from typing import Optional, Sequence, Union
 import functools
+from collections.abc import Sequence
 
 import torch
 
@@ -14,8 +14,8 @@ class IndicatorChannelOffset:
         xextent: tuple[float, float],
         yextent: tuple[float, float],
         img_shape: tuple[int, int],
-        xy_trafo: Optional[trafo.XYZTransformation],
-        device: Union[str, torch.device] = "cpu",
+        xy_trafo: trafo.XYZTransformation | None,
+        device: str | torch.device = "cpu",
     ):
         """
         Compute offset of pixel centers for each channel.
@@ -44,7 +44,7 @@ class IndicatorChannelOffset:
 
     @functools.lru_cache(maxsize=128)
     def forward(
-        self, xy_trafo: Optional[trafo.XYZTransformation] = None
+        self, xy_trafo: trafo.XYZTransformation | None = None
     ) -> Sequence[torch.Tensor]:
         """
 

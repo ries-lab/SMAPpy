@@ -1,12 +1,13 @@
-from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Optional, Sequence, Union
-
 import math
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import torch
 from pytorch_lightning import loggers
 from pytorch_lightning.utilities import rank_zero_only
+
 from decode_smlm.plex.generic.logging import get_logger
 
 try:
@@ -15,9 +16,8 @@ except ImportError:
     wandb = None
 
 from .. import emitter
-from ..plot import plot
 from ..evaluation import predict_dist
-
+from ..plot import plot
 
 logger_console = get_logger(__name__)
 
@@ -38,15 +38,15 @@ def _channel_metrics(metrics: dict[str, float | Sequence[float]]) -> dict:
 class PrefixDictMixin(ABC):
     @abstractmethod
     def log_metrics(
-        self, metrics: dict[str, float], step: Optional[int] = None
+        self, metrics: dict[str, float], step: int | None = None
     ) -> None:
         ...
 
     def log_group(
         self,
         metrics: dict[str, float],
-        step: Optional[int] = None,
-        prefix: Optional[str] = None,
+        step: int | None = None,
+        prefix: str | None = None,
     ) -> None:
         """
 
@@ -68,10 +68,10 @@ class LogTensorMixin(ABC):
 
     def log_tensor(
         self,
-        t: Union[torch.Tensor, Sequence[torch.Tensor]],
+        t: torch.Tensor | Sequence[torch.Tensor],
         name: str,
-        step: Optional[int] = None,
-        unbind: Optional[int] = None,
+        step: int | None = None,
+        unbind: int | None = None,
         colormap: str = "gray",
         colorbar: bool = True,
     ):
@@ -93,7 +93,7 @@ class Logger(PrefixDictMixin, loggers.logger.Logger, ABC):
         self,
         name: str,
         figure: plt.figure,
-        step: Optional[int] = None,
+        step: int | None = None,
         close: bool = True,
     ) -> None:
         """
@@ -110,10 +110,10 @@ class Logger(PrefixDictMixin, loggers.logger.Logger, ABC):
     def log_emitter(
         self,
         name: str,
-        em: Optional[emitter.EmitterSet] = None,
-        em_tar: Optional[emitter.EmitterSet] = None,
-        frame: Optional[torch.Tensor] = None,
-        step: Optional[int] = None,
+        em: emitter.EmitterSet | None = None,
+        em_tar: emitter.EmitterSet | None = None,
+        frame: torch.Tensor | None = None,
+        step: int | None = None,
     ):
         plot.PlotFrameCoord(
             frame=frame.cpu(),
@@ -129,7 +129,7 @@ class Logger(PrefixDictMixin, loggers.logger.Logger, ABC):
         x_ref: torch.Tensor,
         xlabel: str = "reference",
         ylabel: str = "prediction",
-        step: Optional[int] = None,
+        step: int | None = None,
     ):
         f, ax = plt.subplots()
         predict_dist.deviation_dist(
@@ -170,7 +170,7 @@ class TensorboardLogger(loggers.TensorBoardLogger, LogTensorMixin, Logger):
         self,
         name: str,
         figure: plt.figure,
-        step: Optional[int] = None,
+        step: int | None = None,
         close: bool = True,
     ) -> None:
         self.experiment.add_figure(
@@ -178,11 +178,11 @@ class TensorboardLogger(loggers.TensorBoardLogger, LogTensorMixin, Logger):
         )
 
     @rank_zero_only
-    def log_hist(self, name: str, vals: torch.Tensor, step: Optional[int] = None):
+    def log_hist(self, name: str, vals: torch.Tensor, step: int | None = None):
         self.experiment.add_histogram(tag=name, values=vals, global_step=step)
 
     def log_metrics(
-        self, metrics: dict[str, float | Sequence[float]], step: Optional[int] = None
+        self, metrics: dict[str, float | Sequence[float]], step: int | None = None
     ) -> None:
         metrics = _channel_metrics(metrics)
         if self.drop_nan:
@@ -198,7 +198,7 @@ class WandbLogger(loggers.WandbLogger, LogTensorMixin, Logger):
         self,
         name: str,
         figure: plt.figure,
-        step: Optional[int] = None,
+        step: int | None = None,
         close: bool = True,
     ) -> None:
         # we don't need to catch optional deps `wandb` as lightning does that already
@@ -207,5 +207,5 @@ class WandbLogger(loggers.WandbLogger, LogTensorMixin, Logger):
         plt.close(figure) if close else None
 
     @rank_zero_only
-    def log_hist(self, name: str, vals: torch.Tensor, step: Optional[int] = None):
+    def log_hist(self, name: str, vals: torch.Tensor, step: int | None = None):
         logger_console.warning("WandbLogger has not yet implemented histograms.")

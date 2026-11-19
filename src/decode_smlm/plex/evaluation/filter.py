@@ -1,7 +1,6 @@
-from typing import Sequence
+from collections.abc import Sequence
 
-from decode_smlm.plex.emitter import emitter
-from decode_smlm.plex.emitter import process
+from decode_smlm.plex.emitter import emitter, process
 
 
 class MatchedFilter:

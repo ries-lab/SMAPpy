@@ -1,15 +1,12 @@
 from abc import ABC, abstractmethod  # abstract class
-from typing import Optional, Union
 
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 
-import decode_smlm.plex.neuralfitter.scaling.base
 from ...emitter import emitter
+from .. import coord_transform, scaling, spec
 from . import to_emitter
-from .. import spec
-from .. import scaling
-from .. import coord_transform
 
 
 class PostProcessing(ABC):
@@ -44,10 +41,10 @@ class PostProcessing(ABC):
 class PostProcessingGaussianMixture(PostProcessing):
     def __init__(
         self,
-        scaler: Optional[scaling.base.ScalerModelChannel] = None,
-        coord_convert: Optional[coord_transform.Offset2Coordinate] = None,
-        frame_to_emitter: Optional[to_emitter.ToEmitter] = None,
-        ch_map: Optional[spec.ModelChannelMap] = None,
+        scaler: scaling.base.ScalerModelChannel | None = None,
+        coord_convert: coord_transform.Offset2Coordinate | None = None,
+        frame_to_emitter: to_emitter.ToEmitter | None = None,
+        ch_map: spec.ModelChannelMap | None = None,
     ):
         """
 
@@ -63,7 +60,7 @@ class PostProcessingGaussianMixture(PostProcessing):
         self._frame2em = frame_to_emitter
         self._ch_map = ch_map
 
-    def forward(self, x: torch.Tensor) -> Union[emitter.EmitterSet, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> emitter.EmitterSet | torch.Tensor:
         """
         Applies post-processing pipeline
 

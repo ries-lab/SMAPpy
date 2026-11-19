@@ -1,8 +1,7 @@
 """Provides means to handle test assets, i.e. check if file exists and loads."""
 
-from pathlib import Path
-from typing import Optional, Union
 from functools import wraps
+from pathlib import Path
 
 import click
 import yaml
@@ -15,7 +14,7 @@ class AssetHandler:
     _path_asset_list = _path_repo / "test/assets/asset_list.yaml"
     _path_save_default = _path_repo / "test/assets"
 
-    def __init__(self, assets: Optional[dict] = None):
+    def __init__(self, assets: dict | None = None):
         if assets is not None:
             self._assets = assets
         else:
@@ -32,7 +31,7 @@ class AssetHandler:
         return path
 
 
-def load_asset(name, path: Optional[Path] = None) -> Path:
+def load_asset(name, path: Path | None = None) -> Path:
     """
     Load an asset by name.
 
@@ -46,7 +45,7 @@ def load_asset(name, path: Optional[Path] = None) -> Path:
     return AssetHandler().auto_load(name=name, path=path)
 
 
-def auto_asset(name, path: Optional[Path] = None, return_path: bool = True):
+def auto_asset(name, path: Path | None = None, return_path: bool = True):
     """
     Decorator to automatically retrieve asset and insert path into decorated functions
     signature (default).

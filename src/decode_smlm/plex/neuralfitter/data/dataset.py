@@ -1,17 +1,18 @@
-from typing import Any, Optional, Sequence, Union
+from collections.abc import Sequence
+from typing import Any
 
 import torch
-from decode_smlm.plex.generic.deprecation import deprecated
 
 from decode_smlm.plex.emitter import emitter
-from decode_smlm.plex.generic import delay, protocols, indexing
+from decode_smlm.plex.generic import delay, indexing, protocols
+from decode_smlm.plex.generic.deprecation import deprecated
 from decode_smlm.plex.neuralfitter import process
 
 
 class IxShifter:
     _pad_modes = (None, "same")
 
-    def __init__(self, mode: str, window: int, n: Optional[int] = None):
+    def __init__(self, mode: str, window: int, n: int | None = None):
         """
         Shift index to allow for windowing without repeating samples
         Args:
@@ -69,7 +70,7 @@ class DatasetGenericInputTar(torch.utils.data.Dataset):
         self,
         x: protocols.TypedSequence,
         y: protocols.TypedSequence,
-        em: Optional[emitter.EmitterSet] = None,
+        em: emitter.EmitterSet | None = None,
     ):
         """
         Generic dataset consisting of input and target and optional EmitterSet.
@@ -97,10 +98,10 @@ class DatasetGenericInputTar(torch.utils.data.Dataset):
 class InferenceDataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        frames: Union[torch.Tensor, Sequence[torch.Tensor]],
-        aux: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
+        frames: torch.Tensor | Sequence[torch.Tensor],
+        aux: torch.Tensor | Sequence[torch.Tensor] | None = None,
         window: int = 1,
-        proc: Optional[process.Processing] = None,
+        proc: process.Processing | None = None,
     ):
         """
         Dataset for inference.

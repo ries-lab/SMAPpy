@@ -1,13 +1,13 @@
-from decode_smlm.plex.generic.deprecation import deprecated
 from pathlib import Path
-from typing import Union, Optional
 
 import torch
+
+from decode_smlm.plex.generic.deprecation import deprecated
 
 
 @deprecated(reason="Using pytorch_lightning.callbacks.ModelCheckpoint instead.")
 class CheckPoint:
-    def __init__(self, path: Union[str, Path]):
+    def __init__(self, path: str | Path):
         """
         Checkpointing intended to resume to an already started training.
         Warning:
@@ -54,7 +54,7 @@ class CheckPoint:
         torch.save(self.dict, self.path)
 
     @classmethod
-    def load(cls, path: Union[str, Path], path_out: Optional[Union[str, Path]] = None):
+    def load(cls, path: str | Path, path_out: str | Path | None = None):
         ckpt_dict = torch.load(path)
 
         if path_out is None:

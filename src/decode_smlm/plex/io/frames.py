@@ -1,12 +1,13 @@
 import collections
 import re
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Callable, Union, Optional, Any
+from typing import Any, Union
 
 import tifffile
 import torch
+
 from decode_smlm.plex.generic.deprecation import deprecated
 
 from ..generic import slicing, tensor
@@ -50,7 +51,7 @@ def load_tif(
         frames = TiffTensor(path, auto_ome=auto_ome)
     else:
         if not auto_ome:
-            raise ValueError(f"Auto OME is always on when not using memmap.")
+            raise ValueError("Auto OME is always on when not using memmap.")
         im = tifffile.imread(path)
         frames = torch.from_numpy(im.astype(dtype_inter)).type(dtype)
 
@@ -130,7 +131,7 @@ class TiffTensor(
     def __len__(self) -> int:
         return len(self._data)
 
-    def size(self, dim: Optional[int] = None) -> torch.Size:
+    def size(self, dim: int | None = None) -> torch.Size:
         return self._data.size()
 
 
@@ -139,7 +140,7 @@ class TiffFilesTensor(
 ):
     def __init__(
         self,
-        container: Union[tifffile.TiffFile, Sequence[tifffile.TiffFile]],
+        container: tifffile.TiffFile | Sequence[tifffile.TiffFile],
         dtype_inter: str = "int32",
         dtype: torch.dtype = torch.float32,
     ):

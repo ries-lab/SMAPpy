@@ -1,5 +1,5 @@
 import copy
-from typing import Iterable
+from collections.abc import Iterable
 
 import yaml
 
@@ -99,7 +99,7 @@ def pip(run_deps, dev_deps, doc_deps, pip, level):
 
 
 def parse_dependency(path) -> dict:
-    with open(path, "r") as stream:
+    with open(path) as stream:
         data = yaml.safe_load(stream)
 
     for k, v in data["pip"].items():

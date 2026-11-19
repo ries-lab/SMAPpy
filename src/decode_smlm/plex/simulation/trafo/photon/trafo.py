@@ -1,7 +1,6 @@
 import copy
 from abc import abstractmethod
-from typing import Literal
-from typing import Protocol, Optional, Union
+from typing import Literal, Protocol
 
 import torch
 
@@ -19,8 +18,8 @@ class MultiChoricSplitter(ChoricTransformation):
     def __init__(
         self,
         t: torch.Tensor,
-        t_sig: Optional[torch.Tensor] = None,
-        ix_low: Optional[int] = 0,
+        t_sig: torch.Tensor | None = None,
+        ix_low: int | None = 0,
         channel: Literal["first", "last"] = "last",
         _optional_expand: bool = True,
     ):
@@ -46,7 +45,7 @@ class MultiChoricSplitter(ChoricTransformation):
     def device(self) -> torch.device:
         return self._t.device
 
-    def to(self, device: Union[str, torch.device]) -> "MultiChoricSplitter":
+    def to(self, device: str | torch.device) -> "MultiChoricSplitter":
         return MultiChoricSplitter(
             t=self._t.to(device),
             t_sig=self._t_sig.to(device) if self._t_sig is not None else None,
@@ -54,7 +53,7 @@ class MultiChoricSplitter(ChoricTransformation):
         )
 
     def forward(
-        self, phot: torch.Tensor, color: Optional[torch.LongTensor]
+        self, phot: torch.Tensor, color: torch.LongTensor | None
     ) -> torch.Tensor:
         if color is not None:
             color = color - self._ix_low

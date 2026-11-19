@@ -1,14 +1,14 @@
-from typing import Callable, Optional, Union, Sequence
+from collections.abc import Callable, Sequence
+from typing import Optional
 
 import torch
 
-from ...generic import delay
-from ...generic import indexing
+from ...generic import delay, indexing
 
 
 def bg_samples(
     bg: torch.Tensor | Sequence[torch.Tensor],
-) -> Union[torch.Tensor, delay._DelayedSlicer]:
+) -> torch.Tensor | delay._DelayedSlicer:
     """
     Get bg samples. Expects bg to tensor or sequence of tensors
     Args:
@@ -26,7 +26,7 @@ def bg_samples(
 
 
 def frame_samples(
-    frames: torch.Tensor | list[torch.Tensor], window: Optional[int] = None
+    frames: torch.Tensor | list[torch.Tensor], window: int | None = None
 ) -> indexing._WindowDelayed:
     """
     Get frame samples. Expects frames to tensor or tuple of sequence of size

@@ -1,9 +1,10 @@
-from typing import Literal, Sequence
+from collections.abc import Sequence
+from typing import Literal
 
 import torch
 
-from . import base
 from .. import spec
+from . import base
 
 
 def channeled_scaler_from_output(

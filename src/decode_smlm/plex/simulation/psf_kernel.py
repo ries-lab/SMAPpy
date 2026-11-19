@@ -1,8 +1,6 @@
-import warnings
-from abc import ABC
-from typing import Tuple, Optional, Union
-
 import math
+from abc import ABC
+
 import numpy as np
 import torch
 
@@ -12,9 +10,9 @@ except ImportError:
     zernike = None
 
 import decode_smlm.plex.generic.utils
+
+from ..generic import deploy, logging
 from ..generic import slicing as gutil
-from ..generic import deploy
-from ..generic import logging
 
 logger = logging.get_logger(__name__)
 
@@ -22,10 +20,10 @@ logger = logging.get_logger(__name__)
 class PSF(ABC):
     def __init__(
         self,
-        xextent: Tuple[float, float] = (None, None),
-        yextent: Tuple[float, float] = (None, None),
-        zextent: Tuple[float, float] = (None, None),
-        img_shape: Tuple[int, int] = (None, None),
+        xextent: tuple[float, float] = (None, None),
+        yextent: tuple[float, float] = (None, None),
+        zextent: tuple[float, float] = (None, None),
+        img_shape: tuple[int, int] = (None, None),
     ):
         """
         Abstract class to represent a point spread function.
@@ -48,9 +46,7 @@ class PSF(ABC):
         self.img_shape = img_shape
 
     def __str__(self):
-        return "PSF: \n xextent: {}\n yextent: {}\n zextent: {}\n img_shape: {}".format(
-            self.xextent, self.yextent, self.zextent, self.img_shape
-        )
+        return f"PSF: \n xextent: {self.xextent}\n yextent: {self.yextent}\n zextent: {self.zextent}\n img_shape: {self.img_shape}"
 
     def crlb(self, *args, **kwargs):
         raise NotImplementedError
@@ -59,9 +55,9 @@ class PSF(ABC):
         self,
         xyz: torch.Tensor,
         weight: torch.Tensor,
-        frame_ix: Optional[torch.Tensor] = None,
-        ix_low: Optional[int] = None,
-        ix_high: Optional[int] = None,
+        frame_ix: torch.Tensor | None = None,
+        ix_low: int | None = None,
+        ix_high: int | None = None,
     ):
         """
         Forward coordinates frame index aware through the psf model.
@@ -177,9 +173,9 @@ class PSF(ABC):
 class DeltaPSF(PSF):
     def __init__(
         self,
-        xextent: Tuple[float, float],
-        yextent: Tuple[float, float],
-        img_shape: Tuple[int, int],
+        xextent: tuple[float, float],
+        yextent: tuple[float, float],
+        img_shape: tuple[int, int],
     ):
         """
         Delta function PSF. You input a list of coordinates, this class outputs a single
@@ -253,9 +249,9 @@ class DeltaPSF(PSF):
         self,
         xyz: torch.Tensor,
         weight: torch.Tensor,
-        frame_ix: Optional[torch.Tensor] = None,
-        ix_low: Optional[int] = None,
-        ix_high: Optional[int] = None,
+        frame_ix: torch.Tensor | None = None,
+        ix_low: int | None = None,
+        ix_high: int | None = None,
     ):
         """
         Forward coordinates frame index aware through the psf model.
@@ -357,10 +353,10 @@ class _WashedDeltaPSF(PSF):
 class GaussianPSF(PSF):
     def __init__(
         self,
-        xextent: Tuple[float, float],
-        yextent: Tuple[float, float],
-        zextent: Tuple[float, float],
-        img_shape: Tuple[int, int],
+        xextent: tuple[float, float],
+        yextent: tuple[float, float],
+        zextent: tuple[float, float],
+        img_shape: tuple[int, int],
         sigma_0: float,
         peak_weight: bool = False,
     ):
@@ -470,12 +466,12 @@ class CubicSplinePSF(PSF):
 
     def __init__(
         self,
-        xextent: Tuple[float, float],
-        yextent: Tuple[float, float],
-        img_shape: Tuple[int, int],
+        xextent: tuple[float, float],
+        yextent: tuple[float, float],
+        img_shape: tuple[int, int],
         ref0: tuple,
         coeff: torch.Tensor,
-        vx_size: Tuple[int, int, int],
+        vx_size: tuple[int, int, int],
         *,
         roi_size: (None, tuple) = None,
         ref_re: (None, torch.Tensor, tuple) = None,
@@ -711,7 +707,7 @@ class CubicSplinePSF(PSF):
         self.__dict__ = state
         self._init_spline_impl()
 
-    def to(self, device: Union[str, torch.device]) -> "CubicSplinePSF":
+    def to(self, device: str | torch.device) -> "CubicSplinePSF":
         """
         Returns psf instance on specified device.
 
@@ -1124,9 +1120,9 @@ class CubicSplinePSF(PSF):
         self,
         xyz: torch.Tensor,
         weight: torch.Tensor,
-        frame_ix: Optional[torch.Tensor] = None,
-        ix_low: Optional[int] = None,
-        ix_high: Optional[int] = None,
+        frame_ix: torch.Tensor | None = None,
+        ix_low: int | None = None,
+        ix_high: int | None = None,
     ):
         """
         Forward coordinates frame index aware through the psf model.
@@ -1320,7 +1316,7 @@ class ZernikePSF(PSF):
         )
 
         [yy, xx] = np.meshgrid(krange, krange)
-        kr = np.lib.scimath.sqrt((xx**2 + yy**2))
+        kr = np.lib.scimath.sqrt(xx**2 + yy**2)
         # pupilmag = np.complex64(kr < 1)
         # cos_nimm = np.lib.scimath.sqrt(1 - (kr * self._num_aperture / self._ref_index) ** 2)
 
