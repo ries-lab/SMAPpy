@@ -1948,7 +1948,7 @@ class GaussianFit(_FitPlugin):
     # 3: nm columns only; the pixel ones (`x_pix`, ...) are no longer written
     # 4: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
     # 5: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`)
-    version = "5"
+    version = "6"
 
     def model(self, settings, camera):
         return settings.model.model()
@@ -1970,7 +1970,7 @@ class SplineFit(_FitPlugin):
     # 8: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`)
     # 9: beads taken with the other EM gain than the data: the spline mirrored in x (`matched_to_em`)
     # 10: and *focus* on auto's spots mirrored into the beads' orientation (`depth.in_beads_orientation`)
-    version = "10"
+    version = "11"
     calibration_kind = "single"
 
     def model(self, settings, camera):

@@ -33,6 +33,7 @@ import numpy as np
 from .channels import ChannelLayout, detection_lookup, local_scale, onto_reference
 from .detect import Candidates
 from .dualfit import MATCH_PIXELS, PairedROIs, _concat_pairs, _match, paired_to_localizations
+from .pipeline import SAME_MOLECULE_PIXELS, one_per_molecule  # noqa: F401  (re-exported)
 
 #: how the engine finds its molecules: on the channels' sum (4Pi), or in each channel, paired (two colours)
 DETECTION = ("sum", "pairs")
@@ -103,59 +104,6 @@ def paired_candidates(found: List[Candidates], layout: ChannelLayout,
     return (Candidates(np.concatenate(frames), np.rint(np.concatenate(xs)).astype(np.int32),
                        np.rint(np.concatenate(ys)).astype(np.int32),
                        np.concatenate(values).astype(np.float32)), matched)
-
-
-#: Two fits of one frame closer than this (pixels of channel 0) are one molecule's (`one_per_molecule`).
-SAME_MOLECULE_PIXELS = 1.0
-
-
-def one_per_molecule(x: np.ndarray, y: np.ndarray, frame: np.ndarray, peak_x: np.ndarray,
-                     peak_y: np.ndarray, distance: float = SAME_MOLECULE_PIXELS) -> np.ndarray:
-    """Which fits to keep where two of a frame ended on the same molecule: the one nearest its own box's centre.
-
-    Far from focus an astigmatic spot is a streak several pixels long, and the
-    peak finder (a strict 3 x 3 maximum of the difference of Gaussians, at
-    1.2 px) finds a maximum at each end of it -- often in both channels, the
-    ends 4 -- 5 px apart, too far for the pairing's mutual nearest neighbours
-    to join.  Each end is a candidate, both boxes hold the whole spot, and both
-    fits converge to the one molecule: on the C = 2 benchmark's isolated
-    molecules (`docs/decode/plex-plan.md` §14) 19 -- 29 % of them were fitted
-    twice, the two fits a median 15 -- 28 nm apart.  The candidates cannot be
-    told apart before the fit (two molecules 5 px apart look the same), so the
-    duplicates are dropped after it.
-
-    A single-emitter fit cannot put two molecules within a pixel of each other
-    (both fits slide to the light's centre), so two fits that close are one: of
-    the pairs within 100 nm there, 97 -- 100 % came from one simulated molecule,
-    and the rest were two molecules 400 -- 800 nm apart fitted, both, between
-    them.  The kept fit is the one nearest its own candidate -- the box that
-    holds most of the spot -- and the rule is greedy, so a chain of three
-    keeps one.
-    """
-    n = len(x)
-    keep = np.ones(n, bool)
-    if n < 2:
-        return keep
-    from scipy.spatial import cKDTree
-
-    frame = np.asarray(frame, np.int64)
-    span = float(np.nanmax(np.abs(np.r_[x, y]))) + 4 * distance + 1.0
-    points = np.c_[(frame - frame.min()) * 2 * span + np.asarray(x, float), np.asarray(y, float)]
-    finite = np.isfinite(points).all(axis=1)
-    index = np.flatnonzero(finite)
-    pairs = cKDTree(points[finite]).query_pairs(distance, output_type="ndarray")
-    if not len(pairs):
-        return keep
-    pairs = index[pairs]
-    off = np.hypot(np.asarray(x, float) - peak_x, np.asarray(y, float) - peak_y)
-    # each pair once, the better fit first; a fit already dropped drops no other
-    better = off[pairs[:, 0]] <= off[pairs[:, 1]]
-    first = np.where(better, pairs[:, 0], pairs[:, 1])
-    second = np.where(better, pairs[:, 1], pairs[:, 0])
-    for i in np.argsort(off[first], kind="stable"):
-        if keep[first[i]]:
-            keep[second[i]] = False
-    return keep
 
 
 def channel_candidates(candidates: Candidates, layout: ChannelLayout, roisize: int,

@@ -1,6 +1,6 @@
 ---
-version: "5"
-covers: [smappy.plugins.fit.in_region, smappy.plugins.fit.RegionFinder, smappy.pipeline.LocalizationEngine, smappy.detect.PeakFinder, smappy.detect.DynamicCutoff, smappy.psf.GaussianPSF, smappy.camera.to_photons, smappy.rawframes.RawFrameKeeper, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
+version: "6"
+covers: [smappy.plugins.fit.in_region, smappy.plugins.fit.RegionFinder, smappy.pipeline.LocalizationEngine, smappy.pipeline.one_per_molecule, smappy.detect.PeakFinder, smappy.detect.DynamicCutoff, smappy.psf.GaussianPSF, smappy.camera.to_photons, smappy.rawframes.RawFrameKeeper, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
 ---
 
 ## What it does
@@ -126,6 +126,12 @@ distributed around $\mu_i$ -- the **maximum likelihood** estimate.  This is
 the best that can be done with the data: it makes use of every photon, and
 weighs each pixel by how noisy it really is.
 
+Two fits of one frame that end less than a pixel apart are one molecule's,
+and only the one nearest its own candidate is kept.  Far from focus an
+astigmatic spot (*elliptical*) is a streak, and the peak finder finds a maximum
+at each of its ends; both boxes hold the whole spot and both fits slide to the
+molecule, which would otherwise be in the table twice.
+
 ```figure One fit box from the frame above: the data, the fitted model, and what is left over.  A good fit leaves only noise.
 roi = cut_rois(photons, here, 13)
 fit = GaussianPSF(sigma=1.2).fit(roi.images, iterations=50)
@@ -235,6 +241,14 @@ times $2\pi\sigma_0^2$.  Width: *start sigma*, $\sigma_0$.  During the fit
 $N \geq 1$, $b \geq 0.01$ and $0 \leq \sigma \leq$ half the box.  The position
 is not held inside the box: a fit that runs away is visible, and *max fit
 distance* rejects those that end further than that from their candidate.
+
+**One fit per molecule.**  After the fit, pairs of fits in one frame less than
+1 pixel apart are taken to be one molecule (a single-emitter fit cannot put two
+molecules that close: both slide to the light's centre).  Of each pair the fit
+nearer its candidate, `peak_x_pix` / `peak_y_pix`, is kept -- the box that
+holds most of the spot -- greedily, so a chain of three keeps one.  In focus
+this almost never happens; on simulated astigmatic movies 12 -- 20 % of
+isolated molecules 300 -- 700 nm from focus had been fitted twice.
 
 **The CRLB.**  The Fisher information is the matrix $H$ above at the fitted
 parameters; its inverse is the covariance of the best possible unbiased

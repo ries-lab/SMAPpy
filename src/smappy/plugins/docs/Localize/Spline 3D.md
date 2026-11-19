@@ -1,6 +1,6 @@
 ---
-version: "10"
-covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.io.calibration.matched_to_em, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of, smappy.calibrate.depth.in_beads_orientation]
+version: "11"
+covers: [smappy.psf.SplinePSF, smappy.pipeline.one_per_molecule, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.io.calibration.matched_to_em, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of, smappy.calibrate.depth.in_beads_orientation]
 ---
 
 ## What it does
@@ -93,8 +93,15 @@ The detection, the fit boxes and the fit itself are those of
 [Gaussian 2D](plugin:Localize/Gaussian 2D), which explains them step by step:
 the counts are converted to photons, candidates are found in a
 difference-of-Gaussians filtered image, a square fit box is cut around each, and
-the fit box is fitted by maximum likelihood with Levenberg-Marquardt.  What is
-different here is the model, and where it comes from.
+the fit box is fitted by maximum likelihood with Levenberg-Marquardt.  Fits of
+one frame that end less than a pixel apart are one molecule's, and only the one
+nearest its candidate is kept: far from focus an astigmatic spot is a streak
+whose two ends are both found as peaks, and without this a molecule there was
+fitted twice (on the simulated movies of the
+[DECODE](plugin:Localize/DECODE) benchmark, 12 -- 20 % of isolated molecules
+300 -- 700 nm from focus; the share of fits that are real molecules rose from
+0.83 to 0.99, and as many molecules were found).  What is different here is the
+model, and where it comes from.
 
 **1. The calibration.**  Beads are small and bright, so a bead's image *is*
 the PSF (the point spread function: what the microscope makes of a single
