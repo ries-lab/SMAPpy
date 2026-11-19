@@ -1,0 +1,92 @@
+Camera:
+  - name: CameraPerfect
+    specs:
+      px_size: [100., 100.]
+      sensor_size: [256, 256]
+  - name: CameraPerfect
+    specs:
+      px_size: [100., 100.]
+      sensor_size: [256, 256]
+
+Meta:
+  tag: dual_color
+  version: crlb
+
+Model:
+  aux_shared: true
+  aux_union: true
+  separate_ch: true
+  separate_win: true
+
+Optimizer:
+  lr: 0.0001
+
+Paths:
+  base: /home/shahao/projects/DECODE-Plex/
+  calibration: /home/shahao/projects/DECODE-Plex/calibration/FigS4-Pos0_231130_BeadsCal_Z_1_MMStack_Default.ome_updown_ul_normal_em_3dcal.mat
+  trafo: /home/shahao/projects/DECODE-Plex/calibration/FigS4-Pos0_231130_BeadsCal_Z_1_MMStack_Default.ome_updown_ul_normal_em_trafo.mat
+  experiment: /home/shahao/projects/DECODE-Plex/outputs/
+  logging: /home/shahao/projects/DECODE-Plex/log/
+
+Simulation:
+  bg:
+    ### experimental
+    - uniform: [ 0, 40]
+    - uniform: [ 0, 40]
+  emitter_extent:
+    x: [-0.5, 79.5]
+    y: [-0.5, 79.5]
+    z: [ -1000.0, 1000.0 ]
+  frame_extent:
+    x: [-0.5, 79.5]
+    y: [-0.5, 79.5]
+  img_size: [80, 80]
+  Photon: # new style
+    distribution:
+      Uniform:
+        # low: [1000., 1000.]
+        # high: [3000., 4000.]
+        low: [2000.]
+        high: [8000.]
+  PSF:
+    CubicSpline:
+      channels_out: [0, 0] # necesasary, otherwise crlb computation is complicated
+      flip:
+        x: [false, false]
+        y: [false, false]
+  psf_extent:
+    x: [ -0.5, 79.5 ]
+    y: [ -0.5, 79.5 ]
+  Transformation:
+    Pos:
+      model: load
+      reference: trafo_inv_raw
+      glob:
+        flip:
+          dim: 0
+          channel: 1
+          frame_size: 512
+        offset:
+          x: [0, -14]
+          y: [0, 0]
+  emitter_avg: 3
+
+# Hardware:
+#   device:
+#     simulation: cpu
+
+Target:
+  filter:
+    phot: [1000., null]
+    # pre_agg: sum
+    agg: all
+
+Trainer:
+  max_epochs: 600
+  frame_window: 1
+  batch_size: 32
+
+defaults:
+  - conf_dual
+  - override Simulation/Transformation/Photon: halfed
+  - _self_

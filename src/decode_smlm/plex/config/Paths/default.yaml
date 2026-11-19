@@ -1,0 +1,8 @@
+base:  # base dir for relative paths resolution, if not specified, cwd is used
+calibration:  ??? # psf calib
+checkpoint_init:  # initialise from checkpoint (i.e. resume training)
+checkpoint_warmstart:  # warm-start from checkpoint (i.e. initialize model weights)
+experiment: ??? # main output dir
+logging:  ??? # logging dir
+model_init:  # model weights
+trafo:  # transformation for dual channel

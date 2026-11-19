@@ -1,0 +1,5 @@
+job:
+  chdir: true
+run:
+  # composite of Paths.experiment, the tag and the datetime
+  dir: ${Paths.experiment}/${Meta.tag}/${now:%Y-%m-%d_%H-%M-%S-%f}

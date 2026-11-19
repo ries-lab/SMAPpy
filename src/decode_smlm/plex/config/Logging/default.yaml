@@ -1,0 +1,3 @@
+no_op: false
+logger: TensorBoardLogger  # specify logger or list of loggers
+

@@ -1,0 +1,11 @@
+max_epochs: 500
+schedulers:
+  learning_rate:
+    name: StepLR
+    specs:
+      step_size: 10
+      gamma: 0.9
+
+defaults:
+  - base
+  - _self_

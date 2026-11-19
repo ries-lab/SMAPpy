@@ -1,0 +1,5 @@
+# biplane split for 1 code resulting in 2 channels with equal photons
+# caution: do not re-normalize the PSF; i.e. PSF.CubicSpline.norm: null
+choric_split:
+  mean: [[1., 1.]]
+  std: null

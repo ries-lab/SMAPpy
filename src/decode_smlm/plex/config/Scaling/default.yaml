@@ -1,0 +1,15 @@
+# if some values are missing they will be auto-set as described in the respective comments below
+input:
+  frame:
+    offset: # [bg_uniform (mean)]
+    scale:  # [intensity_mu / 50]
+  aux:
+    scale:
+output:
+  phot:
+    max:  # [intensity_mu + 8 * sigma]
+  bg:
+    max:  # [1.2 * upper limit of bg val]
+  z:
+    max:  # 1.2 * upper simulation extent
+  # x, y offsets are not scaled since they typically vary from -0.5 to 0.5

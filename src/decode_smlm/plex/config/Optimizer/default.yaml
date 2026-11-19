@@ -1,0 +1,4 @@
+name: AdamW
+lr: 0.0002  # null for using lr_finder
+specs:
+  weight_decay: 0.1

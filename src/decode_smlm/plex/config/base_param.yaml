@@ -1,0 +1,92 @@
+Camera:
+  - name: CameraEMCCD
+    specs:
+      qe: 1.
+      photon_units: true
+      baseline: 398.6
+      e_per_adu: 5
+      em_gain: 100
+      read_sigma: 74.4
+      spur_noise: 0.0
+      px_size: [127, 117]
+      sensor_size: [512, 512]
+      flip:
+        gain: null
+        channel: -2
+  - name: CameraEMCCD
+    specs:
+      qe: 1.
+      photon_units: true
+      baseline: 398.6
+      e_per_adu: 5
+      em_gain: 100
+      read_sigma: 74.4
+      spur_noise: 0.0
+      px_size: [ 127, 117 ]
+      sensor_size: [ 512, 512 ]
+      flip:
+        gain: null
+        channel: -2
+
+Meta:
+  tag: experiments
+  version: 240802_NC_ER_MT_TritonX100_2percent_2
+
+Optimizer:
+  lr: 0.0001
+
+Paths:
+  base: /home/shahao/projects/DECODE_Internal/
+  calibration: /home/shahao/projects/DECODE_Internal/calibration/240802_NC_BeadCal_DualColor/FigS5-Pos0_240802_NC_BeadCal_DualColor_Z_1_MMStack_Default.ome_3dcal.mat
+  trafo: /home/shahao/projects/DECODE_Internal/calibration/240802_NC_BeadCal_DualColor/FigS5-Pos0_240802_NC_BeadCal_DualColor_Z_1_MMStack_Default.ome_trafo.mat
+  experiment: /home/shahao/projects/DECODE_Internal/outputs/
+  logging: /home/shahao/projects/DECODE_Internal/log/
+  # checkpoint_init: /home/shah/projects/DECODE_PLEX/outputs/pixilation/2025-03-26_15-42-59-insituPSF-2um/epoch=482-step=301875.ckpt
+
+Simulation:
+  bg:
+    ### experimental
+    - uniform: [ 0, 30]
+    - uniform: [ 50, 200]
+  emitter_extent:
+    z: [ -600.0, 600.0 ]
+  Photon: # new style
+    distribution:
+      Uniform:
+        low: [200, 400.]
+        high: [10000., 100000.]
+  PSF:
+    CubicSpline:
+      flip:
+        x: [false, true]
+        y: [false, false]
+  Transformation:
+    Pos:
+      model: load
+      reference: trafo_inv_raw
+      glob:
+        flip: 
+          dim: 0
+          channel: 1
+          frame_size: 512
+        offset:
+          x: [0, -5] # [0, -22]
+          y: [0, -14] # [0, 1]
+
+Test:
+  samples: 512
+
+Target:
+  filter:
+    phot: [100., null]
+    pre_agg: sum
+    agg: all
+
+Trainer:
+  max_epochs: 1000
+  frame_window: 3
+  batch_size: 16
+
+defaults:
+  - conf_dual
+  - _self_

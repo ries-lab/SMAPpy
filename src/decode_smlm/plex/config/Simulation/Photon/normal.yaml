@@ -1,0 +1,5 @@
+distribution:
+  Normal:
+    loc: ??? # mean intensity (i.e. photon flux)
+    scale: ??? # intensity spread
+

@@ -1,0 +1,12 @@
+batch_size: 64
+callbacks:
+  - LossValidation:
+      loss_max: 1e3
+      at: 10
+max_epochs: ???
+frame_window: 3
+random_seed: null  # set for reproducibility
+train_dim: 3  # 3 or 2 or 3D or 2D respectively
+gradient_clip_val: 0.03
+gradient_clip_algorithm: norm
+schedulers: ???

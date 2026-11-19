@@ -1,0 +1,6 @@
+multiprocessing:
+  sharing_strategy:
+  start_method:
+  pin_memory: true
+threads: 8
+precision: 32

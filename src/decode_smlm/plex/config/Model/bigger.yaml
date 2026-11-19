@@ -1,0 +1,8 @@
+backbone_specs:
+  depth_shared: 3
+  depth_union: 3
+  initial_features: 64
+  inter_features: 64
+
+defaults:
+  - default

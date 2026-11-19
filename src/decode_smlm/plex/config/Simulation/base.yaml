@@ -1,0 +1,41 @@
+bg:
+  - uniform:  ??? # tuple or single value
+codes: ???  # number of codes
+channels: ???  # number of channels
+density:  # either density xor emitter avg
+emitter_avg: 20  # either density xor emitter avg
+emitter_extent:
+  x: [-0.5, 39.5]
+  y: [-0.5, 39.5]
+  z: ???
+frame_extent:
+  x: [-0.5, 39.5]
+  y: [-0.5, 39.5]
+img_size: [40, 40]
+lifetime_avg: ???
+PSF:
+  format:  # None or pseudo-multi (pseudo-multi replicates the same PSF for all channels)
+  CubicSpline:
+    channels: 1
+    channels_out: 0  # index or list of indices of channels to use
+    roi_size:  # if null, take the whole range of calibration
+    roi_auto_center: false
+    norm: null
+    # if you want to specify flips, specify x/y per channel,
+    # e.g. flip: { x: [false, true], y: [false, false] }
+    flip: null
+    kwargs_static: null
+    kwargs_per_channel: null
+psf_extent:
+  x: [-0.5, 39.5]
+  y: [-0.5, 39.5]
+  z: null
+roi_size:  # if none, take the whole range of calibration
+roi_auto_center: false
+samples: 10000
+xy_unit: px
+
+defaults:
+  - Photon: normal
+  - Transformation: base
+  - _self_

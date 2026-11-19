@@ -1,0 +1,13 @@
+max_epochs: 1000
+schedulers:
+  learning_rate:
+    name: ReduceLROnPlateau
+    specs:
+      mode: min
+      factor: 0.5
+      patience: 20
+
+
+defaults:
+  - base
+  - _self_

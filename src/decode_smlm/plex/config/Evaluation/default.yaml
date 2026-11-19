@@ -1,0 +1,6 @@
+dist_ax: 500.0
+dist_lat: 250.0
+dist_vol:
+match_dims: 3
+filter:
+  prob: [0.5, null]

@@ -1,0 +1,6 @@
+cpu:
+  worker: 16
+
+defaults:
+  - default
+  - _self_

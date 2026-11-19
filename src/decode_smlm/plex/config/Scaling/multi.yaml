@@ -1,0 +1,7 @@
+input:
+  aux:
+    scale: 20
+
+defaults:
+  - default
+  - _self_

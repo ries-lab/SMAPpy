@@ -1,0 +1,33 @@
+# base for 2 cameras
+bg:
+  - uniform: ???
+  - uniform: ???
+codes: 1  # number of codes (mode: multi-channel photons)
+channels: 2  # number of channels
+emitter_avg: 40
+emitter_extent:
+  x: [-0.5, 39.5]
+  y: [-0.5, 39.5]
+  z: ???
+frame_extent:
+  x: [-0.5, 39.5]
+  y: [-0.5, 39.5]
+img_size: [40, 40]
+Photon:  # new style
+  distribution:
+    Normal:
+      loc: ???
+      scale: ???
+PSF:
+  CubicSpline:
+    channels: 2
+    channels_out: [0, 1]
+lifetime_avg: 1.0
+psf_extent:
+  x: [ -0.5, 39.5 ]
+  y: [ -0.5, 39.5 ]
+
+
+defaults:
+  - base
+  - _self_

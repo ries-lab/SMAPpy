@@ -1,0 +1,3 @@
+lightning: cuda:0
+training: cuda:0
+simulation: cuda:0

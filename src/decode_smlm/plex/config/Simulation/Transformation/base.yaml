@@ -1,0 +1,4 @@
+
+defaults:
+  - Photon: no_op
+  - Pos: no_op

@@ -1,0 +1,38 @@
+Camera: ???
+
+Meta:
+  tag:
+  version:
+
+Simulation:
+  bg:
+    - uniform: ???
+    - uniform: ???
+  emitter_extent:
+    z: ???
+  Photon: # new style
+    distribution: # Normal (loc, scale) / or Uniform (low, high)
+
+  PSF:
+    CubicSpline:
+      channels: 2
+      channels_out: [ 0, 1 ]
+      norm:
+      flip:
+        x: ???
+        y: ???
+
+  Transformation:
+    Pos:
+      model: ???
+      reference: ???
+      glob: ???
+
+Trainer:
+  frame_window: 3
+
+
+defaults:
+  - conf_dual
+  - override Simulation/Transformation/Photon: biplane
+  - _self_

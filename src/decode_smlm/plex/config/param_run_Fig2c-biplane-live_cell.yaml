@@ -1,0 +1,104 @@
+Camera:
+  - name: CameraEMCCD
+    specs:
+      qe: 1.
+      photon_units: true
+      baseline: 398.6
+      e_per_adu: 5
+      em_gain: 100
+      read_sigma: 74.4
+      spur_noise: 0.0
+      px_size: [127, 117]
+      sensor_size: [512, 512]
+      flip:
+        gain: -1
+        channel: -2
+  - name: CameraEMCCD
+    specs:
+      qe: 1.
+      photon_units: true
+      baseline: 398.6
+      e_per_adu: 5
+      em_gain: 100
+      read_sigma: 74.4
+      spur_noise: 0.0
+      px_size: [ 127, 117 ]
+      sensor_size: [ 512, 512 ]
+      flip:
+        gain: -1
+        channel: -2
+
+Meta:
+  tag: experiments
+  version: Fig2c
+
+Model:
+  separate_ch: true
+
+Optimizer:
+  lr: 0.0001
+
+Paths:
+  base: /home/shahao/projects/DECODE-Plex/
+  calibration: /home/shahao/projects/DECODE-Plex/calibration/Fig1c_2c-Pos0_240621_NC_BeadCal_BifocalPlane_Z_1_MMStack_Default.ome_3dcal.mat
+  trafo: /home/shahao/projects/DECODE-Plex/calibration/Fig1c_2c-Pos0_240621_NC_BeadCal_BifocalPlane_Z_1_MMStack_Default.ome_trafo.mat
+  experiment: /home/shahao/projects/DECODE-Plex/outputs/
+  logging: /home/shahao/projects/DECODE-Plex/log/
+Simulation:
+  bg:
+    ### experimental
+    - uniform: [ 0, 300 ]
+    - uniform: [ 0, 300 ]
+  emitter_extent:
+    z: [ -1000.0, 1000.0 ]
+  Photon: # new style
+    distribution:
+      Uniform:
+        low: [500.]
+        high: [30000.]
+  PSF:
+    CubicSpline:
+      norm:
+      flip:
+        x: [false, true]
+        y: [false, false]
+  Transformation:
+    Pos:
+      model: load
+      reference: trafo_inv_raw
+      glob:
+        flip:
+          dim: 0
+          channel: 1
+          frame_size: 512
+        offset:
+          x: [0, 47]
+          y: [0, -13]
+
+# Hardware:
+#   device:
+#     simulation: cpu
+
+Test:
+  Transformation:
+    Pos:
+      glob:
+        offset:
+          x: [0, 43] # [0, -22]
+          y: [0, -12] # [0, 1]
+
+Target:
+  filter:
+    phot: [100., null]
+    pre_agg: sum
+    agg: all
+
+Trainer:
+  frame_window: 1
+  batch_size: 64
+  max_epochs: 600
+
+
+defaults:
+  - conf_biplane
+  - _self_

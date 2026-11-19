@@ -15,3 +15,16 @@ The tests in `tests/decode_tests/` came the same way from `decode/test/`.
 
 The rest of SMAPpy is BSD 3-Clause; this package and its tests are DECODE's licence until
 its authors' relicensing says otherwise.
+
+## `decode_smlm.plex`: DECODE-Plex
+
+`plex/` is a port of [DECODE-Plex](https://github.com/ries-lab/DECODE-Plex) (Sha et al. 2026), the
+multi-channel DECODE (biplane, two colours), to train and run its networks from SMAPpy as the
+baseline for two channels (`docs/decode/plex-plan.md`).  Its modules began as verbatim copies of
+DECODE-Plex at commit `6138472576d239eb6e9e7a5477e3b6d70e9f18d2` (2026-10-20): the package
+`decode/` as `plex/`, and its Hydra configuration `config/` as `plex/config/`.  DECODE-Plex is
+Hao Sha's work in Jonas Ries's group, built on DECODE 1.0.0dev0 by Lucas-Raphael Müller, Artur
+Speiser and the DECODE contributors, and licensed under the same **GNU General Public License,
+version 3** (`LICENSE.txt`); keeping it GPL-3 here was decided by Jonas Ries (2026-11-19).  The
+first commit that adds it changes nothing; every change since is a visible diff in this
+repository's history.

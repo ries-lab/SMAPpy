@@ -1,0 +1,8 @@
+
+cpu:
+  worker: 8
+  niceness: 0  # only applicable to unix
+
+defaults:
+  - device: cuda
+  - _self_

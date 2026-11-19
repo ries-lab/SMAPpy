@@ -1,0 +1,75 @@
+Camera:
+  - name: CameraPerfect
+    specs:
+      px_size: [100., 100.]
+      sensor_size: [ 512, 512 ]
+  - name: CameraPerfect
+    specs:
+      px_size: [100., 100.]
+      sensor_size: [ 512, 512 ]
+Meta:
+  tag: Biplane
+  version: density
+
+Model:
+  separate_ch: true
+
+Optimizer:
+  lr: 0.0001
+
+Paths:
+  base: /home/shahao/projects/DECODE-Plex/
+  calibration: /home/shahao/projects/DECODE-Plex/calibration/Fig1c_2c-Pos0_240621_NC_BeadCal_BifocalPlane_Z_1_MMStack_Default.ome_3dcal.mat
+  trafo: /home/shahao/projects/DECODE-Plex/calibration/Fig1c_2c-Pos0_240621_NC_BeadCal_BifocalPlane_Z_1_MMStack_Default.ome_trafo.mat
+  experiment: /home/shahao/projects/DECODE-Plex/outputs/
+  logging: /home/shahao/projects/DECODE-Plex/log/
+Simulation:
+  bg:
+    ### experimental
+    - uniform: [ 0, 100 ]
+    - uniform: [ 0, 100 ]
+  emitter_extent:
+    z: [ -600.0, 600.0 ]
+  Photon: # new style
+    distribution:
+      Uniform:
+        low: [1000.]
+        high: [10000.]
+  PSF:
+    CubicSpline:
+      norm:
+      flip:
+        x: [false, true]
+        y: [false, false]
+  Transformation:
+    Pos:
+      model: load
+      reference: trafo_inv_raw
+      glob:
+        flip:
+          dim: 0
+          channel: 1
+          frame_size: 512
+        offset:
+          x: [0, 47]
+          y: [0, -13]
+
+# Hardware:
+#   device:
+#     simulation: cpu
+
+Target:
+  filter:
+    phot: [100., null]
+    pre_agg: sum
+    agg: all
+
+Trainer:
+  frame_window: 3
+  batch_size: 16
+  max_epochs: 1000
+
+
+defaults:
+  - conf_biplane
+  - _self_

@@ -1,0 +1,6 @@
+codes: 1  # number of codes
+channels: 1  # number of channels
+
+defaults:
+  - base
+  - _self_

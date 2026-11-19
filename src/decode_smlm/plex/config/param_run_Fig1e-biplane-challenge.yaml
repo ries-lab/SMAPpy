@@ -1,0 +1,61 @@
+Meta:
+  tag: Biplane
+  version: density
+
+Model:
+  separate_ch: true
+
+Optimizer:
+  lr: 0.0001
+
+Paths:
+  base: /home/shahao/projects/DECODE-Plex/
+  calibration: /home/shahao/projects/DECODE-Plex/calibration/Fig1e-sequence-Beads-BP-Exp-as-stack_3dcal_v7.mat
+  trafo: null
+  experiment: /home/shahao/projects/DECODE-Plex/outputs/
+  logging: /home/shahao/projects/DECODE-Plex/log/
+Simulation:
+  bg:
+    ### experimental
+    - uniform: [10.]
+    - uniform: [10.]
+  emitter_extent:
+    z: [ -600.0, 600.0 ]
+  Photon: # new style
+    distribution:
+      Normal:
+        loc: [500.]
+        scale: [150.]
+  lifetime_avg: 2.
+  PSF:
+    CubicSpline:
+      norm: [1., 1.]
+      flip:
+        x: [false, false]
+        y: [false, false]
+  Transformation:
+    Pos:
+      model: load
+      reference: trafo_inv_raw
+      glob:
+        flip:
+        offset:
+          x: [0, 0]
+          y: [0, 0]
+
+Target:
+  filter:
+    phot: [100., null]
+    pre_agg: sum
+    agg: all
+
+Trainer:
+  frame_window: 3
+  batch_size: 16
+  max_epochs: 600
+
+
+defaults:
+  - Camera: challenge
+  - conf_biplane
+  - _self_

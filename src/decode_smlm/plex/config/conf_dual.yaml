@@ -1,0 +1,44 @@
+# defaults are defined in the respective config/ folders
+# m3 camera
+Camera: ???
+
+Meta:
+  tag: decode  # tag your experiment here
+  version:
+
+Model:
+  backbone: SigmaMUNetv2
+  aux_shared: true
+  aux_union: true
+  separate_ch: true  # currently false seems to be better
+
+Simulation:
+  bg:
+    - uniform: ???
+    - uniform: ???
+  channels: 2
+  emitter_extent:
+    z: ???
+  Photon: # new style
+    distribution: # Normal (loc, scale) / or Uniform (low, high)
+
+  PSF:
+    CubicSpline:
+      channels: 2
+      norm: auto
+
+
+defaults:
+  - conf
+  - override Hardware: default_dual
+  - override Model: bigger
+  - override Optimizer: default_multi
+  - override Scaling: multi
+  - override Simulation: base_multi
+  - override Target: multi
+  - override Trainer: dual
+  - override hydra/hydra_logging: disabled # disable outputs of hydra
+  - override hydra/job_logging: disabled # disable outputs of hydra
+  - override Simulation/Transformation/Photon: no_op
+  - override Simulation/Transformation/Pos: loaded
+  - _self_

@@ -1,0 +1,3 @@
+choric_split: # for multi-colour / multi-channel
+  mean: [[0.5, 0.5]]  # this will fail > 1 colour, != 2 channels
+  std: null

@@ -1,0 +1,28 @@
+- name: CameraEMCCD
+  specs:
+    qe: 0.9
+    photon_units: true
+    baseline: 100
+    e_per_adu: 45
+    em_gain: 300
+    read_sigma: 74.4
+    spur_noise: 0.002
+    px_size: [100, 100]
+    sensor_size: [512, 512]
+    flip:
+      gain:
+      channel:
+- name: CameraEMCCD
+  specs:
+    qe: 0.9
+    photon_units: true
+    baseline: 100
+    e_per_adu: 45
+    em_gain: 300
+    read_sigma: 74.4
+    spur_noise: 0.002
+    px_size: [100, 100]
+    sensor_size: [512, 512]
+    flip:
+      gain:
+      channel:

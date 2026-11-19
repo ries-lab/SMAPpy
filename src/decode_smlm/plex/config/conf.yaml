@@ -1,0 +1,39 @@
+Camera: ???  # specify camera
+
+Meta:
+  tag: decode  # tag your experiment here
+  version:
+
+Simulation:
+  bg:
+    - uniform: ???  # tuple or single value
+  codes: 1
+  channels: 1
+  emitter_extent:
+    z: ???  # [min, max] in nm
+  lifetime_avg: ???
+
+
+
+# defaults are defined in the respective config/ folders
+defaults:
+  - Computing: default
+  - Context: default
+  - Evaluation: default
+  - Hardware: default
+  - hydra: default
+  - Logging: default
+  - Loss: default
+  - Meta: default
+  - Model: default
+  - Optimizer: default
+  - Paths: default
+  - Processing: default
+  - Scaling: default
+  - Simulation: base_single
+  - Trainer: default
+  - Target: single
+  - Test: default
+  - override hydra/hydra_logging: disabled # disable outputs of hydra
+  - override hydra/job_logging: disabled # disable outputs of hydra
+  - _self_

@@ -1,0 +1,17 @@
+model: load  # None or 'load'
+# reference determined by main channel. if u/l in SMAP --> trafo_inv_raw; if d/r in SMAP --> trafo_raw
+reference: trafo_inv_raw
+glob:   # global additions to transformation, i.e. to minimize shift
+  flip:
+    dim: 0  # index to flip, or null
+    channel: 1  # which camera / channel to flip
+    frame_size: 512  # referenced frame size for mirroring, likely same as camera sensor size
+  offset:  # per channel
+    x: [0, 0]
+    y: [0, 0]
+    z: [0, 0]
+sampled:
+  offset:  # null / `auto` (to sample whole sensor) or list of values
+    x: auto
+    y: auto
+    z: null

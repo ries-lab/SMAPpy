@@ -1,0 +1,106 @@
+Camera:
+  - name: CameraEMCCD
+    specs:
+      qe: 1.
+      photon_units: true
+      baseline: 0.0
+      e_per_adu: 1.0
+      em_gain: 
+      read_sigma: 0.0
+      spur_noise: 0.0
+      px_size: [127, 117]
+      sensor_size: [512, 512]
+      flip:
+        gain: -1
+        channel: -2
+  - name: CameraEMCCD
+    specs:
+      qe: 1.
+      photon_units: true
+      baseline: 0.0
+      e_per_adu: 1.0
+      em_gain: 
+      read_sigma: 0.0
+      spur_noise: 0.0
+      px_size: [ 127, 117 ]
+      sensor_size: [ 512, 512 ]
+      flip:
+        gain: -1
+        channel: -2
+
+Meta:
+  tag: dual_color
+  version: density
+
+Model:
+  separate_ch: true
+
+Optimizer:
+  lr: 0.0001
+
+Paths:
+  base: /home/shahao/projects/DECODE-Plex/
+  calibration: /home/shahao/projects/DECODE-Plex/calibration/FigS5-Pos0_240802_NC_BeadCal_DualColor_Z_1_MMStack_Default.ome_3dcal.mat
+  trafo: /home/shahao/projects/DECODE-Plex/calibration/FigS5-Pos0_240802_NC_BeadCal_DualColor_Z_1_MMStack_Default.ome_trafo.mat
+  experiment: /home/shahao/projects/DECODE-Plex/outputs/
+  logging: /home/shahao/projects/DECODE-Plex/log/
+  # checkpoint_warmstart: /home/shahao/projects/DECODE_Internal/outputs/warm_start/2026-04-06_10-12-231120-cold_start/epoch=999-step=313000.ckpt
+
+Simulation:
+  bg:
+    ### experimental
+    - uniform: [ 18, 22]
+    - uniform: [ 120, 150]
+  emitter_extent:
+    z: [ -600.0, 600.0 ]
+  Photon: # new style
+    distribution:
+      Uniform:
+        low: [100., 100.]
+        high: [10000., 10000.]
+  PSF:
+    CubicSpline:
+      flip:
+        x: [false, true]
+        y: [false, false]
+  Transformation:
+    Pos:
+      model: load
+      reference: trafo_inv_raw
+      glob:
+        flip:
+          dim: 0
+          channel: 1
+          frame_size: 512
+        offset:
+          x: [0,-2]
+          y: [0, -23]
+
+Test:
+  samples: 512
+
+Target:
+  filter:
+    phot: [50., null]
+    pre_agg: sum
+    agg: all
+
+# Hardware:
+#   device:
+#     simulation: cpu
+
+Trainer:
+  max_epochs: 1000
+  frame_window: 3
+  batch_size: 32
+  schedulers:
+    learning_rate:
+      name: ReduceLROnPlateau
+      specs:
+        mode: min
+        factor: 0.5
+        patience: 3
+
+defaults:
+  - conf_dual
+  - _self_

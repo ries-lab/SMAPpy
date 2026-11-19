@@ -1,0 +1,8 @@
+filter:
+  phot: [100., null]  # min, max
+  agg: any  # irrelevant for single channel
+
+
+defaults:
+  - base
+  - _self_

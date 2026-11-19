@@ -1,0 +1,6 @@
+input:
+coupled:
+output:
+post:
+  SpatialIntegration:  # or LookUp
+    raw_th: 0.1

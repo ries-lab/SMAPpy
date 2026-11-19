@@ -1,0 +1,14 @@
+- name: CameraEMCCD
+  specs:
+    baseline:
+    photon_units: true
+    e_per_adu:
+    em_gain:
+    qe: 1.0
+    read_sigma:
+    spur_noise:
+    px_size:
+    sensor_size:   # max. sensor size in pixels
+    flip: # these fields are only considered during fitting per the inference routine
+      gain:
+      channel:

@@ -1,0 +1,4 @@
+distribution:
+  Uniform:
+    low: ???  # lower end of photon flux
+    high: ???  # upper end of photon flux

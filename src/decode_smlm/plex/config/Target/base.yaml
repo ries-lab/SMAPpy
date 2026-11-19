@@ -1,0 +1,2 @@
+max_emitters: 250
+filter: ???  # filter e.g. min photon count

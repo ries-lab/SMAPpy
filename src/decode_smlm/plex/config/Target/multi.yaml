@@ -1,0 +1,9 @@
+filter: null  # no filter, for the moment
+  ## multi-channel filter
+  #phot: [[0., 100.]., null]  # --> [[min_0, min_1], max]
+  #agg: all
+
+
+defaults:
+  - base
+  - _self_
