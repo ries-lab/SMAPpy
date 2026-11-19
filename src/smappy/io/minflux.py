@@ -60,7 +60,11 @@ record is unnested into its iterations.
 **Threads**: a measurement may run several sequences, interleaved, one per
 thread (two colours, usually); each row says which in ``thi``.  Every
 thread's sequence is kept (`sequences`), and each row's precision takes its
-own thread's pattern size and laser.
+own thread's pattern size and laser.  The colour is the laser, not the
+thread, whose order is not fixed: the `.msr` reader writes ``channel``, the
+laser's place among the file's lasers, longest first (`colours`,
+`channel_of_threads`); the threads that only measure MBM beads
+(`mbm_threads`) are not colours of the localizations.
 
 The records give no precision, so ``xy_err_nm`` is the Cramér-Rao bound at
 the centre of the beam pattern -- a number from the photons, as a camera
@@ -670,6 +674,59 @@ def excitation_nm(attrs: dict, thread: int = 0) -> Optional[float]:
         if "excit" in said or "minflux" in said:
             return nm
     return with_nm[0][1] if with_nm else None
+
+
+def mbm_threads(attrs: dict) -> set:
+    """The threads that measure MBM beads (``measurement.grids``' ``mbm``
+    grids, their controlling and watching thread): a two-colour measurement
+    has one per colour, beside the threads that localize."""
+    try:
+        grids = attrs["measurement"].get("grids") or {}
+    except (KeyError, TypeError, AttributeError):
+        return set()
+    out = set()
+    for g in grids.values() if isinstance(grids, dict) else ():
+        if isinstance(g, dict) and g.get("type") == "mbm":
+            out |= {int(g[k]) for k in ("controlling_thi", "watching_thi")
+                    if isinstance(g.get(k), (int, float))}
+    return out
+
+
+def colours(attrs_list) -> List[float]:
+    """The MINFLUX lasers (nm) the localizing threads of these measurements
+    use, longest first: a localization's ``channel`` is its laser's place in
+    this list (`channel_of_threads`).  Ranked over all the measurements read
+    from one file, so a bead measurement and a tracking measurement whose
+    threads run in the opposite order -- seen: 560 first in one, 638 in the
+    other -- name each colour alike."""
+    found = set()
+    for attrs in attrs_list:
+        try:
+            n = len(attrs["measurement"]["threads"])
+        except (KeyError, TypeError):
+            continue
+        skip = mbm_threads(attrs)
+        for i in range(n):
+            nm = excitation_nm(attrs, i)
+            if i not in skip and nm is not None:
+                found.add(round(float(nm), 1))
+    return sorted(found, reverse=True)
+
+
+def channel_of_threads(attrs: dict, order: List[float]) -> Dict[int, int]:
+    """Each thread's ``channel``: its MINFLUX laser's place in ``order``
+    (`colours`); threads whose laser is not known or not listed are left
+    out."""
+    try:
+        n = len(attrs["measurement"]["threads"])
+    except (KeyError, TypeError):
+        return {}
+    out = {}
+    for i in range(n):
+        nm = excitation_nm(attrs, i)
+        if nm is not None and round(float(nm), 1) in order:
+            out[i] = order.index(round(float(nm), 1))
+    return out
 
 
 def instrument(attrs: dict, thread: int = 0) -> Dict[str, Any]:

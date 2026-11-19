@@ -28,6 +28,16 @@ corrected with it.  The plugin reads the localizations of each file in the
 [selection](plugin:Panels/Glossary), whatever the layer shows, and corrects
 the whole of each file.
 
+**Two colours.**  A two-colour measurement can measure its beads in both
+colours (File > Open lists each bead once per colour, `R0@638` and
+`R0@560`).  The plugin takes every bead in every colour as a track of its
+own, each with its own offset, and fits one curve to them all, which it
+applies to both colours alike.  So the beads' colour biases -- tens of
+nanometres, and different for every bead in the file looked at -- never
+enter the correction, and the offset between the two colours is the same
+after it as before: drift correction moves the sample, and leaves aligning
+the colours to the colour alignment.
+
 Some files keep the beads only from before the measurement starts.  There
 is then no track to correct with: the curve is flat after the beads' last
 point, and the plugin warns that the beads cover only part of the

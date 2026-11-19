@@ -26,6 +26,13 @@ second; the choices made by hand (*by hand*) are kept by these names.
 
 **Imspector's choice** is where the automatic one starts, by default: a bead
 Imspector did not use stays out unless ticked in.
+
+**Two colours.**  A measurement with a grid per colour gives each bead
+twice, ``R0@638`` and ``R0@560`` (`bead_name`), a track each with its own
+offset, and one curve is fitted to all of them and applied to both colours:
+the beads' colour biases (tens of nm, different per bead, in the file
+looked at) stay out of it, and the overlay of the colours is left as it
+was -- aligning the colours is a registration's job, not drift's.
 """
 from __future__ import annotations
 
@@ -110,6 +117,13 @@ def measurements_of(metadata: Dict, locs: Optional[Localizations] = None,
     return out
 
 
+def bead_name(b: Dict) -> str:
+    """A bead's name in its measurement, as `io.msr.bead_table` lists it:
+    Imspector's (R0), with its colour where a measurement has a grid per
+    colour (R0@638) -- the same bead seen in two colours is two tracks."""
+    return str(b.get("bead") or b["name"] or b["gri"])
+
+
 def _axes(m: Measurement, use_z: Optional[bool]) -> Tuple[str, ...]:
     has_z = "z_nm" in m.beads
     if use_z and not has_z:
@@ -120,7 +134,7 @@ def _axes(m: Measurement, use_z: Optional[bool]) -> Tuple[str, ...]:
 def choose(m: Measurement, settings: MBMSettings) -> Tuple[BeadSet, Tuple[str, ...]]:
     """The beads of one measurement, judged, and the curve they give."""
     axes = _axes(m, settings.use_z)
-    names = [m.prefix + str(b["name"] or b["gri"]) for b in m.info]
+    names = [m.prefix + bead_name(b) for b in m.info]
     order = np.argsort([b["tid"] for b in m.info])
     names = [names[i] for i in order]
     info = [m.info[i] for i in order]
@@ -206,7 +220,7 @@ def bead_view(measurements: Sequence[Measurement], settings: MBMSettings,
     if any(b.get("sigpos_nm") for b in info):
         columns["sigpos (nm)"] = [b.get("sigpos_nm") for b in info]
     return BeadView(chosen, axes, sources or [x.label for x in measurements], source,
-                    columns, where, [str(b["name"] or b["gri"]) for b in info],
+                    columns, where, [bead_name(b) for b in info],
                     title=m.label)
 
 

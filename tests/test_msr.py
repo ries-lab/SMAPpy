@@ -363,6 +363,107 @@ def test_a_bead_file_stays_paired_with_its_measurement_through_a_save(beaded, tm
     assert msr.mbm_partner([i for _, i in merged], 0) == 1
 
 
+# --------------------------------------------------------------- two colours
+# As the two-colour measurements looked at (2026-11): a bead measurement
+# whose thread 0 is the 560 nm laser, then a tracking measurement whose
+# thread 0 is 640 nm, with an MBM grid per colour on threads 2 and 3.
+
+def two_colour_attrs(lasers, date, grids=False):
+    threads = [{"sequences": [{"Itr": [{"Mode": {"pattern": "hexagon", "dim": 2},
+                                        "_excitation": {"laser": laser}}]}],
+                "lasers": [{"id": "ACT405", "wavelength": 4.05e-7, "purpose": 0},
+                           {"id": laser, "wavelength": nm * 1e-9, "purpose": 1}],
+                "detectors": [{"id": f"GCM{k + 1}", "expcontrol_name": f"det {k}"}]}
+               for k, (laser, nm) in enumerate(lasers)]
+    measurement = {"dimensionality": 2, "threads": threads}
+    if grids:
+        measurement["grids"] = {"mbm_0": {"type": "mbm", "controlling_thi": 2,
+                                          "watching_thi": 2},
+                                "mbm_1": {"type": "mbm", "controlling_thi": 3,
+                                          "watching_thi": 3}}
+    return {"acquisition_date": date, "version": "2.1", "measurement": measurement}
+
+
+def two_colour_grids():
+    """Two beads, three points each, seen in both colours with a bias of
+    their own per colour."""
+    dt = [["gri", "<u4"], ["xyz", "<f8", [3]], ["tim", "<f4"], ["str", "<f4"]]
+    out = {}
+    for name, thread, corrects, bias in (("mbm_0", 2, 0, 0.0), ("mbm_1", 3, 1, 20e-9)):
+        pts = np.zeros(6, zarr_lite._dtype(dt))
+        pts["gri"] = [61, 123] * 3
+        pts["tim"] = np.repeat([1.0, 2.0, 3.0], 2)
+        pts["xyz"] = [[1e-6 + bias, 2e-6, 0], [4e-6 + bias, 5e-6, 0]] * 3
+        out[name] = {"thread": thread, "corrects": [corrects], "points": pts, "spec": dt,
+                     "points_by_gri": {"61": {"gri": 61, "name": "R0", "used": 1},
+                                       "123": {"gri": 123, "name": "R1", "used": 1}}}
+    return out
+
+
+@pytest.fixture
+def two_colours(tmp_path):
+    beads = m2410_records()
+    beads["thi"][beads["tid"] == 6] = 1                     # trace 6 at 640 nm
+    tracks = m2410_records(t0=5.0)
+    tracks["thi"][tracks["tid"] == 6] = 1                   # trace 6 at 560 nm
+    path = tmp_path / "colours.msr"
+    write_obf(path, [
+        msr_write.measurement_stack(
+            "beads", beads, two_colour_attrs([("MINFLUX560", 560), ("MINFLUX640", 640)],
+                                             "2026-11-13T16:20:34+01:00")),
+        msr_write.measurement_stack(
+            "tracks", tracks,
+            two_colour_attrs([("MINFLUX640", 640), ("MINFLUX560", 560),
+                              ("MINFLUX640", 640), ("MINFLUX560", 560)],
+                             "2026-11-13T16:26:46+01:00", grids=True),
+            beads={"grids": two_colour_grids()})])
+    return path
+
+
+def test_each_localization_is_named_by_its_laser_whatever_the_order_of_the_threads(
+        two_colours):
+    beads, binfo = load(two_colours, measurements=[1])
+    tracks, tinfo = load(two_colours, measurements=[2])
+    # the beads' thread 0 is 560 nm, the tracks' is 640 nm: the channel is
+    # the laser, longest first, in both
+    assert set(zip(beads["tid"], beads["thi"], beads["channel"])) == \
+        {(5, 0, 1), (9, 0, 1), (6, 1, 0)}
+    assert set(zip(tracks["tid"], tracks["thi"], tracks["channel"])) == \
+        {(5, 0, 0), (9, 0, 0), (6, 1, 1)}
+    channels = tinfo.metadata["minflux"]["measurements"][0]["channels"]
+    assert [(c["channel"], c["excitation_nm"], c["threads"]) for c in channels] == \
+        [(0, 640.0, [0]), (1, 560.0, [1])]                  # the MBM threads are not listed
+    assert channels[1]["detectors"] == ["GCM2 det 1"]
+    merged, _ = load(two_colours)                           # read together, named alike
+    assert set(zip(merged["measurement"], merged["thi"], merged["channel"])) == \
+        {(0, 0, 1), (0, 1, 0), (1, 0, 0), (1, 1, 1)}
+
+
+def test_a_measurement_whose_lasers_are_not_named_has_no_channel(two):
+    locs, info = load(two)
+    assert "channel" not in locs
+    assert "channels" not in info.metadata["minflux"]["measurements"][0]
+
+
+def test_two_colour_mbm_gives_each_bead_once_per_colour_with_what_it_corrects(two_colours):
+    found = msr.contents(two_colours)
+    assert [m.n_beads for m in found.measurements] == [0, 2]
+    tracks, tinfo = load(two_colours, measurements=[2])
+    grids = tinfo.metadata["minflux"]["measurements"][0]["mbm"]["grids"]
+    assert [(g["name"], g["thread"], g["corrects"], g["excitation_nm"], g["channel"])
+            for g in grids] == [("mbm_0", 2, [0], 640.0, 0), ("mbm_1", 3, [1], 560.0, 1)]
+    beads, binfo = load(two_colours, measurements=[2], beads=True)
+    assert set(beads.columns) <= set(tracks.columns)      # channel too: nothing padded
+    listed = binfo.metadata["mbm_beads"]
+    assert [(b["tid"], b["bead"], b["channel"], b["corrects"]) for b in listed] == \
+        [(1, "R0@640", 0, [0]), (2, "R1@640", 0, [0]),
+         (3, "R0@560", 1, [1]), (4, "R1@560", 1, [1])]
+    for tid, channel, x in ((1, 0, 1000.0), (3, 1, 1020.0)):
+        rows = beads["tid"] == tid
+        assert np.all(beads["channel"][rows] == channel)
+        assert np.allclose(beads["x_nm"][rows], x)
+
+
 def test_beads_named_but_never_recorded_add_no_file(two):
     # the second measurement of `two` has no beads; asked for, it is skipped
     files = msr.read_files(two, beads=True)

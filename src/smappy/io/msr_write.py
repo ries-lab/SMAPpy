@@ -124,13 +124,32 @@ def measurement_stack(label: str, rec: np.ndarray, attrs: dict,
     ``attrs`` its ``zarr/mfx/.zattrs`` (``acquisition_date``,
     ``measurement.threads[i].sequences``, ``lasers``, ...), ``roi_m`` the
     ROI's corners in metres, ``beads`` the MBM part as ``{"points": records,
-    "spec": dtype spec, "points_by_gri": ..., "used": [...]}``."""
+    "spec": dtype spec, "points_by_gri": ..., "used": [...]}`` -- or, two
+    colours, ``{"grids": {name: {"thread", "corrects", "points", "spec",
+    "points_by_gri", "used"}}}``, a grid per colour (``attrs`` then names
+    them in ``measurement.grids``)."""
     corners = roi_m if roi_m is not None else [[0.0, 0.0], [1e-5, 1e-5]]
     files = {"zarr/.zattrs": json.dumps({"rois": [{"corners": [list(c) for c in corners],
                                                    "type": "ROI", "name": ""}]}).encode()}
     files.update(zarr_array("zarr/mfx", as_records(rec), M2410, chunk=chunk))
     files["zarr/mfx/.zattrs"] = json.dumps(attrs).encode()
-    if beads:
+    if beads and beads.get("grids"):
+        # two colours: a grid per colour, measured by its own thread and
+        # correcting another, as Imspector m2410 writes them (grd/mbm_0, ...)
+        for name, g in beads["grids"].items():
+            node = f"zarr/grd/{name}"
+            files.update(zarr_array(f"{node}/points", g["points"], g["spec"], chunk=10,
+                                    compressor="blosc"))
+            files[f"{node}/.zattrs"] = json.dumps(
+                {"type": "mbm", "controlling_thi": g["thread"], "watching_thi": g["thread"],
+                 "points": "./points"}).encode()
+            files[f"{node}/points/.zattrs"] = json.dumps(
+                {"points_by_gri": g.get("points_by_gri", {})}).encode()
+            files[f"zarr/mbm/{name}/.zattrs"] = json.dumps(
+                {"correcting_thi": list(g["corrects"]), "grid": name,
+                 "used": g.get("used", [])}).encode()
+        files["zarr/mbm/.zattrs"] = json.dumps({"version": "3"}).encode()
+    elif beads:
         files.update(zarr_array("zarr/grd/mbm/points", beads["points"], beads["spec"],
                                 chunk=10, compressor="blosc"))
         files["zarr/grd/mbm/points/.zattrs"] = json.dumps(

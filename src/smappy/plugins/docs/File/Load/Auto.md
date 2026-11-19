@@ -265,7 +265,15 @@ An m2205 record is unnested into its iterations.
 **Threads.**  A measurement can run several sequences at once, one per
 *thread* -- two colours, each with its own laser and sequence -- and every
 row says which (`thi`).  Every thread's sequence is kept, and each row's
-precision is computed with its own thread's pattern size and laser.
+precision is computed with its own thread's pattern size and laser.  Where
+the file names each thread's MINFLUX laser, a row's colour is `channel`:
+its laser's place among the lasers of the file's measurements, the longest
+wavelength first -- 0 the 640 nm laser and 1 the 560 nm one in a file with
+both.  The colour is the laser and not the thread, because the order of the
+threads is not fixed: in one pair of measurements looked at, the bead
+measurement ran 560 nm first and the tracking measurement 640 nm first.
+What each channel is -- its laser, threads and detectors -- is kept with
+the measurement.  A file whose threads name no laser has no `channel`.
 
 The final iteration's `efo`, `efc`, `ecc`, `fbg`, the iteration number
 (`iteration`), why the iteration ended (`sta`), the grid point, thread and
@@ -376,7 +384,12 @@ used it and how often it lost it are kept with the file.  The bead file
 knows which measurement it belongs to by the `.msr`'s path and the
 measurements' ids, which survive saving the session and opening it again.
 Some files keep the beads only from before the measurement starts; their
-bead file has just those few points.  Stacks Imspector writes in
+bead file has just those few points.  A two-colour measurement can measure
+its beads in both colours, a grid of beads per colour each corrected thread
+by thread: every bead is then in the bead file once per colour, an id each,
+named after its colour (`R0@638`, `R0@560`), with the colour as `channel`
+-- a bead seen in two colours is two tracks, apart by a bias of their own,
+which in the file looked at differed between beads by tens of nanometres.  Stacks Imspector writes in
 chunks, for very large acquisitions, are not read yet, and say so.
 
 **Picasso.**  Picasso keeps its table as one dataset of records, `/locs`,

@@ -104,7 +104,7 @@ class MBMRegistration(Plugin):
         return ""
 
     def run(self, ctx: Context, settings: MBMRegistrationSettings) -> Result:
-        from ..mbm import MBMSettings, choose
+        from ..mbm import MBMSettings, bead_name, choose
         from ..mbm_registration import register as fit_map, start_positions
         from ..transformation import Transformation
         found = {label: (k, m) for label, k, m in measurements(ctx)}
@@ -122,7 +122,7 @@ class MBMRegistration(Plugin):
             # the beads' drift, as MBM drift correction fits it: a bead's
             # position is its offset about it, zero at the first bead point
             chosen, axes = choose(m, MBMSettings())
-            names = {b["tid"]: str(b["name"] or b["gri"]) for b in m.info}
+            names = {b["tid"]: bead_name(b) for b in m.info}
             ids = sorted(names)
             return start_positions(np.asarray(m.beads["time_s"]),
                                      np.column_stack([np.asarray(m.beads[f"{a}_nm"])

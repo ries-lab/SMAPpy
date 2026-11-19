@@ -193,3 +193,54 @@ def test_with_its_bead_file_open_each_bead_is_a_row_of_a_region_table():
     assert is_current(session.context(), ev)
     assert set(found) == set(NAMES)
     assert found["R2"]["used"] == 0 and found["R0"]["used"] == 1    # R2 jumps
+
+
+def test_two_colours_beads_correct_both_colours_with_one_curve_whatever_each_beads_bias():
+    """A grid per colour, as a two-colour measurement records them: each
+    bead seen at 640 and at 560 nm, a bias apart that differs from bead to
+    bead (tens of nm in the file looked at).  Every bead-in-a-colour is a
+    track with its own offset, so the biases stay out of the curve, and the
+    one curve moves both colours alike: the overlay is untouched."""
+    beads = simulate_bead_tracks(T, DRIFT, n_beads=4, precision_nm=1.0, seed=3)
+    rng = np.random.default_rng(4)
+    bias = rng.normal(0, 20, (4, 2))                        # 560 - 640, per bead
+    grids = []
+    for name, thread, channel, nm in (("mbm_0", 2, 0, 640.0), ("mbm_1", 3, 1, 560.0)):
+        x, y = beads["x_nm"].copy(), beads["y_nm"].copy()
+        if channel == 1:
+            x += bias[beads["tid"] - 1, 0]
+            y += bias[beads["tid"] - 1, 1]
+        grids.append({"name": name, "thread": thread, "corrects": [channel],
+                      "excitation_nm": nm, "channel": channel, "used": [],
+                      "points": {"gri": (61 + 62 * (beads["tid"] - 1)).tolist(),
+                                 "x_nm": x.tolist(), "y_nm": y.tolist(),
+                                 "z_nm": beads["z_nm"].tolist(),
+                                 "time_s": beads["time_s"].tolist(),
+                                 "strength": beads["photons"].tolist()},
+                      "beads": [{"name": f"R{k}", "gri": 61 + 62 * k, "used": True}
+                                for k in range(4)]})
+    meta = {"label": "261113-162646_tracks", "did": "d2", "dimensionality": 2,
+            "z_scale": 1.0, "mbm": {"used": [], "grids": grids}}
+    n = 2000
+    t = np.sort(rng.uniform(T[0], T[-1], n))
+    true = rng.uniform(0, 2000, (n, 2))
+    drift = np.column_stack([np.interp(t, T, DRIFT[:, a]) for a in range(2)])
+    channel = (np.arange(n) % 2).astype(np.int16)
+    locs = Localizations({"time_s": t, "frame": np.arange(n), "tid": np.arange(n) // 5,
+                          "channel": channel, "x_nm": true[:, 0] + drift[:, 0],
+                          "y_nm": true[:, 1] + drift[:, 1]},
+                         {"minflux": {"measurements": [meta]}})
+    listed = bead_table([meta]).metadata["mbm_beads"]
+    assert [b["bead"] for b in listed[:2]] == ["R0@640", "R1@640"]
+    result = MBMDrift().run(Context(locs=locs), MBMSettings(use_z=False))
+    assert "8 beads: 8 used" in result.text
+    moved = np.column_stack([result.locs["x_nm"], result.locs["y_nm"]]) - true
+    moved -= moved.mean(axis=0)                             # the curve's zero is its own
+    assert np.abs(moved).max() < 1.5
+    shift = np.column_stack([result.locs["x_nm"], result.locs["y_nm"]]) - \
+        np.column_stack([locs["x_nm"], locs["y_nm"]])
+    # the same curve on both colours: their offset is what it was (to the
+    # interpolation between neighbours in time across the curve's bends)
+    at_560 = np.column_stack([np.interp(t[channel == 1], t[channel == 0], shift[channel == 0, a])
+                              for a in range(2)])
+    assert np.abs(at_560 - shift[channel == 1]).max() < 0.2
