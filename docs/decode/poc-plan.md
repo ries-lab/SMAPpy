@@ -2391,3 +2391,45 @@ costs.  Since a fine-tune keeps its seed's pixelation, the shipped base can be c
 seeds, and users only fine-tune.  Pixelation falls with the learning rate's decay rather than with the
 samples (GMN7CL_s0, a 12 M schedule, 0.035 at 6 M; GMN7C_s0's 6 M schedule ends at 0.020), so a short
 schedule with its own decay (1.5 - 3 M) may pixelate nearly as little in a quarter of the time: open.
+
+### Network size at C = 1 (2026-11-19)
+
+`plex-plan.md` §7, question 4: DECODE-Plex's network is about six times netfit's, and screen B compared
+backbones at v1f's size only.  So: the default with only the backbone made larger -- 64 features at
+depth 2 + 2, 48 at depth 3 + 3, and 64 at depth 3 + 3, about DECODE-Plex's size at C = 1 (7.5 M frame
++ 7.75 M union).  Everything else is GMN7C's: the ConvGRU reading 7 frames, mixed on-times 1 - 3,
+streamed, EMA, offsets 2, sigmix, the sigma head; the same 6 M schedule; three seeds a variant (the
+seeds of GMN7C_s0 - s2).  Trained on gpuvm (H100) and decodebox (4090), one job a GPU.  Each model's
+6 M snapshot is scored on the 7-frame test sets at densities 15, 25 and 50 per 40 x 40 px (B7_d15 and
+B7_d25 drawn for this, as B7, on-time 1, seed 12345, 2048 samples), the default's three seeds too, with
+the same script.  Near focus is |z| < 300 nm (`metrics.CORE_Z_NM`); error/CRLB is the robust width.
+Speed: the `Predictor` as the fitter runs it (fp32, streamed, extraction included) on 256 x 256 frames
+tiled from B7_d25, 512 frames, the median of three passes, one model a variant, on the idle H100.
+
+| variant | params | J d15 | J d25 | J d50 | lat / z RMSE near focus, d50 (nm) | error/CRLB lat / ax near focus, d50 | lat / ax, d15 | pixel_mod | ms/frame (H100) | s/epoch |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 48 / d2 (default) | 2.45 M | 0.705 +- 0.001 | 0.658 +- 0.001 | 0.568 +- 0.001 | 39.4 +- 0.1 / 69.2 +- 0.3 | 1.120 / 1.137 | 0.799 / 0.771 | 0.027 +- 0.006 | 6.7 | 19.7 (H100) |
+| 48 / d3 | 8.87 M | 0.709 +- 0.001 | 0.662 +- 0.002 | 0.570 +- 0.003 | 39.5 +- 0.2 / 69.5 +- 0.5 | 1.119 / 1.140 | 0.795 / 0.764 | 0.024 +- 0.008 | 7.0 | 20 (H100) |
+| 64 / d2 | 4.35 M | 0.716 +- 0.003 | 0.670 +- 0.001 | 0.576 +- 0.000 | 38.8 +- 0.1 / 68.0 +- 0.4 | 1.098 / 1.115 | 0.783 / 0.751 | 0.026 +- 0.009 | 8.2 | 23 (4090) |
+| 64 / d3 | 15.76 M | 0.717 +- 0.003 | 0.670 +- 0.003 | 0.577 +- 0.002 | 38.9 +- 0.2 / 68.5 +- 0.3 | 1.099 / 1.114 | 0.785 / 0.751 | 0.021 +- 0.009 | 8.7 | 20 (H100) |
+
+Mean +- sd over the three seeds; error/CRLB's sd is 0.001 - 0.008.  Every model reads 7 frames.  The
+default's s/epoch on the 4090 was about 18.
+
+- **Width helps, a little, at every density**: 64 features gain 0.009 - 0.012 Jaccard (recall 0.592 ->
+  0.599, precision 0.935 -> 0.939 at density 50), 0.6 nm lateral and 1.2 nm axial RMSE near focus at
+  density 50, and error/CRLB 1.12 -> 1.10.  The seeds' sd is a few thousandths, so the gain is real;
+  it is a fifth of what the time model gained.
+- **Depth does nothing**: 48 / d3 is the default within the seeds' spread, though it has 3.6 x the
+  parameters, and 64 / d3 is 64 / d2.  A third level widens the receptive field the PSF does not need.
+- **Pixelation does not move**: pixel_mod differs more between seeds (0.011 - 0.032) than between sizes.
+- **The cost is time**: 64 / d2 is 23 % slower to run (8.2 against 6.7 ms a frame) and about 25 % to
+  train; depth costs little time, as each level costs about the same FLOPs.
+
+**Verdict**: DECODE-Plex's size buys nothing over 64 / d2.  If the 1 - 2 % in Jaccard and the 0.6 nm is
+worth 23 % in speed, the default goes to 64 features at depth 2 -- Jonas's call; the default is not
+changed here.  For C = 2 (`plex-plan.md` §7) capacity is not the lever: compare there at 48 / d2 and
+take 64 / d2 as the larger variant, not DECODE-Plex's depth.  Not checked: the real data (the example's
+pixelation and speed, `real_time_models.py`); the run files `nf_cap_*` are in
+`benchmarks/decode/suite/runs/` and the models in `~/netfit/jobs/cap_*` on gpuvm (64 / d3, 48 / d3 s1,
+s2) and decodebox (64 / d2, 48 / d3 s0).

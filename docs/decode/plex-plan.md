@@ -202,6 +202,8 @@ training, three seeds a variant, against DECODE-Plex's numbers (Jonas, 2026-11-1
 3. **Where the offset maps go:** every stage, as DECODE-Plex, or the union alone.
 4. **Size.**  DECODE-Plex's network is ten times v1f's.  Screen B compared backbones at v1f's size
    only, so capacity is open at C = 1 too, and is tried there first, where it is cheapest.
+   *Answered at C = 1 (`poc-plan.md`, "Network size at C = 1"): depth adds nothing, 64 features
+   gain about 0.01 in Jaccard for 23 % in speed, DECODE-Plex's size nothing beyond that.*
 5. **The photons for colour:** a count per channel (DECODE-Plex), or a total and a fraction, which
    gives the colour a head of its own.
 

@@ -1,0 +1,4 @@
+base: netfit_time
+name: nf_cap_f64d3_s0
+models:
+  B: netfit/cap_f64d3_s0/model.safetensors
