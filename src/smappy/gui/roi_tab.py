@@ -48,6 +48,15 @@ def proposal_text(key: str, value) -> str:
 from ..roi_manager.core import annotation_columns
 from .roi_window import COUNT_LIMIT
 
+# the tab's way in, tinted so that it stands out from the rest a little
+OPEN_STYLE = """
+QPushButton { font-weight: bold; border-radius: 5px; padding: 5px 8px;
+              border: 1px solid rgba(58, 143, 208, 0.75);
+              background: rgba(58, 143, 208, 0.28); }
+QPushButton:hover { background: rgba(58, 143, 208, 0.40); }
+QPushButton:pressed { background: rgba(58, 143, 208, 0.55); }
+"""
+
 
 class ROIHeader(QWidget):
     def __init__(self, session: Session, view=None, parent=None):
@@ -69,6 +78,9 @@ class ROIHeader(QWidget):
         self.open_button = QPushButton("Open ROI manager")
         self.open_button.setToolTip("the window for choosing and judging ROIs")
         self.open_button.clicked.connect(self.open_manager)
+        # The tab's way in, so it should catch the eye -- but only a little:
+        # bold on a light blue tint, which reads on light and dark windows alike.
+        self.open_button.setStyleSheet(OPEN_STYLE)
         layout.addWidget(self.open_button)
 
         # which file this acts on is chosen in the manager; here it is only named
