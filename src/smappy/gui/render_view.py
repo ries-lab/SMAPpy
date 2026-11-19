@@ -189,6 +189,7 @@ class PanelJob:
 class RenderView(QWidget):
     render_requested = Signal(object, int)  # a `PanelJob`, generation
     render_failed = Signal(str)             # shown by the window, not swallowed
+    roi_dragged = Signal(object)            # the ROI as it is dragged, a `Region`
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -958,6 +959,11 @@ class RenderView(QWidget):
             return
         self.roi_halo.setPath(self.roi_item.mapToParent(self.roi_item.shape()))
         self._mirror_roi()
+        # the size in the status line follows the drag, not only its end:
+        # a line ROI is how a distance is measured
+        region = self._item_region()
+        if region is not None:
+            self.roi_dragged.emit(region)
 
     def _mirror_roi(self) -> None:
         """The ROI's outline on every other panel, where it is drawn, not edited."""
@@ -967,9 +973,15 @@ class RenderView(QWidget):
             mirror.show_outline(path)
 
     def _roi_edited(self) -> None:
+        region = self._item_region()
+        if region is not None:
+            self.session.roi_edited(region)        # no redraw: the item is the truth
+
+    def _item_region(self) -> Optional[Region]:
+        """The ROI as the item on screen has it, mid-drag or after."""
         item, old = self.roi_item, self.session.roi
         if item is None or old is None:
-            return
+            return None
         if old.kind == "rect":
             pos, size = item.pos(), item.size()
             region = Region.rect(pos.x(), pos.y(), pos.x() + size.x(), pos.y() + size.y())
@@ -991,7 +1003,7 @@ class RenderView(QWidget):
         else:
             pts = [item.mapToParent(pg.Point(p)) for p in item.getState()["points"]]
             region = Region("polygon", [(p.x(), p.y()) for p in pts])
-        self.session.roi_edited(region)            # no redraw: the item is the truth
+        return region
 
     # ------------------------------------------------------------- saving
     def view_frame(self) -> ViewFrame:
@@ -1302,12 +1314,14 @@ class RenderToolBar(QToolBar):
         # picture answers a question nobody asked.  Made here, shown in the
         # window's status bar (`RenderWindow`)
         self.counts = QLabel("")
+        self._count_text = ""
         self.counts.setToolTip("localizations each layer draws in the view "
-                               "(in the ROI when one is drawn)")
+                               "(in the ROI when one is drawn), and the ROI's size")
         self._count_timer = QTimer(self, singleShot=True, interval=150)
         self._count_timer.timeout.connect(lambda: self._update_counts("view"))
         view.view.sigRangeChanged.connect(lambda *_: self._count_timer.start())
         view.session.on_change(self._update_counts)
+        view.roi_dragged.connect(self._show_counts)
         self._update_counts("locs")
         view.session.on_change(self._show_layout_choice)
         self._show_layout_choice()
@@ -1391,8 +1405,18 @@ class RenderToolBar(QToolBar):
             # the layer's number, as its button in the Render tab shows it
             parts.append(f"layer {i + 1}: {n}" if len(session.layers) > 1 else n)
         where = "" if session.roi is not None else " in the view"
-        self.counts.setText(("   ".join(parts) + f" shown{where}")
+        self._count_text = (("   ".join(parts) + f" shown{where}")
                             if parts and len(session.locs) else "")
+        self._show_counts(session.roi)
+
+    def _show_counts(self, roi) -> None:
+        """The counts, and the ROI's size after them: a line's length is
+        what SMAP's users drew it for."""
+        text = self._count_text
+        if roi is not None:
+            size = f"{roi.kind} ROI: {roi.size_text()}"
+            text = f"{text}   ·   {size}" if text else size
+        self.counts.setText(text)
 
     def set_layout(self, mode: str) -> None:
         """Overlay, side by side, or both: `LAYOUTS`."""

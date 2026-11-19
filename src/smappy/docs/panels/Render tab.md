@@ -38,7 +38,10 @@ are the [assistant](plugin:Panels/Assistant)'s button and ⋯ (*more*): saving
 the picture, the colour bar, what the mouse and the keys do in the
 picture, the keys that turn a line ROI among them, and *Help*, this page.  Under the picture is how
 many localizations each layer draws in the view -- counted again after every
-zoom -- or in the ROI when one is drawn.  Every control below the layer strip edits one layer,
+zoom -- or in the ROI when one is drawn, followed by the ROI's size: a line's
+length and width (a line ROI measures a distance, as in SMAP), a rectangle's
+or an ellipse's sides, a circle's diameter, a polygon's area, all following a
+drag as it happens.  Every control below the layer strip edits one layer,
 the one selected in the strip.
 
 What a layer shows is also what the rest of the program works on.  A plugin

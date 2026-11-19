@@ -76,6 +76,38 @@ def test_the_line_width_is_on_the_toolbar_and_moves_the_line(app):
     assert bar.line_width.value() == 77.0
 
 
+def test_the_status_line_shows_the_roi_size_and_follows_a_drag(app):
+    """A line ROI is how SMAP's users measure a distance: its length is
+    shown beside the count, and it changes while the line is dragged, not
+    only when the drag ends."""
+    from smappy.gui.render_view import RenderToolBar, RenderView
+
+    session = Session(table())
+    view = RenderView(session)
+    bar = RenderToolBar(view)
+    session.set_roi(Region.line((0, 0), (300, 400), 50.0))
+    assert "in ROI" in bar.counts.text()
+    assert "line ROI: length 500 nm, width 50 nm" in bar.counts.text()
+
+    # mid-drag: the item stretched, the session not told yet
+    view.roi_item.setSize((1000, 50), finish=False)
+    assert "length 1000 nm" in bar.counts.text()
+    assert session.roi.ends()[1][0] == pytest.approx(300)
+
+    session.set_roi(Region.circle((0, 0), 150))
+    assert "circle ROI: diameter 300 nm" in bar.counts.text()
+    session.set_roi(None)
+    assert "ROI" not in bar.counts.text()
+
+
+def test_every_region_says_its_size_in_nm_or_um():
+    assert Region.line((0, 0), (300, 400), 50).size_text() == "length 500 nm, width 50 nm"
+    assert Region.rect(0, 0, 12_000, 800).size_text() == "12.00 x 0.80 µm"
+    assert Region.ellipse((0, 0), 100, 50, 30).size_text() == "200 x 100 nm"
+    square = Region.polygon([(0, 0), (1000, 0), (1000, 1000), (0, 1000)])
+    assert square.size_text() == "area 1 µm²"
+
+
 def test_the_pixel_size_shows_the_zoom_and_typing_one_zooms_to_it(app):
     """SMAP's pixrec: the zoom is a pixel size one can read and type."""
     from smappy.gui.render_view import DEFAULT_PIXEL, RenderToolBar, RenderView

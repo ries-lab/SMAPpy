@@ -239,12 +239,46 @@ class Region:
         return cls(d["kind"], d["points"], d.get("width", 0.0), d.get("radius", 0.0),
                    d.get("anchor"), d.get("axes"), d.get("tilt", 0.0))
 
+    def size_text(self) -> str:
+        """The region's size in a few words, for the render window's status
+        line: a line's length first, since SMAP's users measure distances
+        with a line ROI, and the width it averages over beside it.  Data
+        units are nm."""
+        if self.kind == "line":
+            p0, p1 = self.ends()
+            return (f"length {_nm(float(np.hypot(*(p1 - p0))))}, "
+                    f"width {_nm(self.width)}")
+        if self.kind == "circle":
+            return f"diameter {_nm(2 * self.radius)}"
+        if self.kind == "ellipse":
+            a, b = self.axes
+            return _pair(2 * a, 2 * b)
+        if self.kind == "rect":
+            x0, y0, x1, y1 = self.bounds
+            return _pair(x1 - x0, y1 - y0)
+        x, y = self.points[:, 0], self.points[:, 1]
+        area = 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+        return f"area {area / 1e6:.3g} µm²"
+
     def __str__(self) -> str:
         if self.kind == "ellipse":
             a, b = self.axes
             return f"ellipse ROI {2 * a:.0f} x {2 * b:.0f}"
         x0, y0, x1, y1 = self.bounds
         return f"{self.kind} ROI {x1 - x0:.0f} x {y1 - y0:.0f}"
+
+
+def _nm(value: float) -> str:
+    """A length to read off: nm below 10 µm, where a structure is measured,
+    µm above it."""
+    return f"{value / 1000:.2f} µm" if abs(value) >= 10_000 else f"{value:.0f} nm"
+
+
+def _pair(a: float, b: float) -> str:
+    """Two sides in one unit, the larger's."""
+    if max(abs(a), abs(b)) >= 10_000:
+        return f"{a / 1000:.2f} x {b / 1000:.2f} µm"
+    return f"{a:.0f} x {b:.0f} nm"
 
 
 # the columns of an ROI's own frame (`SiteFrame`) that a measurement in an
