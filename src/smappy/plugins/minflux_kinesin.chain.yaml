@@ -1,0 +1,77 @@
+# Two-colour MINFLUX kinesin, from the opened measurements to the steps of
+# each walking molecule: the localizations as read; MINFLUX's quality cuts;
+# each trace's start (its tail, while it settles) left out; the colours put
+# on top of each other from the bead measurement (or, with none open, from
+# the molecules themselves) and the traces of both colours joined into
+# molecules; an ROI per molecule that walks; the steps of those (Find
+# steps' *only ROIs' traces*: a region filter would not reach it, since an
+# id column's measurements never see one).  The plan
+# behind it is docs/minflux-kinesin-2c-workflow.md.  Shipped as a chain:
+# every step is the shipped plugin with its settings.
+schema: smappy-chain-v1
+path: Analysis/MINFLUX/Workflow/MINFLUX kinesin
+description: >-
+  Quality cuts, trace starts left out, the two colours registered and joined
+  into molecules, an ROI per walking kinesin and its steps, in one run.
+grouping: ungrouped                 # pairing and steps want the localizations
+interface:
+  colours.offset.source: offset from
+  colours.pairing.max_distance_nm: colours apart
+  kinesins.ids.keep: kinesins kept
+  steps.min_locs: steps from
+steps:
+  - plugin: Analysis/Process/Layers
+    label: layers
+    version: "2"
+    values:
+      layers:
+        - grouped: false           # traces are made of localizations
+          start: keep              # the filter as the Render tab has it
+          bounds: []
+      remove: false
+  - plugin: Analysis/MINFLUX/Quality filter
+    label: quality
+    version: "2"
+    values: {}
+  - plugin: Analysis/Tracking/Trace statistics
+    label: trace starts
+    version: "3"
+    values:
+      id_column: tid               # each colour's traces, before they are joined
+      tail.rule: moving            # until its steps' rolling std settles
+      write_tail: true
+  - plugin: Analysis/Process/Layers
+    label: without the starts
+    version: "2"
+    values:
+      layers:
+        - grouped: false
+          start: keep
+          bounds:
+            - {field: in_tail, lo: 0, hi: 0}
+      remove: false
+  - plugin: Analysis/MINFLUX/MINFLUX dual colour
+    label: colours
+    version: "2"
+    values: {}                     # auto: the bead measurement open, else the molecules
+  - plugin: Analysis/Regions/Segment regions
+    label: kinesins
+    version: "3"
+    values:                        # the MINFLUX kinesin preset's
+      preset: MINFLUX kinesin
+      method: ids
+      ids.column: pair_id
+      ids.min_size: 20
+      ids.membership: id
+      ids.draw: track
+      ids.angle: axis
+      ids.keep: n_locs >= 20 and displacement_nm >= 100 and linearity >= 0.8
+      replace: true
+  - plugin: Analysis/Tracking/Find steps
+    label: steps
+    version: "5"
+    values:
+      id_column: pair_id
+      pairs: true                  # each colour its own steps, side by side
+      in_rois: true                # the kinesins' ROIs only
+      min_locs: 20

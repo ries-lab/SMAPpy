@@ -1,5 +1,5 @@
 ---
-version: "4"
+version: "5"
 covers: [smappy.bnp_steps.bnp_steps, smappy.bnp_steps.noise_sd, smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file]
 ---
 
@@ -129,14 +129,18 @@ They are compared by the Akaike information criterion, AIC = 2 x parameters
 - 2 log-likelihood: the lowest is the model the dwells support, and a
 difference of a few units is no evidence either way.
 
-**7. Two colours.**  With *pairs* ticked, on a two-thread MINFLUX
-measurement whose traces *Pair colours* paired (`pair_id`): each pair is
-turned onto the long axis of its first thread's trace, so both colours lie
-along the same line, and each thread's localizations get their own steps.
-A motor and its cargo, or the two heads of one motor in two colours, then
-step side by side in one plot (SMAP's StepsMINFLUX_dc), and the region
-table holds the median step of each thread (`step_median_thi0_nm`,
-`step_median_thi1_nm`).
+**7. Two colours.**  With *pairs* ticked, on a two-colour MINFLUX
+measurement whose traces [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour)
+joined into molecules (`pair_id`): each molecule is turned onto the long
+axis of its colour-0 localizations, so both colours lie along the same
+line, and each colour's localizations get their own steps.  The colour is
+the laser, `channel` (0 the longer wavelength), where the reader knew it,
+else the thread, `thi`.  A motor and its cargo, or the two heads of one
+motor in two colours, then step side by side in one plot (SMAP's
+StepsMINFLUX_dc), and the region table holds the median step of each colour
+(`step_median_channel0_nm`, `step_median_channel1_nm`; `..._thi0_nm` where
+the colour is the thread).  The step count, dwell and velocity in the
+table are colour 0's.
 
 ## In detail
 
@@ -212,14 +216,21 @@ Below 1 takes fewer, more certain steps; above 1 more, splitting dwells.
 The median is robust to a few outliers within a plateau; the mean is
 AutoStepFinder's own.
 
+### in_rois
+For the motors chosen by hand or by
+[Segment regions](plugin:Analysis/Regions/Segment regions)' *from an id
+attribute*: only the ids of the used ROIs are fitted, so the pooled steps
+and dwells are theirs.  A region filter would not do it: the per-trace
+numbers never see one.
+
 ### step_nm
 8 for kinesin and dynein along microtubules, 36 for myosin V.  Leave it at
 0 to see what the data find without a prior.
 
 ### pairs
-Needs `pair_id` and `thi`.  Each thread of a pair has only its own
-localizations, about half of the pair's: dwells shorter than a few
-localizations per thread merge.
+Needs `pair_id` and two colours (`channel`, else `thi`).  Each colour of
+a molecule has only its own localizations, about half of the molecule's:
+dwells shorter than a few localizations per colour merge.
 
 ### output
 *plateaus on the localizations* writes `plateau` (an id per plateau, -1 for

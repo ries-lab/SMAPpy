@@ -1,5 +1,5 @@
-"""*Pair colours* (`smappy.pairing`, `plugins/pair_colours.py`): two-thread
-traces with a known pairing and offset come back."""
+"""`smappy.pairing` -- the bead measurement's pairing by time -- and *MINFLUX
+dual colour* on two threads: a known pairing and offset come back."""
 import numpy as np
 import pytest
 
@@ -64,7 +64,7 @@ def test_a_trace_overlapping_two_takes_the_longer_overlap():
 def test_the_plugin_writes_pair_id_and_keeps_the_offset_for_transform():
     session = Session(two_threads())
     session.show_grouped(0, False)
-    cls = plugins.get("Analysis/MINFLUX/Pair colours")
+    cls = plugins.get("Analysis/MINFLUX/MINFLUX dual colour")
     result = session.run(cls(), cls.Settings())
     assert "pair_id" in session.locs
     t = session.transformations["thi 1 onto thi 0"]
@@ -76,6 +76,6 @@ def test_the_plugin_writes_pair_id_and_keeps_the_offset_for_transform():
 def test_the_plugin_refuses_one_thread():
     locs = two_threads()
     locs.columns["thi"] = np.zeros(len(locs), np.int64)
-    cls = plugins.get("Analysis/MINFLUX/Pair colours")
+    cls = plugins.get("Analysis/MINFLUX/MINFLUX dual colour")
     with pytest.raises(ValueError, match="two threads"):
         Session(locs).run(cls(), cls.Settings())

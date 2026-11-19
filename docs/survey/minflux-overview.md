@@ -50,7 +50,7 @@ built since, each with tests, a page and a `--slow` run:
   wavelength (L = patGeoFactor x 360 nm x lambda/642, abberior's wiki).
 * *Analysis/MINFLUX/Sequence QC* -- ParaFlux's plots from every iteration.
 * *Analysis/MINFLUX/Sequence table* -- the sequences side by side.
-* *Analysis/MINFLUX/Pair colours* -- `pair_id` for two threads, the offset
+* *Analysis/MINFLUX/MINFLUX dual colour* -- `pair_id` for two threads, the offset
   between the colours (per pair, time, field; a transformation).
 * *Analysis/MINFLUX/Quality filter* -- cfr and efo cuts from the data.
 * *Analysis/Tracking/Trace statistics* -- displacement, velocity, axes,

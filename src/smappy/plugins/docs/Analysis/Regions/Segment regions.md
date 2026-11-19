@@ -52,7 +52,13 @@ A **preset** fills the settings for one kind of structure, *keep* included:
 * *CME* -- filled discs of 30 to 150 nm radius, with at least 20
   localizations;
 * *Circles* -- rings of 100 to 500 nm, round, with at least 10
-  localizations on the ring.
+  localizations on the ring;
+* *MINFLUX kinesin* -- *from an id attribute*, the molecules of
+  [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour) (`pair_id`)
+  that walk: 20 localizations, 100 nm, `linearity` of 0.8 or more, each
+  drawn as its track and turned along it;
+* *MINFLUX kinesin, both colours* -- the same, and only the molecules seen
+  in both colours.
 
 Without a preset, the settings are discs of 30 to 150 nm with at least 10
 localizations: compact structures of any kind, as a first look.
@@ -146,6 +152,11 @@ and each turned so that it runs along $x$, left to right in time.  *keep*
 of this method measures every id as a trace (its length, how elongated it
 is, which way it went) and makes ROIs only of those it keeps:
 `eccentricity >= 4 and displacement_nm >= 300` keeps long straight runs.
+`linearity` -- the squared correlation of the position along the track
+with time -- tells a motor that walks on (near 1) from one stuck or
+diffusing to and fro along its microtubule (near 0), which is as
+elongated; `velocity_nm_per_s` is the displacement over the duration, and
+`n_colours` the colours an id holds, 2 for a molecule seen in both.
 *angle* gives each ROI the direction its trace moved, as its own frame, so
 every step measured in it, such as
 [Find steps](plugin:Analysis/Tracking/Find steps), gets positions along

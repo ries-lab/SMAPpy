@@ -332,7 +332,8 @@ def hull(xy: np.ndarray) -> Optional[List[List[float]]]:
 #: what *keep* of *from an id attribute* can name: each id's localizations
 #: as a trace (`traces.statistics`), in frame order (or ``time_s``)
 TRACE_VALUES = ("n_locs", "displacement_nm", "std_long_nm", "std_short_nm",
-                "eccentricity", "trend_nm", "angle_deg", "ends_angle_deg")
+                "eccentricity", "trend_nm", "angle_deg", "ends_angle_deg",
+                "velocity_nm_per_s", "linearity", "n_colours")
 
 
 def trace_values(locs, column: str) -> Dict[int, Dict[str, float]]:
@@ -340,7 +341,13 @@ def trace_values(locs, column: str) -> Dict[int, Dict[str, float]]:
     order: `TRACE_VALUES`.  ``angle_deg`` is the long axis pointing from the
     trace's first quarter to its last (`traces.axes`), ``ends_angle_deg``
     the direction from its first localization to its last; both 0-360,
-    anticlockwise from +x.  All ids at once, no loop over them."""
+    anticlockwise from +x.  ``velocity_nm_per_s`` the displacement over the
+    duration (per frame where there is no ``time_s``); ``linearity`` the
+    squared correlation of the position along the long axis with time --
+    near 1 for a motor walking on, near 0 for one stuck or diffusing back and
+    forth along its track, which is as elongated; ``n_colours`` how many
+    colours (`dual_colour.colour_column`) the id holds, 2 for a molecule seen
+    in both.  All ids at once, no loop over them."""
     from .. import traces as T
     time = np.asarray(locs["time_s"] if "time_s" in locs else locs["frame"], np.float64)
     r = T.runs(locs[column], time)
@@ -348,13 +355,45 @@ def trace_values(locs, column: str) -> Dict[int, Dict[str, float]]:
         return {}
     x = np.asarray(locs["x_nm"], np.float64)[r.order]
     y = np.asarray(locs["y_nm"], np.float64)[r.order]
-    st = T.statistics(r, x, y, time[r.order])
+    t = time[r.order]
+    st = T.statistics(r, x, y, t)
     first, last = r.start, r.start + r.n - 1
     ends = np.degrees(np.arctan2(y[last] - y[first], x[last] - x[first])) % 360.0
     columns = {**{k: np.asarray(st[k], float) for k in TRACE_VALUES if k in st},
-               "ends_angle_deg": ends}
+               "ends_angle_deg": ends,
+               "velocity_nm_per_s": np.asarray(st["velocity"], float),
+               "linearity": _linearity(r, x, y, t, np.asarray(st["angle_deg"], float)),
+               "n_colours": _n_colours(locs, r)}
     return {int(k): {name: float(v[i]) for name, v in columns.items()}
             for i, k in enumerate(r.ids)}
+
+
+def _linearity(r, x, y, t, angle_deg) -> np.ndarray:
+    """Per run, r^2 of its position along its long axis against time, from
+    sums over each run's rows (sorted run by run)."""
+    run = np.repeat(np.arange(len(r.ids)), r.n)
+    a = np.radians(np.nan_to_num(angle_deg))[run]
+    s = x * np.cos(a) + y * np.sin(a)
+    s = s - np.add.reduceat(s, r.start)[run] / r.n[run]
+    tc = t - np.add.reduceat(t, r.start)[run] / r.n[run]
+    sst = np.add.reduceat(s * tc, r.start)
+    sss = np.add.reduceat(s * s, r.start)
+    stt = np.add.reduceat(tc * tc, r.start)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = sst ** 2 / (sss * stt)
+    return np.where(r.n > 2, out, np.nan)
+
+
+def _n_colours(locs, r) -> np.ndarray:
+    """Per run, how many colours its localizations have."""
+    from ..dual_colour import colour_column
+    column = colour_column(locs)
+    if column not in locs:
+        return np.ones(len(r.ids))
+    c = np.asarray(locs[column], np.int64)[r.order]
+    run = np.repeat(np.arange(len(r.ids)), r.n)
+    pairs = np.unique(np.column_stack([run, c]), axis=0)
+    return np.bincount(pairs[:, 0], minlength=len(r.ids)).astype(float)
 
 
 def column_regions(locs, column: str, min_size: int = 1, outline: bool = True

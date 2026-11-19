@@ -60,6 +60,35 @@ The chain: 1-5 with an interface of a few settings (minimum length,
 directed only, both colours only, maximum separation), one click from the
 opened measurements to kinesin ROIs and their steps.
 
+## Status (2026-11-19, uncommitted)
+
+Done, with tests (`tests/test_msr.py`, `test_mbm.py`, `test_dual_colour.py`)
+and pages:
+
+- **loader**: `channel` from the laser over the file's measurements, and
+  `channels` per measurement; both MBM grids, `R0@638` / `R0@560`.
+- **MBM drift correction**: two grids, one common curve on both colours
+  (the per-colour option not done: not needed so far).
+- **MINFLUX dual colour** (`plugins/dual_colour.py`, `smappy/dual_colour.py`):
+  offset from bead measurements (auto: last before, first after; one read
+  merged with the tracking told by its long traces), bracketing with the
+  MBM drift as shape, from the molecules (`c + a u`, robust), named or
+  typed; MBM colour drift; colour 1 moved, idempotent; pairing by time and
+  place, many traces of a colour per molecule.  Not done: offset from ROIs
+  chosen by hand; co-movement test.
+- **Segment regions**: `velocity_nm_per_s`, `linearity`, `n_colours` for
+  *keep*; presets *MINFLUX kinesin* and *... both colours*.  Not done:
+  region values of other plugins in *keep*; a colour keyword.
+- **Find steps**: colour = `channel`; *only ROIs' traces* (`in_rois`).
+- **chain** `Analysis/MINFLUX/Workflow/MINFLUX kinesin`: layers, quality,
+  trace starts (Trace statistics, *moving*), dual colour, kinesin ROIs,
+  steps.  The tails stayed in Trace statistics (not moved into Quality
+  filter).
+
+On the test data: bead offset 560 - 638 = (-1.3, 11.6) nm (the student's);
+from the molecules (2.3, 8.0) ± 5 nm; 16 walking kinesins, 4 in both
+colours (the student had 3), the focus kinesin pair_id 788.
+
 ## Open
 
 - Bracketing data (beads before and after, ideally with MBM throughout):

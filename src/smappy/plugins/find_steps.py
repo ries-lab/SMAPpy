@@ -58,11 +58,24 @@ class FindStepsSettings:
                            help="0: off; else merge steps smaller and split steps larger "
                                 "than this expected size")
     pairs: bool = param(False, label="pairs", advanced=True,
-                        help="pair_id from Pair colours: both threads of a pair turned into "
-                             "the thread-0 trace's frame, each with its own steps")
+                        help="pair_id from MINFLUX dual colour: both colours of a molecule "
+                             "turned into colour 0's frame, each with its own steps")
+    in_rois: bool = param(False, label="only ROIs' traces",
+                          help="only the ids the ROI manager's used ROIs hold (an ROI of "
+                               "its id alone): the kinesins Segment regions found")
     output: str = param("table", label="output", choices=OUTPUTS,
                         help="a region table only; plateau and step_level on the "
                              "localizations; or a file of one localization per plateau")
+
+
+def rois_ids(ctx: Context, column: str) -> set:
+    """The ids of ``column`` the ROI manager's used ROIs hold, by id
+    (`ROI.ids`); the ROIs of other id columns, and drawn ones, left out."""
+    project = getattr(ctx.session, "rois", None) if ctx.session is not None else None
+    if project is None:
+        return set()
+    return {int(roi.ids[column]) for roi in project.rois.values()
+            if roi.use and column in (roi.ids or {})}
 
 
 @register("Analysis/Tracking/Find steps")
@@ -77,7 +90,7 @@ class FindSteps(Plugin):
     # 2: pairs -- both threads of a pair in the first one's frame
     # 3: the dwell models fitted by likelihood, compared by AIC
     # 4: BNP-Step as a second method
-    version = "4"
+    version = "5"
 
     def changes_locs_for(self, settings: FindStepsSettings) -> bool:
         return settings.output != "table"
@@ -103,27 +116,38 @@ class FindSteps(Plugin):
         from ..region_runs import column_table, layer_mask
         locs = ctx.locs
         pairs = bool(settings.pairs)
-        if pairs and ("thi" not in locs or "pair_id" not in locs):
-            raise ValueError("pairs need pair_id and thi: run Pair colours on a two-thread "
-                             "MINFLUX measurement first")
+        # the colour: the laser (channel) where the reader knew it, else the thread
+        from ..dual_colour import colour_column
+        colour = colour_column(locs)
+        if pairs and (colour not in locs or "pair_id" not in locs):
+            raise ValueError("pairs need pair_id and two colours: run MINFLUX dual colour "
+                             "on a two-colour MINFLUX measurement first")
         column = "pair_id" if pairs and not settings.id_column else \
             id_column(locs, settings.id_column)
         clock = "time_s" in locs
         time = np.asarray(locs["time_s"] if clock else locs["frame"], np.float64)
         r = T.runs(locs[column], time, layer_mask(ctx))
         long_enough = r.n >= settings.min_locs
+        if settings.in_rois:
+            wanted = rois_ids(ctx, column)
+            if not wanted:
+                raise ValueError(f"no used ROI holds an id of {column}: make them with "
+                                 "Segment regions' 'from an id attribute', or untick "
+                                 "'only ROIs' traces'")
+            long_enough &= np.isin(r.ids, np.fromiter(wanted, np.int64))
         if not long_enough.any():
             raise ValueError(f"no trace of {column} has {settings.min_locs} localizations "
-                             "the layer keeps")
+                             "the layer keeps"
+                             + (" among the ROIs' ids" if settings.in_rois else ""))
         x = np.asarray(locs["x_nm"], np.float64)[r.order]
         y = np.asarray(locs["y_nm"], np.float64)[r.order]
         t = time[r.order]
-        thread = (np.asarray(locs["thi"], np.int64)[r.order] if pairs
+        thread = (np.asarray(locs[colour], np.int64)[r.order] if pairs
                   else np.zeros(len(x), np.int64))
         if settings.along == "track":
             a = T.axes(r, x, y)
             if pairs:
-                # a pair in its first thread's frame, so both colours' steps line up
+                # a pair in its colour 0's frame, so both colours' steps line up
                 a0 = T.axes(r, x, y, thread == 0)
                 a = {k: np.where(np.isfinite(a0[k]), a0[k], a[k]) for k in a}
             coord, _ = T.rotate(r, x, y, a)
@@ -226,7 +250,7 @@ class FindSteps(Plugin):
                   ("velocity_nm_per_s" if clock else "velocity_nm_per_frame"): per["velocity_steps"],
                   "erlang_shape": per["erlang_shape"]}
         for th, med in sorted(by_thread.items()):
-            values[f"step_median_thi{th}_nm"] = med
+            values[f"step_median_{colour}{th}_nm"] = med
         step = {"label": LABEL, "plugin": self.path, "version": self.version,
                 "parameters": settings_values(settings)}
         table = column_table(locs, column, LABEL, r.ids, values, step,

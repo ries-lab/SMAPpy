@@ -347,8 +347,11 @@ def make(d) -> None:
 
     d.chapter("Next")
     d.card("Also there",
-           "<ul><li><b>Pair colours</b>: two threads' traces paired, and the "
-           "offset between the colours.</li>"
+           "<ul><li><b>MINFLUX dual colour</b>: two colours registered, from "
+           "beads or the molecules, and their traces joined into molecules."
+           "</li>"
+           "<li><b>MINFLUX kinesin</b> (MINFLUX &gt; Workflow): from two-colour "
+           "tracks to the steps of every walking kinesin, in one run.</li>"
            "<li><b>MBM drift correction</b> and <b>MBM registration</b>: the "
            "beads, to correct drift and to put measurements on top of each "
            "other.</li>"
