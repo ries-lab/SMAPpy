@@ -1,17 +1,21 @@
+from __future__ import annotations
+
 import copy
 import contextlib
 import pathlib
 import sys
 from pathlib import Path
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
 import torch
 from decode_smlm.plex.generic.deprecation import deprecated
 
 from . import param
 from ..generic.logging import get_logger
-from ..neuralfitter import model as model_lightning
 from ..neuralfitter.train import setup_cfg
+
+if TYPE_CHECKING:
+    from ..neuralfitter import model as model_lightning
 from ..utils import dev
 
 logger = get_logger(__name__)
@@ -51,18 +55,24 @@ def load_model(
         cfg = param.patch_img_size(cfg, img_size, frame_extent, scenario)
 
     model = setup_cfg.setup_model(cfg)
+    model.load_state_dict(load_state_dict(path_weights, device=device))
+    return model.to(device)
 
-    with _patch_posix_path_unpickling_on_windows():
-        model_wrap = model_lightning.Model.load_from_checkpoint(
-            path_weights,
-            model=model,
-            proc_train=None,
-            proc_val=None,
-            batch_size=None,
-            map_location=device,
-        )
 
-    return model_wrap._model
+def load_state_dict(path_ckpt: Union[str, Path], device: Union[str, torch.device] = "cpu") -> dict:
+    """The network's weights from a Lightning checkpoint, without Lightning.
+
+    decode_smlm.plex (docs/decode/plex-plan.md §3): the checkpoint's ``state_dict`` holds the
+    Lightning module's, whose network is its ``_model``; that prefix is taken off.  It is read
+    with ``weights_only``, so nothing in the file runs: of the classes it names beside tensors,
+    only ``pathlib.PosixPath`` (a callback's directory) needs allowing, read as ``PurePosixPath``,
+    which also reads on Windows, where the original had to patch ``pathlib`` instead.
+    """
+    with torch.serialization.safe_globals([(pathlib.PurePosixPath, "pathlib.PosixPath")]):
+        ckpt = torch.load(path_ckpt, map_location=device, weights_only=True)
+    state = ckpt["state_dict"]
+    prefix = "_model."
+    return {k[len(prefix):]: v for k, v in state.items() if k.startswith(prefix)}
 
 
 @dev.experimental(level="warning")
@@ -83,6 +93,8 @@ def load_pipeline(
             scenario=scenario,
         )
         cfg = param.patch_img_size(cfg, img_size, frame_extent, scenario)
+
+    from ..neuralfitter import model as model_lightning  # Lightning: training only
 
     model = setup_cfg.setup_model(cfg)
     proc_train = setup_cfg.setup_processor(cfg, cfg["Simulation"])
