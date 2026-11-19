@@ -188,3 +188,53 @@ def test_in_an_roi_find_steps_proposes_its_moving_direction_as_the_angle():
     result = cls().run(ctx, cls.Settings(min_locs=20))
     assert result.proposals["angle"] == pytest.approx(310.0, abs=4.0)
     assert result.values["angle_deg"] == pytest.approx(310.0, abs=4.0)
+
+
+def walking_pair(apart: bool, seed=3):
+    """One molecule's two colours over 3 s: walking at 200 nm/s along 20°,
+    the second colour a few nm off -- or, ``apart``, walking the other way
+    from the same start, two molecules that met."""
+    rng = np.random.default_rng(seed)
+    t = np.sort(rng.uniform(0, 3, 1500))
+    colour = rng.integers(0, 2, 1500)
+    along = 200 * t * np.where((colour == 1) & apart, -1.0, 1.0)
+    a = np.radians(20)
+    x = along * np.cos(a) + rng.normal(0, 3, 1500) + 4.0 * colour
+    y = along * np.sin(a) + rng.normal(0, 3, 1500)
+    return t, x, y, colour
+
+
+def test_co_movement_tells_one_walking_molecule_from_two_that_met():
+    from smappy.dual_colour import co_movement
+    t, x, y, c = walking_pair(apart=False)
+    one = co_movement(t, x, y, c, window=0.5, min_speed=100.0)
+    assert one.share == 1.0 and one.windows == 6
+    assert one.angle_deg < 5 and one.speed_ratio < 1.1 and one.distance_nm < 10
+    t, x, y, c = walking_pair(apart=True)
+    two = co_movement(t, x, y, c, window=0.5, min_speed=100.0)
+    assert two.share == 0.0 and two.angle_deg > 170
+    # the whole overlap as one window: the two lines compared
+    assert co_movement(t, x, y, c, window=0.0, min_speed=100.0).windows == 1
+    # a stuck molecule says nothing about moving together
+    still = co_movement(t, np.random.default_rng(1).normal(0, 3, len(t)), y * 0, c,
+                        window=0.5, min_speed=100.0)
+    assert np.isnan(still.share) and still.windows == 0
+    # the second colour seen for 40 ms, 8 nm at this speed: too short to judge
+    t, x, y, c = walking_pair(apart=True)
+    short = (c == 0) | ((t > 1.0) & (t < 1.04))
+    assert co_movement(t[short], x[short], y[short], c[short], window=0.5,
+                       min_speed=100.0).windows == 0
+
+
+@pytest.mark.parametrize("apart, word", [(False, "dual"), (True, "apart")])
+def test_in_an_roi_a_two_colour_molecule_is_proposed_both_or_apart(apart, word):
+    t, x, y, c = walking_pair(apart)
+    locs = Localizations({"x_nm": x.astype(np.float32), "y_nm": y.astype(np.float32),
+                          "time_s": t, "frame": np.arange(len(t)), "channel": c,
+                          "pair_id": np.zeros(len(t), np.int64),
+                          "tid": c.astype(np.int64)}, {})
+    ctx = plugins.Context(locs=locs, region_id="roi-1")
+    cls = plugins.get(PLUGIN)
+    result = cls().run(ctx, cls.Settings(min_locs=20))
+    assert result.proposals["keyword:colours"] == word
+    assert result.values["comove_share"] == (0.0 if apart else 1.0)

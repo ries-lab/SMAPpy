@@ -244,9 +244,13 @@ class SegmentSettings:
 
 
 #: the keyword list an ROI of a two-colour table is annotated in, and its
-#: word for one that holds both colours (the others are named by colour)
+#: three words: one colour, both, and both but not moving as one (*Find
+#: steps*' proposal) -- one list, so the ROI manager filters by one choice
 COLOURS_LIST = "colours"
-BOTH_COLOURS = "both"
+SINGLE = "single"
+DUAL = "dual"
+APART = "apart"
+COLOUR_WORDS = (SINGLE, DUAL, APART)
 
 
 def draw_as(column: str) -> str:
@@ -710,18 +714,14 @@ class SegmentRegions(SegmenterPlugin):
                     reasons[part] = reasons.get(part, 0) + 1
             found = kept
         # a table of two colours: each ROI says which it holds, as a keyword
-        from ..dual_colour import colour_column, colour_names
+        from ..dual_colour import colour_column
         colour_col = colour_column(ctx.locs)
         colours = (np.asarray(ctx.locs[colour_col], np.int64) if colour_col in ctx.locs
                    else None)
         two = colours is not None and len(np.unique(colours)) > 1
-        names = colour_names(ctx.locs, colour_col) if two else {}
 
         def colour_word(region) -> str:
-            held = np.unique(colours[region["rows"]])
-            if len(held) > 1:
-                return BOTH_COLOURS
-            return names.get(int(held[0]), f"{colour_col} {int(held[0])}")
+            return DUAL if len(np.unique(colours[region["rows"]])) > 1 else SINGLE
         angle_key = {"axis": "angle_deg", "ends": "ends_angle_deg"}.get(ids.angle)
 
         def ours(r) -> bool:
@@ -775,9 +775,9 @@ class SegmentRegions(SegmenterPlugin):
                                        "sites": sites, "replaces": replaced})
         made, flat = [], 0
         if two:
-            # the list in a fixed order, both first, then the colours
+            # the list in a fixed order; apart is Find steps' to propose
             have = list(project.annotation_lists.get(COLOURS_LIST, []))
-            words = [BOTH_COLOURS] + [names[c] for c in sorted(names)]
+            words = list(COLOUR_WORDS)
             project.set_annotation_lists({**project.annotation_lists, COLOURS_LIST:
                                           words + [w for w in have if w not in words]})
         with project.edit(f"{self.name}: ROIs") as step:

@@ -58,15 +58,17 @@ first, and joins the traces of both colours into molecules, `pair_id`.
 **5. Kinesins.**  [Segment regions](plugin:Analysis/Regions/Segment regions)
 with the *MINFLUX kinesin* preset makes an ROI of every molecule of 20
 localizations or more, drawn as its track and turned along it, and
-annotated in the keyword list *colours* (*both*, *638 nm*, *560 nm*); the
+annotated in the keyword list *colours* (*single*, *dual*; *apart* comes from Find steps); the
 ones that walk are used, the others are there to look at, unused.
 
 **6. Steps.**  [Find steps](plugin:Analysis/Tracking/Find steps) on
 `pair_id`, each colour with its own steps on one clock and in one frame
 (*two colours* on *auto*), along the direction each molecule walks in, on
 the used ROIs only (*only ROIs' traces*): the step sizes and dwell times
-pooled over them, and a row per kinesin.  To orient the ROIs by where each
-moves, run Find steps as a per-region step in the ROI manager and apply its
+pooled over them, and a row per kinesin, with how its two colours move
+together (`comove_share`).  To orient the ROIs by where each moves, and to
+mark the molecules in both colours that do not move as one *apart*, run
+Find steps as a per-region step in the ROI manager and apply its
 proposals.
 
 ## In detail

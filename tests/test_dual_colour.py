@@ -267,5 +267,5 @@ def test_the_kinesin_chain_finds_the_walkers_and_their_steps():
     walkers = [r for r in s.rois.rois.values() if r.use]
     assert len(walkers) == 30                          # the still ones not used
     assert len(s.rois.rois) == 40                      # but there, to look at
-    assert {r.annotations.get("colours") for r in s.rois.rois.values()} == {"both"}
+    assert {r.annotations.get("colours") for r in s.rois.rois.values()} == {"dual"}
     assert "30 traces of pair_id" in result.text

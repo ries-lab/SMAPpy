@@ -1,6 +1,6 @@
 ---
-version: "6"
-covers: [smappy.bnp_steps.bnp_steps, smappy.bnp_steps.noise_sd, smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file, smappy.traces.moving_direction, smappy.plugins.find_steps.draw_steps, smappy.plugins.find_steps.rois_ids]
+version: "7"
+covers: [smappy.bnp_steps.bnp_steps, smappy.bnp_steps.noise_sd, smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file, smappy.traces.moving_direction, smappy.plugins.find_steps.draw_steps, smappy.plugins.find_steps.rois_ids, smappy.dual_colour.co_movement]
 ---
 
 ## What it does
@@ -152,11 +152,30 @@ the colour is the thread).  The step count, dwell and velocity in the
 table are colour 0's.  *as one trace* fits both colours' localizations as
 one, which is only right for one label in two colours.
 
-**8. In an ROI.**  Run as a per-region step in the ROI manager, it measures
+**8. Moving together.**  A molecule in two colours should move as one: the
+same way, at the same speed, close together.  Two molecules that met by
+chance can pass the pairing's distance test for a moment and then part.
+Over the time both colours are seen, cut into windows of *window* (0.5 s;
+0, one window over the whole overlap -- the two lines of a linear stepper
+compared), a straight line x(t), y(t) is fitted to each colour.  A window
+where the molecule moves (the faster colour at *moving from* or more)
+matches when the two directions are within *directions within* (30°), the
+speeds within *speeds within* (a factor 1.5) and the two lines within
+*lines within* (50 nm) at the window's centre.  The share of the moving
+windows that match is `comove_share`.  A molecule that never moves, or
+whose colours are seen too briefly to fit a line through more than a step
+or two, is not judged (NaN): that says nothing either way.
+
+**9. In an ROI.**  Run as a per-region step in the ROI manager, it measures
 the ROI's molecule and proposes the direction it walks in as the ROI's
 angle -- set only by *Apply proposals* -- which the ROI then shows its
 molecule turned by, and the steps of anything else measured in it are
-along.
+along.  A two-colour molecule that was judged is proposed a keyword in the
+*colours* list too: *dual* when at least *together from* (half) of its
+moving windows match, *apart* when fewer do -- in both colours, but not
+moving as one.  [Segment regions](plugin:Analysis/Regions/Segment regions)
+names the ROIs *single* or *dual* when it makes them; *Apply proposals*
+turns the *dual* ones that do not move together into *apart*.
 
 ## In detail
 
@@ -191,6 +210,19 @@ prior and run 50 000 sweeps) and in priors scaled to the data; on simulated
 staircases it finds the same number of steps as their sampler.  The
 boundaries are not refined afterwards: the sampler's times already are
 where the data put them.
+
+**Moving together** (`co_movement`).  Each window's lines are least
+squares in x and y against time, centred on the window; the angle is
+between the two velocity vectors, the speed ratio the faster over the
+slower (≥ 1), the distance between the two lines' positions at the
+window's centre.  The windows are the overlap divided into whole windows
+nearest *window* long.  A window is judged only when each colour has at
+least 5 localizations in it and, at the faster colour's speed, is seen over
+*judged from* (30 nm) or more: a line through 40 ms of a stepping motor is
+one plateau or one step, and on the kinesin data a colour seen that briefly
+came out five times slower and 136° off.  The medians over the judged
+windows are `comove_angle_deg`, `comove_speed_ratio` and
+`comove_distance_nm`; `comove_windows` counts them.
 
 **Not done** from AutoStepFinder: its merging of steps by their error and
 its bootstrap errors; from StepsMINFLUX: the running-window smoothing, the
@@ -247,6 +279,16 @@ numbers never see one.
 Each colour of a molecule has only its own localizations, about half of
 the molecule's: dwells shorter than a few localizations per colour merge.
 
+### comove.window_s
+0.3-1 s for a kinesin: several steps per window, so the lines are not one
+step's.  0 compares one line per colour over everything, right for a
+motor that walks straight and steadily; windows also follow a curved
+microtubule and a motor that pauses.
+
+### comove.min_share
+0.5 calls a molecule *apart* when most of its moving windows disagree.  Raise
+it to keep only molecules that move together throughout.
+
 ### window_s
 A few tens of localizations per window: at a few hundred localizations a
 second, 0.1 s.  Shorter windows see a kinesin's single steps and its
@@ -269,7 +311,13 @@ A region table of the id attribute, "per tid: Find steps": `n_steps`,
 `step_median_nm`, `step_mean_nm`, `dwell_mean_s`, `velocity_nm_per_s`,
 `erlang_shape`, the direction of the track (`angle_deg`) and, from the
 moving parts, the share of windows it moved in (`moving_share`); with two
-colours the median step of each.  The text adds the dwell models, the best
+colours the median step of each, and how the colours move together:
+`comove_share`, `comove_angle_deg`, `comove_speed_ratio`,
+`comove_distance_nm`, `comove_windows` -- NaN where it could not be judged,
+and the values [Filter regions](plugin:Analysis/Regions/Filter regions)
+keeps molecules by (`comove_share >= 0.5`).  The text counts the
+two-colour molecules that move and those of them that do not move
+together.  The text adds the dwell models, the best
 first with each one's parameters and its AIC above the best.  The figure:
 the upper half, the longest traces (in an ROI, its molecule) side by side,
 the localizations as dots joined in time by a thin line (*localizations as

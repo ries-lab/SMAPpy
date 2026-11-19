@@ -47,6 +47,7 @@ the MBM beads.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import pairwise
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -516,3 +517,95 @@ def offset_curve(before: Tuple[np.ndarray, float], after: Optional[Tuple[np.ndar
             f"{t1 - t0:.0f} s; MBM explains ({explained[0]:.1f}, {explained[1]:.1f}), "
             f"rest ({rest[0]:.1f}, {rest[1]:.1f}) nm spread linearly")
     return OffsetCurve(c, drift, t0, rest / (t1 - t0), note)
+
+
+@dataclass
+class CoMovement:
+    """How two colours' traces of one molecule move together, from windows
+    of the time both are seen (`co_movement`): the share of the moving
+    windows where they go the same way at the same speed, close together,
+    and the medians of what was compared over the moving windows."""
+    share: float = np.nan              # of the moving windows, those that match
+    angle_deg: float = np.nan          # between the two directions
+    speed_ratio: float = np.nan        # the faster over the slower, >= 1
+    distance_nm: float = np.nan        # between the two lines at the window's centre
+    windows: int = 0                   # moving windows compared
+
+
+def _line(t, x, y, centre):
+    """A straight line through (t, x), (t, y) by least squares: the
+    velocity and the position at ``centre``."""
+    dt = t - centre
+    var = np.sum((dt - dt.mean()) ** 2)
+    if var <= 0:
+        return None
+    vx = np.sum((dt - dt.mean()) * (x - x.mean())) / var
+    vy = np.sum((dt - dt.mean()) * (y - y.mean())) / var
+    return vx, vy, x.mean() - vx * dt.mean(), y.mean() - vy * dt.mean()
+
+
+def co_movement(t, x, y, colour, window: float, min_speed: float, *,
+                max_angle: float = 30.0, max_ratio: float = 1.5,
+                max_distance: float = 50.0, min_travel: float = 30.0,
+                min_points: int = 5) -> CoMovement:
+    """Whether a molecule's two colours (``colour`` 0 and 1) move as one.
+
+    The time both colours are seen is cut into windows of ``window`` (in the
+    units of ``t``; 0 or more than the overlap: one window, the whole
+    overlap), and in each a straight line x(t), y(t) is fitted to each
+    colour -- for linear stepping over the whole overlap, exactly the two
+    lines compared.  A window moves when the faster colour's speed is
+    ``min_speed`` or more: a stuck molecule says nothing about whether its
+    colours move together, so stuck windows are left out, and a molecule
+    that never moves gets NaN.  A moving window matches when the directions
+    are within ``max_angle`` degrees, the speeds within a factor
+    ``max_ratio`` and the lines within ``max_distance`` at the window's
+    centre.  Windows, not one line, so that a curved microtubule and a
+    motor that stops and goes again are still compared where they move.
+
+    A line through a few tens of milliseconds of a stepping motor is one
+    plateau or one step, and its slope says nothing (a pair seen in its
+    second colour for 40 ms, 2026-11, came out "five times slower, 136°
+    off").  So a window is judged only when, at the faster colour's speed,
+    each colour is seen over ``min_travel`` or more -- a few steps."""
+    t = np.asarray(t, float)
+    x = np.asarray(x, float)
+    y = np.asarray(y, float)
+    colour = np.asarray(colour)
+    ok = np.isfinite(t) & np.isfinite(x) & np.isfinite(y)
+    a, b = ok & (colour == 0), ok & (colour == 1)
+    if a.sum() < min_points or b.sum() < min_points:
+        return CoMovement()
+    start, stop = max(t[a].min(), t[b].min()), min(t[a].max(), t[b].max())
+    if not stop > start:
+        return CoMovement()
+    n = 1 if not window > 0 else max(1, round((stop - start) / window))
+    edges = np.linspace(start, stop, n + 1)
+    angles, ratios, distances, matched = [], [], [], []
+    for lo, hi in pairwise(edges):
+        centre = 0.5 * (lo + hi)
+        lines = []
+        for m in (a, b):
+            w = m & (t >= lo) & (t <= hi)
+            lines.append((_line(t[w], x[w], y[w], centre), np.ptp(t[w]))
+                         if w.sum() >= min_points else (None, 0.0))
+        if lines[0][0] is None or lines[1][0] is None:
+            continue
+        (vx0, vy0, x0, y0), (vx1, vy1, x1, y1) = lines[0][0], lines[1][0]
+        s0, s1 = np.hypot(vx0, vy0), np.hypot(vx1, vy1)
+        if max(s0, s1) < min_speed:
+            continue
+        if max(s0, s1) * min(lines[0][1], lines[1][1]) < min_travel:
+            continue
+        cos = (vx0 * vx1 + vy0 * vy1) / (s0 * s1) if s0 > 0 and s1 > 0 else -1.0
+        angle = float(np.degrees(np.arccos(np.clip(cos, -1.0, 1.0))))
+        ratio = float(max(s0, s1) / min(s0, s1)) if min(s0, s1) > 0 else np.inf
+        distance = float(np.hypot(x1 - x0, y1 - y0))
+        angles.append(angle)
+        ratios.append(ratio)
+        distances.append(distance)
+        matched.append(angle <= max_angle and ratio <= max_ratio and distance <= max_distance)
+    if not matched:
+        return CoMovement()
+    return CoMovement(float(np.mean(matched)), float(np.median(angles)),
+                      float(np.median(ratios)), float(np.median(distances)), len(matched))

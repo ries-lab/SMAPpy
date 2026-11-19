@@ -37,6 +37,28 @@ COLOUR_LINES = ("#b0177e", "#1f8a3a")
 
 
 @dataclass
+class CoMoveSettings:
+    window_s: float = param(0.5, label="window", unit="s", min=0.0,
+                            help="the two colours' lines fitted in windows this long; 0: one "
+                                 "line over the whole time both are seen (frames where "
+                                 "there is no time_s)")
+    max_angle_deg: float = param(30.0, label="directions within", unit="°", min=0.0,
+                                 max=180.0, advanced=True,
+                                 help="the angle between the colours' directions in a window")
+    max_ratio: float = param(1.5, label="speeds within", unit="×", min=1.0, advanced=True,
+                             help="the faster colour's speed over the slower one's")
+    max_distance_nm: float = param(50.0, label="lines within", unit="nm", min=0.0,
+                                   advanced=True,
+                                   help="the distance between the lines at the window's centre")
+    min_travel_nm: float = param(30.0, label="judged from", unit="nm", min=0.0, advanced=True,
+                                 help="a window is judged when each colour is seen for as "
+                                      "long as the motor takes to travel this: a few steps")
+    min_share: float = param(0.5, label="together from", min=0.0, max=1.0,
+                             help="a molecule moves together when this share of its moving "
+                                  "windows match; else its ROI is proposed 'apart'")
+
+
+@dataclass
 class FindStepsSettings:
     id_column: str = param("", label="id attribute", choices=_id_choices,
                            help="the traces; auto: tid, else track_id, else cluster_id")
@@ -77,6 +99,8 @@ class FindStepsSettings:
     colours: str = param("auto", label="two colours", choices=COLOURS,
                          help="auto: in a two-colour table each colour of a molecule its "
                               "own steps, both in colour 0's frame and on one clock")
+    comove: CoMoveSettings = param(default_factory=CoMoveSettings,
+                                   label="moving together", collapsed=True)
     in_rois: bool = param(False, label="only ROIs' traces",
                           help="only the ids the ROI manager's used ROIs hold (an ROI of "
                                "its id alone): the kinesins Segment regions found")
@@ -114,7 +138,8 @@ class FindSteps(Plugin):
     # 4: BNP-Step as a second method
     # 5: two colours by the laser; only the ROIs' traces
     # 6: the track's axis from its moving parts; two colours together on auto
-    version = "6"
+    # 7: two colours: whether they move together, and a keyword proposed
+    version = "7"
 
     def changes_locs_for(self, settings: FindStepsSettings) -> bool:
         return settings.output != "table"
@@ -136,6 +161,7 @@ class FindSteps(Plugin):
         state.shown["axis"] = track
         for name in ("window_s", "min_speed"):
             state.shown[name] = track and settings.axis == "moving"
+        state.shown["comove"] = settings.colours != "one"
         return state
 
     def run(self, ctx: Context, settings: FindStepsSettings) -> Result:
@@ -202,6 +228,26 @@ class FindSteps(Plugin):
         per = {k: np.full(len(r.ids), np.nan) for k in
                ("n_steps", "step_median_nm", "step_mean_nm", "dwell_mean", "velocity_steps",
                 "erlang_shape")}
+        comove = {k: np.full(len(r.ids), np.nan) for k in
+                  ("comove_share", "comove_angle_deg", "comove_speed_ratio",
+                   "comove_distance_nm", "comove_windows")}
+        if pairs:
+            from ..dual_colour import co_movement
+            cm = settings.comove
+            for i in np.flatnonzero(long_enough):
+                sl = slice(r.start[i], r.start[i] + r.n[i])
+                seen = np.unique(thread[sl])
+                if len(seen) != 2:
+                    continue
+                c = co_movement(t[sl], x[sl], y[sl], (thread[sl] == seen[1]).astype(np.int8),
+                                cm.window_s, settings.min_speed, max_angle=cm.max_angle_deg,
+                                max_ratio=cm.max_ratio, max_distance=cm.max_distance_nm,
+                                min_travel=cm.min_travel_nm)
+                comove["comove_share"][i] = c.share
+                comove["comove_angle_deg"][i] = c.angle_deg
+                comove["comove_speed_ratio"][i] = c.speed_ratio
+                comove["comove_distance_nm"][i] = c.distance_nm
+                comove["comove_windows"][i] = c.windows
         sizes, dwells, examples = [], [], []
         plateau = np.full(len(x), -1, np.int64)
         level = np.full(len(x), np.nan)
@@ -297,6 +343,8 @@ class FindSteps(Plugin):
                   "erlang_shape": per["erlang_shape"]}
         for th, med in sorted(by_thread.items()):
             values[f"step_median_{colour}{th}_nm"] = med
+        if pairs:
+            values.update(comove)
         if settings.along == "track":
             values["angle_deg"] = axis_angle
             if settings.axis == "moving":
@@ -306,8 +354,16 @@ class FindSteps(Plugin):
         table = column_table(locs, column, LABEL, r.ids, values, step,
                              layer=ctx.layer, session=ctx.session)
         pooled = pooled_steps(sizes, dwells)
+        together = ""
+        if pairs:
+            share = comove["comove_share"]
+            judged = np.isfinite(share)
+            if judged.any():
+                apart = int((share[judged] < settings.comove.min_share).sum())
+                together = (f"; of {int(judged.sum())} two-colour molecules that move, "
+                            f"{apart} not together")
         lines = [f"{int(long_enough.sum())} traces of {column} with {settings.min_locs} or more "
-                 f"localizations: {len(sizes)} steps",
+                 f"localizations: {len(sizes)} steps{together}",
                  f"step size: {pooled['step_mean_nm']:.2f} ± {pooled['step_sd_nm']:.2f} nm "
                  f"(mean ± sd of |size|); dwell {pooled['dwell_mean']:.4g} {unit}, "
                  f"Erlang shape {pooled['erlang_shape']:.2f}"
@@ -338,6 +394,13 @@ class FindSteps(Plugin):
                 if settings.along == "track" and np.isfinite(axis_angle[i]):
                     proposals["angle"] = float(axis_angle[i])
                     lines.append(f"proposes for the ROI: angle {axis_angle[i]:.0f}°")
+                share = comove["comove_share"][i]
+                if pairs and np.isfinite(share):
+                    from .segment import APART, COLOURS_LIST, DUAL
+                    word = DUAL if share >= settings.comove.min_share else APART
+                    proposals[f"keyword:{COLOURS_LIST}"] = word
+                    lines.append(f"moves together in {share:.0%} of its moving windows: "
+                                 f"proposes {COLOURS_LIST} '{word}'")
         label = f"{column} {{}}"
         line = settings.line
 

@@ -421,10 +421,11 @@ squared correlation of the position along the long axis with time; and
 `n_colours`.
 
 **Two colours.**  In a table of two colours (`channel`, else `thi`) every
-ROI is annotated in the keyword list *colours*: *both* where its id holds
-localizations of both, else its one colour by name (*638 nm*, or
-*channel 1* where the reader did not name it).  The list is made where it
-is missing, *both* first.  The ROI manager filters and sorts by it, as by
+ROI is annotated in the keyword list *colours*: *dual* where its id holds
+localizations of both colours, *single* where it holds one.  The list is
+made where it is missing, with a third word, *apart*: a molecule in both
+colours that does not move as one, which
+[Find steps](plugin:Analysis/Tracking/Find steps) proposes.  The ROI manager filters and sorts by it, as by
 any keyword.  The values are kept with each ROI and are columns of the results
 table, as the other methods' are.
 
