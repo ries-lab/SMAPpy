@@ -11,32 +11,27 @@ __gateway__ = (
     "https://raw.githubusercontent.com/TuragaLab/DECODE/master/gateway.yaml"  # gateway
 )
 
-import warnings
+# The subpackages are imported when first used, not here, as in `decode_smlm`'s own __init__:
+# DECODE-Plex imported them all, and with them torch, Lightning and the plotting, so reading one
+# model's settings loaded everything.  `decode_smlm.plex.simulation`, `.EmitterSet` and the rest
+# still work as attributes.  The warning for a GPU of compute capability below 3.7 is gone: current
+# torch builds refuse such a GPU themselves.
+import importlib
 
-import decode_smlm.plex.evaluation
-import decode_smlm.plex.generic
-import decode_smlm.plex.io
-import decode_smlm.plex.neuralfitter
-import decode_smlm.plex.plot
-import decode_smlm.plex.renderer
-import decode_smlm.plex.simulation
+_SUBPACKAGES = ("emitter", "evaluation", "generic", "hardware", "io", "neuralfitter", "plot",
+                "renderer", "simulation", "utils", "validation")
+_NAMES = {"EmitterSet": ("emitter.emitter", "EmitterSet"),
+          "emitter_factory": ("emitter.emitter", "factory")}
 
-from . import emitter
-from . import io
-from . import validation
-from .emitter.emitter import EmitterSet
-from .emitter.emitter import factory as emitter_factory
 
-# check device capability
-import torch
-import decode_smlm.plex.utils.hardware
+def __getattr__(name):
+    if name in _SUBPACKAGES:
+        return importlib.import_module(f".{name}", __name__)
+    if name in _NAMES:
+        module, attr = _NAMES[name]
+        return getattr(importlib.import_module(f".{module}", __name__), attr)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-if torch.cuda.is_available():
-    device_capa = decode_smlm.plex.utils.hardware.get_device_capability()
-    if float(device_capa) < 3.7:
-        warnings.warn(
-            f"Your GPU {torch.cuda.get_device_name()} has cuda capability {device_capa} and is no longer supported (minimum is 3.7)."
-            f"\nIf you have multiple devices make sure to select the index of the most modern one."
-            f"\nOtherwise you can use your CPU to run DECODE or switch to Google Colab.",
-            category=UserWarning,
-        )
+
+def __dir__():
+    return sorted([*globals(), *_SUBPACKAGES, *_NAMES])
