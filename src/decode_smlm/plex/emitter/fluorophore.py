@@ -1,7 +1,7 @@
 from typing import Optional, Union
 
 import torch
-from pydantic import BaseModel, validator
+from decode_smlm.plex.generic.validated import BaseModel, validator
 
 from .emitter import EmitterSet
 from ..generic import models

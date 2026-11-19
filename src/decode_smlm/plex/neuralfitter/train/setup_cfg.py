@@ -3,7 +3,7 @@ import functools
 from pathlib import Path
 from typing import Optional, Sequence, Any, Union, Literal
 
-import pydantic
+from decode_smlm.plex.generic import validated as pydantic
 import pytorch_lightning as pl
 from decode_smlm.plex.generic.logging import get_logger
 import torch

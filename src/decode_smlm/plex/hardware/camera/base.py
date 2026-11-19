@@ -1,7 +1,7 @@
 from abc import ABC
 from typing import Any
 
-from pydantic import BaseModel
+from decode_smlm.plex.generic.validated import BaseModel
 
 
 class ROIMixin(BaseModel):

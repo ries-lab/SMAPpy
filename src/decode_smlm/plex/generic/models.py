@@ -2,7 +2,7 @@
 
 from typing import Sequence, Union
 
-import pydantic
+from decode_smlm.plex.generic import validated as pydantic
 import torch
 
 from decode_smlm.plex.generic import dtype

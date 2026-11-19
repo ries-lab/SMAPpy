@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod  # abstract class
 from typing import Optional, Union, Protocol
 
-import pydantic
+from decode_smlm.plex.generic import validated as pydantic
 import torch
 
 from . import code

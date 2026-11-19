@@ -6,7 +6,7 @@ from typing import Callable, Union, Optional, Sequence
 import numpy as np
 import torch
 from decode_smlm.plex.generic.deprecation import deprecated
-from pydantic import BaseModel, validate_model
+from decode_smlm.plex.generic.validated import BaseModel, validate_model
 
 from ..generic import models
 from ..generic import slicing
