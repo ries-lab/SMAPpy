@@ -12,14 +12,14 @@ from ..generic.delay import _DelayedSlicer
 from ..simulation import sampler as em_sampler
 from ..simulation import trafo
 from ..simulation.microscope import Microscope, MicroscopeMultiChannel
-from ..simulation.trafo.pos import trafo
+from ..simulation.trafo.pos import trafo  # noqa: F811 -- DECODE-Plex's: this one is the name's
 from ..utils import future
 from . import process
 from .sample import samplers
 
 logger = get_logger()
 
-T = TypeVar("T", bound="_TypedSequence")
+T = TypeVar("T", bound="_TypedSequence")  # noqa: F821 -- DECODE-Plex's, a bound never resolved
 
 
 class SamplerMicroscope:

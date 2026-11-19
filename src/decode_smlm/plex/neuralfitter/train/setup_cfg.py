@@ -4,7 +4,11 @@ import copy
 import functools
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    import pytorch_lightning as pl
+    from pytorch_lightning import loggers
 
 import torch
 from torch import nn

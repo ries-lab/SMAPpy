@@ -3,7 +3,10 @@ from __future__ import annotations
 import copy
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from omegaconf import DictConfig
 
 try:
     import mat73

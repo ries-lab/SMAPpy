@@ -24,6 +24,13 @@ ignore = [
 
 [lint.per-file-ignores]
 "__init__.py" = ["F401"]   # importing a subpackage there is what makes it available
+# DECODE-Plex's code as it came (NOTICE.md), on the same terms as DECODE's above
+"**/decode_smlm/plex/**" = [
+    "E731",   # lambdas assigned to names
+    "B006",   # a mutable default argument, never mutated
+    "B019",   # lru_cache on a method (the offset maps, cached per transformation)
+    "UP046",  # Generic subclasses rather than type parameters
+]
 
 [lint.isort]
 known-first-party = ["decode_smlm", "decode_tests"]
