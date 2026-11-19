@@ -13,6 +13,47 @@ import time
 
 import pytest
 
+# The tests test the tree they are in.  SMAPpy is installed editable from one checkout, so in any
+# other -- a session's worktree (CLAUDE.md, "Work in a worktree of your own") -- `import smappy`
+# loaded that checkout's code and the tests passed or failed on what was not being changed (found
+# 2026-11-19 in .claude/worktrees/roi-angle).  So this tree's `src` goes first, for this process and,
+# through PYTHONPATH, for the tests' subprocesses; and its compiled extensions must be its own and
+# built since `csrc/` last changed, or the run stops and says how to build them.
+_TREE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_TREE, "src")
+if sys.path[:1] != [_SRC]:
+    sys.path.insert(0, _SRC)
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    [_SRC] + [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p and p != _SRC])
+
+
+def _stale_extensions():
+    """The extension modules of `setup.py` missing from this tree's `src/smappy`, or older than their
+    own sources or any header in `csrc/` (setup.py's ``depends``): what `python setup.py build_ext
+    --inplace` would build."""
+    import importlib.machinery
+    import re
+    suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
+    csrc = os.path.join(_TREE, "csrc")
+    headers = max((os.path.getmtime(os.path.join(csrc, f)) for f in os.listdir(csrc) if f.endswith(".hpp")),
+                  default=0.0)
+    with open(os.path.join(_TREE, "setup.py"), encoding="utf-8") as f:
+        found = re.findall(r'Pybind11Extension\(\s*"smappy\.(\w+)",\s*\[([^\]]*)\]', f.read())
+    out = []
+    for name, sources in found:
+        newest = max([headers] + [os.path.getmtime(os.path.join(_TREE, s)) for s in re.findall(r'"([^"]+)"', sources)
+                                  if os.path.exists(os.path.join(_TREE, s))])
+        path = os.path.join(_SRC, "smappy", name + suffix)
+        if not os.path.exists(path) or os.path.getmtime(path) < newest:
+            out.append(name)
+    return out
+
+
+if os.path.isdir(os.path.join(_TREE, "csrc")) and _stale_extensions():
+    pytest.exit(f"{_TREE}: the compiled extensions {', '.join(_stale_extensions())} are missing or older "
+                f"than csrc/; build this tree's first:\n    cd {_TREE} && python setup.py build_ext --inplace",
+                returncode=4)
+
 # Qt and matplotlib draw into nothing unless the developer asks otherwise.  A
 # suite that opens windows takes the keyboard away from whatever is in front of
 # it, several times, and that is reason enough; it also makes the live-view

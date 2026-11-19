@@ -59,18 +59,43 @@ a window `open_window` opens -- its fields and buttons -- is
 window is in `WINDOWS_WITHOUT_ACTIONS` with the reason --
 `tests/test_window_actions.py` fails until it is.
 
-## Before you edit anything
+## Before you edit anything: a worktree of your own
 
-Pull first:
+**Work in a worktree of your own**, never in the checkout at
+`/Users/ries/git/SMAPpy`: that one is Jonas's, kept on `main` and clean so he
+can pull and test in a terminal while sessions run.  Never edit, commit or
+stash there.  Several sessions work on this repository at once; in one working
+tree their half-finished edits mixed, tests ran on each other's changes, a
+dirty tree refused every pull, and one session's push published another's
+commits (2026-11-19).  So, before the first edit:
 
-    git fetch origin && git rebase origin/main      # or: git pull --rebase
+    git fetch origin
+    git worktree add .claude/worktrees/<name> -b claude/<name> origin/main
+    cd .claude/worktrees/<name>
+    python setup.py build_ext --inplace     # the C++ extensions, this tree's own: ~40 s
 
-Work lands on `origin/main` from cloud sessions and other machines, so the
-local `main` is routinely well behind it -- 28 commits, on one occasion.
-Editing first means rebasing finished work through conflicts in files upstream
-has already changed -- `NOTES.md` most often.  If you have already started,
-`git stash push -u` first so new untracked files come along, and rebuild
-afterwards if `csrc/` moved.
+The app's own worktrees (a session started with one) are the same thing; a
+session started inside another's folder that will edit makes its own.  A
+session that only reads or runs benchmarks may run in Jonas's checkout, but
+writes nothing into it.
+
+**The tests test the tree they run in**: `tests/conftest.py` puts its `src`
+first (SMAPpy is installed editable from Jonas's checkout, so a worktree's
+tests imported his code before) and stops, with the command, when the tree's
+extensions are missing or older than their sources in `csrc/` -- after a
+rebase that moved `csrc/`, build again.  The shared files outside the tree
+(`~/.cache`, the stash list) are shared: never a bare `git stash` / `pop`.
+
+**Land the work from the worktree**, never through a local `main`:
+
+    git fetch origin && git rebase origin/main      # then the tests
+    git push origin HEAD:main
+
+Work lands on `origin/main` from many sessions and machines, so rebase late
+and often; `NOTES.md` and the plans under `docs/` are where conflicts come
+from.  Stage files by name.  When the work is merged and nothing is left in
+the worktree, remove it (`git worktree remove .claude/worktrees/<name>`, then
+the branch).
 
 ## Remind the user to release
 
