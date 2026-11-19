@@ -477,8 +477,15 @@ paper's movies, against DECODE-Plex's localizations of the same frames (the orig
   nm with 1467 matches (shift 0), but the fits stay at `logl_rel` -31.  The movie's background is 300 --
   700 photons a pixel and uneven (66 in the frame's left half, 709 in its right; DECODE-Plex's input shows
   the same level), and even the fits on a background under 60 stay at -16 to -21, a single-channel fit
-  of one half at -30.  Fig. 2c is not a clean test of the conventions with a fitter that takes the
-  background flat in its box; Fig. 2a is.
+  of one half at -30.  **The conventions hold on Fig. 2c too** (Jonas): at x = 175 and no shift, the
+  best of every variant tried, Spline 3D 2C puts the molecules where DECODE-Plex does, offset by
+  +16 / +7 / -53 nm (x / y / z; every other variant moves z by 120 -- 1500 nm).  What is not alike is
+  the precision: spread by 73 / 71 / 201 nm (1.48 MAD), where DECODE-Plex's own uncertainties are
+  27 / 28 / 74 nm, and 39 % of Spline 3D 2C's fits have no partner within 150 nm -- the poor fits of a
+  model that takes the background flat in its box, under the live cell's.  The paper's own fit of the
+  movie (`results.zip`, all 10 000 frames) is the run of §9: on the first 200 frames 99.9 % of its
+  localizations lie within 0.05 px of ours, differing by 0.002 px and 1.7 nm (99th percentile), as
+  much as the original's own run on the 4090 does (TF32).
 - What the affine reading costs DECODE-Plex on real data is not measured yet: on Fig. 2a's narrow chip
   the two readings differ by 0.07 px at most, too little to see here; Fig. 2c's chip is where it would
   show, once that movie fits.
