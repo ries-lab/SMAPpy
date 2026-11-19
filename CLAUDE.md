@@ -194,6 +194,12 @@ Running the tests -- three tiers, and the run before a release:
   from Preferences > General), and one that makes a session installs its
   identity too (`gui/identity.install_identity`: its name and colour in
   every window title).
+* **Which window takes the keyboard** is a real window system's matter:
+  the offscreen platform moves no focus, so a test cannot see a window
+  coming to the front.  `SMAPPY_DEBUG_FOCUS=1` logs every focus change and
+  every raise, activate and show with SMAPpy's code that asked for it
+  (`gui/focus_log.py`, into the config directory's `focus.log`): one run of
+  the user's makes the culprit plain.
 * **A colour is read from the palette, never fixed for a light window**:
   the windows can be dark.  A secondary grey is `widgets.note_style()`,
   which a switch of theme finds and rewrites (`theme._rebake`); a warning

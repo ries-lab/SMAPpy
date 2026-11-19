@@ -29,6 +29,10 @@ def make_app(argv=None):
     collect_on_gui_thread(app)
     install_icon(app)
     install_screen_fit(app)
+    # SMAPPY_DEBUG_FOCUS: who takes the keyboard, for a bug only a real
+    # window system shows (`focus_log`)
+    from .focus_log import install as install_focus_log
+    install_focus_log(app)
     return app
 
 
