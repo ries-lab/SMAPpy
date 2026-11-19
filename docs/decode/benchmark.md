@@ -174,4 +174,5 @@ belong to the new fitter (step 3), which reads `parts` from its settings.
   (step 5), where its published weights fit; a C = 1 run is added when it is installed.
 - **The published DECODE package's model** was trained on SMAP's spline A, which these sets are not
   drawn with; (i)'s sets on A compared it with the port (equal within the runs' spread).
-- **Other modalities** (C = 2, 4Pi) get their sets when their steps come (5, 6).
+- **Other modalities** get their sets when their steps come: C = 2's, on DECODE-Plex's calibrations, are
+  `sets_c2.py` (`docs/decode/plex-plan.md` §10); 4Pi's with step 6.

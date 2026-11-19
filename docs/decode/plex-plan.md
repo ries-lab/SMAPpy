@@ -1,8 +1,9 @@
 # DECODE-Plex in SMAPpy: the port, and step 5's plan
 
 Status, 2026-11-19: planned and agreed with Jonas; the port's inference done -- the paper's three
-published models tested (Fig. 1e, 2c, 2a) give the original's localizations here (§9).  Next: the
-reader of SMAP's two-channel calibrations, then the C = 2 sets (§6).  It details
+published models tested (Fig. 1e, 2c, 2a) give the original's localizations here (§9).  The reader of SMAP's two-channel calibrations and the C = 2 sets
+followed the same day (§10).  Next: the baselines' runs on the sets (DECODE-Plex, Spline 3D 2C), then
+the study (§7).  It details
 `docs/decode.md` §10, step 5 (C = 2, biplane and colour), as `poc-plan.md` detailed §9 for C = 1.
 Written after reading `ries-lab/DECODE-Plex` at 6138472 (2026-10-20) and its data release
 (Zenodo 10.5281/zenodo.20088009, record 21348704).
@@ -270,3 +271,61 @@ the port, has to deal with.
 **Not done yet:** training (§4); uiPSF's `.h5` calibrations (Fig. 2b), which need omegaconf and
 dotted_dict at the call; the multi-GPU path (`DataParallel`), untested; the de-biasing
 (`de_bias.py`), not on the notebooks' path.
+
+## 10. The reader and the C = 2 sets, as done (2026-11-19)
+
+**The reader**, `smappy.calibrate.smap_dual.load_smap_dual_calibration` (tests in
+`tests/test_smap_dual.py`).  Each `SXY` entry goes through SMAPpy's single reader, now one function
+for one entry (`io.calibration.smap_spline`); the global calibration's `coeff` is each channel's raw
+spline (`coeffrawref` / `coeffrawtar`), so the secondary stays as the camera saw it, as SMAPpy keeps
+it.  The splines hold each channel's brightness relative to the main one (SMAP's `normf`: their sums
+at focus differ by 0.78 for Fig. 1c, 4.6 for Fig. 2a).  The registration is `trafo_raw.tar`
+(secondary to main), read as MATLAB applies it, on pixels from 1 in units of 1000, in the bead image
+as SMAP loaded it (un-mirrored in x for EM gain); the reader takes it onto the chip's pixels from 0 in
+the camera's orientation through the beads' camera ROI (`parameters_g.roi`).  How this was settled:
+- on Fig. 2a (no EM) it agrees with DECODE-Plex's loader, given the same matrix, to 0.01 px (float32
+  at its scale) once the division is left out as DECODE-Plex leaves it;
+- the movies' own shift between the channels agrees with it: Fig. 2a's movie lies on the registration
+  but for 5.3 rows, Fig. 2c's (EM-mirrored, as SMAP's EM coordinates need) but for 3.4 rows, which is
+  how far each splitter moved since its beads: DECODE-Plex's runs say so too, shifting the movie's
+  second channel by their `Test` offset where their maps take the `Simulation` one (Fig. 2a: -29
+  against -35 rows; Fig. 2c: 43 against 47).  Its maps and its shifted frames agree within a pixel.
+
+**DECODE-Plex treats SMAP's projective registration as affine** (`XYZTransformationMatrix` never
+divides by the third coordinate).  On Fig. 2a's beads (226 px wide) that moves a point by up to
+0.07 px; on Fig. 1c's (512 px) by up to 0.29 px, 37 nm, over the area sampled.  Its offset maps carry
+that error, in training and in inference alike, so a model learns around it only where the error is
+the same; the study (§7) and netfit take the registration with its division.
+
+**The sets**, `benchmarks/decode/suite/sets_c2.py` (`$DECODE_SMLM_DATA/benchmark/v1/sets_c2/`, the
+manifest `manifest_c2.json`), each context's converted calibration kept beside them as `_2ct.h5`:
+- `biplane_2c`: Fig. 1c's bifocal beads, frames of 512 x 512 as that EMCCD records them, the Fig. 2c
+  model's context (one photon count, drawn into both planes, each with its share), z +-1000 nm;
+- `colour_2a`: Fig. 2a's two-colour beads, 512 x 226, its model's context; two dyes at 78 % and 92 %
+  of their light in channel 1 -- the peak and the shoulder of log10(ch1 / ch0) in DECODE-Plex's own
+  fit of the Fig. 2a movie (0.55 and 1.05), an estimate to replace by the dyes' known ratios; each
+  channel's spline normalised at focus, as the model's `norm: auto`; z +-600 nm;
+- each a density sweep (1, 5, 15, 25, 50 per 40 x 40 pixels of the main half) at the model's training
+  photons and background, and a photon sweep (1000, 3000, 10 000 at density 1, each channel's
+  background 2 % of its mean photons); 20 000 molecules a set, placed in the main half where the
+  partner falls inside the secondary one;
+- the camera the paper's (EMCCD, gain 100, 5 e-/ADU, read noise 74.4 e-), pixels 117 x 127 nm;
+- each molecule's CRLB from both channels together (`crlb`): each channel's spot's Fisher matrix,
+  the secondary's position derivatives through the registration's Jacobian, summed over x, y, z and
+  the photons (one count, or two for colour) with a background per channel, doubled for the EM
+  register.  At 10 000 photons the median is 7 -- 8 nm laterally and 15 nm in z (C = 1: 9 nm).
+
+**The published models on the sets** (`plex_on_set.py`; the trial, 2000 molecules at 10 000 photons,
+the second channel shifted by the registration's own offset): they find 96 % (biplane) and 99.8 %
+(colour) of the molecules where both channels see the sample, so the reader, the drawing and
+DECODE-Plex's conventions agree on where a molecule is.  Near the focus they are at the bound (colour,
+|z| < 240 nm: x and y scattered by 6 -- 13 nm against a CRLB of 7); away from it they are not (at
+z = -600 nm, y biased by 47 nm, scattered by 59), and z is biased by up to +-20 nm at +-360 nm.  Two
+things the benchmark's scoring has to know:
+- **score where both channels see the sample.**  Where a molecule's partner falls off the chip
+  (Fig. 1c: the main half's rows below 52) DECODE-Plex pads its second channel with zeros, and the
+  network reports spots at the edge it sees there;
+- **the biplane model reports a band of false localizations** (rows 73 -- 103 of the main half, at
+  probability about 0.6; 2447 against 1783 molecules on the trial) inside that area.  Not yet
+  understood: it may be the training's sampled ROI positions never covering that part of the chip,
+  or something the real movie has and the simulation lacks.
