@@ -100,6 +100,9 @@ class Layer:
         self.image: Optional[ImageData] = None
         self.name = name
         self.visible = True
+        # set when a tracking file opens as tracks: the Render tab colours
+        # each track its own when it first shows the layer, then clears it
+        self.colour_tracks = False
         if settings is None:
             settings = RenderSettings(sigma_settings=SigmaSettings(factor=PRECISION_FACTOR))
         self.state = ViewState(settings=settings, display=display, tables=tables)
@@ -641,6 +644,8 @@ class Session:
                                     else np.asarray(grouped["filenumber"], np.int32))
                 grouped = Localizations(gc, dict(grouped.metadata))
             self.set_locs(locs, undoable=False, grouped=grouped)
+            if not saved:                # a saved session keeps how it was shown
+                self._open_as_tracks_if_tracking(info)
             # the file's own log continues rather than starting again: what
             # was done to these localizations before they were saved is the
             # part of the record that cannot be reconstructed from anything
@@ -1106,6 +1111,23 @@ class Session:
             self.layers = [l for l in self.layers if l.is_image]
             self.layers.insert(0, Layer(self.tables, base=carried))
         self.changed("locs")
+
+    def _open_as_tracks_if_tracking(self, info: FileInfo) -> None:
+        """A MINFLUX tracking measurement opens as its tracks: the first
+        layer drawn in the *tracks* mode, ungrouped (merged blinks would join
+        a slow particle's steps into one point), and coloured by track when
+        the Render tab first shows it (`Layer.colour_tracks`), as choosing
+        the mode there does.  Told by the sequence's name
+        (`minflux.is_tracking`): an imaging sequence opens as a picture."""
+        from .io.minflux import is_tracking
+        layer = self._locs_layer()
+        if layer is None or not is_tracking(info.metadata):
+            return
+        layer.state.settings = dataclasses.replace(layer.state.settings, mode="tracks")
+        if layer.grouped:
+            layer.show_grouped(False)
+        layer.colour_tracks = True
+        self.changed("layer")
 
     def carried_bounds(self, base: Optional[Dict[str, Tuple]] = None
                        ) -> Dict[str, Tuple]:

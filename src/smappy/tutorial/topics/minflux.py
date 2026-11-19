@@ -211,19 +211,16 @@ def make(d) -> None:
            "to see both measurements.",
            spot=[filt.field, filt.files, filt.all_files], point=filt.all_files,
            click=True, zoom=d.around(filt, 760))
-    assert tab.grouped.isChecked()
-    d.shot("Merge blinks draws each trace as one point: its localizations "
-           "averaged.",
-           spot=[tab.grouped, d.rect(render.view.graphics, pad=-2)], point=tab.grouped)
-    tab.grouped.click()
-    d.settle()
+    # a tracking sequence opens as its tracks (`minflux.is_tracking`):
+    # every localization drawn, a line per trace in its own colour
+    assert not tab.grouped.isChecked()
+    assert session.layers[0].state.settings.mode == "tracks"
     x0, x1, y0, y1 = _busiest(session.locs)
     render.view.frame_on((x0, x1), (y0, y1))
     d.settle_picture()
-    d.shot("Unticked, every localization is drawn, and the traces show the "
-           "motors walking.",
-           spot=[tab.grouped, d.rect(render.view.graphics, pad=-2)], point=tab.grouped,
-           click=True)
+    d.shot("A tracking measurement opens as its tracks: every localization, "
+           "each trace a line in its own colour. The motors walk.",
+           spot=[tab.mode, d.rect(render.view.graphics, pad=-2)], point=tab.mode)
 
     d.chapter("The sequence")
     analysis = show_tab(d, "Analysis")

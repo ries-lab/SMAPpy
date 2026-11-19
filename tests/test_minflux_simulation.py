@@ -49,3 +49,49 @@ def test_two_molecules_at_once_double_the_photon_rate_and_raise_cfr():
     both = np.median([efo_of[t] for t in tids[two] if t in efo_of])
     assert 1.7 < both / one < 2.3
     assert not (rec["cfr"][rec["vld"]] > 0.8).any()       # the sequence's limit aborts
+
+
+def test_a_tracking_measurement_opens_as_its_tracks_and_an_imaging_one_as_a_picture(tmp_path):
+    """Told by the sequence's name (`minflux.is_tracking`): Abberior's
+    ``TDs_Trk_2D_...`` tracks, ``imaging_sequence...`` images, an MBM
+    sequence neither."""
+    import pytest
+
+    from smappy.io.minflux import is_tracking
+    from smappy.session import Session
+    from smappy.simulate.minflux import sequence_attrs, write_msr
+
+    def meta(*names):
+        return {"minflux": {"measurements": [
+            {"sequence": {"globals": {"id": n}}} for n in names]}}
+    assert is_tracking(meta("TDs_Trk_2D_L75_pho010_dt900us"))
+    assert is_tracking(meta("seqMBM2d_v8", "Tracking_2D"))
+    assert not is_tracking(meta("imaging_sequence_toolkit_test", "seqMBM2d_v8"))
+    assert not is_tracking({}) and not is_tracking(None)
+
+    rec = simulate_attempts(200, passed=(0.2, 0.95, 0.9), locs_per_burst=50.0,
+                            precision_nm=3.0, dwell_s=5e-4, seed=2)
+    date = "2026-06-11T15:08:27+02:00"
+    shown = {}
+    for name in ("Tracking_2D", "imaging_sequence_2d"):
+        path = tmp_path / f"{name}.msr"
+        write_msr(path, [("one", rec, sequence_attrs(6.0, date, name=name))])
+        session = Session()
+        session.load(path)
+        layer = session.layers[0]
+        shown[name] = (layer.state.settings.mode, layer.grouped, layer.colour_tracks)
+    assert shown["Tracking_2D"] == ("tracks", False, True)
+    assert shown["imaging_sequence_2d"][0] != "tracks"
+    assert not shown["imaging_sequence_2d"][2]
+
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.render_tab import RenderTab
+    session = Session()
+    session.load(tmp_path / "Tracking_2D.msr")
+    tab = RenderTab(session)                 # shows the layer: coloured by track, once
+    settings = session.layers[0].state.settings
+    assert settings.mode == "tracks" and settings.color_field == "tid"
+    assert not session.layers[0].colour_tracks
+    tab.deleteLater()

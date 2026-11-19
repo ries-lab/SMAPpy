@@ -1714,6 +1714,12 @@ class RenderTab(QWidget):
         self.grouped.setChecked(layer.grouped)
         for w in widgets:
             w.blockSignals(False)
+        if (getattr(layer, "colour_tracks", False) and settings.mode == "tracks"
+                and layer is self.layer):          # what `_colour_by_track` colours
+            # a tracking file opened as tracks (`Session._open_as_tracks_if_
+            # tracking`): coloured as choosing the mode here colours it, once
+            layer.colour_tracks = False
+            self._colour_by_track()
 
     def set_mode(self, key: str) -> None:
         """Choose a render mode by its stored key ("precision", "gauss", ...)."""

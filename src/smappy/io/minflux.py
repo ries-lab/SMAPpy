@@ -656,6 +656,34 @@ def sequences(attrs: dict) -> List[Dict[str, Any]]:
     return [sequence(attrs, i) for i in range(max(n, 1))]
 
 
+#: what a tracking sequence's id holds, lower case: Abberior's own
+#: ``TDs_Trk_2D_...``, a lab's ``..._tracking_...``; imaging and MBM
+#: sequences (``imaging_sequence...``, ``seqMBM2d_v8``) hold neither
+TRACKING_WORDS = ("trk", "track")
+
+
+def sequence_id(seq: Optional[dict]) -> str:
+    """The name the sequence was saved under (``globals.id``), "" if none."""
+    if not isinstance(seq, dict):
+        return ""
+    return str((seq.get("globals") or {}).get("id") or seq.get("id") or "")
+
+
+def is_tracking(metadata: Optional[dict]) -> bool:
+    """Whether a file's MINFLUX measurements ran a tracking sequence, by the
+    sequence's name (`TRACKING_WORDS`): what decides that it opens as tracks
+    rather than as a picture.  An export carries no sequence: False."""
+    measurements = ((metadata or {}).get("minflux") or {}).get("measurements") or []
+    for m in measurements:
+        if not isinstance(m, dict):
+            continue
+        for seq in m.get("sequences") or [m.get("sequence")]:
+            name = sequence_id(seq).lower()
+            if any(word in name for word in TRACKING_WORDS):
+                return True
+    return False
+
+
 def excitation_nm(attrs: dict, thread: int = 0) -> Optional[float]:
     """The wavelength (nm) of a thread's MINFLUX excitation laser (m2410's
     ``measurement.threads[i].lasers``): the laser whose ``purpose`` or
