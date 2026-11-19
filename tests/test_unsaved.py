@@ -167,3 +167,34 @@ def test_the_preference_is_a_tick_in_the_preferences_and_off_by_default(windows)
     tick.setChecked(True)
     assert config.ask_before_quit() is True
     dialog.close()
+
+
+def test_a_quit_cancelled_at_unsaved_changes_closes_no_window(windows):
+    # Qt's quit closes the windows one by one before the main window asks;
+    # asked first, Cancel leaves every window open (the ROI results window,
+    # 2026-11)
+    from PySide6.QtWidgets import QApplication, QWidget
+    from smappy import config
+    from smappy.gui.app import quit_app
+    session, control, asked = windows
+    config.set_ask_before_quit(True)
+    session.run(Brighter())
+    other = QWidget()
+    other.show()
+    quitting = []
+    app = QApplication.instance()
+    app.aboutToQuit.connect(lambda: quitting.append(True))
+    real_quit = QApplication.quit
+    QApplication.quit = staticmethod(lambda: quitting.append("quit"))
+    try:
+        control.answer = "cancel"
+        quit_app()
+        assert asked == [True] and other.isVisible() and control.isVisible()
+        assert not quitting and not getattr(control, "leaving", False)
+        control.answer = "discard"
+        quit_app()
+        assert asked == [True, True] and quitting == ["quit"] and control.leaving
+    finally:
+        QApplication.quit = real_quit
+        control.leaving = False
+        other.close()

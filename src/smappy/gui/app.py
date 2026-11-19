@@ -155,13 +155,36 @@ def _copy_selected_text(widget) -> bool:
     return selected
 
 
+def quit_app() -> None:
+    """Quit, having asked about unsaved changes first.  Qt 6's `quit`
+    closes the windows one by one and is called off when one refuses --
+    the main window, asking Save / Discard / Cancel -- so a quit cancelled
+    there had already closed the windows before it: ROI results, with its
+    *draw its figures* (2026-11, seen in the focus log).  Asked first, a
+    Cancel leaves every window as it was."""
+    app = QApplication.instance()
+    for window in app.topLevelWidgets():
+        # a main window closed already has nothing to ask about
+        if (isinstance(window, ControlWindow) and window.isVisible()
+                and not getattr(window, "leaving", False)):
+            try:
+                go = window.may_close()
+            except Exception:                 # a question that fails must not
+                traceback.print_exc()         # keep the program open for good
+                go = True
+            if not go:
+                return
+            window.leaving = True             # asked: its closeEvent asks no more
+    app.quit()
+
+
 def window_shortcuts(window: QWidget, with_quit: bool = True) -> None:
     """Cmd/Ctrl+W closes this window, Cmd/Ctrl+Q quits: on every window."""
     close = QAction("Close window", window, triggered=window.close)
     close.setShortcuts(_keys(QKeySequence.Close, "Ctrl+W"))
     actions = [close]
     if with_quit:
-        quit_ = QAction("Quit", window, triggered=lambda: QApplication.instance().quit())
+        quit_ = QAction("Quit", window, triggered=quit_app)
         quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
         actions.append(quit_)
     for action in actions:
@@ -325,7 +348,7 @@ class ControlWindow(QMainWindow):
         self._action(menu, "Preferences...", QKeySequence.Preferences,
                      self.open_preferences).setMenuRole(QAction.PreferencesRole)
         menu.addSeparator()
-        quit_ = self._action(menu, "Quit", None, lambda: QApplication.instance().quit())
+        quit_ = self._action(menu, "Quit", None, quit_app)
         quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
         window_shortcuts(self, with_quit=False)
         edit = _add_menu(self.menuBar(), "Edit", self)
