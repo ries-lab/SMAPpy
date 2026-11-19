@@ -63,6 +63,19 @@ class Failing(Plugin):
         raise ValueError("not this site")
 
 
+class Proposing(Plugin):
+    """An evaluator that proposes an angle for its ROI, as Find steps does."""
+    changes_locs = False
+    name = "Proposing"
+    path = "ROIManager/Evaluate/Proposing"
+    per_region = True
+    Settings = DrawingSettings
+
+    def run(self, ctx, settings):
+        return Result(text="", values={"n": len(ctx.selection)},
+                      proposals={"angle": 30})
+
+
 def table(centers, per=10, seed=0):
     rng = np.random.default_rng(seed)
     x = np.concatenate([rng.normal(cx, 20, per) for cx, _ in centers])
@@ -428,6 +441,56 @@ def test_the_figures_show_without_taking_the_keyboard_and_step_with_every_arrow(
         if shortcut.key().toString() == "Down":
             shortcut.activated.emit()
     assert project.navigation.get("roi") == ids[1]
+
+
+def test_stepping_the_rois_makes_no_widget_a_window_of_its_own(app, monkeypatch):
+    """A widget taken out with `setParent(None)` is a window for a moment; on
+    macOS each one deleted handed the keyboard to the main window, so the
+    arrows pressed in the ROI manager went there after one step (2026-11: the
+    Regions tab's proposal lines, rebuilt for every ROI).  The offscreen
+    platform moves no focus, so what is checked is that no widget becomes a
+    window while the ROIs are stepped through."""
+    from PySide6.QtCore import QEvent, QObject
+
+    from smappy.gui.roi_tab import ROIHeader
+    monkeypatch.setattr(pipeline_module, "block_steps",
+                        lambda block: steps(Drawing, Proposing))
+    session = Session(table([(0, 0), (1000, 1000)]))
+    session.show_grouped(0, False)
+    project = session.rois
+    project.set_geometry(200)
+    file_id = next(iter(project.sources))
+    for center in ([0, 0], [1000, 1000]):
+        project.add_roi(file_id, center)
+    header = ROIHeader(session)
+    header.plot.setChecked(True)
+    manager = header.manager
+    ids = list(project.rois)
+    manager.select(ids[0])             # the figures made: their toolbars reparent
+    app.processEvents()
+    assert header.proposals_layout.count() == 1
+
+    windows = []
+
+    class Watch(QObject):
+        def eventFilter(self, obj, event):          # noqa: N802 (Qt's name)
+            if (event.type() == QEvent.ParentChange and obj.isWidgetType()
+                    and obj.isWindow()):
+                windows.append(type(obj).__name__)
+            return False
+
+    watch = Watch()
+    app.installEventFilter(watch)
+    try:
+        for roi_id in ids[1:] + ids[:1] + ids[1:]:
+            manager.select(roi_id)
+            app.processEvents()
+    finally:
+        app.removeEventFilter(watch)
+    assert header.proposals_layout.count() == 1      # rebuilt, and still there
+    assert not windows
+    manager._site.close()
+    manager.close()
 
 
 def test_a_step_added_with_the_figures_open_draws_without_recursing(app, monkeypatch):

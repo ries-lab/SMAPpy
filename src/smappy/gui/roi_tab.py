@@ -403,7 +403,12 @@ class ROIHeader(QWidget):
             widget = item.widget()
             if widget is not None:
                 # out of the panel now, not at the next turn of the event loop
-                widget.setParent(None)
+                # -- hidden, never `setParent(None)`: that makes it a window
+                # of its own for a moment, and on macOS each one deleted on
+                # every ROI stepped through handed the keyboard to the main
+                # window (`focus.log`: an untitled window, then none, then
+                # the control window, once per line, 2026-11)
+                widget.hide()
                 widget.deleteLater()
         if roi is None:
             return
@@ -416,22 +421,23 @@ class ROIHeader(QWidget):
             proposed = (entry or {}).get("proposals")
             if not proposed:
                 continue
+            # every widget in the panel from the start, never a window of its
+            # own for a moment (see above)
+            line = QWidget(self.proposals)
             text = QLabel(f"{label} proposes for the ROI: " + ", ".join(
-                proposal_text(k, v) for k, v in proposed.items()))
+                proposal_text(k, v) for k, v in proposed.items()), line)
             text.setToolTip(PROPOSAL_TIP)
             text.setWordWrap(True)
             text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-            button = QPushButton(f"Apply to {where}")
+            button = QPushButton(f"Apply to {where}", line)
             button.setToolTip(PROPOSAL_TIP + "  On the ROIs selected in the ROI "
                               "manager, all when none is, each taking its own; "
                               "one undo step.")
             button.clicked.connect(lambda _=False, step=label: self._apply_proposals(step))
-            row = QHBoxLayout()
+            row = QHBoxLayout(line)
             row.setContentsMargins(0, 0, 0, 0)
             row.addWidget(text, 1)
             row.addWidget(button)
-            line = QWidget()
-            line.setLayout(row)
             self.proposals_layout.addWidget(line)
 
     def proposing_steps(self) -> list:

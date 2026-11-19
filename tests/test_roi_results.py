@@ -398,10 +398,12 @@ def test_the_regions_tab_offers_a_steps_proposals_for_the_selection():
     header = ROIHeader(session)
     project.selected = [roi.id]
     header._show_result()
-    texts = [w.text() for w in header.proposals.findChildren(QLabel)]
+    def shown(kind):                 # the lines replaced wait, hidden, for deletion
+        return [w for w in header.proposals.findChildren(kind) if not w.parent().isHidden()]
+    texts = [w.text() for w in shown(QLabel)]
     assert any(t.startswith("Trace inspector proposes for the ROI: angle") and "line axis" in t
                for t in texts)
-    (button,) = header.proposals.findChildren(QPushButton)
+    (button,) = shown(QPushButton)
     assert button.text() == "Apply to this ROI"
     button.click()
     assert off(project.rois[roi.id].angle, MOTOR_ANGLES[1]) == pytest.approx(0, abs=3)
@@ -409,6 +411,6 @@ def test_the_regions_tab_offers_a_steps_proposals_for_the_selection():
     assert all(r.angle == 0 for r in others)
     project.selected = []
     header._show_result()
-    (button,) = header.proposals.findChildren(QPushButton)
+    (button,) = shown(QPushButton)
     assert button.text() == "Apply to all 3"
     header.deleteLater()
