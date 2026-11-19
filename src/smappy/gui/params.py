@@ -792,6 +792,8 @@ class ShapesField(QWidget):
 
 #: px: a key parameter's label wraps beyond this, a component's name before it
 KEY_LABEL_WIDTH = 150
+# how far an option's label (`param(under=...)`) is set in, in pixels
+SUB_INDENT = 14
 
 
 class PresetField(QWidget):
@@ -1286,6 +1288,8 @@ class SettingsForm(QWidget):
             label = QLabel(spec.info.label or name)
             if spec.info.help:
                 label.setToolTip(spec.info.help)
+            if spec.info.under:              # an option of the field above
+                label.setIndent(SUB_INDENT)
             self.labels[name] = label
             if spec.info.beside and last_row is not None:
                 # on the row before: its label a small word between the two

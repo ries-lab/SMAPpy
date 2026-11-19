@@ -39,6 +39,10 @@ class ParamInfo:
     # on the row of the field before it, with its label as a small word in
     # between: "photons [5000] +- [2500]" rather than a second row
     beside: bool = False
+    # an option of the field named, its own row with the label set in a step
+    # (the value stays in its column): *moving window* under *track axis
+    # from*, so it reads as that choice's option and not as one of its own
+    under: str = ""
     # kind="preset": a name chosen from saved settings, with *save...* and
     # *delete* beside it; and for a list of parts, where saved items are.
     # A callable giving the folders, the user's first (`smappy.presets`)

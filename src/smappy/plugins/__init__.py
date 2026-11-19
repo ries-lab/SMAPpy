@@ -567,13 +567,22 @@ class Plot:
     # on the window's *All* page, which is made when two or more are; off
     # for a figure that is already a page of everything
     summary: bool = True
+    # what the figure's own ticks show or hide, by label, each on or off to
+    # start with: the figure tab shows them beside its toolbar and draws
+    # again when one is clicked, without running anything (a layer of a
+    # figure is not a setting: flipping it should cost a redraw, not a run).
+    # `draw` then takes them as ``switches={label: on}``; a saved figure, a
+    # page of all, a script take these defaults
+    switches: Dict[str, bool] = field(default_factory=dict)
 
-    def draw_into(self, figure) -> None:
-        """Draw into a cleared figure, or into a subfigure of a page."""
-        if self.panels <= 1:
-            self.draw(figure.subplots())
+    def draw_into(self, figure, switches: Optional[Dict[str, bool]] = None) -> None:
+        """Draw into a cleared figure, or into a subfigure of a page;
+        ``switches`` the figure's ticks as they stand (default: as declared)."""
+        target = figure.subplots() if self.panels <= 1 else figure
+        if self.switches:
+            self.draw(target, switches={**self.switches, **(switches or {})})
         else:
-            self.draw(figure)
+            self.draw(target)
 
 
 def _as_plot(plot, name: str = "") -> Plot:

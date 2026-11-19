@@ -158,3 +158,33 @@ def test_a_canvas_deleted_with_a_redraw_queued_leaves_the_event_loop_alone(app):
     del made                                   # and the canvas with it
     assert not shiboken6.isValid(canvas)
     app.processEvents()                        # raised RuntimeError
+
+
+def test_a_figures_ticks_redraw_it_and_stay_as_clicked_for_the_next_run(app):
+    """`Plot.switches`: ticks beside the toolbar that draw the figure again,
+    without running anything; a click survives the next ROI or run, but a
+    default the plugin's own setting moved wins over it."""
+    from PySide6.QtWidgets import QCheckBox
+    seen = []
+
+    def plot(smoothed=False):
+        def draw(ax, switches):
+            seen.append(dict(switches))
+            ax.plot([0, 1], [0, 1])
+        return Plot(draw=draw, switches={"steps": True, "smoothed": smoothed})
+
+    made = window(app)
+    made.show_plots([plot()])
+    pane = made.figures.panes[""]
+    ticks = {b.text(): b for b in pane.toolbar.findChildren(QCheckBox)}
+    assert set(ticks) == {"steps", "smoothed"}
+    assert seen[-1] == {"steps": True, "smoothed": False}
+    ticks["steps"].setChecked(False)                  # a redraw, nothing run
+    assert seen[-1] == {"steps": False, "smoothed": False}
+    made.show_plots([plot()])                         # the next ROI: as clicked
+    assert seen[-1] == {"steps": False, "smoothed": False}
+    made.show_plots([plot(smoothed=True)])            # the setting moved: it wins
+    assert seen[-1] == {"steps": False, "smoothed": True}
+    assert ticks["smoothed"].isChecked()
+    assert len(pane.toolbar.findChildren(QCheckBox)) == 2
+    made.close()

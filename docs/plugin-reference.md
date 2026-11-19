@@ -117,7 +117,14 @@ engine: on the window's *All* page a plot is handed a `SubFigure`, which has
 neither, and `size` is the hint the window reads instead.  The *All* page is
 made when two or more figures are on it; `Plot(..., summary=False)` keeps a
 figure off it, for one that is already a page of everything
-(`statistics.py`).  Return the settings
+(`statistics.py`).  A layer of a figure one may want to see without --
+a fit over the data, a smoothed line -- is a switch, not a setting:
+`Plot(..., switches={"steps": True, "smoothed": False})` puts a tick per
+name beside the figure's toolbar, and `draw` is then handed them as
+``draw(target, switches={name: on})``; a click draws again without a run,
+and stays for the next ROI or run until the plugin's own default for it
+changes (`find_steps.py`).  A saved figure or the *All* page takes the
+defaults.  Return the settings
 that were actually used -- that is what the history records.
 
 A run in a region may hand back `overlays`, shapes to draw over it in the

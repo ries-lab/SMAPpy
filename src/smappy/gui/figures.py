@@ -22,8 +22,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QTextCursor
-from PySide6.QtWidgets import (QApplication, QMainWindow, QPlainTextEdit, QTabWidget,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QMainWindow, QPlainTextEdit,
+                               QTabWidget, QVBoxLayout, QWidget)
 
 from ..figures import summary_plot as _summary_page
 from ..plugins import Plot
@@ -67,7 +67,8 @@ class FigurePane(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(toolbar_cls(self.canvas, self))
+        self.toolbar = toolbar_cls(self.canvas, self)
+        layout.addWidget(self.toolbar)
         # the drawing tools of a figure whose panel takes shapes (`ShapeEdit`);
         # hidden for every other figure
         from .shape_tools import ShapeTools
@@ -76,18 +77,63 @@ class FigurePane(QWidget):
         layout.addWidget(self.canvas, 1)
         self.plot: Optional[Plot] = None
         self.stale = True
+        # the figure's own ticks (`Plot.switches`), at the toolbar's end: what
+        # was clicked stays as it was for the next ROI or run, which reuse
+        # this pane, until the figure stops offering that tick
+        self.switches: Dict[str, bool] = {}
+        self._ticks: Dict[str, QCheckBox] = {}
+        self._tick_actions: list = []
+        self._declared: Dict[str, bool] = {}
 
     def offer(self, plot: Plot) -> None:
         """This is what to draw next time the pane is looked at."""
         self.plot = plot
         self.stale = True
+        self._offer_ticks(plot.switches)
+
+    def _offer_ticks(self, declared: Dict[str, bool]) -> None:
+        changed = {k for k, on in declared.items() if self._declared.get(k, on) != on}
+        self._declared = dict(declared)
+        if changed:              # the plugin's setting moved: it wins over a click
+            for label in changed:
+                self.switches[label] = declared[label]
+                box = self._ticks.get(label)
+                if box is not None:          # quietly: the pane draws when looked at
+                    box.blockSignals(True)
+                    box.setChecked(declared[label])
+                    box.blockSignals(False)
+        if list(declared) == list(self._ticks):
+            return
+        for action in self._tick_actions:
+            self.toolbar.removeAction(action)
+        for box in self._ticks.values():
+            box.hide()
+            box.deleteLater()
+        self._tick_actions = []
+        self._ticks = {}
+        self.switches = {label: self.switches.get(label, on)
+                         for label, on in declared.items()}
+        if declared:
+            self._tick_actions.append(self.toolbar.addSeparator())
+        for label in declared:
+            box = QCheckBox(label, self.toolbar)
+            box.setChecked(self.switches[label])
+            box.setToolTip(f"show or hide the {label} in this figure; drawn again, "
+                           "nothing is run")
+            box.toggled.connect(lambda on, name=label: self._switch(name, on))
+            self._tick_actions.append(self.toolbar.addWidget(box))
+            self._ticks[label] = box
+
+    def _switch(self, label: str, on: bool) -> None:
+        self.switches[label] = bool(on)
+        self._redraw()
 
     def draw(self) -> None:
         """Draw what was last offered, unless it is already on the screen."""
         if not self.stale or self.plot is None:
             return
         self.figure.clear()
-        self.plot.draw_into(self.figure)
+        self.plot.draw_into(self.figure, self.switches)
         self.canvas.draw_idle()
         self.stale = False
         self.shape_tools.attach(getattr(self.plot, "edit", None), self.figure)
