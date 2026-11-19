@@ -172,6 +172,8 @@ where = ["src"]
 # decode_smlm's: DECODE's licence and the note of where it comes from, and the reference
 # parameters it fills a training's from
 "decode_smlm" = ["LICENSE.txt", "NOTICE.md", "utils/reference_files/*.yaml"]
+# decode_smlm.plex's: DECODE-Plex's Hydra configuration, which a training composes from
+"decode_smlm.plex" = ["config/*.yaml", "config/*/*.yaml", "config/*/*/*.yaml", "config/*/*/*/*.yaml"]
 # the camera database: a file that is read at run time, so it has to be in the
 # wheel and not only in the checkout
 # and the simulator's built-in structures, likewise, and the window icon,
