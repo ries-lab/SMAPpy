@@ -86,16 +86,22 @@ extensions are missing or older than their sources in `csrc/` -- after a
 rebase that moved `csrc/`, build again.  The shared files outside the tree
 (`~/.cache`, the stash list) are shared: never a bare `git stash` / `pop`.
 
-**Land the work from the worktree**, never through a local `main`:
+**Land the work from the worktree**, never through a local `main`, when
+Jonas says **`/land`** (the `land` skill, `.claude/skills/land/SKILL.md`):
+commit by name, `git fetch origin && git rebase origin/main`, the tests,
+`git push origin HEAD:main` -- or `/land pr` for a pull request.  His `/land`
+is the permission to push to main, for that landing.  After the push, his
+checkout follows: a fast-forward of `/Users/ries/git/SMAPpy` to the new main
+when it can be done without touching his changes, and its extensions built
+again if `csrc/` moved -- every Python on the machine imports SMAPpy from
+there.  Then the worktree and its branch are removed.
 
-    git fetch origin && git rebase origin/main      # then the tests
-    git push origin HEAD:main
-
-Work lands on `origin/main` from many sessions and machines, so rebase late
-and often; `NOTES.md` and the plans under `docs/` are where conflicts come
-from.  Stage files by name.  When the work is merged and nothing is left in
-the worktree, remove it (`git worktree remove .claude/worktrees/<name>`, then
-the branch).
+**Propose landing, explicitly**, when a task in a worktree is finished and its
+tests pass: ask "Land this on main?" in the wrap-up, with a button that
+answers `/land`.  Unproposed work is forgotten work; `/land status`
+(`scripts/worktrees.py`) lists every worktree and branch with commits main
+lacks.  Rebase late and often: `NOTES.md` and the plans under `docs/` are
+where conflicts come from.
 
 ## Remind the user to release
 
