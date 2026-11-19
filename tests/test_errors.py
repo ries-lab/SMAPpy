@@ -149,3 +149,19 @@ def test_a_file_that_will_not_open_says_so_in_red_without_a_modal_box(
     control._load_error_window.close()
     control.close()
     render.close()
+
+
+def test_a_panel_deleted_with_its_window_no_longer_hears_the_session(app):
+    # a deleted chain panel, told of the table a run made, rebuilt its key
+    # parameters in a freed form, and the run was reported failed (2026-11)
+    from PySide6.QtWidgets import QWidget
+    from shiboken6 import delete
+    from smappy import plugins
+    from smappy.gui.plugin_panel import PluginPanel
+    session = Session(a_table())
+    window = QWidget()
+    PluginPanel(plugins.get("Analysis/MINFLUX/Workflow/MINFLUX kinesin"), session, window)
+    before = len(session._listeners)
+    delete(window)                          # the panel goes with it, as a tab's does
+    assert len(session._listeners) < before
+    session.set_locs(a_table(50))           # no RuntimeError from a freed form

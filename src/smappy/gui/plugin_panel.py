@@ -336,6 +336,12 @@ class PluginPanel(QWidget):
         self._describe()
         self._enable_parts()
         session.on_change(self._on_session)
+        # a panel destroyed with its tab or window -- not only a chain's,
+        # which `release`s -- stops listening: a deleted panel told of a new
+        # table rebuilt its key parameters in a form Qt had freed, and the
+        # run that made the table reported it as failed (2026-11)
+        listening = self._on_session
+        self.destroyed.connect(lambda *_: session.off_change(listening))
         self._take_saved()
 
     def release(self) -> None:
@@ -344,6 +350,10 @@ class PluginPanel(QWidget):
         self.session.off_change(self._on_session)
 
     def _on_session(self, what: str) -> None:
+        from shiboken6 import isValid
+        if not isValid(self) or not isValid(self.form):
+            self.release()                  # gone without a destroyed signal heard
+            return
         if what in ("locs", "rois", "transformations") \
                 or (what == "roi" and self.plugin.follow_roi):
             # the lists of evaluations; a save says what it would leave out;
