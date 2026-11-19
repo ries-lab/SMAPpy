@@ -1,14 +1,14 @@
+from __future__ import annotations
+
 import copy
 import functools
 from pathlib import Path
 from typing import Optional, Sequence, Any, Union, Literal
 
 from decode_smlm.plex.generic import validated as pydantic
-import pytorch_lightning as pl
 from decode_smlm.plex.generic.logging import get_logger
 import torch
 from decode_smlm.plex.generic.deprecation import deprecated
-from pytorch_lightning import loggers
 from torch import nn
 
 import decode_smlm.plex.simulation.trafo
@@ -84,6 +84,8 @@ def setup_logger(
     Args:
         cfg: config
     """
+    from pytorch_lightning import loggers  # training only; reading a model needs no Lightning
+
     if cfg["Logging"]["no_op"]:
         return loggers.logger.DummyLogger()
 
@@ -1293,6 +1295,8 @@ def setup_sampler(cfg, cfg_sim) -> neuralfitter.sampler.SamplerTraining:
 
 
 def setup_callbacks(cfg, path_exp: Path) -> list[pl.callbacks.Callback]:
+    import pytorch_lightning as pl  # training only; reading a model needs no Lightning
+
     m_ckpt = pl.callbacks.ModelCheckpoint(dirpath=path_exp)
     lr_mtr = pl.callbacks.LearningRateMonitor("epoch")
     callbacks = [m_ckpt, lr_mtr]

@@ -1,8 +1,12 @@
-from pathlib import Path
-from typing import Literal
+from __future__ import annotations
 
-import omegaconf
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
+
 import torch
+
+if TYPE_CHECKING:
+    import omegaconf  # an annotation; reading a run's settings needs no omegaconf
 
 from . import debug
 from . import inference

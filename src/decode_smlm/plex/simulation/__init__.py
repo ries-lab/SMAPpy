@@ -1,16 +1,9 @@
-import decode_smlm.plex.simulation.background
-import decode_smlm.plex.simulation.noise
-import decode_smlm.plex.simulation.camera
-import decode_smlm.plex.simulation.code
-import decode_smlm.plex.simulation.sampler
-import decode_smlm.plex.simulation.psf_kernel
-import decode_smlm.plex.simulation.simulator
-import decode_smlm.plex.simulation.structures
+# Imported when first used (decode_smlm.plex._lazy): DECODE-Plex imported all of these here.
+from decode_smlm.plex._lazy import attach
 
-from . import microscope
-from . import roi
-from . import roi_place
-from . import trafo
-
-from decode_smlm.plex.simulation.simulator import Simulation
-from decode_smlm.plex.simulation.structures import RandomStructure
+__getattr__, __dir__ = attach(
+    __name__,
+    submodules=['background', 'camera', 'code', 'microscope', 'noise', 'psf_kernel', 'roi',
+                'roi_place', 'sampler', 'simulator', 'structures', 'trafo'],
+    names={'Simulation': ('.simulator', 'Simulation'), 'RandomStructure': ('.structures', 'RandomStructure')},
+)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 from pathlib import Path
 from typing import Union, Literal, Sequence
@@ -11,8 +13,6 @@ from decode_smlm.plex.generic.logging import get_logger
 import torch
 from decode_smlm.plex.generic.deprecation import deprecated
 import h5py
-from omegaconf import OmegaConf, DictConfig
-from dotted_dict import DottedDict
 import numpy as np
 
 from ..generic import deploy
@@ -128,6 +128,9 @@ def load_spline_smap(
     )
 
 def h5_to_dict(group):
+    # uiPSF's result files only (Fig. 2b): dotted_dict is imported here, not with the module
+    from dotted_dict import DottedDict
+
     result = {}
     for key, item in group.items():
         if isinstance(item, h5py.Group):
@@ -138,6 +141,9 @@ def h5_to_dict(group):
 
 
 def load_h5(path: Union[str, Path]) -> DictConfig:
+    # uiPSF's result files only (Fig. 2b): omegaconf is imported here, not with the module
+    from omegaconf import OmegaConf
+
     f = h5py.File(path, "r")
     res = h5_to_dict(f)
     params = OmegaConf.create(f.attrs["params"])

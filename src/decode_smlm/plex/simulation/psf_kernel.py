@@ -4,7 +4,6 @@ from typing import Tuple, Optional, Union
 
 import math
 import numpy as np
-import spline  # cubic spline implementation
 import torch
 
 try:
@@ -587,6 +586,10 @@ class CubicSplinePSF(PSF):
         Init the spline implementation, done separately because otherwise
         it's harder to pickle
         """
+        # the compiled spline is imported where it is used, so that reading a model needs none
+        # (decode_smlm.plex, docs/decode/plex-plan.md §3; training gets decode_smlm's torch spline)
+        import spline  # cubic spline implementation
+
         if self._device.type == "cuda":
             self._spline_impl = spline.PSFWrapperCUDA(
                 self._coeff.shape[0],
@@ -643,6 +646,8 @@ class CubicSplinePSF(PSF):
         Technically (1) could come without (2).
 
         """
+        import spline
+
         return spline.cuda_compiled
 
     @staticmethod
@@ -652,6 +657,8 @@ class CubicSplinePSF(PSF):
         init the class. I wonder whether Python has 'static properties'?
 
         """
+        import spline
+
         return spline.cuda_is_available()
 
     @property

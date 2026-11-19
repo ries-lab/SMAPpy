@@ -1,8 +1,7 @@
-from . import camera
-from . import checkpoint
-from . import emitter
-from . import frames
-from . import model
-from . import param
-from . import psf
-from . import trafo
+# Imported when first used (decode_smlm.plex._lazy): DECODE-Plex imported all of these here.
+from decode_smlm.plex._lazy import attach
+
+__getattr__, __dir__ = attach(
+    __name__,
+    submodules=['camera', 'checkpoint', 'emitter', 'frames', 'model', 'param', 'psf', 'trafo'],
+)

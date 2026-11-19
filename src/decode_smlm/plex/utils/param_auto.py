@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 import copy
 import statistics
 from typing import Literal, Union
 from typing import Optional, Sequence
 
-import omegaconf
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import omegaconf  # annotations; omegaconf is imported where a DictConfig is asked for
 
 from . import dev
 from ..io import param
@@ -188,6 +193,8 @@ class AutoConfig:
     def _convert_return_type(self, cfg: dict) -> Union[dict, omegaconf.DictConfig]:
         if self._return_type is dict:
             return cfg
+        import omegaconf
+
         if self._return_type is omegaconf.DictConfig:
             return omegaconf.OmegaConf.create(cfg)
 

@@ -2,17 +2,53 @@ import copy
 from pathlib import Path
 from typing import Any, IO, Union, Literal
 
-import hydra
+import re
+
+import yaml
+
 from decode_smlm.plex.generic import validated as pydantic
 from decode_smlm.plex.generic.deprecation import deprecated
-from omegaconf import OmegaConf
+
+
+class _OmegaConfLoader(yaml.SafeLoader):
+    """PyYAML's safe loader with OmegaConf's two changes to it (omegaconf 2.2, ``get_yaml_loader``):
+    floats written without a dot (``1e3``) are floats, and dates stay strings.  ``load`` read a
+    run's settings through OmegaConf; this reads them the same without it (decode_smlm.plex,
+    docs/decode/plex-plan.md §3).  Interpolations (``${...}``) stay strings, as
+    ``OmegaConf.to_container`` left them."""
+
+
+_OmegaConfLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:float",
+    re.compile(
+        r"""^(?:
+         [-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+        |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
+        |\.[0-9_]+(?:[eE][-+][0-9]+)?
+        |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*
+        |[-+]?\.(?:inf|Inf|INF)
+        |\.(?:nan|NaN|NAN))$""",
+        re.X,
+    ),
+    list("-+0123456789."),
+)
+_OmegaConfLoader.yaml_implicit_resolvers = {
+    k: [(tag, regexp) for tag, regexp in v if tag != "tag:yaml.org,2002:timestamp"]
+    for k, v in _OmegaConfLoader.yaml_implicit_resolvers.items()
+}
 
 
 def load(p: Union[str, Path, IO[Any]]) -> dict:
-    return OmegaConf.to_container(OmegaConf.load(p))
+    if isinstance(p, (str, Path)):
+        with open(p, "r", encoding="utf-8") as f:
+            return yaml.load(f, Loader=_OmegaConfLoader)
+    return yaml.load(p, Loader=_OmegaConfLoader)
 
 
 def load_hydra(config_name: Literal["conf", "conf_dual"] = "conf") -> dict:
+    import hydra
+    from omegaconf import OmegaConf
+
     try:
         hydra.initialize(config_path="../../config")
     except ValueError:

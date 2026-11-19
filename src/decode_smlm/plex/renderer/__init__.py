@@ -1,4 +1,8 @@
-import decode_smlm.plex.renderer.renderer
+# Imported when first used (decode_smlm.plex._lazy): DECODE-Plex imported all of these here.
+from decode_smlm.plex._lazy import attach
 
-from .renderer import Renderer2D
-from .renderer import RendererIndividual2D
+__getattr__, __dir__ = attach(
+    __name__,
+    submodules=['renderer'],
+    names={'Renderer2D': ('.renderer', 'Renderer2D'), 'RendererIndividual2D': ('.renderer', 'RendererIndividual2D')},
+)

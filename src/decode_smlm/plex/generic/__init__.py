@@ -1,10 +1,7 @@
-from . import delay
-from . import dtype
-from . import indexing
-from . import lazy
-from . import logging
-from . import models
-from . import mixin
-from . import tensor
-from . import processing
-from . import protocols
+# Imported when first used (decode_smlm.plex._lazy): DECODE-Plex imported all of these here.
+from decode_smlm.plex._lazy import attach
+
+__getattr__, __dir__ = attach(
+    __name__,
+    submodules=['delay', 'dtype', 'indexing', 'lazy', 'logging', 'mixin', 'models', 'processing', 'protocols', 'tensor'],
+)
