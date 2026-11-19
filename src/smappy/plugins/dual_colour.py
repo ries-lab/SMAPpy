@@ -341,6 +341,9 @@ class DualColour(Plugin):
                                 f"{span[1] - span[0]:.0f}, held flat after"
                                 if drift.span[1] < span[1] - 0.1 * (span[1] - span[0])
                                 else ""))
+            trends = _trends(links, curve, settings.apply)
+            if trends is not None:
+                lines.append("  " + trends_line(trends))
             if bead_info and bead_info.get("warn"):
                 ctx.warn(bead_info["warn"])
         cols["x_nm"] = x.astype(np.asarray(locs["x_nm"]).dtype)
@@ -376,7 +379,7 @@ class DualColour(Plugin):
             draw_dual(figure, per_target)
 
         return Result(locs=out, text="\n".join(lines),
-                      plot=Plot(draw, panels=4, size=(14, 3.4)),
+                      plot=Plot(draw, panels=5, size=(17.5, 3.4)),
                       id_regions={"pair_id": {LABEL: table}}, transformations=transformations,
                       data={"targets": [(m.title, curve, how, fit, drift, links)
                                         for m, _, curve, how, fit, drift, _, links, _
@@ -523,16 +526,56 @@ class DualColour(Plugin):
         return curve, how, None, info
 
 
+def _seen(links, curve, applied):
+    """Each pair in both colours: its offset as measured (the shift added
+    back where it was applied) and what is left once the curve used at its
+    time is taken off.  ``(both, seen, left)``."""
+    both = links.both & np.isfinite(links.dx)
+    seen = np.column_stack([links.dx[both], links.dy[both]])
+    used = curve(links.time[both]) if both.any() else np.zeros((0, 2))
+    if applied:
+        seen = seen + used
+    return both, seen, seen - used
+
+
+def _trends(links, curve, applied):
+    """What is left of the offset, across the field and over time; None
+    with no pair in both colours."""
+    from ..dual_colour import offset_trends
+    both, _, left = _seen(links, curve, applied)
+    if not both.any():
+        return None
+    return offset_trends(links.x[both], links.y[both], links.time[both],
+                         left[:, 0], left[:, 1])
+
+
+def trends_line(tr) -> str:
+    """The text's line on what is left of the offset."""
+    from ..dual_colour import MIN_FIELD, MIN_TIME
+    def part(what, v, e, unit, need):
+        if not np.all(np.isfinite(v)):
+            return f"{what}: too few molecules to tell ({need} needed)"
+        big = np.abs(v) > 3 * e
+        word = "changes" if big.any() else "no change beyond its error"
+        return (f"{what}: {word} (" + ", ".join(
+            f"{name} {val:+.2f} ± {err:.2f}" for name, val, err in
+            zip(names_of(v), np.ravel(v), np.ravel(e))) + f" {unit})")
+
+    def names_of(v):
+        return (["dx/x", "dx/y", "dy/x", "dy/y"] if np.ndim(v) == 2 else ["dx", "dy"])
+    g = np.asarray(tr.gradient).T                    # rows dx, dy; columns per x, per y
+    ge = np.asarray(tr.gradient_err).T
+    return (f"left after the offset, {tr.n} molecules: "
+            + part("across the field", g, ge, "nm per um", MIN_FIELD) + "; "
+            + part("over time", tr.rate, tr.rate_err, "nm per 100 s", MIN_TIME))
+
+
 def draw_dual(figure, per_target) -> None:
     """The pairs' offsets against the curve used, over time, the MBM colour
-    drift, and the lead along the track."""
-    a, b, c, d = figure.subplots(1, 4)
+    drift, the lead along the track, and what is left across the field."""
+    a, b, c, d, e = figure.subplots(1, 5)
     _, names, curve, _, fit, drift, _, links, applied = per_target[0]
-    both = links.both & np.isfinite(links.dx)
-    # the pairs' offsets as measured: with the shift added back where it was applied
-    seen = np.column_stack([links.dx[both], links.dy[both]])
-    if applied and both.any():
-        seen = seen + curve(links.time[both])
+    both, seen, left = _seen(links, curve, applied)
     a.plot(seen[:, 0], seen[:, 1], "o", ms=4, color="0.35", label="molecules")
     a.plot([curve.c[0]], [curve.c[1]], "x", ms=11, mew=2, color="tab:red", label="offset")
     a.axhline(0, color="0.85", lw=0.6)
@@ -593,3 +636,35 @@ def draw_dual(figure, per_target) -> None:
         d.set_axis_off()
         d.text(0.5, 0.5, "no moving molecule in both colours", ha="center", va="center",
                transform=d.transAxes, fontsize=8)
+    draw_field(e, links.x[both], links.y[both], left, _trends(links, curve, applied))
+
+
+def draw_field(ax, x, y, left, trends) -> None:
+    """What is left of each molecule's offset, as an arrow at its place:
+    arrows that turn or grow across the field are a gradient the constant
+    misses; arrows pointing every way at random are the dyes' own offsets."""
+    if not len(left):
+        ax.set_axis_off()
+        ax.text(0.5, 0.5, "no molecule in both colours", ha="center", va="center",
+                transform=ax.transAxes, fontsize=8)
+        return
+    xu, yu = np.asarray(x) * 1e-3, np.asarray(y) * 1e-3
+    length = np.hypot(left[:, 0], left[:, 1])
+    ref = float(np.ceil(max(np.percentile(length, 90), 1.0)))
+    q = ax.quiver(xu, yu, left[:, 0], left[:, 1], angles="xy", scale_units="width",
+                  scale=ref * 12, width=0.005, color="0.25")
+    ax.quiverkey(q, 0.88, 0.05, ref, f"{ref:.0f} nm", labelpos="N", coordinates="axes",
+                 fontproperties={"size": 6})
+    ax.plot(xu, yu, ".", ms=3, color="tab:red")
+    ax.set_xlabel("x (µm)")
+    ax.set_ylabel("y (µm)")
+    ax.set_aspect("equal", adjustable="box")
+    # room for the arrows at the edge (a twelfth of the width for ``ref``)
+    pad = 0.15 * max(np.ptp(xu), np.ptp(yu), 0.5)
+    ax.set_xlim(xu.min() - pad, xu.max() + pad)
+    ax.set_ylim(yu.min() - pad, yu.max() + pad)
+    word = ("it changes" if trends is not None and trends.significant("field")
+            else "no gradient beyond its error"
+            if trends is not None and np.all(np.isfinite(trends.gradient))
+            else "too few molecules for a gradient")
+    ax.set_title(f"left over, across the field: {word}", fontsize=8)

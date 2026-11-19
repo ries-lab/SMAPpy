@@ -609,3 +609,100 @@ def co_movement(t, x, y, colour, window: float, min_speed: float, *,
         return CoMovement()
     return CoMovement(float(np.mean(matched)), float(np.median(angles)),
                       float(np.median(ratios)), float(np.median(distances)), len(matched))
+
+
+# ------------------------------------------------ the offset across field and time
+
+#: the fewest pairs a plane across the field (three numbers per axis) is
+#: fitted to, and a line over time
+MIN_FIELD = 20
+MIN_TIME = 8
+
+
+@dataclass
+class OffsetTrends:
+    """Whether what is left of the colours' offset, once the curve used is
+    taken off, changes across the field or over time (`offset_trends`):
+    least-squares slopes with their standard errors, NaN where there are
+    too few pairs to tell."""
+    n: int
+    gradient: np.ndarray                    # (2, 2): d(dx, dy) / d(x, y), nm per um
+    gradient_err: np.ndarray
+    rate: np.ndarray                        # d(dx, dy) / dt, nm per 100 s
+    rate_err: np.ndarray
+    scatter_nm: np.ndarray                  # the residuals' SD per axis, after the fits
+
+    def significant(self, what: str) -> bool:
+        """A slope more than three times its standard error: four slopes
+        across the field and two over time are tested, and at twice the
+        error one of the four would stand out by chance one time in five."""
+        v, e = ((self.gradient, self.gradient_err) if what == "field"
+                else (self.rate, self.rate_err))
+        ok = np.isfinite(v) & np.isfinite(e)
+        return bool(np.any(np.abs(v[ok]) > 3 * e[ok]))
+
+
+def _slopes(design: np.ndarray, r: np.ndarray, iterations: int = 30):
+    """Robust least squares of ``r`` (n, 2) on ``design`` (n, k, centred,
+    no constant column): Tukey's biweight on each pair's distance from the
+    fit, both axes together, as `fit_track_offset` -- a chance pair or a
+    molecule whose dyes sit far apart would otherwise make a gradient of
+    its own.  The slopes (k, 2), their standard errors (from the kept
+    pairs' scatter) and the residual SD per axis."""
+    n, k = design.shape
+    a = np.column_stack([np.ones(n), design])
+    w = np.ones(n)
+    for _ in range(iterations):
+        sw = np.sqrt(w)[:, None]
+        coef, *_ = np.linalg.lstsq(a * sw, r * sw, rcond=None)
+        dist = np.hypot(*(r - a @ coef).T)
+        scale = max(1.4826 * np.median(dist), MIN_SCALE_NM)
+        z = dist / (TUKEY_C * scale)
+        new = np.where(z < 1, (1 - z ** 2) ** 2, 0.0)
+        if np.allclose(new, w):
+            break
+        w = new
+    res = r - a @ coef
+    used = w > 0
+    dof = max(int(used.sum()) - k - 1, 1)
+    sd = np.sqrt(np.sum(w[:, None] * res ** 2, axis=0) / dof)
+    cov = np.linalg.pinv((a * w[:, None]).T @ a)
+    err = np.sqrt(np.diag(cov))[:, None] * sd[None, :]
+    return coef[1:], err[1:], sd
+
+
+def offset_trends(x, y, t, dx, dy, min_field: int = MIN_FIELD,
+                  min_time: int = MIN_TIME) -> OffsetTrends:
+    """How the offset left over (``dx``, ``dy`` per pair, nm, at the pair's
+    position ``x``, ``y`` in nm and time ``t`` in s) changes: a plane over
+    the field and a line over time, each fitted on its own.
+
+    A diagnostic, not a correction: on MINFLUX the pairs are few (tens of
+    kinesins, a bead or two) and the dyes' own offset on each molecule
+    scatters them by several nm, so one constant is all the data can carry
+    unless a slope stands out of its error -- which is what this says.
+    Each pair counts once, whatever its localizations: the pairs are the
+    independent measurements.  Robust (`_slopes`): on the kinesin data
+    plain least squares made 5 nm per um across the field out of the two
+    molecules 16 and 25 nm off of twelve, and the robust fit, which keeps
+    them because both lie on one side of the field, 4.9 ± 1.5: a plane
+    through twelve points over 4 um is decided by any two at its edge.
+    Hence ``min_field``: below it, no gradient is offered at all."""
+    x, y, t = (np.asarray(v, float) for v in (x, y, t))
+    r = np.column_stack([np.asarray(dx, float), np.asarray(dy, float)])
+    ok = np.isfinite(x) & np.isfinite(y) & np.isfinite(t) & np.all(np.isfinite(r), axis=1)
+    x, y, t, r = x[ok], y[ok], t[ok], r[ok]
+    n = len(r)
+    nan2 = np.full((2, 2), np.nan)
+    gradient, gradient_err = nan2.copy(), nan2.copy()
+    rate, rate_err = np.full(2, np.nan), np.full(2, np.nan)
+    scatter = np.std(r, axis=0, ddof=1) if n > 1 else np.full(2, np.nan)
+    spread = lambda v: np.ptp(v) if len(v) else 0.0
+    if n >= min_field and spread(x) > 0 and spread(y) > 0:
+        design = np.column_stack([x - x.mean(), y - y.mean()]) * 1e-3     # um
+        g, ge, scatter = _slopes(design, r)
+        gradient, gradient_err = g, ge                  # rows: per x, per y
+    if n >= min_time and spread(t) > 0:
+        b, be, _ = _slopes(((t - t.mean()) / 100.0)[:, None], r)
+        rate, rate_err = b[0], be[0]
+    return OffsetTrends(n, gradient, gradient_err, rate, rate_err, scatter)

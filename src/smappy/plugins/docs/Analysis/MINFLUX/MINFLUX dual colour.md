@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.dual_colour.link_traces, smappy.dual_colour.fit_track_offset, smappy.dual_colour.bead_offset, smappy.dual_colour.mbm_colour_drift, smappy.dual_colour.offset_curve, smappy.dual_colour.direction, smappy.pairing.pair_traces, smappy.pairing.pair_offsets, smappy.plugins.dual_colour.DualColour.run, smappy.plugins.dual_colour._bead_like]
+covers: [smappy.dual_colour.link_traces, smappy.dual_colour.fit_track_offset, smappy.dual_colour.bead_offset, smappy.dual_colour.mbm_colour_drift, smappy.dual_colour.offset_curve, smappy.dual_colour.direction, smappy.pairing.pair_traces, smappy.pairing.pair_offsets, smappy.plugins.dual_colour.DualColour.run, smappy.plugins.dual_colour._bead_like, smappy.dual_colour.offset_trends, smappy.plugins.dual_colour.draw_field, smappy.plugins.dual_colour.trends_line]
 ---
 
 ## What it does
@@ -156,6 +156,33 @@ stopped and started again on the same kinesin joins its 638 nm trace
 (and the other way round), as long as no two traces of one colour in a
 molecule overlap in time: two at once are two molecules.
 
+**7. Is one offset enough?**  The offset applied is one shift (plus the MBM
+drift).  What each molecule in both colours has left of its offset once
+that is taken off is checked for what one shift would miss: a gradient
+across the field -- a plane fitted to the leftovers against x and y -- and
+a drift in time -- a line against time.  The text says, for each, whether a
+slope stands out of its error, and the fifth panel draws each molecule's
+leftover as an arrow at its place.  A slope there says the bead or the
+molecules' average does not hold everywhere in the field or all through
+the measurement.  With few molecules -- the kinesin measurement has a dozen
+in both colours -- two at the edge of the field decide a plane, so a
+gradient is fitted only from 20 molecules, a drift in time from 8.  The
+molecules' own spread (the dyes' places on each molecule, a few nm) is
+what a slope has to stand out of.
+
+```figure Simulated: 40 molecules over 4 x 3.5 um whose offset left over grows by 1.5 nm per um along x, 2 nm of scatter (left), and 12 of them (right): with 40 the arrows turn from left to right across the field and the gradient is found; with 12 none is offered.
+from smappy.plugins.dual_colour import draw_field
+fig.set_size_inches(7.6, 3.2)
+g = np.random.default_rng(3)
+fx, fy = g.uniform(-2000, 2000, 40), g.uniform(-1000, 2500, 40)
+ft = g.uniform(0, 600, 40)
+left = np.column_stack([1.5 * fx / 1000 + g.normal(0, 2, 40), g.normal(0, 2, 40)])
+ax, bx = fig.subplots(1, 2)
+draw_field(ax, fx, fy, left, DC.offset_trends(fx, fy, ft, *left.T))
+draw_field(bx, fx[:12], fy[:12], left[:12],
+           DC.offset_trends(fx[:12], fy[:12], ft[:12], *left[:12].T))
+```
+
 ## In detail
 
 **Matching in time.**  Within two traces, for each colour-1 localization
@@ -198,6 +225,19 @@ trace keeps its molecule; -1 outside the measurements paired, outside the
 layer's filter, or without a trace.  Molecules are numbered by when they
 start.
 
+**What is left** (`offset_trends`).  For each molecule in both colours,
+its median offset as measured less the offset curve at its time.  Two fits,
+each on its own: dx and dy against x and y (a plane, slopes in nm per um),
+and against time (a line, nm per 100 s).  Each molecule counts once.  Both
+are robust as the offset fit is -- Tukey's biweight on the length of each
+molecule's residual, constant 4.685, the spread 1.4826 times the median
+residual and never under 1 nm -- and their errors come from the kept
+molecules' scatter.  A slope "changes" when it is more than three times
+its error: four slopes across the field are tested, and at twice the error
+one would stand out by chance one time in five.  Fewer than 20 molecules:
+no plane; fewer than 8: no line.  It is a diagnostic: nothing it finds is
+applied.
+
 ## Parameters
 
 ### offset.source
@@ -234,11 +274,18 @@ after the move (`dx_nm`, `dy_nm`), and how far and fast colour 0 moved
 a named transformation ("560 nm onto 638 nm") for
 [Transform](plugin:Analysis/Process/Transform).
 
-Four panels: each molecule's offset as measured, with the offset used; the
+The text adds a line on what is left after the offset: the slopes across
+the field and over time with their errors, or that there were too few
+molecules to tell.
+
+Five panels: each molecule's offset as measured, with the offset used; the
 same over time with the offset curve -- the molecules should scatter round
 it, with no trend away from it; the MBM colour drift, each bead about its
 own offset and the curve; and how far colour 1 is ahead of colour 0 along
-the motion, with the fitted lead.
+the motion, with the fitted lead; and what each molecule has left of its
+offset, as an arrow at its place in the field -- arrows that turn or grow
+across the field are a gradient one shift misses, arrows pointing every
+way are the molecules' own spread.
 
 ## Differences from SMAP
 

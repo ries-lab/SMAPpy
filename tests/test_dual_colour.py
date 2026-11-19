@@ -188,6 +188,28 @@ def test_beads_before_and_after_are_interpolated_with_the_drift_as_the_shape():
     assert "rest (3.0, 4.0)" in curve.note
 
 
+def test_what_is_left_of_the_offset_shows_a_gradient_across_the_field_and_a_drift_in_time():
+    rng = np.random.default_rng(0)
+    n = 40
+    x, y = rng.uniform(0, 10_000, n), rng.uniform(0, 10_000, n)
+    t = rng.uniform(0, 600, n)
+    # dx grows by 0.5 nm per um across x, dy by 1 nm per 100 s; 2 nm of scatter
+    dx = 0.5 * (x - 5000) / 1000 + rng.normal(0, 2, n)
+    dy = 1.0 * (t - 300) / 100 + rng.normal(0, 2, n)
+    tr = DC.offset_trends(x, y, t, dx, dy)
+    assert tr.gradient[0, 0] == pytest.approx(0.5, abs=0.25)     # d dx / d x
+    assert tr.rate[1] == pytest.approx(1.0, abs=0.4)
+    assert tr.significant("field") and tr.significant("time")
+    # scatter and three chance pairs 30 nm off: nothing to see
+    dx = rng.normal(0, 2, n)
+    dx[:3] += 30
+    tr = DC.offset_trends(x, y, t, dx, rng.normal(0, 2, n))
+    assert not tr.significant("field") and not tr.significant("time")
+    # twelve molecules: no plane is offered, a line in time is
+    tr = DC.offset_trends(x[:12], y[:12], t[:12], dx[:12], dy[:12])
+    assert np.isnan(tr.gradient).all() and np.isfinite(tr.rate).all()
+
+
 # --------------------------------------------------------------------- plugin
 
 def test_the_bead_measurement_open_beside_the_tracking_sets_the_offset_and_moves_colour_1():
@@ -200,6 +222,7 @@ def test_the_bead_measurement_open_beside_the_tracking_sets_the_offset_and_moves
     assert cls.name == "MINFLUX dual colour"
     result = s.run(cls(), cls.Settings())
     assert "beads in beads.msr" in result.text and "40 in both colours" in result.text
+    assert "left after the offset, 40 molecules" in result.text
     # colour 1 moved onto colour 0: a still molecule's colours on top of each other
     links = result.data["targets"][0][5]
     still = links.both & (links.displacement_nm < 30)
