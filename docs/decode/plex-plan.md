@@ -462,8 +462,14 @@ paper's movies, against DECODE-Plex's localizations of the same frames (the orig
 - **Fig. 2c** (EM, a 248-pixel ROI) fits badly in every variant tried -- the movie's columns as they are
   and flipped, channel 1 flipped and not, its ROI at x = 266 and at 2, the splitter's move at 0 and +-3.4
   rows: median `logl_rel` -30 to -34, against -4 on Fig. 2a, and z 60 -- 420 nm from DECODE-Plex's.
-  Something about this movie and its calibration is not yet understood (its camera ROI, its depth in the
-  cell, its camera's settings are candidates); open.
+  Something about this movie and its calibration is not yet understood; open.  **Not the EM register**:
+  beads and movies were taken with the same EM settings and nothing should be flipped for it, only the
+  channels against each other (Jonas, 2026-11-19) -- the converter flips nothing for EM in SMAPpy's frame
+  (it only undoes SMAP's own mirror of the beads, `EMon` 1, back to the camera's orientation), and with
+  no EM mirror anywhere (splines and registration as SMAP stored them, the movie as recorded) the fits
+  are as bad (-30 to -32, z +380 -- +415 nm from DECODE-Plex's).  Since nothing varied here moves the fit,
+  the cause is global: the live cell's high, structured background against a uniform one in the model,
+  or a focus or depth offset (z some 400 nm from DECODE-Plex's throughout).
 - What the affine reading costs DECODE-Plex on real data is not measured yet: on Fig. 2a's narrow chip
   the two readings differ by 0.07 px at most, too little to see here; Fig. 2c's chip is where it would
   show, once that movie fits.
