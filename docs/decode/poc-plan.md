@@ -2370,3 +2370,24 @@ So the mixture, not streaming, is what pixelates; streaming stays (1.7 x faster)
 base model by its pixel_mod.  Open: whether a seed keeps its properties through a strong change (another
 PSF, brightness or on-time), and whether a well-chosen base beats training from scratch there on RMSE,
 Jaccard and pixelation.
+
+**How early a good seed shows** (the training logs' pixel_mod, 90 runs in 30 setups of 3 seeds, 6 M
+schedules; streamed on the H100 0.1 M samples a minute, so 6 M is 60 min, 95 % of the final Jaccard
+after 8 - 9).  The seed with the lowest pixel_mod at an early point, against the best at 6 M:
+
+| decided at | min | r with 6 M (within setups) | the best at 6 M | its 6 M pixel_mod below the setup mean |
+|---|---|---|---|---|
+| 0.15 M | 1.5 | -0.17 | 6 / 28 | -0.002 |
+| 0.25 M | 2.5 | +0.09 | 10 / 29 | +0.001 |
+| 0.5 M | 5 | +0.46 | 12 / 29 | +0.002 |
+| 1 M | 10 | +0.56 | 16 / 29 | +0.004 |
+| 1.5 M | 15 | +0.68 | 21 / 29 | +0.006 |
+| 3 M | 30 | +0.84 | 23 / 30 | +0.006 |
+| 4 M | 40 | +0.90 | 25 / 30 | +0.007 |
+
+Chance is 1 in 3; knowing the best gains 0.0076 (the seeds' sd at 6 M is 0.008).  Nothing shows in the
+first minutes; from 1.5 M (15 min) a pick takes three quarters of the gain, four times what streaming
+costs.  Since a fine-tune keeps its seed's pixelation, the shipped base can be chosen once from many
+seeds, and users only fine-tune.  Pixelation falls with the learning rate's decay rather than with the
+samples (GMN7CL_s0, a 12 M schedule, 0.035 at 6 M; GMN7C_s0's 6 M schedule ends at 0.020), so a short
+schedule with its own decay (1.5 - 3 M) may pixelate nearly as little in a quarter of the time: open.
