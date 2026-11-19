@@ -444,3 +444,26 @@ real-data models (EM camera, Fig. 2) are 1.2 -- 1.5 times the bound near focus a
 **Still open:** Spline 3D 2C's duplicates far from focus (its Jaccard of 0.77 -- 0.80 on isolated
 molecules, §11), the Fig. 2 models' false positives at high background (§11), and the biplane band of
 §10 -- each to look at again on these sets before the study.
+
+## 13. The conventions on real movies (2026-11-19, first look)
+
+Spline 3D 2C through the converted calibration (SMAP's projective reading), on the first frames of the
+paper's movies, against DECODE-Plex's localizations of the same frames (the original's run, §9):
+
+- **Fig. 2a** (its beads' ROI, no EM): the splitter moved by **5.8 rows** of the secondary half since the
+  beads -- the shift that takes the offset between the two fitters to zero (scanned 4.5 -- 6.5; the
+  likelihood is best at 5.5 -- 6.0), against 6 from DECODE-Plex's two offsets (`Test` -29, `Simulation`
+  -35).  There, on 200 frames, 26 000 of Spline 3D 2C's 42 000 localizations lie within 150 nm of one of
+  DECODE-Plex's, offset by -0.7 / -0.8 / -4.5 nm (x / y / z) and spread by 30 / 48 / 96 nm (1.48 MAD; the
+  movie is dense, 230 fits a frame).
+- **Channel 1's orientation is not decided by Fig. 2a**: flipped along the split (the converter now) and
+  not, the fits are alike (median `logl_rel` -4.22 against -4.18, the same agreement): its astigmatic PSF
+  is nearly symmetric along y.  The orientation rests on §12's evidence (DECODE-Plex's own splines).
+- **Fig. 2c** (EM, a 248-pixel ROI) fits badly in every variant tried -- the movie's columns as they are
+  and flipped, channel 1 flipped and not, its ROI at x = 266 and at 2, the splitter's move at 0 and +-3.4
+  rows: median `logl_rel` -30 to -34, against -4 on Fig. 2a, and z 60 -- 420 nm from DECODE-Plex's.
+  Something about this movie and its calibration is not yet understood (its camera ROI, its depth in the
+  cell, its camera's settings are candidates); open.
+- What the affine reading costs DECODE-Plex on real data is not measured yet: on Fig. 2a's narrow chip
+  the two readings differ by 0.07 px at most, too little to see here; Fig. 2c's chip is where it would
+  show, once that movie fits.
