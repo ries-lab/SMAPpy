@@ -271,13 +271,14 @@ A region table of the id attribute, "per tid: Find steps": `n_steps`,
 moving parts, the share of windows it moved in (`moving_share`); with two
 colours the median step of each.  The text adds the dwell models, the best
 first with each one's parameters and its AIC above the best.  The figure:
-above, the longest traces (in an ROI, its molecule) each in a panel of its
-own, the localizations as dots joined in time (*localizations as a line*)
-and the steps over them, a two-colour molecule's colours in magenta (colour
-0) and green on one clock from its first localization in either and from
-colour 0's first plateau; below, the step sizes, the dwell times with the
-three models (the best drawn thicker), and the velocity.  The histograms'
-bins grow with the number of steps.  Steps clustered at the expected size,
+the upper half, the longest traces (in an ROI, its molecule) side by side,
+the localizations as dots joined in time by a thin line (*localizations as
+a line*) and the steps over them, a two-colour molecule's colours in
+magenta (colour 0) and green on one clock from its first localization in
+either and from colour 0's first plateau; below, the step sizes, and the
+dwell times with the three models (the best drawn thicker), the mean dwell
+and the velocity in its title.  The histograms' bins grow with the number
+of steps.  Steps clustered at the expected size,
 mostly forward, and an Erlang shape near the number of events per step
 (about 2 for kinesin's alternating heads) look like a motor; a broad size
 distribution with many backward steps, like steps fitted to noise.

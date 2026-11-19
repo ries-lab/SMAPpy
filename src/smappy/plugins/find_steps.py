@@ -32,6 +32,7 @@ AXES = (("moving", "its moving parts"), ("all", "all its localizations"))
 #: the colours of a two-colour molecule's figure: colour 0 (the longer
 #: wavelength, 638 nm) magenta, colour 1 green -- as the groups draw them
 COLOUR_DOTS = ("#e7a6d3", "#a9dcb0")
+COLOUR_JOIN = ("#cc5fa6", "#55b065")      # the localizations joined: thin, clearly seen
 COLOUR_LINES = ("#b0177e", "#1f8a3a")
 
 
@@ -417,12 +418,13 @@ def draw_steps(figure, examples, sizes, dwells, pooled, unit, names=None,
     localization in either) and its frame (the position from colour 0's
     first plateau), each drawn in its colour with its own steps."""
     names = names or {}
-    grid = figure.add_gridspec(2, 3, height_ratios=(1.7, 1.0), hspace=0.45, wspace=0.3)
-    # the traces share the top row: one (an ROI's) two thirds of it
+    # the traces fill the upper half, side by side; the pooled numbers below
+    grid = figure.add_gridspec(2, 2, height_ratios=(1.3, 1.0), hspace=0.32, wspace=0.18,
+                               left=0.06, right=0.985, top=0.95, bottom=0.08)
     shown_n = max(1, min(3, len(examples)))
-    top = (grid[0, :2] if shown_n == 1 else grid[0, :]).subgridspec(1, shown_n, wspace=0.3)
+    top = grid[0, :].subgridspec(1, shown_n, wspace=0.22)
     tops = [figure.add_subplot(top[0, k]) for k in range(shown_n)]
-    b, c, d = (figure.add_subplot(grid[1, k]) for k in range(3))
+    b, c = figure.add_subplot(grid[1, 0]), figure.add_subplot(grid[1, 1])
     for k, ax in enumerate(tops):
         if k >= len(examples):
             ax.set_axis_off()
@@ -434,12 +436,13 @@ def draw_steps(figure, examples, sizes, dwells, pooled, unit, names=None,
         counts = []
         for t, x, fit, th in shown:
             two = bool(names)
-            dots = COLOUR_DOTS[th % 2] if two else "0.6"
+            dots = COLOUR_DOTS[th % 2] if two else "0.65"
+            join = COLOUR_JOIN[th % 2] if two else "0.45"
             fitc = COLOUR_LINES[th % 2] if two else "tab:red"
             if line:
-                ax.plot(t - t0, x - x0, "-", lw=0.5, color=dots)
-            ax.plot(t - t0, x - x0, ".", ms=2.5, color=dots)
-            ax.step(t - t0, fit - x0, where="post", color=fitc, lw=1.4,
+                ax.plot(t - t0, x - x0, "-", lw=0.6, color=join, alpha=0.9)
+            ax.plot(t - t0, x - x0, ".", ms=3, color=join if line else dots)
+            ax.step(t - t0, fit - x0, where="post", color=fitc, lw=1.8,
                     label=names.get(th) if two else None)
             counts.append(int(np.count_nonzero(np.diff(fit))))
         ax.set_xlabel(f"time ({unit})")
@@ -483,6 +486,6 @@ def draw_steps(figure, examples, sizes, dwells, pooled, unit, names=None,
         c.legend(fontsize=6, frameon=False)
     c.set_xlabel(f"dwell ({unit})")
     c.set_ylabel("density")
-    d.text(0.05, 0.6, f"velocity\n{pooled['velocity']:.3g} nm/{unit[:-1] if unit == 'frames' else 's'}"
-           f"\n(step × net direction / dwell)", fontsize=9, transform=d.transAxes)
-    d.set_axis_off()
+    per = unit[:-1] if unit == "frames" else "s"
+    c.set_title(f"dwell {pooled['dwell_mean']:.3g} {unit}; velocity {pooled['velocity']:.3g} "
+                f"nm/{per} (step × net direction / dwell)", fontsize=8)
