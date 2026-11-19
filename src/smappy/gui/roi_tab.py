@@ -150,9 +150,12 @@ class ROIHeader(QWidget):
         self.results.verticalHeader().setDefaultSectionSize(20)
         self.results.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.results.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        # the table only once an ROI is selected, and as tall as its rows
-        self.results.hide()
-        slayout.addWidget(self.results)
+        # the table only once an ROI is selected, and as tall as its rows;
+        # in a section of its own, to fold away while stepping (2026-11)
+        self.results_section = CollapsibleSection("measured values", self.results,
+                                                  expanded=True)
+        self.results_section.hide()
+        slayout.addWidget(self.results_section)
         # what the steps propose the selected ROI be, and a button to take
         # it: here, beside the steps that measured it, not in the ROI manager
         self.proposals = QWidget()
@@ -356,7 +359,7 @@ class ROIHeader(QWidget):
         # each step's title says how its result stands for this ROI
         self.steps.show_states(project.latest(roi.id)[1] if roi is not None else None)
         self.results.setRowCount(0)
-        self.results.setVisible(roi is not None)
+        self.results_section.setVisible(roi is not None)
         self._show_proposals(roi)
         if roi is None:
             return

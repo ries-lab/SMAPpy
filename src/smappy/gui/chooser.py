@@ -49,17 +49,19 @@ def snippet(text: str, word: str, width: int = 60) -> str:
 
 
 class PluginTree(QTreeWidget):
-    """The plugin tree, collapsed, filtered by a search box."""
+    """The plugin tree, collapsed but for the branch ``opened`` names,
+    filtered by a search box."""
 
     chosen = Signal(str)            # a leaf was double-clicked or Enter pressed
 
-    def __init__(self, per_region: bool = False, parent=None):
+    def __init__(self, per_region: bool = False, parent=None, opened: str = ""):
         """``per_region`` keeps only the plugins that can run once per
         region (`Plugin.per_region`), for the ROI evaluation pipeline.  It is
         the plugin's own declaration, not its folder, which is what makes
         filtering work with one shared tree."""
         super().__init__(parent)
         self.per_region = per_region
+        self.opened = opened         # a branch's path, "Analysis": unfolded to begin
         self.setHeaderHidden(True)
         self.setUniformRowHeights(True)
         self.itemActivated.connect(self._activated)
@@ -92,7 +94,23 @@ class PluginTree(QTreeWidget):
             item = QTreeWidgetItem(parent or self, [ref.name])
             item.setData(0, _PATH, path)
             item.setToolTip(0, ref.description or path)
+        self._as_opened()
+
+    def _as_opened(self) -> None:
+        """Collapsed, but for the branch `opened` names, one level shown: a
+        per-region step is almost always an analysis, and a folded tree cost
+        a click before every one of them (2026-11)."""
         self.collapseAll()
+        item = None
+        for name in filter(None, self.opened.split("/")):
+            parent = item
+            count = parent.childCount() if parent else self.topLevelItemCount()
+            found = [parent.child(i) if parent else self.topLevelItem(i)
+                     for i in range(count)]
+            item = next((it for it in found if it.text(0) == name), None)
+            if item is None:
+                return
+            item.setExpanded(True)
 
     def _activated(self, item: QTreeWidgetItem, _column: int = 0) -> None:
         path = item.data(0, _PATH)
@@ -108,7 +126,7 @@ class PluginTree(QTreeWidget):
         documentation page -- and the branches leading to it.
 
         With a search in place the matches are expanded; emptying the box puts
-        the tree back the way it opens, collapsed.
+        the tree back the way it opens (`_as_opened`).
         """
         self.text = text = text.strip().lower()
 
@@ -131,7 +149,7 @@ class PluginTree(QTreeWidget):
         for i in range(self.topLevelItemCount()):
             visit(self.topLevelItem(i))
         if not text:
-            self.collapseAll()
+            self._as_opened()
 
 
 # what `choose_plugin` returns for "a new chain...", which is not a plugin
@@ -143,7 +161,8 @@ class PluginChooser(QDialog):
     `NEW_CHAIN`, with ``new_chain``, for an empty chain to build."""
 
     def __init__(self, parent=None, per_region: bool = False,
-                 title: str = "Add a plugin", new_chain: bool = False):
+                 title: str = "Add a plugin", new_chain: bool = False,
+                 opened: str = ""):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.path: Optional[str] = None
@@ -151,7 +170,7 @@ class PluginChooser(QDialog):
         self.search = QLineEdit(placeholderText="find a plugin: its name, or a word from its page")
         self.search.setClearButtonEnabled(True)
         layout.addWidget(self.search)
-        self.tree = PluginTree(per_region=per_region)
+        self.tree = PluginTree(per_region=per_region, opened=opened)
         layout.addWidget(self.tree, 1)
         self.about = QLabel(" ")
         self.about.setWordWrap(True)
@@ -229,11 +248,13 @@ class PluginChooser(QDialog):
 
 
 def choose_plugin(parent=None, per_region: bool = False,
-                  title: str = "Add a plugin", new_chain: bool = False) -> Optional[str]:
-    """Show the chooser; the plugin path picked, or None (or `NEW_CHAIN`)."""
+                  title: str = "Add a plugin", new_chain: bool = False,
+                  opened: str = "") -> Optional[str]:
+    """Show the chooser; the plugin path picked, or None (or `NEW_CHAIN`).
+    ``opened``: the branch unfolded to begin with (`PluginTree`)."""
     # scanned again, so a plugin saved into a folder since is offered: the
     # scan parses the files and imports none
     plugins.discover(force=True)
-    dialog = PluginChooser(parent, per_region=per_region, title=title,
+    dialog = PluginChooser(parent, per_region=per_region, title=title, opened=opened,
                            new_chain=new_chain)
     return dialog.path if dialog.exec() == QDialog.Accepted else None

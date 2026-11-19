@@ -322,6 +322,12 @@ manager; redrawn as the ROIs are stepped, from either window, it never takes
 the keyboard from the one the keys are pressed in.  Closing that window
 unticks it.
 
+### measured values
+What the steps measured in the ROI selected in the ROI manager, a row per
+value, and the keywords given it; a value whose step's result is out of
+date says so.  Shown once an ROI is selected; click the title to fold it
+away while stepping through the ROIs.
+
 ### region filter
 Keeps the localizations of the [regions](plugin:Panels/Glossary) whose
 results pass conditions -- ROIs with six corners or more, traces whose

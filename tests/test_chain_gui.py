@@ -333,3 +333,45 @@ def test_a_chain_with_an_interface_shows_what_it_asks_and_folds_its_steps(app):
     form.set_values({chain.STEPS_FIELD: True})
     panel.panel.refresh_derived()
     assert form.sections["localization_statistics"].isVisibleTo(panel)
+
+
+def test_switching_a_step_off_leaves_every_section_open_or_folded_as_it_was(app):
+    # the rebuild for the tick opened the step it was in, folded or not (2026-11)
+    _tab, instance, panel = new_chain_tab(app, Session(blinks()))
+    spec = panel.current_spec()
+    spec.steps += [Step(plugin="Analysis/Process/Layers"),
+                   Step(plugin="Analysis/Measure/Localization Statistics")]
+    assert panel._apply(spec)
+    sections = {p: s for p, _, _, s in panel.step_sections()}
+    sections[(0,)].set_expanded(True)
+    sections[(1,)].set_expanded(False)
+    sections[(1,)].tick.setChecked(False)
+    assert instance.chain["steps"][1].get("enabled") is False
+    opened = {p: s.button.isChecked() for p, _, _, s in panel.step_sections()}
+    assert opened == {(0,): True, (1,): False}
+
+
+def test_adding_a_per_region_step_opens_the_chooser_on_the_analysis_branch(app, monkeypatch):
+    from smappy.gui import chooser
+    from smappy.gui.chooser import PluginTree
+    tree = PluginTree(opened="Analysis")
+    tops = {tree.topLevelItem(i).text(0): tree.topLevelItem(i)
+            for i in range(tree.topLevelItemCount())}
+    analysis = tops.pop("Analysis")
+    assert analysis.isExpanded()                     # its groups shown, folded
+    assert not any(analysis.child(i).isExpanded() for i in range(analysis.childCount()))
+    assert not any(item.isExpanded() for item in tops.values())
+    tree.filter("statistics")
+    tree.filter("")                                  # emptied: as it opened
+    assert analysis.isExpanded()
+    assert not any(PluginTree().topLevelItem(i).isExpanded()
+                   for i in range(PluginTree().topLevelItemCount()))
+    # the per-region steps' *add* asks for it; a chain's own does not
+    from smappy.gui.roi_tab import ROIHeader
+    asked = []
+    monkeypatch.setattr(chooser, "choose_plugin",
+                        lambda *a, **k: asked.append(k.get("opened")) or None)
+    ROIHeader(Session(blinks())).steps.panel.add_step()
+    _tab, _instance, panel = new_chain_tab(app, Session(blinks()))
+    panel.add_step()
+    assert asked == ["Analysis", ""]

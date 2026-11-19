@@ -332,7 +332,7 @@ class ChainPanel(QWidget):
             settings = None              # a half-typed number: the saved values
         return self.cls.current_spec(settings)
 
-    def _apply(self, spec: ChainSpec) -> bool:
+    def _apply(self, spec: ChainSpec, open_current: bool = True) -> bool:
         try:
             cls = chains.chain_class(spec, path=self.instance.plugin)
         except ChainError as error:
@@ -345,8 +345,10 @@ class ChainPanel(QWidget):
         self.instance.values = {}        # the values are in the steps now
         path = self.current_path()
         self._build(cls)
-        if path:
+        if path and open_current:
             self.select(path)
+        else:
+            self._current = path
         self.changed.emit()
         return True
 
@@ -385,8 +387,14 @@ class ChainPanel(QWidget):
         if step.enabled == bool(on):
             return
         step.enabled = bool(on)
+        # the sections stay as they were: a tick in a folded step's title
+        # unfolded it, the rebuild opening the current step (2026-11)
+        opened = {p for p, _, _, section in self.step_sections()
+                  if section.button.isChecked()}
         self._current = tuple(path)
-        self._apply(spec)
+        if self._apply(spec, open_current=False):
+            for p, _, _, section in self.step_sections():
+                section.set_expanded(p in opened)
 
     def _insert(self, step) -> None:
         """Put ``step`` after the current one, or into it if it is a block."""
@@ -409,7 +417,8 @@ class ChainPanel(QWidget):
 
     def add_step(self) -> None:
         from .chooser import choose_plugin
-        path = choose_plugin(self.window())
+        # into a block -- the per-region steps -- an analysis, nearly always
+        path = choose_plugin(self.window(), opened="Analysis" if self.root else "")
         if not path:
             return
         try:
