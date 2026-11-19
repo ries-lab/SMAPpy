@@ -17,9 +17,12 @@ without training -- SMAP's global two-channel calibrations read by `smappy.calib
   92 % of the light in channel 1.  Each channel's spline is made to sum to one at its focus, as
   DECODE-Plex's ``norm: auto`` does for colour.
 
-**Frames as the camera records them**: the beads' whole camera ROI, each half drawn with its own
-spline, the secondary where the registration puts a molecule's partner (mirror included), each
-clipped to its own half; the camera the paper's (EMCCD, gain 100, 5 e-/ADU, read noise 74.4 e-,
+**Frames as DECODE-Plex's models were trained on them** (plex-plan §12): the beads' whole camera ROI,
+each half drawn with its own spline, the secondary where the registration *as DECODE-Plex reads it*
+puts a molecule's partner -- SMAP's registration without its projective division
+(`smap_dual`, ``reading="decode-plex"``; up to 0.29 px from SMAP's own on a 512-pixel chip, which costs
+its biplane CRLB model 3 -- 7 times the bound where it otherwise reaches it) -- and channel 1's spline
+oriented as each model was trained (``channel_1``), each clipped to its own half; the camera the paper's (EMCCD, gain 100, 5 e-/ADU, read noise 74.4 e-,
 offset 398.6), the pixels 117 x 127 nm (x, y) as its runs convert them.  A molecule is placed in the
 main half where its partner lands inside the secondary half.
 
@@ -54,6 +57,12 @@ PIXEL_NM = (117.0, 127.0)                     # x, y: as DECODE-Plex's runs conv
 CAMERA = {"conversion": 5.0, "offset": 398.6, "em_on": True, "emgain": 100.0, "read_noise_e": 74.4,
           "pixelsize_um": PIXEL_NM[0] / 1000, "pixelsize_y_um": PIXEL_NM[1] / 1000}
 EXCESS_NOISE = 2.0
+#: DECODE-Plex's CameraPerfect, Fig. S4's: Poisson noise alone, counts in photons
+PERFECT = {"conversion": 1.0, "offset": 0.0, "em_on": False, "emgain": 0.0, "read_noise_e": 0.0,
+           "pixelsize_um": PIXEL_NM[0] / 1000, "pixelsize_y_um": PIXEL_NM[1] / 1000}
+CRLB_PHOTONS = (2000, 5000, 8000)              # the S4 models' training range, its middle the paper's figure's
+CRLB_BACKGROUND = 20.0                        # a pixel, each channel, as the paper's CRLB notebook
+GRID_PX = 32                                  # isolated: a spline's spot is 26 px across
 DENSITIES = (1, 5, 15, 25, 50)
 PHOTONS = (1000, 3000, 10000)
 DYES = (0.78, 0.92)                           # fraction of a dye's light in channel 1 (colour_2a)
@@ -75,12 +84,48 @@ CONTEXTS = {
                      "total": (3000.0, 40000.0)},
         "about": "DECODE-Plex Fig. 2a's two-colour beads; its actin / microtubule model",
     },
+    # Fig. S4's CRLB demonstration (notebook/crlb.ipynb): its own models, trained with a perfect camera
+    # on single frames, photons 2000 -- 8000, background 0 -- 40.  Its biplane model's channel 1 is the
+    # secondary spline not flipped along the split as Fig. 2c's run flips it, so in the camera's frame it
+    # is the secondary mirrored along the split (plex-plan §12: DECODE-Plex's own PSFs, rendered)
+    "biplane_s4": {
+        "smap": PLEX / "calibration" / "Fig1c_2c-Pos0_240621_NC_BeadCal_BifocalPlane_Z_1_MMStack_Default.ome_3dcal.mat",
+        "model": PLEX / "outputs" / "FigS4-biplane-crlb-2026-05-28_12-12-58-710801",
+        "kind": "biplane", "z_nm": (-600.0, 600.0), "camera": PERFECT, "excess": 1.0, "placement": "grid",
+        "channel_1": "secondary mirrored",
+        "training": {"photons": [(2000.0, 8000.0)], "background": [(0.0, 40.0), (0.0, 40.0)]},
+        "about": "Fig. 1c's bifocal beads; the Fig. S4 biplane CRLB model (perfect camera, isolated molecules)",
+    },
+    # its colour model draws channel 0's spline in both channels (channels_out [0, 0]), each normalised,
+    # the photons split half and half: in the camera's frame channel 1 is the main spline mirrored
+    "colour_s4": {
+        "smap": PLEX / "calibration" / "FigS4-Pos0_231130_BeadsCal_Z_1_MMStack_Default.ome_updown_ul_normal_em_3dcal.mat",
+        "model": PLEX / "outputs" / "FigS4-dual_color-crlb-2026-05-28_12-10-32-901897",
+        "kind": "colour", "z_nm": (-600.0, 600.0), "camera": PERFECT, "excess": 1.0, "placement": "grid",
+        "channel_1": "main mirrored", "dyes": (0.5,),
+        "training": {"photons": [(1000.0, 4000.0), (1000.0, 4000.0)], "background": [(0.0, 40.0), (0.0, 40.0)],
+                     "total": (2000.0, 8000.0)},
+        "about": "Fig. S4's two-colour beads; the Fig. S4 colour CRLB model (perfect camera, isolated molecules)",
+    },
 }
+
+
+def camera_of(context):
+    return CONTEXTS[context].get("camera", CAMERA)
+
+
+def excess_of(context):
+    return CONTEXTS[context].get("excess", EXCESS_NOISE)
 
 
 def _sets():
     out = {}
     for c, (name, ctx) in enumerate(CONTEXTS.items()):
+        if ctx.get("placement") == "grid":
+            for i, p in enumerate(CRLB_PHOTONS):
+                out[f"{name}_crlb_{p}"] = {"kind": "simulated", "context": name, "seed": 5070 + 100 * c + i,
+                                           "density": None, "photons": float(p), "background": CRLB_BACKGROUND}
+            continue
         for i, d in enumerate(DENSITIES):
             out[f"{name}_density_{d}"] = {"kind": "simulated", "context": name, "seed": 5000 + 100 * c + i,
                                           "density": d, "photons": "training", "background": "training"}
@@ -93,14 +138,20 @@ def _sets():
 SETS = _sets()
 
 
+#: how a context's registration is read (`smappy.calibrate.smap_dual`): as DECODE-Plex reads it, so
+#: that its published models see the microscope they were trained for
+READING = "decode-plex"
+
+
 def calibration(context: str):
-    """The context's dual calibration, converted once from SMAP's files and kept as ``_2ct.h5``."""
+    """The context's dual calibration, converted once from SMAP's files (read as `READING`) and kept as
+    ``<context>_<READING>_2ct.h5``."""
     from smappy.calibrate import dual
     from smappy.calibrate.smap_dual import load_smap_dual_calibration
-    kept = SETS_DIR / f"{context}_2ct.h5"
+    kept = SETS_DIR / f"{context}_{READING}_2ct.h5"
     if not kept.exists():
         kept.parent.mkdir(parents=True, exist_ok=True)
-        dual.save_dual_color_calibration(kept, load_smap_dual_calibration(CONTEXTS[context]["smap"]))
+        dual.save_dual_color_calibration(kept, load_smap_dual_calibration(CONTEXTS[context]["smap"], reading=READING))
     return dual.load_dual_color_calibration(kept)
 
 
@@ -109,6 +160,24 @@ def _unit(cal):
     from dataclasses import replace
     s = float(cal.psf[round(cal.z0)].sum())
     return replace(cal, coeff=(cal.coeff / s).astype(np.float32), psf=cal.psf / s)
+
+
+def drawn_splines(context, cal):
+    """The two splines a context's frames are drawn with, as the camera sees them: colour's each
+    normalised at focus (DECODE-Plex's ``norm: auto``), biplane's with each plane's share; channel 1
+    the secondary's, or (``channel_1``) as the context's model was trained -- mirrored along the split,
+    or the main channel's mirrored along it."""
+    from smappy.calibrate.dual import mirror_axis, mirrored_spline
+    ctx = CONTEXTS[context]
+    colour = ctx["kind"] == "colour"
+    main = _unit(cal.main) if colour else cal.main
+    how = ctx.get("channel_1", "secondary")
+    second = {"secondary": cal.secondary, "secondary mirrored": cal.secondary, "main": cal.main,
+              "main mirrored": cal.main}[how]
+    second = _unit(second) if colour else second
+    if how.endswith("mirrored"):
+        second = mirrored_spline(second, axis=2 - int(mirror_axis(cal.geometry)))
+    return main, second
 
 
 def _layout(cal):
@@ -144,23 +213,34 @@ def simulate(spec, cal):
     rng = np.random.default_rng(spec["seed"])
     shape, regions, to_secondary, _ = _layout(cal)
     main_r, sec_r = regions
-    splines = (_unit(cal.main), _unit(cal.secondary)) if colour else (cal.main, cal.secondary)
+    splines = drawn_splines(spec["context"], cal)
 
-    # molecules in the main half whose partner is inside the secondary half: the share that is,
-    # measured on 20 000 trial positions, sets the frames
-    def place(n):
-        xy = np.c_[rng.uniform(main_r[0] - 0.5, main_r[0] + main_r[2] - 0.5, n),
-                   rng.uniform(main_r[1] - 0.5, main_r[1] + main_r[3] - 0.5, n)]
-        return xy[_inside(to_secondary(xy), sec_r)]
-    share = len(place(20000)) / 20000
-    per_frame = spec["density"] * main_r[2] * main_r[3] / (40 * 40) * share
-    n_frames = int(np.ceil(EMITTERS / per_frame))
-    counts = rng.poisson(per_frame, n_frames)
-    xy = np.empty((0, 2))
-    while len(xy) < counts.sum():
-        xy = np.r_[xy, place(2 * (counts.sum() - len(xy)) + 100)]
-    xy = xy[: counts.sum()]
-    frame = np.repeat(np.arange(n_frames), counts)
+    if ctx.get("placement") == "grid":
+        # isolated molecules: one in each cell of a grid of GRID_PX over the main half, anywhere within
+        # its middle, kept where the partner is inside the secondary half
+        gx = np.arange(main_r[0] + GRID_PX / 2, main_r[0] + main_r[2] - GRID_PX / 2, GRID_PX)
+        gy = np.arange(main_r[1] + GRID_PX / 2, main_r[1] + main_r[3] - GRID_PX / 2, GRID_PX)
+        cells = np.stack(np.meshgrid(gx, gy), -1).reshape(-1, 2)
+        cells = cells[_inside(to_secondary(cells), sec_r, margin=GRID_PX / 2)]
+        n_frames = int(np.ceil(EMITTERS / len(cells)))
+        frame = np.repeat(np.arange(n_frames), len(cells))
+        xy = np.tile(cells, (n_frames, 1)) + rng.uniform(-GRID_PX / 4, GRID_PX / 4, (len(frame), 2))
+    else:
+        # molecules in the main half whose partner is inside the secondary half: the share that is,
+        # measured on 20 000 trial positions, sets the frames
+        def place(n):
+            xy = np.c_[rng.uniform(main_r[0] - 0.5, main_r[0] + main_r[2] - 0.5, n),
+                       rng.uniform(main_r[1] - 0.5, main_r[1] + main_r[3] - 0.5, n)]
+            return xy[_inside(to_secondary(xy), sec_r)]
+        share = len(place(20000)) / 20000
+        per_frame = spec["density"] * main_r[2] * main_r[3] / (40 * 40) * share
+        n_frames = int(np.ceil(EMITTERS / per_frame))
+        counts = rng.poisson(per_frame, n_frames)
+        xy = np.empty((0, 2))
+        while len(xy) < counts.sum():
+            xy = np.r_[xy, place(2 * (counts.sum() - len(xy)) + 100)]
+        xy = xy[: counts.sum()]
+        frame = np.repeat(np.arange(n_frames), counts)
     n = len(frame)
     z = rng.uniform(*ctx["z_nm"], n)
     xy2 = to_secondary(xy)
@@ -168,12 +248,13 @@ def simulate(spec, cal):
     train = ctx["training"]
     truth = {"frame": frame, "x_px": xy[:, 0], "y_px": xy[:, 1], "z_nm": z, "x2_px": xy2[:, 0], "y2_px": xy2[:, 1]}
     if colour:
-        dye = rng.integers(0, 2, n)
-        fraction = np.asarray(DYES)[dye]
+        dyes = np.asarray(ctx.get("dyes", DYES))
+        dye = rng.integers(0, len(dyes), n)
+        fraction = dyes[dye]
         total = rng.uniform(*train["total"], n) if spec["photons"] == "training" else np.full(n, spec["photons"])
         phot = np.c_[total * (1 - fraction), total * fraction]
         truth.update(dye=dye, photons=total, photons_0=phot[:, 0], photons_1=phot[:, 1])
-        mean_c = [np.mean(1 - np.asarray(DYES)), np.mean(DYES)]
+        mean_c = [np.mean(1 - dyes), np.mean(dyes)]
     else:
         total = rng.uniform(*train["photons"][0], n) if spec["photons"] == "training" else np.full(n, spec["photons"])
         phot = np.c_[total, total]                  # each plane's share is in its spline
@@ -182,6 +263,8 @@ def simulate(spec, cal):
         mean_c = [float(splines[c].psf[z0[c]].sum()) for c in range(2)]
     if spec["background"] == "training":
         bg = np.stack([rng.uniform(*train["background"][c], n_frames) for c in range(2)], 1)
+    elif not isinstance(spec["background"], str):
+        bg = np.full((n_frames, 2), float(spec["background"]))
     else:
         bg = np.tile([0.02 * spec["photons"] * mean_c[c] for c in range(2)], (n_frames, 1))
     truth.update(background_0=bg[frame, 0], background_1=bg[frame, 1], frame_background_0=bg[:, 0],
@@ -194,7 +277,7 @@ def simulate(spec, cal):
         half[:] = bg[:, c, None, None]
         _draw_spline(half, frame, pos - [x0, y0], z, phot[:, c], splines[c])
         image[:, y0:y0 + h, x0:x0 + w] = half
-    c = CAMERA
+    c = camera_of(spec["context"])
     frames = np.empty(image.shape, np.uint16)
     for k in range(n_frames):
         frames[k] = _camera(image[k], np.random.default_rng([spec["seed"], 7, k]), c["conversion"], c["offset"],
@@ -203,7 +286,8 @@ def simulate(spec, cal):
 
 
 def crlb(cal, splines, truth, colour: bool, excess=EXCESS_NOISE):
-    """Each molecule's bound in x, y (nm, the main channel's pixels) and z, both channels together."""
+    """Each molecule's bound in x, y (nm, the main channel's pixels) and z, both channels together, on
+    the splines the frames were drawn with; ``excess`` the camera's, 2 for an EM register, 1 perfect."""
     from smappy.training.joint_crlb import spline_spots
     _, _, _, jacobian = _layout(cal)
     n = len(truth["frame"])
@@ -261,9 +345,12 @@ def draw(names=None):
             print(f"{name}: {ctx['smap']} is missing; skipped", flush=True)
             continue
         cals[name] = calibration(name)
-        manifest["contexts"][name] = {"calibration": fingerprint(SETS_DIR / f"{name}_2ct.h5"),
+        manifest["contexts"][name] = {"calibration": fingerprint(SETS_DIR / f"{name}_{READING}_2ct.h5"), "reading": READING,
                                       "smap": str(ctx["smap"]), "model": str(ctx["model"]),
                                       "about": ctx["about"], "z_nm": ctx["z_nm"], "training": ctx["training"],
+                                      "camera": camera_of(name), "excess_noise": excess_of(name),
+                                      "channel_1": ctx.get("channel_1", "secondary"),
+                                      "placement": ctx.get("placement", "random"),
                                       "frame_shape": list(_layout(cals[name])[0])}
     for name, spec in SETS.items():
         if spec["context"] not in cals:
@@ -272,7 +359,7 @@ def draw(names=None):
         folder = SETS_DIR / name
         if (names and name in names) or not (folder / "truth.npz").exists():
             frames, truth, splines = simulate(spec, cal)
-            b = crlb(cal, splines, truth, colour)
+            b = crlb(cal, splines, truth, colour, excess=excess_of(spec["context"]))
             truth.update(crlb_x_nm=b[:, 0], crlb_y_nm=b[:, 1], crlb_z_nm=b[:, 2])
             folder.mkdir(parents=True, exist_ok=True)
             tifffile.imwrite(folder / "frames.tif", frames, photometric="minisblack")

@@ -44,7 +44,8 @@ import sets_c2 as S
 FITS = S.ROOT / "fits_c2"
 REPORTS = S.ROOT / "reports"
 KEEP = {"plex": {"min_prob": 0.5}, "spline": {"logl_mads": 3.0, "below_iteration_limit": True}}
-FRAMES_READ = {"plex": {"biplane_2c": 1, "colour_2a": 3}, "spline": {"biplane_2c": 1, "colour_2a": 1}}
+FRAMES_READ = {"plex": {"biplane_2c": 1, "colour_2a": 3, "biplane_s4": 1, "colour_s4": 1},
+               "spline": {"biplane_2c": 1, "colour_2a": 1, "biplane_s4": 1, "colour_s4": 1}}
 EDGE = 7                                       # pixels in from a half's edge or the crop's: a 13-px fit box
                                                # stays inside, as the C = 1 scoring's 7 (score_sets.EDGE_PX)
 
@@ -62,8 +63,12 @@ def _plex_cfg(context, dev):
     cfg = dp.io.param.load(ctx["model"] / "param_run.yaml")
     for s in cfg["Hardware"]["device"]:
         cfg["Hardware"]["device"][s] = dev
+    # the frames are as the camera records them: DECODE-Plex undoes the EM register's mirror (``gain``)
+    # where the beads were taken with EM gain, as Fig. 2c's run does, and the split's mirror
+    # (``channel``) always, as the notebooks set it; the S4 models' runs (a perfect camera) name neither
+    em = bool(S.calibration(context).parameters["smap"]["EMon"][0])
     for cam in cfg["Camera"]:
-        cam["specs"]["flip"]["channel"] = -2                  # as the notebooks set it
+        cam["specs"]["flip"] = {"gain": -1 if em else None, "channel": -2}
     glob = cfg["Simulation"]["Transformation"]["Pos"]["glob"]["offset"]
     cfg["Test"]["Transformation"]["Pos"]["glob"]["offset"] = copy.deepcopy(glob)
     return cfg
@@ -105,18 +110,20 @@ def fit_plex(name, out):
 
 def local_calibration(context):
     """The context's calibration ROI-local: the map with the beads' corner taken off, the frames'
-    pixels from 0 -- for movies that carry no camera ROI."""
+    pixels from 0 -- for movies that carry no camera ROI -- with the splines the frames are drawn with
+    (`sets_c2.drawn_splines`), so that Spline 3D 2C fits the physics the sets hold."""
     from smappy.calibrate import dual
-    path = S.SETS_DIR / f"{context}_2ct_local.h5"
+    path = S.SETS_DIR / f"{context}_{S.READING}_2ct_local.h5"
     if not path.exists():
         cal = S.calibration(context)
+        main, secondary = S.drawn_splines(context, cal)
         x0, y0, w, h = cal.geometry["sources"][0]["roi"]
         corner = np.array([[1, 0, x0], [0, 1, y0], [0, 0, 1]], float)
         hmat = np.linalg.inv(corner) @ cal.transformation @ corner
         g = cal.geometry
         split = dual.geometry_layout(g).regions[1][1 if "up-down" in g["layout"] else 0] - (y0 if "up-down" in g["layout"] else x0)
         geometry = dual.split_geometry(g["layout"], g["main_channel"], (h, w), split_position=split, roi_local=True)
-        dual.save_dual_color_calibration(path, dual.DualColorCalibration(cal.main, cal.secondary, hmat / hmat[2, 2],
+        dual.save_dual_color_calibration(path, dual.DualColorCalibration(main, secondary, hmat / hmat[2, 2],
                                                                           geometry, cal.parameters))
     return path
 
@@ -133,7 +140,7 @@ def fit_spline(name, out):
         SourceSettings,
     )
     spec = S.SETS[name]
-    c = S.CAMERA
+    c = S.camera_of(spec["context"])
     settings = DualSplineFitSettings(
         source=SourceSettings(path=str(S.SETS_DIR / name / "frames.tif")),
         camera=CameraSettings(conversion=c["conversion"], offset=c["offset"], em_on=c["em_on"], emgain=c["emgain"],
@@ -173,7 +180,7 @@ def score(name, locs, keep):
     context = spec["context"]
     t = dict(np.load(S.SETS_DIR / name / "truth.npz"))
     shape = tuple(S._layout(S.calibration(context))[0])
-    flip = S.CONTEXTS[context]["kind"] == "biplane"            # its model mirrors the EM frame (gain flip)
+    flip = bool(S.calibration(context).parameters["smap"]["EMon"][0])   # DECODE-Plex mirrors an EM frame first
     mask = both_channels(context, shape, flip)
     n = len(t["frame"])
     truth = {k: v for k, v in t.items() if np.ndim(v) == 1 and len(v) == n}
@@ -187,7 +194,37 @@ def score(name, locs, keep):
     R.Z_LIMIT, R.kept.__defaults__ = z_limit, (z_limit,)
     out = R.score_truth(truth, locs, keep, S.PIXEL_NM, (shape[1], shape[0]))
     out["area_molecules"] = int(sel.sum())
+    out["by_z"] = by_z(truth, locs, keep, shape)
     return out
+
+
+def by_z(truth, locs, keep, shape, width=100.0):
+    """The paper's CRLB figure: in bins of the true z, each axis's RMSE of the matched localizations
+    against the root mean square of their molecules' CRLB, and its ratio -- 1 at the bound."""
+    from score_sets import match
+    ok = R.kept(locs, keep)
+    f = {"frame": np.asarray(locs["frame"])[ok].astype(np.int64), "x_px": np.asarray(locs["x_nm"])[ok] / S.PIXEL_NM[0],
+         "y_px": np.asarray(locs["y_nm"])[ok] / S.PIXEL_NM[1], "z_nm": np.asarray(locs["z_nm"])[ok]}
+    w, h = shape[1], shape[0]
+    fi = R._inside(f["x_px"], f["y_px"], w, h)
+    f = {k: v[fi] for k, v in f.items()}
+    ti = R._inside(truth["x_px"], truth["y_px"], w, h)
+    t = {k: v[ti] for k, v in truth.items()}
+    a, b = match(t, f, S.PIXEL_NM)
+    d = np.c_[(f["x_px"][b] - t["x_px"][a]) * S.PIXEL_NM[0], (f["y_px"][b] - t["y_px"][a]) * S.PIXEL_NM[1],
+              f["z_nm"][b] - t["z_nm"][a]]
+    crlb = np.c_[t["crlb_x_nm"][a], t["crlb_y_nm"][a], t["crlb_z_nm"][a]]
+    z = t["z_nm"][a]
+    rows = []
+    for lo in np.arange(np.floor(z.min() / width) * width, z.max(), width):
+        sel = (z >= lo) & (z < lo + width)
+        if sel.sum() < 50:
+            continue
+        rmse = np.sqrt(np.mean(d[sel] ** 2, 0))
+        bound = np.sqrt(np.nanmean(crlb[sel] ** 2, 0))
+        rows.append({"lo": float(lo), "hi": float(lo + width), "n": int(sel.sum()), "rmse_nm": rmse.tolist(),
+                     "bias_nm": d[sel].mean(0).tolist(), "crlb_nm": bound.tolist(), "ratio": (rmse / bound).tolist()})
+    return rows
 
 
 def run(fitter, names=None, refit=False):
