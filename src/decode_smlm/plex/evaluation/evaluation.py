@@ -639,22 +639,22 @@ class SMLMEvaluation:
         Returns:
             namedtuple: A namedtuple of floats containing
 
-                - **prec** (*decode.evaluation.metric.Metric*): Precision
-                - **rec** (*decode.evaluation.metric.Metric*): Recall
-                - **jac** (*decode.evaluation.metric.Metric*): Jaccard
-                - **f1** (*decode.evaluation.metric.Metric*): F1-Score
-                - **effcy_lat** (*decode.evaluation.metric.Metric*): Efficiency lateral
-                - **effcy_ax** (*decode.evaluation.metric.Metric*): Efficiency axial
-                - **effcy_vol** (*decode.evaluation.metric.Metric*): Efficiency volumetric
-                - **rmse_lat** (*decode.evaluation.metric.Metric*): RMSE lateral
-                - **rmse_ax** (*decode.evaluation.metric.Metric*): RMSE axial
-                - **rmse_vol** (*decode.evaluation.metric.Metric*): RMSE volumetric
-                - **mae_lat** (*decode.evaluation.metric.Metric*): MAE lateral
-                - **mae_ax** (*decode.evaluation.metric.Metric*): MAE axial
-                - **mae_vol** (*decode.evaluation.metric.Metric*): MAE volumetric
-                - **mad_lat** (*decode.evaluation.metric.Metric*): MAD lateral
-                - **mad_ax** (*decode.evaluation.metric.Metric*): MAD axial
-                - **mad_vol** (*decode.evaluation.metric.Metric*): MAD volumetric
+                - **prec** (*decode_smlm.plex.evaluation.metric.Metric*): Precision
+                - **rec** (*decode_smlm.plex.evaluation.metric.Metric*): Recall
+                - **jac** (*decode_smlm.plex.evaluation.metric.Metric*): Jaccard
+                - **f1** (*decode_smlm.plex.evaluation.metric.Metric*): F1-Score
+                - **effcy_lat** (*decode_smlm.plex.evaluation.metric.Metric*): Efficiency lateral
+                - **effcy_ax** (*decode_smlm.plex.evaluation.metric.Metric*): Efficiency axial
+                - **effcy_vol** (*decode_smlm.plex.evaluation.metric.Metric*): Efficiency volumetric
+                - **rmse_lat** (*decode_smlm.plex.evaluation.metric.Metric*): RMSE lateral
+                - **rmse_ax** (*decode_smlm.plex.evaluation.metric.Metric*): RMSE axial
+                - **rmse_vol** (*decode_smlm.plex.evaluation.metric.Metric*): RMSE volumetric
+                - **mae_lat** (*decode_smlm.plex.evaluation.metric.Metric*): MAE lateral
+                - **mae_ax** (*decode_smlm.plex.evaluation.metric.Metric*): MAE axial
+                - **mae_vol** (*decode_smlm.plex.evaluation.metric.Metric*): MAE volumetric
+                - **mad_lat** (*decode_smlm.plex.evaluation.metric.Metric*): MAD lateral
+                - **mad_ax** (*decode_smlm.plex.evaluation.metric.Metric*): MAD axial
+                - **mad_vol** (*decode_smlm.plex.evaluation.metric.Metric*): MAD volumetric
 
 
         """

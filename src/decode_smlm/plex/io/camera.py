@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pydantic
 
-from decode.hardware import camera as cam
+from decode_smlm.plex.hardware import camera as cam
 
 
 @pydantic.validate_arguments

@@ -2,9 +2,9 @@ from typing import Sequence
 
 import torch
 
-from decode.emitter import EmitterSet
-from decode.evaluation import match_emittersets as matcher
-from decode.neuralfitter import peakfinder
+from decode_smlm.plex.emitter import EmitterSet
+from decode_smlm.plex.evaluation import match_emittersets as matcher
+from decode_smlm.plex.neuralfitter import peakfinder
 
 
 def check_aux(frames: Sequence[torch.Tensor], aux: Sequence[torch.Tensor]):

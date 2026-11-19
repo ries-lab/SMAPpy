@@ -9,9 +9,7 @@ try:
 except ImportError:
     _git_available = False
 
-import decode
-
-
+import decode_smlm.plex
 def decode_state() -> str:
     """Get version tag of decode.
 
@@ -27,9 +25,9 @@ def decode_state() -> str:
             return r.git.describe(dirty=True)
 
         except git.exc.InvalidGitRepositoryError:  # not a repo but an installed package
-            return decode.__version__
+            return decode_smlm.plex.__version__
 
         except git.exc.GitCommandError:
-            return decode.__version__
+            return decode_smlm.plex.__version__
     else:
-        return decode.__version__
+        return decode_smlm.plex.__version__

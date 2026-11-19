@@ -7,7 +7,7 @@ from functools import wraps
 import click
 import yaml
 
-from decode import utils
+from decode_smlm.plex import utils
 
 
 class AssetHandler:

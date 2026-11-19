@@ -11,20 +11,20 @@ from deprecated import deprecated
 from pytorch_lightning import loggers
 from torch import nn
 
-import decode.simulation.trafo
-import decode.simulation.trafo.photon.trafo
-import decode.simulation.trafo.pos.sampler
-from decode import emitter
-from decode import evaluation
-from decode import generic
-from decode import neuralfitter
-from decode import simulation
-from decode import utils
-from decode.neuralfitter import models
-from decode.neuralfitter import scaling
-from decode import validation as val
+import decode_smlm.plex.simulation.trafo
+import decode_smlm.plex.simulation.trafo.photon.trafo
+import decode_smlm.plex.simulation.trafo.pos.sampler
+from decode_smlm.plex import emitter
+from decode_smlm.plex import evaluation
+from decode_smlm.plex import generic
+from decode_smlm.plex import neuralfitter
+from decode_smlm.plex import simulation
+from decode_smlm.plex import utils
+from decode_smlm.plex.neuralfitter import models
+from decode_smlm.plex.neuralfitter import scaling
+from decode_smlm.plex import validation as val
 
-from decode.io.psf import load_h5
+from decode_smlm.plex.io.psf import load_h5
 from pathlib import Path
 
 logger = structlog.get_logger()
@@ -171,7 +171,7 @@ def setup_psf(
 def setup_psf_kernel(
     cfg, cfg_sim
 ) -> simulation.psf_kernel.CubicSplinePSF | list[simulation.psf_kernel.CubicSplinePSF]:
-    from decode import io
+    from decode_smlm.plex import io
 
     logger.info("Note: PSF normalization is with reference to the saved PSF.")
 
@@ -248,7 +248,7 @@ def setup_trafo(
     logger.info("Loading transformation.", reference=reference, path=path_trafo)
 
     # scale and shift because of SMAP standard
-    trafo = decode.io.trafo.load_xyz_trafo(
+    trafo = decode_smlm.plex.io.trafo.load_xyz_trafo(
         path_trafo,
         scale=1 / 1000.0,
         switch_xy=True,
@@ -334,7 +334,7 @@ class _DummySampler:
 
 def setup_trafo_sampler(trafo, cfg_trafo_sample, camera, roi_size, n, device):
     if cfg_trafo_sample is None or isinstance(
-        trafo, decode.simulation.trafo.pos.trafo.XYZTransformationNoOp
+        trafo, decode_smlm.plex.simulation.trafo.pos.trafo.XYZTransformationNoOp
     ):  # no-op
         return _DummySampler(trafo, n)
 
@@ -386,13 +386,13 @@ def setup_trafo_coord_sampler(cfg):
     )
     device = cfg["Hardware"]["device"]["simulation"]
 
-    sampler = decode.simulation.trafo.pos.sampler.TransformationRotSampler(
+    sampler = decode_smlm.plex.simulation.trafo.pos.sampler.TransformationRotSampler(
         angle=_ValueSampler(angles),
         offset=_ValueSampler(offsets),
         n=n_frames(cfg, cfg["Simulation"]),
         device=device,
     )
-    sampler_val = decode.simulation.trafo.pos.sampler.TransformationRotSampler(
+    sampler_val = decode_smlm.plex.simulation.trafo.pos.sampler.TransformationRotSampler(
         angle=_ValueSampler(angles),
         offset=_ValueSampler(offsets),
         n=n_frames(cfg, cfg["Simulation"]),
@@ -403,7 +403,7 @@ def setup_trafo_coord_sampler(cfg):
 
 def setup_trafo_phot(
     cfg, cfg_sim
-) -> decode.simulation.trafo.photon.trafo.MultiChoricSplitter:
+) -> decode_smlm.plex.simulation.trafo.photon.trafo.MultiChoricSplitter:
     cfg_choric = cfg_sim["Transformation"]["Photon"]["choric_split"]
     if cfg_choric["mean"] is None:
         return None
@@ -413,7 +413,7 @@ def setup_trafo_phot(
         torch.as_tensor(cfg_choric["std"]) if cfg_choric["std"] is not None else None
     )
 
-    return decode.simulation.trafo.photon.trafo.MultiChoricSplitter(t, t_sig).to(
+    return decode_smlm.plex.simulation.trafo.photon.trafo.MultiChoricSplitter(t, t_sig).to(
         cfg["Hardware"]["device"]["simulation"]
     )
 
@@ -761,7 +761,7 @@ def setup_em_filter(cfg) -> emitter.process.EmitterProcess:
 def setup_input_scaling(cfg):
     ch_map = setup_ch_map_model_in(cfg)
     aux_scale = None if n_aux(cfg) == 0 else cfg["Scaling"]["input"]["aux"]["scale"]
-    return decode.neuralfitter.scaling.factories.channeled_scaler_from_input(
+    return decode_smlm.plex.neuralfitter.scaling.factories.channeled_scaler_from_input(
         frame_scale=cfg["Scaling"]["input"]["frame"]["scale"],
         frame_offset=cfg["Scaling"]["input"]["frame"]["offset"],
         aux_scale=aux_scale,
@@ -953,7 +953,7 @@ def setup_tar_scaling(cfg) -> neuralfitter.scaling.base.ScalerModelChannel:
 
 
 def setup_bg_scaling(cfg) -> scaling.base.ScalerModelChannel:
-    return decode.neuralfitter.scaling.factories.channeled_scaler_from_tar_bg(
+    return decode_smlm.plex.neuralfitter.scaling.factories.channeled_scaler_from_tar_bg(
         bg=cfg["Scaling"]["output"]["bg"]["max"]
     )
 
@@ -982,7 +982,7 @@ def setup_ch_map_tar(n):
 
 
 def setup_post_model_scaling(cfg) -> scaling.base.ScalerModelChannel:
-    return decode.neuralfitter.scaling.factories.channeled_scaler_from_output(
+    return decode_smlm.plex.neuralfitter.scaling.factories.channeled_scaler_from_output(
         ch_map=setup_ch_map_model_out(cfg),
         phot=cfg["Scaling"]["output"]["phot"]["max"],
         z=cfg["Scaling"]["output"]["z"]["max"],

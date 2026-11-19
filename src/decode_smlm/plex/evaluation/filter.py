@@ -1,7 +1,7 @@
 from typing import Sequence
 
-from decode.emitter import emitter
-from decode.emitter import process
+from decode_smlm.plex.emitter import emitter
+from decode_smlm.plex.emitter import process
 
 
 class MatchedFilter:

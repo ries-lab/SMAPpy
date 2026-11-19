@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 from deprecated import deprecated
 
-from decode.utils import bookkeeping
+from decode_smlm.plex.utils import bookkeeping
 from ..emitter.emitter import EmitterSet
 
 minimal_mapping = {k: k for k in ("x", "y", "z", "phot", "frame_ix")}

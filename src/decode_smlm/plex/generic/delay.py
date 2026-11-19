@@ -2,7 +2,7 @@ from typing import TypeVar, Callable, Optional, Sequence, Union
 
 import torch
 
-from decode.generic import protocols
+from decode_smlm.plex.generic import protocols
 
 TDelayed = TypeVar("TDelayed")
 

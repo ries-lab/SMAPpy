@@ -3,10 +3,10 @@ from typing import Any, Optional, Protocol, Sequence
 import pytorch_lightning as pl
 import torch
 
-from decode.emitter import emitter, process as em_process
-from decode.neuralfitter import logger, process
-from decode.evaluation import evaluation
-from decode.evaluation import predict_dist
+from decode_smlm.plex.emitter import emitter, process as em_process
+from decode_smlm.plex.neuralfitter import logger, process
+from decode_smlm.plex.evaluation import evaluation
+from decode_smlm.plex.evaluation import predict_dist
 
 
 class Model(pl.LightningModule):

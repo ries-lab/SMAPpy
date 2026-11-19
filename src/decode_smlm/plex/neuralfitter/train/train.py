@@ -11,17 +11,17 @@ import pytorch_lightning as pl
 import structlog
 import torch
 
-import decode
-from decode.neuralfitter import model
-from decode.neuralfitter.data import datamodel
-from decode.neuralfitter.train import setup_cfg, auto_lr
-from decode.utils import param_auto, system, hardware
+import decode_smlm.plex
+from decode_smlm.plex.neuralfitter import model
+from decode_smlm.plex.neuralfitter.data import datamodel
+from decode_smlm.plex.neuralfitter.train import setup_cfg, auto_lr
+from decode_smlm.plex.utils import param_auto, system, hardware
 
 logger = structlog.get_logger()
 
 
 def log(cfg_raw, cfg_filled):
-    logger.info("DECODE", version=decode.__version__)
+    logger.info("DECODE", version=decode_smlm.plex.__version__)
     logger.info(
         "Experiment", tag=cfg_raw["Meta"]["tag"], version=cfg_raw["Meta"]["version"]
     )

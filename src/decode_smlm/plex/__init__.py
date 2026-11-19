@@ -13,13 +13,13 @@ __gateway__ = (
 
 import warnings
 
-import decode.evaluation
-import decode.generic
-import decode.io
-import decode.neuralfitter
-import decode.plot
-import decode.renderer
-import decode.simulation
+import decode_smlm.plex.evaluation
+import decode_smlm.plex.generic
+import decode_smlm.plex.io
+import decode_smlm.plex.neuralfitter
+import decode_smlm.plex.plot
+import decode_smlm.plex.renderer
+import decode_smlm.plex.simulation
 
 from . import emitter
 from . import io
@@ -29,10 +29,10 @@ from .emitter.emitter import factory as emitter_factory
 
 # check device capability
 import torch
-import decode.utils.hardware
+import decode_smlm.plex.utils.hardware
 
 if torch.cuda.is_available():
-    device_capa = decode.utils.hardware.get_device_capability()
+    device_capa = decode_smlm.plex.utils.hardware.get_device_capability()
     if float(device_capa) < 3.7:
         warnings.warn(
             f"Your GPU {torch.cuda.get_device_name()} has cuda capability {device_capa} and is no longer supported (minimum is 3.7)."

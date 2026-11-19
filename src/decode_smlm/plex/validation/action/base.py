@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from typing import Any, Callable, Literal
 
-from decode.generic import logging
+from decode_smlm.plex.generic import logging
 
 
 class Action:

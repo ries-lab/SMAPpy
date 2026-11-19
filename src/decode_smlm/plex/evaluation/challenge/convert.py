@@ -1,6 +1,6 @@
 import torch
 
-from decode.emitter import emitter
+from decode_smlm.plex.emitter import emitter
 
 
 def chall_to_decode(em: emitter.EmitterSet, flip_z: bool = True) -> emitter.EmitterSet:

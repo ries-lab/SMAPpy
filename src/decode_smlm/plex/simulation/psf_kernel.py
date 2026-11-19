@@ -12,7 +12,7 @@ try:
 except ImportError:
     zernike = None
 
-import decode.generic.utils
+import decode_smlm.plex.generic.utils
 from ..generic import slicing as gutil
 from ..generic import deploy
 from ..generic import logging
@@ -191,7 +191,7 @@ class DeltaPSF(PSF):
         """
         super().__init__(xextent=xextent, yextent=yextent, img_shape=img_shape)
 
-        from decode.emitter.process import EmitterFilterFoV
+        from decode_smlm.plex.emitter.process import EmitterFilterFoV
 
         self._fov_filter = EmitterFilterFoV(
             xextent=self.xextent, yextent=self.yextent, zextent=None
@@ -202,7 +202,7 @@ class DeltaPSF(PSF):
             self._bin_y,
             self._bin_ctr_x,
             self._bin_ctr_y,
-        ) = decode.generic.utils.frame_grid(img_shape, xextent, yextent)
+        ) = decode_smlm.plex.generic.utils.frame_grid(img_shape, xextent, yextent)
 
     @property
     def bin_ctr_x(self):

@@ -335,7 +335,7 @@ class EmitterSet:
             file: path where to save
 
         """
-        from decode.io import emitter as emitter_io
+        from decode_smlm.plex.io import emitter as emitter_io
 
         if not isinstance(file, Path):
             file = Path(file)
@@ -361,7 +361,7 @@ class EmitterSet:
             EmitterSet
 
         """
-        from decode.io import emitter as emitter_io
+        from decode_smlm.plex.io import emitter as emitter_io
 
         file = Path(file) if not isinstance(file, Path) else file
 

@@ -3,9 +3,9 @@ from typing import Any, Optional, Sequence, Union
 import torch
 from deprecated import deprecated
 
-from decode.emitter import emitter
-from decode.generic import delay, protocols, indexing
-from decode.neuralfitter import process
+from decode_smlm.plex.emitter import emitter
+from decode_smlm.plex.generic import delay, protocols, indexing
+from decode_smlm.plex.neuralfitter import process
 
 
 class IxShifter:

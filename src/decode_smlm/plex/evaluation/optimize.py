@@ -1,8 +1,8 @@
 from functools import partial
 from typing import Any, Callable, Literal
 
-from decode.emitter import emitter
-from decode.emitter import process
+from decode_smlm.plex.emitter import emitter
+from decode_smlm.plex.emitter import process
 
 try:
     import skopt

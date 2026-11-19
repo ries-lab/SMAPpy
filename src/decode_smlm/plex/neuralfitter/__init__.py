@@ -1,11 +1,11 @@
-import decode.neuralfitter.de_bias
-import decode.neuralfitter.frame_processing
-import decode.neuralfitter.loss
-import decode.neuralfitter.models
-import decode.neuralfitter.coord_transform
-import decode.neuralfitter.utils.process
-import decode.neuralfitter.scale_transform
-import decode.neuralfitter.train
+import decode_smlm.plex.neuralfitter.de_bias
+import decode_smlm.plex.neuralfitter.frame_processing
+import decode_smlm.plex.neuralfitter.loss
+import decode_smlm.plex.neuralfitter.models
+import decode_smlm.plex.neuralfitter.coord_transform
+import decode_smlm.plex.neuralfitter.utils.process
+import decode_smlm.plex.neuralfitter.scale_transform
+import decode_smlm.plex.neuralfitter.train
 from . import callbacks
 from . import data
 from . import indicator

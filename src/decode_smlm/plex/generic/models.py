@@ -5,7 +5,7 @@ from typing import Sequence, Union
 import pydantic
 import torch
 
-from decode.generic import dtype
+from decode_smlm.plex.generic import dtype
 
 
 class Tensor(torch.Tensor):

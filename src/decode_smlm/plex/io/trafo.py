@@ -4,10 +4,10 @@ from typing import Literal
 import scipy.io
 import torch
 
-from decode.simulation.trafo.pos import trafo
-from decode.utils import dev
+from decode_smlm.plex.simulation.trafo.pos import trafo
+from decode_smlm.plex.utils import dev
 
-from decode.io.psf import load_h5
+from decode_smlm.plex.io.psf import load_h5
 
 
 def _coord_permute_smap(xyz: torch.Tensor) -> torch.Tensor:

@@ -4,7 +4,7 @@ from typing import Optional, Union
 import torch
 from deprecated import deprecated
 
-import decode.neuralfitter.scaling.base
+import decode_smlm.plex.neuralfitter.scaling.base
 from ...emitter import emitter
 from . import to_emitter
 from .. import spec

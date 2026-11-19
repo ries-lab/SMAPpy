@@ -1,6 +1,6 @@
 from torch import nn
 
-from decode.neuralfitter import utils
+from decode_smlm.plex.neuralfitter import utils
 from . import model_param, unet_param
 
 

@@ -3,12 +3,12 @@ import pathlib
 import yaml
 import zipfile
 
-import decode
-from decode.utils import files
+import decode_smlm.plex
+from decode_smlm.plex.utils import files
 
 
 def load_gateway():
-    r = requests.get(decode.__gateway__, allow_redirects=True)
+    r = requests.get(decode_smlm.plex.__gateway__, allow_redirects=True)
 
     return yaml.load(r.content, Loader=yaml.FullLoader)
 
