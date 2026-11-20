@@ -160,6 +160,13 @@ def _stamp(text: str) -> Optional[datetime]:
         return None
 
 
+def _kind(line: str) -> str:
+    try:
+        return str(json.loads(line).get("kind", ""))
+    except Exception:       # noqa: BLE001 -- a broken line is just not a kind
+        return ""
+
+
 def _events_since(since: Optional[datetime]) -> List[str]:
     lines: List[str] = []
     for path in sorted(folder().glob("events-*.jsonl")):
@@ -351,7 +358,11 @@ def bundle(path: Path, since: Optional[datetime] = None) -> Dict[str, Any]:
         for transcript in codex_transcripts(work, since):
             z.writestr(f"transcripts/codex/{transcript.name}", scrub_transcript(transcript))
             parts["transcripts"] = parts.get("transcripts", 0) + 1
-        count = sum(parts.values())
+        # a send's own record ("sent", written after the time it records) goes
+        # with the next bundle but is no reason for one: a send that crossed a
+        # second stamped it after `last_sent`, and the next send uploaded a
+        # bundle of that record alone (a flaky test of the release, 2026-11-20)
+        count = sum(parts.values()) - sum(1 for line in events if _kind(line) == "sent")
         z.writestr("about.json", json.dumps({
             "smappy": __version__, "installation": installation_id(),
             "name": settings()["name"], "made": datetime.now().isoformat(timespec="seconds"),

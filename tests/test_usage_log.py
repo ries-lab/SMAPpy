@@ -176,6 +176,28 @@ def test_a_send_goes_once_records_when_and_sends_only_what_is_new_after(home):
     assert again["count"] == 0 and len(sent) == 1           # nothing new, nothing sent
 
 
+def test_a_sends_own_record_alone_is_not_sent_but_goes_with_the_next(home):
+    """A send that crossed a second: its "sent" record is stamped after the
+    `last_sent` it saved, which is the start of the send cut to the second."""
+    start = (datetime.now() - timedelta(minutes=1)).replace(microsecond=0)
+    usage_log.save_settings(enabled=True, link="https://cloud.example.org/index.php/s/Tok3n",
+                            last_sent=start.isoformat())
+    usage_log.folder().mkdir(parents=True, exist_ok=True)
+    later = (start + timedelta(seconds=1)).isoformat()
+    (usage_log.folder() / f"events-{start:%Y-%m}.jsonl").write_text(
+        f'{{"t": "{later}", "kind": "sent", "parts": {{"events": 1}}}}\n')
+    sent = []
+
+    def opener(request, timeout):
+        sent.append(request)
+        return Answer()
+
+    assert usage_log.send(opener=opener)["count"] == 0 and not sent
+    usage_log.event("help", page="Panels/Glossary")
+    made = usage_log.send(opener=opener)
+    assert made["count"] == 1 and made["parts"] == {"events": 2} and len(sent) == 1
+
+
 def test_a_failed_send_is_noted_and_the_next_one_sends_the_same_again(home):
     usage_log.save_settings(enabled=True, link="https://cloud.example.org/s/Tok3n")
     usage_log.event("help", page="Panels/Glossary")
