@@ -32,6 +32,15 @@ changing slowly over the movie (`slow_background`: a new level every 50 frames, 
 photons at 1000, 3000 and 10 000 at density 1, each channel's background 2 % of its mean photons.  z
 uniform over the model's training range.
 
+**Blinking twins** (``<context>_blink_...``, plex-plan §16): the same two sweeps with molecules that
+blink as DECODE draws them and as both DECODE-Plex and netfit were trained (``lifetime_avg`` 1): each
+switches on at a time uniform over the movie and 3 on-times either side, stays on for an exponential
+time of mean ``LIFETIME`` frames, and gives each frame its on-time overlaps that share of its photons;
+a molecule is a row of the truth in every frame it is on in, at the same place.  As many molecules on
+per frame as the sets without blinking.  In those, each molecule is in one frame alone -- a network
+that reads several frames, trained on molecules that stay on, takes a bright spot in a neighbouring
+frame for a faint tail and reports it (netfit's Round 0, §16).
+
 **Each molecule's CRLB** is kept with its truth: both channels together, one molecule, its spot
 alone and noise-free -- the Fisher matrix of each channel's spot (``training.joint_crlb``'s spots, the
 spline's whole extent less 3 pixels), the secondary's x and y derivatives taken through the
@@ -65,6 +74,7 @@ CRLB_PHOTONS = (2000, 5000, 8000)              # the S4 models' training range, 
 CRLB_BACKGROUND = 20.0                        # a pixel, each channel, as the paper's CRLB notebook
 GRID_PX = 32                                  # isolated: a spline's spot is 26 px across
 DENSITIES = (1, 5, 15, 25, 50)
+LIFETIME = 1.0                                # mean on-time of the blinking sets, frames (DECODE-Plex's lifetime_avg)
 PHOTONS = (1000, 3000, 10000)
 BACKGROUND_KNOTS = 50                         # frames between the drawn levels of a slow background
 DYES = (0.78, 0.92)                           # fraction of a dye's light in channel 1 (colour_2a)
@@ -134,6 +144,14 @@ def _sets():
         for i, p in enumerate(PHOTONS):
             out[f"{name}_photons_{p}"] = {"kind": "simulated", "context": name, "seed": 5050 + 100 * c + i,
                                           "density": 1, "photons": float(p), "background": "2%"}
+        for i, d in enumerate(DENSITIES):
+            out[f"{name}_blink_density_{d}"] = {"kind": "simulated", "context": name, "seed": 5200 + 100 * c + i,
+                                                "density": d, "photons": "training", "background": "training",
+                                                "lifetime": LIFETIME}
+        for i, p in enumerate(PHOTONS):
+            out[f"{name}_blink_photons_{p}"] = {"kind": "simulated", "context": name, "seed": 5250 + 100 * c + i,
+                                                "density": 1, "photons": float(p), "background": "2%",
+                                                "lifetime": LIFETIME}
     return out
 
 
@@ -280,28 +298,54 @@ def simulate(spec, cal):
         share = len(place(20000)) / 20000
         per_frame = spec["density"] * main_r[2] * main_r[3] / (40 * 40) * share
         n_frames = int(np.ceil(EMITTERS / per_frame))
-        counts = rng.poisson(per_frame, n_frames)
+        life = spec.get("lifetime")
+        if life:
+            # molecules switching on over the movie and 3 on-times either side, so many that per_frame
+            # are on in a frame on average (each overlaps life + 1 frames)
+            total = rng.poisson(per_frame / (life + 1) * (n_frames + 6 * life))
+        else:
+            counts = rng.poisson(per_frame, n_frames)
+            total = counts.sum()
         xy = np.empty((0, 2))
-        while len(xy) < counts.sum():
-            xy = np.r_[xy, place(2 * (counts.sum() - len(xy)) + 100)]
-        xy = xy[: counts.sum()]
-        frame = np.repeat(np.arange(n_frames), counts)
+        while len(xy) < total:
+            xy = np.r_[xy, place(2 * (total - len(xy)) + 100)]
+        xy = xy[:total]
+        if life:
+            start = rng.uniform(-3 * life, n_frames + 3 * life, total)
+            end = start + rng.exponential(life, total)
+            first = np.floor(start).astype(int)
+            span = int(np.max(np.floor(end) - first)) + 1
+            k = first[:, None] + np.arange(span)[None]                       # (molecules, span)
+            over = np.clip(np.minimum(end[:, None], k + 1) - np.maximum(start[:, None], k), 0, None)
+            on = (over > 0) & (k >= 0) & (k < n_frames)
+            mol, j = np.nonzero(on)
+            order = np.argsort(k[mol, j], kind="stable")
+            mol, frame, frac = mol[order], k[mol, j][order], over[mol, j][order]
+        else:
+            mol, frame, frac = np.arange(total), np.repeat(np.arange(n_frames), counts), np.ones(total)
+    if ctx.get("placement") == "grid":
+        mol, frac = np.arange(len(frame)), np.ones(len(frame))
     n = len(frame)
-    z = rng.uniform(*ctx["z_nm"], n)
+    m = int(mol.max()) + 1 if n else 0
+    z = rng.uniform(*ctx["z_nm"], m)[mol]
+    xy = xy[mol] if ctx.get("placement") != "grid" else xy
     xy2 = to_secondary(xy)
 
     train = ctx["training"]
-    truth = {"frame": frame, "x_px": xy[:, 0], "y_px": xy[:, 1], "z_nm": z, "x2_px": xy2[:, 0], "y2_px": xy2[:, 1]}
+    truth = {"frame": frame, "x_px": xy[:, 0], "y_px": xy[:, 1], "z_nm": z, "x2_px": xy2[:, 0], "y2_px": xy2[:, 1],
+             "molecule": mol}
     if colour:
         dyes = np.asarray(ctx.get("dyes", DYES))
-        dye = rng.integers(0, len(dyes), n)
+        dye = rng.integers(0, len(dyes), m)[mol]
         fraction = dyes[dye]
-        total = rng.uniform(*train["total"], n) if spec["photons"] == "training" else np.full(n, spec["photons"])
+        # a molecule's flux while on, times the share of the frame it is on for
+        total = (rng.uniform(*train["total"], m)[mol] if spec["photons"] == "training" else np.full(n, spec["photons"])) * frac
         phot = np.c_[total * (1 - fraction), total * fraction]
         truth.update(dye=dye, photons=total, photons_0=phot[:, 0], photons_1=phot[:, 1])
         mean_c = [np.mean(1 - dyes), np.mean(dyes)]
     else:
-        total = rng.uniform(*train["photons"][0], n) if spec["photons"] == "training" else np.full(n, spec["photons"])
+        total = (rng.uniform(*train["photons"][0], m)[mol] if spec["photons"] == "training"
+                 else np.full(n, spec["photons"])) * frac
         phot = np.c_[total, total]                  # each plane's share is in its spline
         truth.update(photons=total)
         z0 = [round(s.z0) for s in splines]
