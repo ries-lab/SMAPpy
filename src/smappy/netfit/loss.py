@@ -53,12 +53,18 @@ import torch
 LOG_2PI = math.log(2 * math.pi)
 
 
-def targets_scaled(batch, scaling):
+def targets_scaled(batch, scaling, layout=None):
     """The batch's molecules in network units: (b, k, P + 3) photons, x, y, z -- ``batch.photons``
-    (b, k) one count, or (b, k, P) one per channel."""
+    (b, k) one count, or (b, k, P) one per channel; with the layout's ``share`` the total and the share
+    in channel 1 instead of the two counts."""
     xyz = batch.xyz
     phot = batch.photons if batch.photons.dim() == 3 else batch.photons[..., None]
-    return torch.cat([phot / scaling.phot_max, xyz[..., 0:2], xyz[..., 2:3] / scaling.z_max], -1)
+    if layout is not None and layout.share:
+        total = phot.sum(-1, keepdim=True)
+        phot = torch.cat([total / scaling.phot_max, phot[..., 1:2] / total.clamp_min(1e-6)], -1)
+    else:
+        phot = phot / scaling.phot_max
+    return torch.cat([phot, xyz[..., 0:2], xyz[..., 2:3] / scaling.z_max], -1)
 
 
 def backgrounds(batch):
@@ -127,7 +133,7 @@ def terms(out, batch, scaling, chunk: int = 64, names=("count", "mixture", "back
     D = mu5.shape[-1]
     p = pk.reshape(b, -1)                                                         # (b, K hw)
     mu, sig = mu5.reshape(b, -1, D), sig5.reshape(b, -1, D)
-    tgt = targets_scaled(batch, scaling)                                          # (b, n, D)
+    tgt = targets_scaled(batch, scaling, lay)                                     # (b, n, D)
     mask = batch.mask
     n = mask.sum(1).to(out.dtype)
     out_terms = {}

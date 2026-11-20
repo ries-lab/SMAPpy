@@ -52,11 +52,12 @@ def physical(out, scaling, scale: int = 1, layout=None):
     P = lay.photons
     for s in range(lay.slots):
         x0, s0 = lay.xyz(s), lay.sig(s)
-        y[:, lay.phot(s):x0] *= scaling.phot_max
+        # with ``share`` the second photon output is a fraction, left as it is
+        y[:, lay.phot(s):lay.phot(s) + (1 if lay.share else P)] *= scaling.phot_max
         y[:, x0] += cols
         y[:, x0 + 1] += rows
         y[:, x0 + 2] *= scaling.z_max
-        y[:, s0:s0 + P] *= scaling.phot_max
+        y[:, s0:s0 + (1 if lay.share else P)] *= scaling.phot_max
         y[:, s0 + P + 2] *= scaling.z_max
     y[:, lay.bg:lay.bg + lay.backgrounds] *= scaling.bg_max
     if lay.reported:                          # the reported sigmas (`network`, ``sigma_rep``)
@@ -69,7 +70,14 @@ def _values(v, lay, k: int = 0) -> dict:
     total, and with a count per channel ``photons_c`` (m, P) and their sigmas beside it."""
     P, x0, s0 = lay.photons, lay.xyz(k), lay.sig(k)
     phot, sig_p = v[:, lay.phot(k):x0], v[:, s0:s0 + P]
-    out = {"photons": phot.sum(1), "photons_err": torch.sqrt((sig_p ** 2).sum(1)),
+    if lay.share:                             # the total and the share in channel 1, as counts
+        total, f, st, sf = phot[:, 0], phot[:, 1], sig_p[:, 0], sig_p[:, 1]
+        phot = torch.stack([total * (1 - f), total * f], 1)
+        sig_p = torch.stack([torch.hypot(st * (1 - f), total * sf), torch.hypot(st * f, total * sf)], 1)
+        out_total, out_err = total, st
+    else:
+        out_total, out_err = phot.sum(1), torch.sqrt((sig_p ** 2).sum(1))
+    out = {"photons": out_total, "photons_err": out_err,
            "x_err": v[:, s0 + P], "y_err": v[:, s0 + P + 1], "z_err_nm": v[:, s0 + P + 2]}
     if lay.backgrounds == 1:
         out["background"] = v[:, lay.bg]

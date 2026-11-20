@@ -316,14 +316,27 @@ class TwoStageUNet(nn.Module):
     With ``channels`` C > 1 (`docs/decode/plex-plan.md` §16, DECODE-Plex's arrangement): a per-frame
     U-Net for each channel, weights of its own, each reading its frame and the ``aux`` offset maps; the
     time model per channel; the channels' joined features and the offset maps into the union; ``photons``
-    counts a slot and a background per channel (`Layout`)."""
+    counts a slot and a background per channel (`Layout`).
+
+    The arrangement's alternatives (plex-plan §7's study), the defaults DECODE-Plex's:
+
+    * ``two_time``: the time model in each channel ("channel"), once over the channels' features joined
+      frame by frame ("joined": it sees a blink in both channels at once), or both;
+    * ``two_fuse`` "early": one per-frame U-Net reading both channels from its first layer, channel 1
+      resampled onto channel 0's grid where the offset maps put each pixel's partner (bilinear) -- no
+      network per channel; "late" (default) a network per channel;
+    * ``two_aux``: the offset maps beside every per-frame network's input and the union's ("every"), or
+      the union's alone ("union");
+    * ``photon_share`` (colour): a slot's two photon outputs are its total and the share in channel 1,
+      not a count per channel (`Layout.share`)."""
 
     def __init__(self, window: int = 3, features: int = 48, depth_frame: int = 2, depth_union: int = 2,
                  activation: str = "relu", upsample_kernel: int = 3, pool_act: bool = True, out_conv: bool = False,
                  init: str = "default", p_clamp: float | None = None, out_scale: int = 1,
                  blur: bool = False, block: str = "plain", offset_range: float = 1.0, sigma_rep: bool = False,
                  slots: int = 1, time_model: str = "frame_stack", time_settings: dict | None = None,
-                 channels: int = 1, photons: int = 1, aux: int = 0):
+                 channels: int = 1, photons: int = 1, aux: int = 0, two_time: str = "channel",
+                 two_fuse: str = "late", two_aux: str = "every", photon_share: bool = False):
         """``upsample_kernel``, ``pool_act``, ``out_conv`` (`UNet`), ``init`` "kaiming" (every convolution
         Kaiming-normal, fan in, as DECODE's ``init_custom``; "default" PyTorch's, about 2.4 times smaller)
         and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details; ``out_scale`` the output
@@ -340,26 +353,45 @@ class TwoStageUNet(nn.Module):
         self.channels, self.aux = int(channels), int(aux)
         if self.channels < 1 or (self.channels == 1 and self.aux):
             raise ValueError(f"channels {channels}, aux {aux}: at least one channel, offset maps only with two")
+        self.two_time, self.two_fuse, self.two_aux = two_time, two_fuse, two_aux
+        if two_time not in ("channel", "joined", "both") or two_fuse not in ("late", "early") \
+                or two_aux not in ("every", "union"):
+            raise ValueError(f"two_time {two_time!r}, two_fuse {two_fuse!r}, two_aux {two_aux!r}")
+        early = self.channels > 1 and two_fuse == "early"
+        # each per-frame network's input: its frame (early: every channel's), and the maps where asked
+        frame_in = (self.channels if early else 1) + (self.aux if two_aux == "every" and not early else 0)
+        nets = 1 if early else self.channels
         # one channel keeps its modules' names, so a C = 1 model saved before is read as it was trained
-        unet = lambda: UNet(1 + self.aux, features, depth_frame, act, **style)
+        unet = lambda: UNet(frame_in, features, depth_frame, act, **style)
         if self.channels == 1:
             self.frame = unet()
         else:
-            self.frames = nn.ModuleList(unet() for _ in range(self.channels))
+            self.frames = nn.ModuleList(unet() for _ in range(nets))
         self.time_model = time_model
+        own = nets if (self.channels == 1 or early or two_time != "joined") else 0
         if time_model == "frame_stack":
             times, per_channel = None, window * features
         elif time_model in TIME_MODELS:
             # made in the order the modules always were, so a seed gives a C = 1 network its old weights
-            times = [TIME_MODELS[time_model](features, window, **(time_settings or {})) for _ in range(self.channels)]
-            per_channel = times[0].out_channels
+            times = [TIME_MODELS[time_model](features, window, **(time_settings or {})) for _ in range(own)]
+            per_channel = TIME_MODELS[time_model](features, window, **(time_settings or {})).out_channels \
+                if not times else times[0].out_channels
         else:
             raise ValueError(f"time model {time_model!r}: frame_stack, {', '.join(TIME_MODELS)}")
         if self.channels == 1:
             self.time = times[0] if times is not None else None
         else:
-            self.times = nn.ModuleList(times) if times is not None else None
-        joined = self.channels * per_channel + self.aux
+            self.times = nn.ModuleList(times) if times else None
+        # the joined time model (late fusion): over the channels' features frame by frame
+        self.time_joined = None
+        joined = own * per_channel
+        if self.channels > 1 and not early and two_time in ("joined", "both"):
+            if time_model == "frame_stack":
+                joined += 0 if two_time == "both" else nets * per_channel       # a stack is a stack
+            else:
+                self.time_joined = TIME_MODELS[time_model](nets * features, window, **(time_settings or {}))
+                joined += self.time_joined.out_channels
+        joined += self.aux
         self.union = UNet(joined, features, depth_union, act, **style)
         self.p_clamp = p_clamp
         self.out_scale = int(out_scale)
@@ -380,7 +412,11 @@ class TwoStageUNet(nn.Module):
         self.heads = nn.ModuleDict({"p": Head(features, k, act), "phot_xyz": Head(features, v * k, act),
                                     "sigma": Head(features, v * k, act), "bg": Head(features, self.channels, act)})
         self.sigma_rep = bool(sigma_rep)
-        self.layout = Layout(slots=k, photons=self.photons, backgrounds=self.channels, reported=self.sigma_rep)
+        self.photon_share = bool(photon_share)
+        if self.photon_share and self.photons != 2:
+            raise ValueError("photon_share: two photon outputs, a colour network's")
+        self.layout = Layout(slots=k, photons=self.photons, backgrounds=self.channels, reported=self.sigma_rep,
+                             share=self.photon_share)
         if self.sigma_rep:
             self.heads["sigma_rep"] = Head(features, 3, act)
         self.fold = 2 ** max(depth_frame, depth_union)        # frames must be a multiple of this
@@ -427,8 +463,21 @@ class TwoStageUNet(nn.Module):
                 raise ValueError(f"{self.channels} channels and {self.aux} offset maps expected, "
                                  f"got {C} and {None if aux is None else aux.shape[-3]}")
             aux = aux.to(x.dtype).expand(n, self.aux, h, w)
-            times = self.times if self.times is not None else [None] * C
-            per = [self._channel(self.frames[c], times[c], x[:, c], aux, windows) for c in range(C)]
+            frame_aux = aux if self.two_aux == "every" else None
+            if self.two_fuse == "early":
+                both = torch.stack([x[:, 0], self._resampled(x[:, 1], aux)], 2)       # (n, L, C, h, w)
+                time = self.times[0] if self.times is not None else None
+                per = [self._channel(self.frames[0], time, both, None, windows)]
+            else:
+                # each channel's per-frame features, (n windows, t, F, h, w), then its time model, the joined
+                # one over them all, or both
+                feats = [self._features(self.frames[c], x[:, c], frame_aux, windows) for c in range(C)]
+                per = []
+                if self.two_time != "joined" or self.time_model == "frame_stack":
+                    times = self.times if self.times is not None else [None] * C
+                    per += [self._time(times[c], f) for c, f in enumerate(feats)]
+                if self.time_joined is not None:
+                    per.append(self.time_joined(torch.cat(feats, 2)))
             # a movie's windows share its offset maps
             joined = torch.cat(per + [aux.repeat_interleave(windows, 0)], 1)
         u = self.refine(self.union(joined))
@@ -438,19 +487,44 @@ class TwoStageUNet(nn.Module):
             return self._heads(u.float())
 
     def _channel(self, frame_net, time, x, aux, windows):
-        """One channel's frames ``x`` (n, L, h, w) through its per-frame U-Net (each frame with the
-        offset maps ``aux`` (n, A, h, w) beside it) and its time model: (n windows, F', h, w)."""
-        n, L, h, w = x.shape
+        """One channel's frames ``x`` (n, L, h, w) -- or (n, L, C, h, w), several read together -- through
+        its per-frame U-Net (each frame with the offset maps ``aux`` (n, A, h, w) beside it) and its time
+        model: (n windows, F', h, w)."""
+        return self._time(time, self._features(frame_net, x, aux, windows))
+
+    @staticmethod
+    def _time(time, feats):
+        n, t, c, h, w = feats.shape
+        return feats.reshape(n, t * c, h, w) if time is None else time(feats)
+
+    @staticmethod
+    def _features(frame_net, x, aux, windows):
+        """Frames (n, L, [C,] h, w) through a per-frame U-Net: (n windows, t, F, h, w)."""
+        n, L = x.shape[:2]
+        h, w = x.shape[-2:]
         t = L - windows + 1
-        inp = x.reshape(n * L, 1, h, w)
+        inp = x.reshape(n * L, -1, h, w)
         if aux is not None:
             inp = torch.cat([inp, aux.repeat_interleave(L, 0)], 1)
         feats = frame_net(inp).reshape(n, L, -1, h, w)
         if windows > 1:
             idx = torch.arange(windows, device=x.device)[:, None] + torch.arange(t, device=x.device)[None]
             feats = feats[:, idx]                                   # (n, windows, t, F, h, w)
-        feats = feats.reshape(n * windows, t, -1, h, w)
-        return feats.reshape(n * windows, -1, h, w) if time is None else time(feats)
+        return feats.reshape(n * windows, t, -1, h, w)
+
+    @staticmethod
+    def _resampled(x, d):
+        """Channel 1's frames ``x`` (n, L, h, w) read at each pixel ``p`` of channel 0 where its partner is,
+        ``p + d(p)`` (``d`` (n, 2, h, w), x then y), bilinear, zero beyond the frame: (n, L, h, w)."""
+        n, L, h, w = x.shape
+        rows, cols = torch.meshgrid(torch.arange(h, device=x.device, dtype=x.dtype),
+                                    torch.arange(w, device=x.device, dtype=x.dtype), indexing="ij")
+        gx = (cols + d[:, 0]) / max(w - 1, 1) * 2 - 1
+        gy = (rows + d[:, 1]) / max(h - 1, 1) * 2 - 1
+        grid = torch.stack([gx, gy], -1).repeat_interleave(L, 0)             # (n L, h, w, 2)
+        out = nn.functional.grid_sample(x.reshape(n * L, 1, h, w), grid, mode="bilinear", padding_mode="zeros",
+                                        align_corners=True)
+        return out.reshape(n, L, h, w)
 
     def _heads(self, u):
         values = self.heads["phot_xyz"](u)
@@ -483,6 +557,8 @@ class Layout:
     photons: int = 1
     backgrounds: int = 1
     reported: bool = False
+    # colour's two photon outputs as the total and the share in channel 1, not a count per channel
+    share: bool = False
 
     @property
     def per_slot(self) -> int:
@@ -545,7 +621,8 @@ def build(parts, window: int, channels=None) -> nn.Module:
     maps and its photon counts."""
     tm = parts.time_model
     extra = {k: v for k, v in (tm.settings or {}).items() if k != "frames"}
-    two = {"channels": 2, "photons": channels.photons, "aux": 2} if channels is not None and channels.kind else {}
+    two = ({"channels": 2, "photons": channels.photons, "aux": 2, "photon_share": channels.photon_out == "share"}
+           if channels is not None and channels.kind else {})
     return BACKBONES[parts.backbone.name](window=window, time_model=tm.name, time_settings=extra or None,
                                           **parts.backbone.settings, **two)
 

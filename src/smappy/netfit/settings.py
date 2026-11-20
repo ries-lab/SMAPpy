@@ -57,6 +57,9 @@ class ChannelSettings:
     share: tuple = (0.0, 1.0)
     # each channel's background range, photons a pixel, uniform per frame; None: the simulation's for both
     background: list | None = None
+    # colour: what a molecule's two photon outputs are -- "counts", one per channel (DECODE-Plex's), or
+    # "share", its total and the share in channel 1 (`network.Layout.share`)
+    photon_out: str = "counts"
 
     @property
     def n(self) -> int:

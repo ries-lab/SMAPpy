@@ -149,3 +149,50 @@ def test_a_two_channel_network_learns_a_batch_it_is_shown():
     assert float(value.detach()) < 2 / 3 * first
     e = extract.extract(model(x, aux=b.aux).detach(), sc, 0.05, "mixture_peak", layout=model.layout)
     assert e["photons_c"].shape == (len(e["x"]), 2) and e["background_c"].shape == (len(e["x"]), 2)
+
+
+def test_early_fusion_reads_channel_one_where_the_offset_maps_put_each_partner():
+    """Channel 1 shifted by 2.5 columns and -1 row, read back at p + d: channel 0's image (spots two
+    pixels wide, as molecules are; bilinear reading blurs them a little)."""
+    rows, cols = torch.meshgrid(torch.arange(20.0), torch.arange(24.0), indexing="ij")
+    img = sum(torch.exp(-((cols - cx) ** 2 + (rows - cy) ** 2) / 8) for cx, cy in ((7.3, 6.1), (15.6, 12.8), (11.0, 9.4)))
+    img = img[None, None]
+    d = torch.zeros(1, 2, 20, 24)
+    d[:, 0], d[:, 1] = 2.5, -1.0
+    grid = torch.stack([(cols - 2.5) / 23 * 2 - 1, (rows + 1.0) / 19 * 2 - 1], -1)[None]
+    shifted = torch.nn.functional.grid_sample(img, grid, align_corners=True)     # channel 1: the image moved by d
+    back = network.TwoStageUNet._resampled(shifted, d)
+    inner = (slice(None), slice(None), slice(2, -2), slice(4, -4))
+    torch.testing.assert_close(back[inner], img[inner], atol=0.08, rtol=0)        # two bilinear passes blur it
+    assert (back[inner] - img[inner]).abs().mean() < 0.02
+
+
+@pytest.mark.parametrize("variant", [{"two_time": "joined"}, {"two_time": "both"}, {"two_fuse": "early"},
+                                     {"two_aux": "union"}, {"photon_share": True}])
+def test_every_arrangement_of_two_channels_reads_a_movie_as_its_windows(variant):
+    """A movie read as overlapping windows gives the same maps as the windows one by one."""
+    torch.manual_seed(4)
+    m = network.TwoStageUNet(window=3, features=8, channels=2, photons=2, aux=2, time_model="convgru",
+                             time_settings={"norm": True}, **variant).eval()
+    movie, aux = torch.randn(1, 2, 5, 16, 16), torch.randn(1, 2, 16, 16)
+    whole = m(movie, 3, aux)
+    one = torch.cat([m(movie[:, :, i:i + 3], aux=aux) for i in range(3)])
+    torch.testing.assert_close(whole, one, atol=1e-5, rtol=1e-4)
+
+
+def test_a_total_and_a_share_come_out_as_each_channel_s_photons():
+    lay = network.Layout(photons=2, backgrounds=2, share=True)
+    sc = network.Scaling(input_offset=0, input_scale=1, phot_max=10000.0, z_max=1000.0, bg_max=100.0)
+    out = torch.zeros(1, lay.channels, 3, 3)
+    out[:, lay.p()] = 0.01
+    out[:, lay.p(), 1, 1] = 0.9
+    out[:, lay.phot()] = 0.4                 # 4000 photons in all
+    out[:, lay.phot() + 1] = 0.75            # three quarters in channel 1
+    out[:, lay.sig():lay.sig() + 5] = 0.1
+    e = extract.extract(out, sc, 0.5, "lookahead", layout=lay)
+    torch.testing.assert_close(e["photons"], torch.tensor([4000.0]))
+    torch.testing.assert_close(e["photons_c"], torch.tensor([[1000.0, 3000.0]]))
+    from smappy.netfit.simulate import Batch
+    b = Batch(torch.zeros(1, 2, 3, 3, 3), torch.tensor([[[1.0, 1.0, 0.0]]]), torch.tensor([[[1000.0, 3000.0]]]),
+              torch.tensor([[True]]), torch.zeros(1, 2))
+    torch.testing.assert_close(loss.targets_scaled(b, sc, lay)[0, 0, :2], torch.tensor([0.4, 0.75]))
