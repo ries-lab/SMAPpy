@@ -6,6 +6,7 @@ and writes the window position on the way down.  Without this the suite would
 take its plugin roots and tabs from whatever the developer has configured.
 """
 import contextlib
+import functools
 import importlib.util
 import os
 import sys
@@ -276,7 +277,9 @@ def pytest_collection_modifyitems(config, items):
 
 def pytest_terminal_summary(terminalreporter, config):
     """Say which packages' slow tiers were left out: a skip count alone hid
-    that the run had not checked them."""
+    that the run had not checked them.  And what memory cost the run: fewer
+    workers than cores, or tests that waited for memory (`_memory_gate`)."""
+    _memory_summary(terminalreporter, config)
     if not (config.getoption("--slow") or config.getoption("--long")
             or config.getoption("--release")):
         return
@@ -372,16 +375,148 @@ def _collect_after_each_test(collect_on_the_main_thread):
     yield
     _tests_since_collect += 1
     if _tests_since_collect >= 100:
-        import gc
-        import sys
-        if "PySide6.QtWidgets" in sys.modules:
-            from PySide6.QtWidgets import QApplication
-            app = QApplication.instance()
-            if app is not None:
-                from smappy.gui.collector import keep_screens
-                keep_screens(app)
-        gc.collect()
-        _tests_since_collect = 0
+        _collect()
+
+
+def _collect():
+    global _tests_since_collect
+    import gc
+    if "PySide6.QtWidgets" in sys.modules:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            from smappy.gui.collector import keep_screens
+            keep_screens(app)
+    gc.collect()
+    _tests_since_collect = 0
+
+
+# ------------------------------------------------------------------------------------------- memory
+# Several sessions run the suite at once on one machine (CLAUDE.md, "Before you edit anything"), each
+# with a worker per core: on a 32 GB Mac a fast tier's ten workers held up to 7 GB together, single
+# workers 1-2.3 GB at a peak (netfit's simulations, uiPSF's scanned beads, FRC), and two runs and a
+# release beside them pushed 28 GB into swap (2026-11-20), where every run crawled.  So `-n auto` starts
+# a worker per GB the machine has available, and each test waits, before it starts, while less than
+# a floor is available -- every worker of every run reads the same figure, so concurrent runs back off
+# together.  A wait is bounded: memory another program holds may never come back, and a run must end.
+
+#: one worker per this much available memory under `-n auto` (bytes); a worker averaged 0.7 GB
+WORKER_BYTES = 1 << 30
+#: below this share of the machine's memory available, a test waits before it starts;
+#: `SMAPPY_TEST_MIN_FREE_GB` sets it in GB instead (0: never wait)
+FLOOR_SHARE = 0.15
+#: the longest one test waits for memory, seconds
+MEMORY_WAIT = 60.0
+
+
+def _memory_bytes():
+    """(available, total) physical memory in bytes, or None where it cannot be read.  On macOS
+    `kern.memorystatus_level` is the percentage available, the figure behind Activity Monitor's
+    memory pressure: free, inactive and purgeable pages, not only free ones, which a Mac keeps near
+    zero.  Read through ctypes in microseconds -- it is read before every test."""
+    import ctypes
+    try:
+        if sys.platform == "darwin":
+            libc = _libc()
+            def sysctl(name, ctype):
+                value, size = ctype(), ctypes.c_size_t(ctypes.sizeof(ctype))
+                if libc.sysctlbyname(name, ctypes.byref(value), ctypes.byref(size), None, 0) != 0:
+                    raise OSError(name)
+                return value.value
+            total = sysctl(b"hw.memsize", ctypes.c_uint64)
+            return total * sysctl(b"kern.memorystatus_level", ctypes.c_int) // 100, total
+        if sys.platform.startswith("linux"):
+            info = {}
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    key, value = line.split(":", 1)
+                    info[key] = int(value.split()[0]) * 1024
+            return info["MemAvailable"], info["MemTotal"]
+        if sys.platform == "win32":
+            class Status(ctypes.Structure):
+                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                            ("total", ctypes.c_ulonglong), ("available", ctypes.c_ulonglong),
+                            ("page_total", ctypes.c_ulonglong), ("page_free", ctypes.c_ulonglong),
+                            ("virtual_total", ctypes.c_ulonglong), ("virtual_free", ctypes.c_ulonglong),
+                            ("extended", ctypes.c_ulonglong)]
+            status = Status(length=ctypes.sizeof(Status))
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return status.available, status.total
+    except (OSError, KeyError, ValueError, AttributeError):
+        pass
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _libc():
+    import ctypes
+    return ctypes.CDLL(None)
+
+
+def _floor_bytes(total):
+    typed = os.environ.get("SMAPPY_TEST_MIN_FREE_GB")
+    return float(typed) * (1 << 30) if typed else FLOOR_SHARE * total
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_auto_num_workers(config):
+    """`-n auto`: a worker per core, but no more than a worker per `WORKER_BYTES` available now --
+    on a machine another run already fills, fewer workers finish sooner than many in swap.
+    `-n 4` asks for four whatever the memory."""
+    cores = os.cpu_count() or 1
+    memory = _memory_bytes()
+    if memory is None:
+        return cores
+    workers = max(1, min(cores, int(memory[0] // WORKER_BYTES)))
+    if workers < cores:
+        config._memory_note = (f"memory: {workers} workers of {cores} cores, "
+                               f"{memory[0] / (1 << 30):.1f} GB available at the start")
+    return workers
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_protocol(item, nextitem):
+    """The memory gate, outermost, so that its wait is not the test's: pytest-timeout's limit
+    starts inside it."""
+    waited = _memory_gate()
+    if waited:
+        item.user_properties.append(("memory_wait_s", round(waited, 1)))
+    yield
+
+
+def _memory_gate():
+    """Wait while the machine has less than the floor available: collect this worker's own
+    garbage first (automatic collection is off, `collect_on_the_main_thread`), then look again
+    every half second, for at most `MEMORY_WAIT`.  The seconds waited, 0 when there was room."""
+    memory = _memory_bytes()
+    if memory is None:
+        return 0.0
+    floor = _floor_bytes(memory[1])
+    if memory[0] >= floor:
+        return 0.0
+    started = time.monotonic()
+    _collect()
+    while time.monotonic() - started < MEMORY_WAIT:
+        memory = _memory_bytes()
+        if memory is None or memory[0] >= floor:
+            break
+        time.sleep(0.5)
+    return time.monotonic() - started
+
+
+def _memory_summary(terminalreporter, config):
+    note = getattr(config, "_memory_note", None)
+    waits = [dict(r.user_properties).get("memory_wait_s", 0.0)
+             for reports in terminalreporter.stats.values() for r in reports
+             if getattr(r, "when", None) == "setup"]
+    waits = [w for w in waits if w]
+    if waits:
+        memory = _memory_bytes()
+        floor = f", below {_floor_bytes(memory[1]) / (1 << 30):.1f} GB available" if memory else ""
+        note = (note + "; " if note else "memory: ") + \
+            f"{len(waits)} test{'s' if len(waits) != 1 else ''} waited {sum(waits):.0f} s in all for memory{floor}"
+    if note:
+        terminalreporter.write_line(note)
 
 
 # A modal dialog open this long in a test is one nobody will answer: it is closed and the test

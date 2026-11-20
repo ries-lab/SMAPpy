@@ -179,6 +179,13 @@ Running the tests -- three tiers, and the run before a release:
   worker one BLAS thread (without it four workers are barely faster than one),
   makes work stealing the default (xdist's own piles the tutorials onto one
   worker) and runs the slow tests first.
+* **Memory is shared between sessions' runs.**  Under `-n auto` a run starts
+  a worker per GB the machine has available, at most one per core, and every
+  test waits before it starts while less than 15 % of the memory is available
+  (at most 60 s, outside the test's limit), so concurrent runs back off
+  together instead of swapping; the summary says when either happened.
+  `SMAPPY_TEST_MIN_FREE_GB` sets the floor (0: never wait); `-n 4` asks for
+  four workers whatever the memory.
 * **Automatic garbage collection is off, in the tests and in the app.**  The
   collector otherwise runs in whichever thread allocates and frees every
   cycle in the process, whatever that thread holds.  PySide sends only plain
