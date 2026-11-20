@@ -677,3 +677,41 @@ B7); on a jumping one the steady-trained network loses 0.02 Jaccard on B7 and 0.
 where its precision falls from 0.95 to 0.78 -- DECODE-Plex's colour failure, reproduced.  So netfit
 keeps the background drawn per frame for C = 2 too: it costs nothing where the background is steady
 and protects where it is not.  `background_jitter` stays, for test sets.
+
+## 16. netfit at C = 2, Round 0: the design (2026-11-20)
+
+Round 0 is netfit made to read two channels the way DECODE-Plex does, with netfit's own C = 1 recipe
+elsewhere, so that the study of §7 starts from a working baseline and changes one thing at a time.
+
+**The channels** come from SMAPpy's own dual calibration (`DualColorCalibration`, the `_2ct.h5` the C =
+2 sets were drawn from), not DECODE-Plex's files: `layout()` gives each half's rectangle on the chip,
+its flip, and the map between the halves' own pixels; `layer_splines()` the two splines in that
+orientation.  The network's grid is channel 0's pixels.  Channel 1 is moved onto it by a whole-pixel
+shift ``s`` (the map's mean offset over the overlap), so that a molecule at ``p`` in channel 0 is at
+``p + d(p)`` in channel 1's image, ``d`` the registration's remainder: a fraction of a pixel near the
+overlap's middle, several pixels at its corners where the map turns and scales (biplane: 0.036 of
+shear, about 9 px over 256).  ``d`` at each pixel's centre is two input maps, as DECODE-Plex's offset
+maps; channel 0's are zero and left out.  The network reads only the overlap, its far edges trimmed
+to the U-Net's fold (§15).
+
+**Simulation** draws crops of the overlap at random places, so the network sees every part of the
+registration: molecules uniform in the crop, channel 0's spot from the main spline at ``p``, channel
+1's from the secondary at ``p + d(p)``; a background per channel and frame (the C = 1 pilot: drawn per
+frame costs nothing where it is steady, §15); the camera on each.  Photons: biplane one count, each
+plane's share held in its spline (as the sets draw it); colour a total and the share in channel 1,
+uniform over 0 -- 1 so that one network serves any pair of dyes (DECODE-Plex draws each channel's
+photons on its own over a range).  The spots over the whole spline grid, as the sets and DECODE-Plex
+draw them.
+
+**The network** is DECODE-Plex's arrangement in netfit's parts: a per-frame U-Net for each channel
+(weights of its own), reading the frame and the two offset maps; the time model per channel; the
+channels' features joined, the offset maps beside them, into the union U-Net; heads for p, the
+photons (one, or one per channel for colour: DECODE-Plex's), x, y, z, their sigmas, and a background
+per channel.  The output's channels are described by a layout object (`network.Layout`), which the
+loss, the extraction and the predictor read, so that C = 1 models are read as they were saved.
+Netfit's C = 1 choices stay: 64 features (the size screen), ConvGRU over 3 frames (GMN7C), the
+mixture loss with the reported sigma, `mixture_peak`.
+
+**Scored** on the C = 2 sets by `run_c2` like DECODE-Plex, on the same overlap; a netfit C = 2 test set
+per context for the training's own scores.  Round 0 is done when both contexts train and score; the
+target is DECODE-Plex's numbers (§15) at each density.
