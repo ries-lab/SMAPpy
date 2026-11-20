@@ -1,3 +1,6 @@
+S_colour_eswap_s0
 S_colour_dyes_s0
 S_colour_dyes_s1
 S_colour_dyes_s2
+S_colour_eswap_s1
+S_colour_eswap_s2

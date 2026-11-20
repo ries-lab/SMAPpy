@@ -30,14 +30,25 @@ class TwoChannels:
     layout: object                 # `channels.ChannelLayout`, regions in frame pixels
     shift: tuple                   # (columns, rows): channel 1's own pixels are channel 0's plus this, plus d
     box: tuple                     # (row0, row1, col0, col1) of channel 0 where both channels are read
+    #: which of the calibration's halves is channel 0, the grid: 1 swaps them (the secondary read as it
+    #: is, the main half shifted -- and, for ``two_fuse`` "early", resampled); positions are reported on
+    #: the calibration's main half and photons in its order either way
+    main: int = 0
 
     @classmethod
-    def from_calibration(cls, cal, corner=(0, 0)) -> TwoChannels:
+    def from_calibration(cls, cal, corner=(0, 0), main: int = 0) -> TwoChannels:
         from ..channels import ChannelLayout
         chip = cal.layout()
         x0, y0 = (int(v) for v in corner)
         regions = [(x - x0, y - y0, w, h) for x, y, w, h in chip.regions]
         layout = ChannelLayout(regions, chip.flips, chip.maps, name=chip.name, warps=chip.warps)
+        if main not in (0, 1):
+            raise ValueError(f"main is 0 or 1, not {main!r}")
+        if main == 1:
+            warp = layout.warps[1]
+            layout = ChannelLayout(regions[::-1], layout.flips[::-1], [np.eye(3), np.linalg.inv(layout.maps[1])],
+                                   name=chip.name, origins=layout.origins[::-1],
+                                   warps=[None, _Reversed(warp) if warp is not None else None])
         (w0, h0), (w1, h1) = layout.sizes
         rows, cols = np.mgrid[0:h0, 0:w0]
         xy = np.c_[cols.ravel(), rows.ravel()].astype(float)
@@ -48,7 +59,7 @@ class TwoChannels:
         box = (max(0, -sy), min(h0, h1 - sy), max(0, -sx), min(w0, w1 - sx))
         if box[1] <= box[0] or box[3] <= box[2]:
             raise ValueError("the two channels do not overlap")
-        return cls(layout, (sx, sy), box)
+        return cls(layout, (sx, sy), box, main)
 
     @property
     def size(self) -> tuple:
@@ -79,25 +90,46 @@ class TwoChannels:
         return np.stack([both[:, 0, r0:r1, c0:c1], both[:, 1, r0 + sy:r1 + sy, c0 + sx:c1 + sx]], 1)
 
     def on_frame(self, xy) -> np.ndarray:
-        """Channel-0 positions (n, 2) back on the frame the camera wrote: where to report them."""
+        """Channel-0 positions (n, 2) back on the frame the camera wrote, in the calibration's main half:
+        where to report them."""
+        if self.main == 1:
+            return self.layout.on_frame(1, self.layout.to_channel(1, xy))
         return self.layout.on_frame(0, xy)
 
+    def in_order(self, values) -> np.ndarray:
+        """Per-channel values (..., 2) of the grid's channels in the calibration's order."""
+        values = np.asarray(values)
+        return values[..., ::-1] if self.main == 1 else values
+
     def to_dict(self) -> dict:
-        return {"shift": list(self.shift), "box": list(self.box)}
+        return {"shift": list(self.shift), "box": list(self.box), "main": self.main}
 
 
-def splines(cal, kind: str):
+@dataclass
+class _Reversed:
+    """A layout's warp read the other way: the swapped channels' (`TwoChannels.main`)."""
+    warp: object
+
+    def to_reference(self, xy):
+        return self.warp.to_channel(xy)
+
+    def to_channel(self, xy):
+        return self.warp.to_reference(xy)
+
+
+def splines(cal, kind: str, main: int = 0):
     """The two splines the channels are drawn with, each in its channel's orientation on the grid
     (`DualColorCalibration.layer_splines`: the secondary flipped back along the mirror): biplane's as
     stored, each plane's share in it; colour's each scaled to one at focus, a molecule's photons split
-    between them by its share (as the C = 2 sets draw them, `sets_c2.drawn_splines`)."""
+    between them by its share (as the C = 2 sets draw them, `sets_c2.drawn_splines`).  In the grid's
+    order: ``main`` 1 (`TwoChannels.main`) puts the secondary's first."""
     from dataclasses import replace
-    main, second = cal.layer_splines()
+    first, second = cal.layer_splines()
     if kind == "colour":
         unit = lambda s: replace(s, coeff=(s.coeff / float(s.psf[round(s.z0)].sum())).astype(np.float32),
                                  psf=s.psf / float(s.psf[round(s.z0)].sum()))
-        main, second = unit(main), unit(second)
-    return main, second
+        first, second = unit(first), unit(second)
+    return (second, first) if main == 1 else (first, second)
 
 
 class Grid:

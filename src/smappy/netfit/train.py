@@ -223,9 +223,10 @@ class Drawer:
             from ..calibrate.dual import load_dual_color_calibration
             from . import channels
             cal = load_dual_color_calibration(settings.calibration)
-            self.two = channels.TwoChannels.from_calibration(cal)
+            self.two = channels.TwoChannels.from_calibration(cal, main=ch.main)
             self.grid = channels.Grid(self.two, device)
-            self.renderers = [SplineRenderer(s, device, whole=whole) for s in channels.splines(cal, ch.kind)]
+            self.renderers = [SplineRenderer(s, device, whole=whole)
+                              for s in channels.splines(cal, ch.kind, ch.main)]
             self.renderer = None
         else:
             _, drawn = _calibration(settings.calibration, bool(cam.em_gain))

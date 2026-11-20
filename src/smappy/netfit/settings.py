@@ -65,6 +65,10 @@ class ChannelSettings:
     # colour: what a molecule's two photon outputs are -- "counts", one per channel (DECODE-Plex's), or
     # "share", its total and the share in channel 1 (`network.Layout.share`)
     photon_out: str = "counts"
+    # which of the calibration's halves is channel 0, the grid (`channels.TwoChannels.main`): 1 swaps
+    # them.  Everything the network reads and puts out is in the grid's order -- a colour share is the
+    # share in the grid's channel 1 -- and is put back in the calibration's where it is reported.
+    main: int = 0
 
     @property
     def n(self) -> int:

@@ -1,3 +1,6 @@
+S_biplane_eswap_s0
 S_colour_win_s0
 S_colour_win_s1
 S_colour_win_s2
+S_biplane_eswap_s1
+S_biplane_eswap_s2

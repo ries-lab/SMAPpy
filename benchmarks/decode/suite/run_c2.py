@@ -352,11 +352,11 @@ def fit_netfit(name, out, model):
     from smappy.netfit.predict import Predictor
     spec = S.SETS[name]
     cal = S.calibration(spec["context"])
-    two = TwoChannels.from_calibration(cal, cal.geometry["sources"][0]["roi"][:2])
+    p = Predictor(model)
+    two = TwoChannels.from_calibration(cal, cal.geometry["sources"][0]["roi"][:2], main=p.channels.main)
     c = S.camera_of(spec["context"])
     adu = tifffile.imread(S.SETS_DIR / name / "frames.tif").astype(np.float32)
     photons = (adu - c["offset"]) * (c["conversion"] / c["emgain"] if c["em_on"] else c["conversion"])
-    p = Predictor(model)
     k = p.window
     stack = two.cut(photons)
     stack = np.concatenate([np.repeat(stack[:1], k, 0), stack, np.repeat(stack[-1:], k, 0)])
@@ -369,7 +369,7 @@ def fit_netfit(name, out, model):
             "x_err_nm": r["x_err_pix"] * S.PIXEL_NM[0], "y_err_nm": r["y_err_pix"] * S.PIXEL_NM[1],
             "z_err_nm": r["z_err_nm"], "prob": r["prob"], "photons": r["photons"]}
     if "photons_c" in r:
-        keep["photons_c"] = r["photons_c"]
+        keep["photons_c"] = two.in_order(r["photons_c"])
     np.savez(out, **keep)
     return {"device": p.device, "seconds": seconds, "frames": len(adu), "model": str(model),
             "read": two.to_dict(), "window": 2 * k + 1}

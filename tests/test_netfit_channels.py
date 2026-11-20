@@ -66,6 +66,25 @@ def test_channel_one_holds_a_molecule_where_the_registration_puts_its_partner():
     assert d.shape == (2, r1 - r0, c1 - c0) and 0.5 < np.ptp(d[1]) < 3
 
 
+def test_swapped_channels_read_the_secondary_as_the_grid_and_report_on_the_main_half():
+    cal = dual()
+    two = CH.TwoChannels.from_calibration(cal, main=1)
+    r0, r1, c0, c1 = two.box
+    rng = np.random.default_rng(1)
+    p = np.c_[rng.uniform(c0, c1 - 1, 200), rng.uniform(r0, r1 - 1, 200)]     # the secondary's pixels
+    # a position on the grid is the secondary's; reported where its partner lies in the main half
+    np.testing.assert_allclose(cal.to_secondary(two.on_frame(p)), two.layout.on_frame(0, p), atol=1e-6)
+    # channel 1, the main half, holds it where shift and remainder say
+    q = p + np.asarray(two.shift) + two.remainder(p)
+    np.testing.assert_allclose(two.layout.on_frame(1, q), two.on_frame(p), atol=1e-6)
+    rows, cols = np.mgrid[0:SHAPE[0], 0:SHAPE[1]]
+    cut = two.cut((1000 * rows + cols).astype(float)[None])[0]
+    assert (cut[0] // 1000 >= SPLIT).all() and (cut[1] // 1000 < SPLIT).all()
+    np.testing.assert_array_equal(two.in_order(np.array([[1., 2.]])), [[2., 1.]])
+    first, second = CH.splines(cal, "biplane", main=1)
+    assert np.allclose(first.psf, cal.layer_splines()[1].psf) and np.allclose(second.psf, cal.layer_splines()[0].psf)
+
+
 def test_the_cut_brings_channel_one_onto_channel_zero_s_grid_by_whole_pixels():
     cal = dual()
     two = CH.TwoChannels.from_calibration(cal)

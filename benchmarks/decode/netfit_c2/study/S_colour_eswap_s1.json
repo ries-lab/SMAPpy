@@ -1,0 +1,135 @@
+{
+ "simulation": {
+  "frame_px": 40,
+  "window": 3,
+  "density_per_40px": 50.0,
+  "lifetime_frames": 1.0,
+  "target_photons_min": 100.0,
+  "spots": "whole",
+  "movie_windows": 1,
+  "photons_range": [
+   500.0,
+   40000.0
+  ],
+  "background": [
+   0.0,
+   300.0
+  ],
+  "z_nm": [
+   -600.0,
+   600.0
+  ]
+ },
+ "camera": {
+  "conversion": 5.0,
+  "offset": 398.6,
+  "em_gain": 100.0,
+  "read_noise_e": 74.4,
+  "qe": 1.0,
+  "pixel_nm": [
+   117.0,
+   127.0
+  ]
+ },
+ "parts": {
+  "backbone": {
+   "name": "unet2",
+   "settings": {
+    "features": 64,
+    "depth_frame": 2,
+    "depth_union": 2,
+    "init": "kaiming",
+    "upsample_kernel": 1,
+    "pool_act": false,
+    "out_conv": true,
+    "p_clamp": 8.0,
+    "offset_range": 2.0,
+    "sigma_rep": true,
+    "two_fuse": "early"
+   }
+  },
+  "time_model": {
+   "name": "convgru",
+   "settings": {
+    "frames": 3,
+    "norm": true
+   }
+  },
+  "output": {
+   "name": "offsets",
+   "settings": {}
+  },
+  "extraction": {
+   "name": "mixture_peak",
+   "settings": {}
+  },
+  "loss": {
+   "name": "mixture",
+   "settings": {
+    "terms": [
+     "count",
+     "mixture",
+     "background"
+    ],
+    "reported": [
+     {
+      "head": "mixture",
+      "weight": 0.1,
+      "from_epoch": 5
+     },
+     {
+      "head": "rep",
+      "weight": 1.0,
+      "from_epoch": 5
+     }
+    ]
+   }
+  },
+  "schedule": {
+   "name": "adamw_step",
+   "settings": {
+    "lr": 0.0006,
+    "weight_decay": 0.1,
+    "step_epochs": 10,
+    "gamma": 0.9,
+    "clip_norm": null,
+    "batch": 64,
+    "samples_per_epoch": 32768,
+    "epochs": 1000,
+    "test_samples": 512,
+    "threshold": 0.5,
+    "max_samples": 3000000.0,
+    "decay_samples": 327680,
+    "precision": "auto",
+    "compile": "auto",
+    "channels_last": "auto",
+    "ema": 0.999,
+    "snapshots": [
+     1000000.0,
+     2000000.0,
+     3000000.0
+    ]
+   }
+  }
+ },
+ "seed": 1,
+ "channels": {
+  "kind": "colour",
+  "share": [
+   0.0,
+   1.0
+  ],
+  "background": [
+   [
+    0.0,
+    100.0
+   ],
+   [
+    0.0,
+    500.0
+   ]
+  ],
+  "main": 1
+ },
+ "calibration": "colour_2a_decode-plex_2ct.h5"
+}
