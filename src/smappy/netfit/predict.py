@@ -5,6 +5,11 @@ frames in photons with ``window`` frames of context on either side and gives SMA
 The frames are cropped to a multiple of the network's fold (its strides), centred -- the edge pixels
 lost, as the DECODE fitter loses them (`docs/decode/poc-plan.md`, item 17) -- and mirrored along the
 columns when the data's camera reads the chip the other way from the one the model was trained for.
+
+A two-channel model (`docs/decode/plex-plan.md` §16) takes the channels already on its grid, ``(n, 2,
+rows, columns)``, and their offset maps ``aux`` ``(2, rows, columns)`` -- `channels.TwoChannels.cut` and
+``offsets`` -- and gives positions on channel 0's grid, with each channel's photons (colour) and
+background beside them.
 """
 from __future__ import annotations
 
@@ -15,7 +20,7 @@ import torch
 
 from ..training import model_file
 from . import extract, network
-from .settings import Part, Parts
+from .settings import ChannelSettings, Part, Parts
 
 
 class Predictor:
@@ -27,7 +32,9 @@ class Predictor:
         parts = Parts(**{k: Part(**v) for k, v in s["parts"].items()})
         self.device = device or ("cuda" if torch.cuda.is_available()
                                  else "mps" if torch.backends.mps.is_available() else "cpu")
-        self.model = network.build(parts, int(meta["window"])).to(self.device).eval()
+        ch = dict(s.get("channels") or {})
+        self.channels = ChannelSettings(**{k: tuple(v) if k == "share" else v for k, v in ch.items()})
+        self.model = network.build(parts, int(meta["window"]), self.channels).to(self.device).eval()
         self.model.load_state_dict({k: torch.as_tensor(np.asarray(v)) for k, v in tensors.items()})
         self.scaling = network.Scaling(**meta["scaling"])
         self.window = (int(meta["window"]) - 1) // 2
@@ -43,26 +50,39 @@ class Predictor:
         hh, ww = h - h % self.fold, w - w % self.fold
         return (h - hh) // 2, (w - ww) // 2, hh, ww
 
-    def __call__(self, photons, first_frame: int = 0) -> dict:
+    def __call__(self, photons, first_frame: int = 0, aux=None) -> dict:
         photons = np.asarray(photons, np.float32)
+        two = self.channels.kind != ""
+        if two and (photons.ndim != 4 or aux is None):
+            raise ValueError("a two-channel model takes frames (n, 2, rows, columns) and their offset maps")
+        if two and self.frames_mirrored:
+            raise ValueError("a two-channel model takes the channels as its calibration has them")
         k = self.window
         n = len(photons) - 2 * k
-        r0, c0, hh, ww = self.crop(*photons.shape[1:])
-        x = torch.as_tensor(photons[:, r0:r0 + hh, c0:c0 + ww])
+        r0, c0, hh, ww = self.crop(*photons.shape[-2:])
+        x = torch.as_tensor(photons[..., r0:r0 + hh, c0:c0 + ww])
         if self.frames_mirrored:
             x = torch.flip(x, (-1,))
         x = (x - self.scaling.input_offset) / self.scaling.input_scale
+        if two:
+            x = x.transpose(0, 1)                                            # (2, n, h, w)
+            maps = torch.as_tensor(np.asarray(aux, np.float32)[:, r0:r0 + hh, c0:c0 + ww]).to(self.device)
+        layout = self.model.layout
         parts = []
         with torch.no_grad():
             for a in range(0, n, self.batch):
                 b = min(a + self.batch, n)
                 # the windows a..b-1 as one movie: each frame through the per-frame U-Net once
-                movie = x[a:b + 2 * k][None].to(self.device)
-                e = extract.extract(self.model(movie, b - a), self.scaling, self.threshold, self.extraction, self.scale)
+                if two:
+                    out = self.model(x[:, a:b + 2 * k][None].to(self.device), b - a, maps[None])
+                else:
+                    out = self.model(x[a:b + 2 * k][None].to(self.device), b - a)
+                e = extract.extract(out, self.scaling, self.threshold, self.extraction, self.scale, layout=layout)
                 e = {name: v.detach().cpu().numpy() for name, v in e.items()}
                 e["frame"] = e["frame"] + a
                 parts.append(e)
         names = ("frame", "x", "y", "z_nm", "photons", "prob", "photons_err", "x_err", "y_err", "z_err_nm", "background")
+        names += tuple(c for c in ("photons_c", "photons_c_err", "background_c") if parts and c in parts[0])
         # a model with the reporting head reports its sigma; the mixture's is kept beside it, to compare
         mix = ("x_err_mix", "y_err_mix", "z_err_mix_nm") if parts and "x_err_mix" in parts[0] else ()
         cols = {name: np.concatenate([p[name] for p in parts]) if parts else np.zeros(0) for name in names + mix}
@@ -71,5 +91,6 @@ class Predictor:
                 "z_nm": cols["z_nm"], "photons": cols["photons"], "background": cols["background"], "prob": cols["prob"],
                 "x_err_pix": cols["x_err"], "y_err_pix": cols["y_err"], "z_err_nm": cols["z_err_nm"],
                 "photons_err": cols["photons_err"],
+                **{c: cols[c] for c in ("photons_c", "photons_c_err", "background_c") if c in cols},
                 **({"x_err_mix_pix": cols["x_err_mix"], "y_err_mix_pix": cols["y_err_mix"],
                     "z_err_mix_nm": cols["z_err_mix_nm"]} if mix else {})}

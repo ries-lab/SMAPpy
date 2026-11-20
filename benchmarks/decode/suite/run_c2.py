@@ -2,6 +2,7 @@
 
     python benchmarks/decode/suite/run_c2.py plex   [--sets NAME ...] [--refit]
     python benchmarks/decode/suite/run_c2.py spline [--sets NAME ...] [--refit]
+    python benchmarks/decode/suite/run_c2.py netfit RUN --models CONTEXT=MODEL ... [--sets NAME ...] [--refit]
     python benchmarks/decode/suite/run_c2.py table  [RUN ...]
 
 **plex**: DECODE-Plex's published model of the set's context (`sets_c2.CONTEXTS`), through its
@@ -21,6 +22,11 @@ molecules nearer a half's edge are not fitted), inside the main half's crop a ne
 cuts the frame to a multiple of 8, from its own corner, after its EM mirror).  ``keep``: the
 network's localizations at prob >= 0.5, Spline 3D 2C's within 3 MADs of the median log-likelihood
 and not at the iteration limit, as for C = 1.  Positions in the main channel's pixels (117 x 127 nm).
+
+**netfit**: a two-channel netfit model per context (`smappy.netfit`, plex-plan §16), on the frames cut
+onto channel 0's grid by SMAPpy's own dual calibration (`netfit.channels.TwoChannels`) -- the overlap
+alone, the registration's remainder as its offset maps -- and its positions put back on the frame.
+The frames' ends get their first and last frame repeated as the window's context.
 
 Fits are kept under ``fits_c2/<RUN>/<set>.npz``, the report as ``reports/<RUN>_c2.json``.
 """
@@ -44,7 +50,8 @@ import sets_c2 as S
 
 FITS = S.ROOT / "fits_c2"
 REPORTS = S.ROOT / "reports"
-KEEP = {"plex": {"min_prob": 0.5}, "spline": {"logl_mads": 3.0, "below_iteration_limit": True}}
+KEEP = {"plex": {"min_prob": 0.5}, "spline": {"logl_mads": 3.0, "below_iteration_limit": True},
+        "netfit": {"min_prob": 0.5}}
 FRAMES_READ = {"plex": {"biplane_2c": 1, "colour_2a": 3, "biplane_s4": 1, "colour_s4": 1},
                "spline": {"biplane_2c": 1, "colour_2a": 1, "biplane_s4": 1, "colour_s4": 1}}
 EDGE = 7                                       # pixels in from a half's edge or the crop's: a 13-px fit box
@@ -337,6 +344,37 @@ def fit_spline(name, out):
     return {"device": "cpu", "seconds": seconds, "calibration": str(local_calibration(spec["context"]))}
 
 
+def fit_netfit(name, out, model):
+    """A two-channel netfit model on one set (the module's docstring)."""
+    import tifffile
+
+    from smappy.netfit.channels import TwoChannels
+    from smappy.netfit.predict import Predictor
+    spec = S.SETS[name]
+    cal = S.calibration(spec["context"])
+    two = TwoChannels.from_calibration(cal, cal.geometry["sources"][0]["roi"][:2])
+    c = S.camera_of(spec["context"])
+    adu = tifffile.imread(S.SETS_DIR / name / "frames.tif").astype(np.float32)
+    photons = (adu - c["offset"]) * (c["conversion"] / c["emgain"] if c["em_on"] else c["conversion"])
+    p = Predictor(model)
+    k = p.window
+    stack = two.cut(photons)
+    stack = np.concatenate([np.repeat(stack[:1], k, 0), stack, np.repeat(stack[-1:], k, 0)])
+    t0 = time.time()
+    r = p(stack, 0, two.offsets())
+    seconds = time.time() - t0
+    r0, _, c0, _ = two.box
+    xy = two.on_frame(np.c_[r["x_pix"] + c0, r["y_pix"] + r0])
+    keep = {"frame": r["frame"], "x_nm": xy[:, 0] * S.PIXEL_NM[0], "y_nm": xy[:, 1] * S.PIXEL_NM[1], "z_nm": r["z_nm"],
+            "x_err_nm": r["x_err_pix"] * S.PIXEL_NM[0], "y_err_nm": r["y_err_pix"] * S.PIXEL_NM[1],
+            "z_err_nm": r["z_err_nm"], "prob": r["prob"], "photons": r["photons"]}
+    if "photons_c" in r:
+        keep["photons_c"] = r["photons_c"]
+    np.savez(out, **keep)
+    return {"device": p.device, "seconds": seconds, "frames": len(adu), "model": str(model),
+            "read": two.to_dict(), "window": 2 * k + 1}
+
+
 FITTERS = {"plex": fit_plex, "spline": fit_spline}
 
 
@@ -419,28 +457,42 @@ def by_z(truth, locs, keep, shape, width=100.0):
     return rows
 
 
-def run(fitter, names=None, refit=False, edges=None):
-    folder = FITS / fitter
+def run(fitter, names=None, refit=False, edges=None, run_name=None, models=None):
+    """``fitter`` on the sets; netfit's run is named ``run_name`` and reads ``models`` (context -> model
+    file), the sets of other contexts left out."""
+    label = run_name or fitter
+    folder = FITS / label
     folder.mkdir(parents=True, exist_ok=True)
-    report = {"fitter": fitter, "keep": KEEP[fitter], "frames_read": FRAMES_READ[fitter],
-              "platform": platform.platform(), "sets": {}}
-    path = REPORTS / f"{fitter}_c2.json"
+    frames_read = FRAMES_READ.get(fitter, {})
+    if fitter == "netfit":
+        names = [n for n in (names or S.SETS) if S.SETS[n]["context"] in models]
+        frames_read = {}
+    report = {"fitter": fitter, "keep": KEEP[fitter], "frames_read": frames_read,
+              "platform": platform.platform(), "sets": {}, **({"models": models} if models else {})}
+    path = REPORTS / f"{label}_c2.json"
     if path.exists():
         report["sets"] = json.loads(path.read_text()).get("sets", {})
     for name in names or S.SETS:
         out = folder / f"{name}.npz"
         meta = folder / f"{name}.json"
         if refit or not out.exists():
-            info = fit_plex(name, out, edges) if fitter == "plex" else FITTERS[fitter](name, out)
+            if fitter == "plex":
+                info = fit_plex(name, out, edges)
+            elif fitter == "netfit":
+                info = fit_netfit(name, out, models[S.SETS[name]["context"]])
+            else:
+                info = FITTERS[fitter](name, out)
             meta.write_text(json.dumps(info))
         info = json.loads(meta.read_text())
+        if fitter == "netfit":
+            report["frames_read"][S.SETS[name]["context"]] = info["window"]
         locs = dict(np.load(out))
         s = score(name, locs, KEEP[fitter])
         s["fit"] = info
         s["ms_per_frame"] = 1000 * info["seconds"] / max(int(np.load(S.SETS_DIR / name / "truth.npz")["frame_background_0"].shape[0]), 1)
         report["sets"][name] = s
         core = s.get("core", {})
-        print(f"{fitter} {name}: J {s['jaccard']:.3f}  RMSE lat/ax {s['rmse_lat_nm']:.1f}/{s['rmse_ax_nm']:.1f}  "
+        print(f"{label} {name}: J {s['jaccard']:.3f}  RMSE lat/ax {s['rmse_lat_nm']:.1f}/{s['rmse_ax_nm']:.1f}  "
               f"|z|<300: {core.get('rmse_lat_nm', float('nan')):.1f}/{core.get('rmse_ax_nm', float('nan')):.1f}  "
               f"/CRLB {s.get('rmse_over_crlb_lat', float('nan')):.2f}/{s.get('rmse_over_crlb_ax', float('nan')):.2f}", flush=True)
     REPORTS.mkdir(parents=True, exist_ok=True)
@@ -469,15 +521,20 @@ def table(fitters):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("what", choices=("plex", "spline", "table"))
+    ap.add_argument("what", choices=("plex", "spline", "netfit", "table"))
     ap.add_argument("runs", nargs="*")
     ap.add_argument("--sets", nargs="*", default=None)
     ap.add_argument("--refit", action="store_true")
     ap.add_argument("--edges", choices=("trim", "strips", "corners", "mirror"), default=EDGES,
                     help="what fills the U-Net's multiple of 8 at the overlap's far edges (fit_plex)")
+    ap.add_argument("--models", nargs="*", default=[], help="netfit: CONTEXT=MODEL, one per context")
     a = ap.parse_args()
     if a.what == "table":
         table(a.runs or ["plex", "spline"])
+    elif a.what == "netfit":
+        if len(a.runs) != 1 or not a.models:
+            ap.error("netfit: one RUN name and --models CONTEXT=MODEL")
+        run("netfit", a.sets, a.refit, run_name=a.runs[0], models=dict(m.split("=", 1) for m in a.models))
     else:
         run(a.what, a.sets, a.refit, a.edges)
 

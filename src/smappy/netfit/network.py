@@ -75,10 +75,18 @@ class Scaling:
     bg_max: float              # 1.2 * the largest background
 
     @classmethod
-    def for_simulation(cls, sim) -> Scaling:
-        return cls(input_offset=float(sum(sim.background) / 2), input_scale=float(sim.photons_mean / 50),
-                   phot_max=float(sim.photons_mean + 8 * sim.photons_sd),
-                   z_max=float(1.2 * max(abs(v) for v in sim.z_nm)), bg_max=float(1.2 * max(sim.background)))
+    def for_simulation(cls, sim, channels=None) -> Scaling:
+        """From the simulation's ranges; with two channels (`settings.ChannelSettings`) their backgrounds'
+        mean and largest, and with a uniform flux (``photons_range``) its mean and 1.2 times its top."""
+        ranges = (channels.background if channels is not None and channels.background else None) or [sim.background]
+        offset = sum(sum(r) / 2 for r in ranges) / len(ranges)
+        if sim.photons_range is not None:
+            mean, top = sum(sim.photons_range) / 2, 1.2 * max(sim.photons_range)
+        else:
+            mean, top = sim.photons_mean, sim.photons_mean + 8 * sim.photons_sd
+        return cls(input_offset=float(offset), input_scale=float(mean / 50), phot_max=float(top),
+                   z_max=float(1.2 * max(abs(v) for v in sim.z_nm)),
+                   bg_max=float(1.2 * max(max(r) for r in ranges)))
 
 
 _ACTIVATIONS = {"relu": nn.ReLU, "elu": nn.ELU}
@@ -530,14 +538,16 @@ BACKBONES = {"unet2": TwoStageUNet}
 TIME_MODELS = {"attention": TimeAttention, "convgru": TimeGRU}
 
 
-def build(parts, window: int) -> nn.Module:
+def build(parts, window: int, channels=None) -> nn.Module:
     """The network the parts name: a backbone (``unet2``) with a time model (``frame_stack``, DECODE's,
     or one of `TIME_MODELS`).  The time model's ``frames`` setting is a record only: the window is the
-    simulation's."""
+    simulation's.  ``channels`` (`settings.ChannelSettings`) with a ``kind``: two channels, their offset
+    maps and its photon counts."""
     tm = parts.time_model
     extra = {k: v for k, v in (tm.settings or {}).items() if k != "frames"}
+    two = {"channels": 2, "photons": channels.photons, "aux": 2} if channels is not None and channels.kind else {}
     return BACKBONES[parts.backbone.name](window=window, time_model=tm.name, time_settings=extra or None,
-                                          **parts.backbone.settings)
+                                          **parts.backbone.settings, **two)
 
 
 def parameters(model: nn.Module) -> int:

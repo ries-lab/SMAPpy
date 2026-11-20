@@ -7,6 +7,10 @@
 again on the folder resumes from it) and ``model.safetensors`` (the latest epoch's network with its
 settings, scaling, parameters and training time: what the predictor and the benchmark read).
 
+**Two channels** (``channels`` with a ``kind``, `docs/decode/plex-plan.md` §16): the calibration is a
+dual one (a ``_2ct.h5``), the batches `simulate.draw_batch_2c`'s, the network reads the offset maps
+beside the frames, and the test set's molecules carry no bound yet.
+
 **The test set** is drawn once from the seed, ``test_samples`` samples, and the CRLB of each of its
 molecules computed once (`metrics.crlbs_torch`); every epoch the network localizes it at the schedule's ``threshold`` and
 `metrics.evaluate` scores it.
@@ -30,8 +34,15 @@ import torch
 from ..training import model_file, progress
 from . import extract, loss, metrics, network
 from .render import SplineRenderer
-from .settings import CameraModel, Part, Parts, SimulationSettings, TrainingSettings
-from .simulate import draw_batch
+from .settings import (
+    CameraModel,
+    ChannelSettings,
+    Part,
+    Parts,
+    SimulationSettings,
+    TrainingSettings,
+)
+from .simulate import draw_batch, draw_batch_2c
 
 METHOD = "netfit-v1"
 # SMAPpy's early stop (`training.progress`), and the pixelation too: version 1's KS kept falling for
@@ -173,8 +184,13 @@ def load_settings(path) -> TrainingSettings:
         raw["density_per_40px"] = raw.pop("emitters_per_frame") * (40.0 / raw.get("frame_px", 40)) ** 2
     sim = SimulationSettings(**{k: tuple(v) if isinstance(v, list) else v for k, v in raw.items()})
     cam = CameraModel(**{k: tuple(v) if isinstance(v, list) else v for k, v in d.get("camera", {}).items()})
+    ch = dict(d.get("channels", {}))
+    if ch.get("share") is not None:
+        ch["share"] = tuple(ch["share"])
+    if ch.get("background") is not None:
+        ch["background"] = [tuple(r) for r in ch["background"]]
     return TrainingSettings(simulation=sim, camera=cam, parts=parts, calibration=d.get("calibration"),
-                            test_set=d.get("test_set"), seed=d.get("seed", 0))
+                            test_set=d.get("test_set"), seed=d.get("seed", 0), channels=ChannelSettings(**ch))
 
 
 def _calibration(path, em: bool):
@@ -192,8 +208,43 @@ def _sha256(path) -> str:
     return h.hexdigest()
 
 
-def _found(out, scaling, threshold, how, pixel_nm, scale=1):
-    e = extract.extract(out, scaling, threshold, how, scale)
+class Drawer:
+    """What a training draws its batches with: one spline (C = 1), or a dual calibration's two
+    (`channels.TwoChannels`, `simulate.draw_batch_2c`).  ``renderer`` is the one a C = 1 test set's bound
+    is computed with; ``two`` the channels' grid, for the model's record."""
+
+    def __init__(self, settings: TrainingSettings, device):
+        sim, cam, ch = settings.simulation, settings.camera, settings.channels
+        self.sim, self.cam, self.channels = sim, cam, ch
+        whole = sim.spots == "whole"
+        if ch.kind:
+            from ..calibrate.dual import load_dual_color_calibration
+            from . import channels
+            cal = load_dual_color_calibration(settings.calibration)
+            self.two = channels.TwoChannels.from_calibration(cal)
+            self.grid = channels.Grid(self.two, device)
+            self.renderers = [SplineRenderer(s, device, whole=whole) for s in channels.splines(cal, ch.kind)]
+            self.renderer = None
+        else:
+            _, drawn = _calibration(settings.calibration, bool(cam.em_gain))
+            self.renderer = SplineRenderer(drawn, device, whole=whole)
+            self.two = None
+
+    def __call__(self, batch: int, g):
+        if self.channels.kind:
+            return draw_batch_2c(self.renderers, self.grid, self.sim, self.cam, self.channels, batch, g)
+        return draw_batch(self.renderer, self.sim, self.cam, batch, g)
+
+
+def run(model, x, batch, windows: int = 1):
+    """The network on network-unit frames ``x`` of ``batch``, with its offset maps where it has them."""
+    if batch.aux is not None:
+        return model(x, windows, batch.aux)
+    return model(x, windows) if windows > 1 else model(x)
+
+
+def _found(out, scaling, threshold, how, pixel_nm, scale=1, layout=None):
+    e = extract.extract(out, scaling, threshold, how, scale, layout=layout)
     to = lambda v: v.detach().cpu().numpy().astype(np.float64)
     return {"frame": to(e["frame"]).astype(np.int64), "xyz": np.c_[to(e["x"]), to(e["y"]), to(e["z_nm"])],
             "err": np.c_[to(e["x_err"]) * pixel_nm[0], to(e["y_err"]) * pixel_nm[1], to(e["z_err_nm"])]}
@@ -215,10 +266,10 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     sch = parts.schedule.settings
     epochs = epochs or sch["epochs"]
     torch.manual_seed(settings.seed)
-    _, drawn = _calibration(settings.calibration, bool(cam.em_gain))
-    renderer = SplineRenderer(drawn, device)
-    scaling = network.Scaling.for_simulation(sim)
-    model = network.build(parts, sim.window).to(device)
+    drawer = Drawer(settings, device)
+    renderer = drawer.renderer
+    scaling = network.Scaling.for_simulation(sim, settings.channels if settings.channels.kind else None)
+    model = network.build(parts, sim.window, settings.channels).to(device)
     # ``init``: a trained model's file to start from -- its weights, with a fresh optimizer and schedule --
     # to fine-tune a network trained on a broad range (on-times, say) to what was measured on the data.
     # Loaded before the EMA copies the model, and only on a fresh start: a resumed run has its own weights.
@@ -256,14 +307,17 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     else:
         # drawn once from the seed, its bounds once
         g_test = torch.Generator(device).manual_seed(settings.seed + 1)
-        test = draw_batch(renderer, sim, cam, sch["test_samples"], g_test)
+        test = drawer(sch["test_samples"], g_test)
         m = test.mask.cpu().numpy()
         frame = np.nonzero(m)[0]
         xyz = test.xyz.cpu().numpy()[m].astype(np.float64)
         ph = test.photons.cpu().numpy()[m]
-        # the bound of the PSF as drawn (a mirror changes no bound), in torch: no compiled SMAPpy needed
-        bound = metrics.crlbs_torch(renderer, ph, test.background.cpu().numpy()[frame], xyz[:, 2], cam.pixel_nm,
-                                    bool(cam.em_gain))
+        if ph.ndim == 2:                         # colour: a count per channel, the total scored
+            ph = ph.sum(1)
+        # the bound of the PSF as drawn (a mirror changes no bound), in torch: no compiled SMAPpy needed;
+        # two channels' joint bound is not written yet
+        bound = None if renderer is None else metrics.crlbs_torch(
+            renderer, ph, test.background.cpu().numpy()[frame], xyz[:, 2], cam.pixel_nm, bool(cam.em_gain))
         truth = {"frame": frame, "xyz": xyz, "photons": ph, "crlb": bound}
     start, seconds = 0, 0.0
     ckpt = folder / "checkpoint.pt"
@@ -284,12 +338,13 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     g = torch.Generator(device).manual_seed(settings.seed + 1000 + start)
     meta_base = {"method": METHOD, "settings": settings.to_dict(), "scaling": asdict(scaling), "window": sim.window,
                  "parameters": network.parameters(model), "calibration_sha256": _sha256(settings.calibration),
-                 "calibration_em_on": bool(cam.em_gain)}
+                 "calibration_em_on": bool(cam.em_gain),
+                 **({"channels": drawer.two.to_dict()} if drawer.two is not None else {})}
     # on a CPU the thread would only take cores from the network
-    feed = _Prefetch(lambda: draw_batch(renderer, sim, cam, batch_size, g), device) \
+    feed = _Prefetch(lambda: drawer(batch_size, g), device) \
         if sch.get("prefetch", True) and str(device).startswith("cuda") else None
     try:
-        _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, truth, scaling, start, epochs,
+        _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, truth, scaling, start, epochs,
                      steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log,
                      forward, channels_last, ema)
     finally:
@@ -297,12 +352,12 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
             feed.close()
 
 
-def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, truth, scaling, start, epochs,
+def _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, truth, scaling, start, epochs,
                  steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log,
                  forward=None, channels_last=False, ema=None):
     forward = model if forward is None else forward
     judged = model if ema is None else ema.module       # what is scored and saved
-    sim, cam, parts = settings.simulation, settings.camera, settings.parts
+    cam, parts = settings.camera, settings.parts
     sch = parts.schedule.settings
     # the loss part's ``reported`` (step 4, an honest sigma): {"head": "rep" | "mixture", "weight",
     # "from_epoch"}, or a list of them -- the reported positions' likelihood (`loss.reported_term`), once
@@ -316,20 +371,21 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
         model.train()
         total, parts_sum = 0.0, {}
         for _ in range(steps):
-            batch = feed.get() if feed is not None else draw_batch(renderer, sim, cam, batch_size, g)
+            batch = feed.get() if feed is not None else drawer(batch_size, g)
             # cut from movies: the movies whole, each frame through the per-frame U-Net once
             whole = batch.movie is not None
             x = ((batch.movie if whole else batch.frames) - scaling.input_offset) / scaling.input_scale
             if channels_last:
                 x = x.contiguous(memory_format=torch.channels_last)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16):
-                out = forward(x, batch.movie_windows)[:len(batch.frames)] if whole else forward(x)
-            value, t = loss.loss(out.float(), batch, scaling, parts.loss)
+                out = run(forward, x, batch, batch.movie_windows)[:len(batch.frames)] if whole else run(forward, x, batch)
+            value, t = loss.loss(out.float(), batch, scaling, parts.loss, layout=model.layout)
             for rp in reps:
                 if epoch >= rp.get("from_epoch", 5):
                     head = rp.get("head", "rep")
                     r = loss.reported_term(out.float(), batch, scaling, cam.pixel_nm, sch["threshold"],
-                                           parts.extraction.name, getattr(model, "out_scale", 1), head)
+                                           parts.extraction.name, getattr(model, "out_scale", 1), head,
+                                           layout=model.layout)
                     value = value + float(rp.get("weight", 1.0)) * r
                     t = {**t, ("reported" if len(reps) == 1 else f"reported_{head}"): r.detach()}
             opt.zero_grad(set_to_none=True)
@@ -351,12 +407,12 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
             outs, test_loss = [], 0.0
             for a in range(0, len(test.frames), 128):
                 sub = _slice(test, a, a + 128)
-                out = judged((sub.frames - scaling.input_offset) / scaling.input_scale)
-                test_loss += float(loss.loss(out, sub, scaling, parts.loss)[0]) * len(sub.frames)
+                out = run(judged, (sub.frames - scaling.input_offset) / scaling.input_scale, sub)
+                test_loss += float(loss.loss(out, sub, scaling, parts.loss, layout=model.layout)[0]) * len(sub.frames)
                 outs.append(out)
             out = torch.cat(outs)
         found = _found(out, scaling, sch["threshold"], parts.extraction.name, cam.pixel_nm,
-                       getattr(model, "out_scale", 1))
+                       getattr(model, "out_scale", 1), model.layout)
         score = metrics.evaluate(truth, found, cam.pixel_nm)
         score.update({f"loss_{k}": v / steps for k, v in parts_sum.items()})
         dt = time.perf_counter() - t0
@@ -404,7 +460,8 @@ def _snapshot(folder, settings, epoch, at, seen, tensors, meta_base, seconds, de
 
 def _slice(batch, a, b):
     from .simulate import Batch
-    return Batch(batch.frames[a:b], batch.xyz[a:b], batch.photons[a:b], batch.mask[a:b], batch.background[a:b])
+    return Batch(batch.frames[a:b], batch.xyz[a:b], batch.photons[a:b], batch.mask[a:b], batch.background[a:b],
+                 aux=None if batch.aux is None else batch.aux[a:b])
 
 
 def main(argv=None):
