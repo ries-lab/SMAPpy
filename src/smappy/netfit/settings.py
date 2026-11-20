@@ -33,6 +33,8 @@ class SimulationSettings:
     photons_mean: float = 7000.0              # flux while on, a full frame's photons
     photons_sd: float = 3000.0
     photons_min: float = 0.0                  # the flux drawn no lower (DECODE's intensity_th, unset there)
+    # set: the flux drawn uniform between the two instead (DECODE-Plex's way, and the C = 2 sets')
+    photons_range: tuple | None = None
     background: tuple = (20.0, 200.0)         # photons a pixel, uniform per frame
     # below 0: each frame's background drawn on its own (DECODE's way); from 0: one level a movie, each
     # frame that level times 1 + this times a normal -- a real movie's background drifts slowly, and a
@@ -40,6 +42,30 @@ class SimulationSettings:
     background_jitter: float = -1.0
     z_nm: tuple = (-800.0, 800.0)
     target_photons_min: float = 0.0           # a target is a molecule with at least this many photons in the frame
+    # "box": each spot in the spline's square less 3 pixels, as SMAPpy's simulation draws it (version 1);
+    # "whole": over the spline's whole grid, as DECODE-Plex and the C = 2 sets draw it (`render`)
+    spots: str = "box"
+
+
+@dataclass
+class ChannelSettings:
+    """A split camera's two halves read as one molecule (`docs/decode/plex-plan.md` §16), from a dual
+    calibration (`channels.TwoChannels`).  ``kind`` "" is one channel (C = 1)."""
+    kind: str = ""                            # "", "biplane" or "colour"
+    # colour: the share of a molecule's light in channel 1, uniform between the two (one network for
+    # any pair of dyes); biplane's shares are in its splines
+    share: tuple = (0.0, 1.0)
+    # each channel's background range, photons a pixel, uniform per frame; None: the simulation's for both
+    background: list | None = None
+
+    @property
+    def n(self) -> int:
+        return 2 if self.kind else 1
+
+    @property
+    def photons(self) -> int:
+        """The photon counts a molecule has: one (C = 1, biplane), or one per channel (colour)."""
+        return 2 if self.kind == "colour" else 1
 
 
 @dataclass
@@ -114,6 +140,7 @@ class TrainingSettings:
     simulation: SimulationSettings = field(default_factory=SimulationSettings)
     camera: CameraModel = field(default_factory=CameraModel)
     parts: Parts = field(default_factory=Parts)
+    channels: ChannelSettings = field(default_factory=ChannelSettings)
     calibration: str | None = None
     test_set: str | None = None               # a fixed test set (`testset.py`); none: drawn from the seed
     seed: int = 0

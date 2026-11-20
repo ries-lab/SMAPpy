@@ -12,6 +12,12 @@ the PSF the fitters fit:
 * z as ``z_nm_to_index`` makes it, its voxel clamped likewise;
 * negative values set to 0, then scaled by the photons.
 
+With ``whole`` (`SimulationSettings.spots` "whole") each spot covers the spline's whole grid instead, as
+DECODE-Plex draws it and the C = 2 sets do (`benchmarks/decode/suite/sets_c2.draw_spline_whole`): a
+square of ``nx`` pixels from ``rint(x) - nx // 2``, pixel ``i`` at ``u = i - x + nx / 2``, and a pixel
+whose ``u`` falls outside the grid drawn as nothing, not as the edge cell's cubic carried on.  The
+square cut 4 -- 8 % of the light far from focus (plex-plan §15).
+
 Spots are drawn in chunks: one spot is ``size^2`` gathers of 64 coefficients.
 """
 from __future__ import annotations
@@ -25,18 +31,25 @@ CHUNK = 4096                      # spots per gather: 4096 x 23^2 x 64 floats is
 class SplineRenderer:
     """A calibration's spline on ``device``, drawing spots into frames."""
 
-    def __init__(self, cal, device="cpu", dtype=torch.float32):
+    def __init__(self, cal, device="cpu", dtype=torch.float32, whole: bool = False):
         _, nz, ny, nx = cal.coeff.shape
         self.device, self.dtype = torch.device(device), dtype
         # (nz, ny, nx, 64): a voxel's coefficients contiguous for the gather
         self.coeff = torch.as_tensor(np.ascontiguousarray(np.moveaxis(cal.coeff, 0, -1)), dtype=dtype, device=self.device)
         self.shape = (nz, ny, nx)
-        self.size = max(min(nx, ny) - 3, 5)
-        if self.size % 2 == 0:
-            raise ValueError(f"the spline's square is {self.size} pixels; an odd one is expected (nx, ny even)")
-        # where evaluate_spline puts pixel i for a spot at x, for its odd square
-        self.cx = self.size / 2 - 0.5 + np.floor((nx + 1 - self.size) / 2)
-        self.cy = self.size / 2 - 0.5 + np.floor((ny + 1 - self.size) / 2)
+        self.whole = bool(whole)
+        if self.whole:
+            if nx != ny:
+                raise ValueError(f"a whole-grid spot needs a square grid, not {nx} x {ny}")
+            # the square from rint(x) - nx // 2, pixel i at u = i - x + nx / 2 (DECODE-Plex's)
+            self.size, self.cx, self.cy = nx, nx / 2, ny / 2
+        else:
+            self.size = max(min(nx, ny) - 3, 5)
+            if self.size % 2 == 0:
+                raise ValueError(f"the spline's square is {self.size} pixels; an odd one is expected (nx, ny even)")
+            # where evaluate_spline puts pixel i for a spot at x, for its odd square
+            self.cx = self.size / 2 - 0.5 + np.floor((nx + 1 - self.size) / 2)
+            self.cy = self.size / 2 - 0.5 + np.floor((ny + 1 - self.size) / 2)
         self.z0, self.dz = float(cal.z0), float(cal.dz)
         powers = torch.arange(4, device=self.device, dtype=dtype)
         self._powers = powers
@@ -56,6 +69,9 @@ class SplineRenderer:
         nz, ny, nx = self.shape
         iu, iv, iw = torch.floor(u), torch.floor(v), torch.floor(w)
         mu, mv, mw = self._monomials(u - iu), self._monomials(v - iv), self._monomials(w - iw)
+        if self.whole:                       # beyond the grid: nothing
+            mu = mu * ((iu >= 0) & (iu < nx))[..., None]
+            mv = mv * ((iv >= 0) & (iv < ny))[..., None]
         iu = iu.long().clamp(0, nx - 1)
         iv = iv.long().clamp(0, ny - 1)
         iw = iw.long().clamp(0, nz - 1)

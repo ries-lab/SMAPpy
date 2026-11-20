@@ -18,6 +18,13 @@ the excess noise), read noise, rounding to ADU -- and back to photons by the fit
 **Targets**: the molecules on in the middle frame, at least ``target_photons_min`` photons in it,
 as padded tensors with a mask: columns, rows (pixels), z (nm), photons in that frame; and that
 frame's background.
+
+**Two channels** (`draw_batch_2c`, `docs/decode/plex-plan.md` §16): crops of the halves' overlap at
+random places (`channels.Grid`), so that the network sees every part of the registration; channel 0's
+spot at the molecule's position, channel 1's at that plus the registration's remainder ``d``, each
+from its own spline; a background per channel and frame; the camera on both; and the crop's offset
+maps beside the frames.  Biplane's photons are one count, each plane's share in its spline; colour's
+a total split by a share in channel 1 drawn per molecule (`settings.ChannelSettings`).
 """
 from __future__ import annotations
 
@@ -31,17 +38,19 @@ from .settings import CameraModel, SimulationSettings
 
 @dataclass
 class Batch:
-    frames: torch.Tensor          # (b, window, rows, columns), photons as the fitter converts them
+    # (b, window, rows, columns), photons as the fitter converts them; two channels (b, 2, window, ...)
+    frames: torch.Tensor
     xyz: torch.Tensor             # (b, k, 3): column, row (pixels), z (nm) of the middle frame's molecules
-    photons: torch.Tensor         # (b, k): their photons in that frame
+    photons: torch.Tensor         # (b, k): their photons in that frame; colour (b, k, 2), each channel's
     mask: torch.Tensor            # (b, k) bool: which of the k are molecules
-    background: torch.Tensor      # (b,): the middle frame's background, photons a pixel
+    background: torch.Tensor      # (b,): the middle frame's background, photons a pixel; two channels (b, 2)
     photons_window: torch.Tensor | None = None     # (b, k, window): the molecules' photons in every frame
     background_window: torch.Tensor | None = None  # (b, window): every frame's background
     # with ``movie_windows`` W > 1: the movies the windows were cut from, (ceil(b / W), window + W - 1,
     # rows, columns), which the network reads whole (`network.TwoStageUNet.forward`'s ``windows``)
     movie: torch.Tensor | None = None
     movie_windows: int = 1
+    aux: torch.Tensor | None = None               # two channels: the offset maps, (b, 2, rows, columns)
 
 
 def _uniform(lo, hi, n, g, device):
@@ -75,8 +84,11 @@ def emitters(sim: SimulationSettings, batch: int, g: torch.Generator, device, fr
     x = _uniform(*edge, n, g, device)
     y = _uniform(*edge, n, g, device)
     z = _uniform(*sim.z_nm, n, g, device)
-    flux = (sim.photons_mean + sim.photons_sd * torch.randn(n, generator=g, device=device)).clamp_min(
-        max(sim.photons_min, 1e-8))
+    if sim.photons_range is not None:
+        flux = _uniform(*sim.photons_range, n, g, device)
+    else:
+        flux = (sim.photons_mean + sim.photons_sd * torch.randn(n, generator=g, device=device)).clamp_min(
+            max(sim.photons_min, 1e-8))
     return sample, x, y, z, flux, flux[:, None] * overlap
 
 
@@ -138,3 +150,55 @@ def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraMod
     window[ks, rank] = per_frame[i[:, None], idx[w]]
     mask[ks, rank] = True
     return Batch(frames, xyz, photons, mask, bgw[:, mid], window, bgw, movie if W > 1 else None, W)
+
+
+def draw_batch_2c(renderers, grid, sim: SimulationSettings, cam: CameraModel, channels, batch: int,
+                  g: torch.Generator) -> Batch:
+    """One batch of fresh two-channel samples (the module's docstring): ``renderers`` the two channels'
+    (`render.SplineRenderer`), ``grid`` the halves' remainder (`channels.Grid`), ``channels`` the
+    `settings.ChannelSettings`.  Every sample its own crop and movie of ``window`` frames."""
+    device = renderers[0].device
+    T, s = sim.window, sim.frame_px
+    if int(sim.movie_windows) > 1:
+        raise ValueError("two channels: one window a movie (movie_windows 1)")
+    n = batch
+    sample, x, y, z, _, per_frame = emitters(sim, n, g, device)
+    r0, c0 = grid.origins(n, s, g)
+    aux = grid.maps(r0, c0, s)                                                    # (n, 2, s, s)
+    d = grid.at(sample, x, y, r0, c0)                                             # (m, 2)
+    ranges = channels.background or [sim.background] * 2
+    bg = torch.stack([_uniform(*ranges[c], n * T, g, device).view(n, T) for c in range(2)], 1)   # (n, 2, T)
+    if channels.kind == "colour":
+        share = _uniform(*channels.share, len(sample), g, device)
+        per_channel = [per_frame * (1 - share[:, None]), per_frame * share[:, None]]
+    else:
+        per_channel = [per_frame, per_frame]
+    image = bg[..., None, None].expand(n, 2, T, s, s).contiguous()
+    for c, (renderer, px, py) in enumerate(zip(renderers, (x, x + d[:, 0]), (y, y + d[:, 1]))):
+        on = per_channel[c] > 0
+        m, f = on.nonzero(as_tuple=True)
+        view = image[:, c].contiguous()
+        renderer.draw(view.view(n * T, s, s), sample[m] * T + f, px[m], py[m], z[m], per_channel[c][m, f])
+        image[:, c] = view
+    frames = camera(image, cam, g)
+    mid = T // 2
+    inside = (x >= -0.5) & (x < s - 0.5) & (y >= -0.5) & (y < s - 0.5)
+    keep = (per_frame[:, mid] > max(sim.target_photons_min, 0.0)) & inside
+    i = keep.nonzero(as_tuple=True)[0]
+    ks = sample[i]
+    counts = torch.bincount(ks, minlength=n)
+    k = max(int(counts.max()) if len(ks) else 1, 1)
+    rank = torch.arange(len(ks), device=device) - torch.repeat_interleave(torch.cumsum(counts, 0) - counts, counts)
+    xyz = torch.zeros((n, k, 3), device=device)
+    mask = torch.zeros((n, k), dtype=torch.bool, device=device)
+    xyz[ks, rank] = torch.stack([x[i], y[i], z[i]], 1)
+    mask[ks, rank] = True
+    window = torch.zeros((n, k, T), device=device)
+    window[ks, rank] = per_frame[i]
+    if channels.kind == "colour":
+        photons = torch.zeros((n, k, 2), device=device)
+        photons[ks, rank] = torch.stack([per_channel[0][i, mid], per_channel[1][i, mid]], 1)
+    else:
+        photons = torch.zeros((n, k), device=device)
+        photons[ks, rank] = per_frame[i, mid]
+    return Batch(frames, xyz, photons, mask, bg[:, :, mid], window, bg, aux=aux)
