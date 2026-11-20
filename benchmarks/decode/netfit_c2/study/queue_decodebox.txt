@@ -1,0 +1,15 @@
+S_colour_base_s0
+S_colour_tjoin_s0
+S_colour_tboth_s0
+S_colour_early_s0
+S_colour_auxu_s0
+S_colour_base_s1
+S_colour_tjoin_s1
+S_colour_tboth_s1
+S_colour_early_s1
+S_colour_auxu_s1
+S_colour_base_s2
+S_colour_tjoin_s2
+S_colour_tboth_s2
+S_colour_early_s2
+S_colour_auxu_s2
