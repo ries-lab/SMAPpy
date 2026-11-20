@@ -487,6 +487,9 @@ def run(fitter, names=None, refit=False, edges=None, run_name=None, models=None)
         if fitter == "netfit":
             report["frames_read"][S.SETS[name]["context"]] = info["window"]
         locs = dict(np.load(out))
+        if not len(locs["frame"]):
+            print(f"{label} {name}: no localizations", flush=True)
+            continue
         s = score(name, locs, KEEP[fitter])
         s["fit"] = info
         s["ms_per_frame"] = 1000 * info["seconds"] / max(int(np.load(S.SETS_DIR / name / "truth.npz")["frame_background_0"].shape[0]), 1)

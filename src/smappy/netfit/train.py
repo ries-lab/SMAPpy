@@ -375,7 +375,7 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, tru
             # cut from movies: the movies whole, each frame through the per-frame U-Net once
             whole = batch.movie is not None
             x = ((batch.movie if whole else batch.frames) - scaling.input_offset) / scaling.input_scale
-            if channels_last:
+            if channels_last and x.dim() == 4:      # two channels' (b, 2, t, h, w) has no such layout
                 x = x.contiguous(memory_format=torch.channels_last)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16):
                 out = run(forward, x, batch, batch.movie_windows)[:len(batch.frames)] if whole else run(forward, x, batch)
