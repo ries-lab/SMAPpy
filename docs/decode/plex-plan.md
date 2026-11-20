@@ -748,3 +748,42 @@ training's total of 3 000 -- 40 000 (DECODE-Plex's channels were trained from 20
 **Next** (open): the sets drawn with molecules that blink over frames, as real movies do and as the
 time model is for -- or netfit on single frames for biplane, matching the sets as they are; colour's
 training range down to the sets' 1 000 photons; then seeds, and the study of §7.
+
+### Round 1: blinking sets, and biplane on one frame (2026-11-20)
+
+**The blinking sets** (`sets_c2`'s ``<context>_blink_...``, molecules on for an exponential time of mean
+1 frame, a truth row per frame on): harder for every fitter -- the rows of a molecule on for part of a
+frame hold part of its photons, and the scoring counts every row from 100 photons (DECODE-Plex biplane
+density 1: 0.792, against 0.906 without blinking; Spline 3D 2C 0.641) -- but the errors against the
+bound are as before (DECODE-Plex 1.2 -- 1.3 on biplane).  Jaccard and lateral / axial RMSE at |z| <
+300 nm:
+
+| set | netfit, 3 frames | netfit, 1 frame | DECODE-Plex |
+| --- | --- | --- | --- |
+| biplane density 1 | 0.835, 16.4 / 36.7 | 0.785, 22.5 / 49.3 | 0.792, 22.5 / 47.7 |
+| biplane density 15 | 0.821, 18.7 / 43.9 | 0.786, 23.6 / 51.1 | 0.762, 25.2 / 56.3 |
+| biplane density 50 | 0.747, 24.0 / 51.7 | 0.711, 26.9 / 59.0 | 0.642, 32.8 / 78.9 |
+| biplane 1 000 photons | 0.563, 27.4 / 70.8 | 0.562, 36.6 / 84.2 | 0.469, 36.9 / 86.7 |
+| biplane 10 000 photons | 0.819, 14.3 / 31.0 | 0.752, 22.4 / 46.1 | 0.777, 22.5 / 48.7 |
+| colour density 1 | 0.901, 20.6 / 36.4 | | 0.746, 21.7 / 38.4 |
+| colour density 50 | 0.721, 41.2 / 69.5 | | 0.675, 44.6 / 77.4 |
+| colour 1 000 photons | 0.561, 39.3 / 80.0 | | 0.341, 44.1 / 84.7 |
+
+netfit reading three frames beats DECODE-Plex on all 16 sets, precision included (biplane density 1:
+0.939 against 0.925) -- the echoes of §16's Round 0 were the one-frame sets'.  On one frame, as
+DECODE-Plex's biplane model reads, netfit is DECODE-Plex's equal at low density (0.785 / 0.792, the
+same errors) and better as the density rises (0.711 / 0.642 at 50): what the second channel's network
+arrangement gives.  The three frames are worth 0.03 -- 0.07 in Jaccard and a quarter to a third of the
+error near focus, the frames a molecule is on in pooled.
+
+**Training** (6 M samples, batch 64, bf16, compiled; the early stop never fired): biplane on 3 frames
+1.8 h on the H100 (35 s an epoch of 32 768), on 1 frame 0.9 h (17 s); colour on 3 frames 2.0 h on the
+4090 (40 s).  Converged early: 90 % of the final Jaccard (on the training's own test frames) at 0.4 --
+0.6 M samples (8 -- 10 minutes), 95 % at 0.7 -- 0.9 M (15 minutes), 99 % at 2.8 -- 3.5 M (about an
+hour); the last 2.5 M samples gain the last 1 %.  6.7 M parameters (64 features, a U-Net per channel
+and a ConvGRU per channel), 5.7 M on one frame.
+
+**Fitting**, the sets' 512 x 512 frames (two 209 x 500 channels read): netfit 30 ms a frame on 3
+frames, 8 ms on 1, on the H100 while a training shared it; DECODE-Plex 77 -- 85 ms on the Mac's GPU,
+Spline 3D 2C 4 -- 93 ms on its CPU (growing with the density) -- different machines, so the speeds are
+not yet a comparison.
