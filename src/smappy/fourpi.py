@@ -820,7 +820,9 @@ def load_smap_4pi(path, dz_sign: float = 1.0) -> FourPiCalibration:
     channels_I, channels_A, channels_B = [], [], []
     for c in range(len(phases)):
         move = (dz_sign * dz[c], 0, 0)
-        i, a, b = (shift(v, move, order=3, mode="nearest") for v in (I, A, B))
+        # along z alone, y and x flattened into one: a 3D shift pads and spline-filters them too
+        i, a, b = (shift(v.reshape(len(v), -1), move[:1] + (0,), order=3, mode="nearest").reshape(v.shape)
+                   for v in (I, A, B))
         cos, sin = np.cos(phases[c]), np.sin(phases[c])
         channels_I.append(normf[c] * i)
         channels_A.append(normf[c] * (a * cos + b * sin))
@@ -1023,7 +1025,11 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
     # every bead moved onto the grid where its focus is the median's
     aligned = np.empty_like(stacks)
     for b in range(nb):
-        aligned[b] = shift(stacks[b], (0, target - foci[b], 0, 0, 0), order=3, mode="nearest")
+        # along z alone, the other axes flattened into one: a 5D shift pads and spline-filters every axis,
+        # many times the data of a bead's box; the same numbers, far faster
+        along = np.moveaxis(stacks[b], 1, 0)
+        moved = shift(along.reshape(len(along), -1), (target - foci[b], 0), order=3, mode="nearest")
+        aligned[b] = np.moveaxis(moved.reshape(along.shape), 0, 1)
     # which beads were scanned through each slice of that grid: a slice is
     # solved with the beads that cover it, so the model reaches as far as a
     # quarter of them do, not only where all do -- 110 beads of uiPSF's

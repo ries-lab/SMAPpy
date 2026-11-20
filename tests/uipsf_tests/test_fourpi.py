@@ -43,20 +43,32 @@ def _truth(model):
             "emitter.photons": torch.full((E,), 8000.0), "emitter.background": torch.full((E, C), 10.0)}
 
 
-@pytest.fixture(scope="module")
-def beads(grid):
-    """Six simulated 4Pi bead stacks: astigmatism of opposite sign in the two objectives (as v1 found), a
-    little coma and spherical, misaligned arms, unequal channels; 11 slices 80 nm apart × 3 mirror steps."""
+def _bead_stacks(grid, slices=J):
     model = FourPiModel(grid, (R, R), n_max=4, magnitude_n_max=0, kind="scalar")
-    z = -np.arange(-(J // 2), J // 2 + 1) * 100.0
+    z = -np.arange(-(slices // 2), slices // 2 + 1) * 100.0 * (J - 1) / max(slices - 1, 1)
     roi_xy = np.random.default_rng(0).uniform(20, 180, (E, 1, 2)).repeat(C, 1)
-    batch = uipsf.Batch(data=torch.zeros(E, C, J * M, R, R), z_nm=torch.tensor(np.repeat(z, M), dtype=torch.float32),
+    batch = uipsf.Batch(data=torch.zeros(E, C, len(z) * M, R, R),
+                        z_nm=torch.tensor(np.repeat(z, M), dtype=torch.float32),
                         roi_xy=torch.tensor(roi_xy, dtype=torch.float32))
     truth = _truth(model)
     start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
              "background": truth["emitter.background"]}
     p = Params(model.specs(batch, start), E, values=truth)
     return model, simulate(model, p, batch, seed=2), {k: v for k, v in p.physical().items()}
+
+
+@pytest.fixture(scope="module")
+def beads(grid):
+    """Six simulated 4Pi bead stacks: astigmatism of opposite sign in the two objectives (as v1 found), a
+    little coma and spherical, misaligned arms, unequal channels; 9 slices 100 nm apart × 3 mirror steps."""
+    return _bead_stacks(grid)
+
+
+@pytest.fixture(scope="module")
+def short_beads(grid):
+    """The same beads in 3 slices over the same 800 nm: a Jacobian compared column by column needs every
+    parameter's effect, not the stack's sampling, and the JVPs' reference costs a model per slice."""
+    return _bead_stacks(grid, slices=3)
 
 
 def test_an_objectives_apodisation_is_its_rotationally_symmetric_magnitude_modes(grid):
@@ -353,30 +365,32 @@ def test_a_model_learnt_with_the_beads_size_is_exported_for_a_point(grid):
 
 
 @pytest.mark.parametrize("kind, radius, per_observation", [("scalar", 0.0, False), ("vector", 0.0, True),
-                                                           ("scalar", 30.0, True), ("vector", 30.0, False)])
-def test_the_linearised_jacobian_is_the_jvps_one(beads, kind, radius, per_observation):
+                                                           ("scalar", 30.0, True),
+                                                           pytest.param("vector", 30.0, False, marks=pytest.mark.slow)])
+def test_the_linearised_jacobian_is_the_jvps_one(short_beads, kind, radius, per_observation):
     """The Jacobian the solver builds from the 4Pi model's linearisations (both pupils' columns by one DFT
     per channel, the emitter's, shares, channel offsets and maps from four PSF tangents) equals the one
     from JVPs through the whole model, scalar and vectorial, with and without a bead kernel."""
     from uipsf.model import PerObservation
     from uipsf.noise import ShiftedPoisson
     from uipsf.solve.problem import Problem
-    _, batch, truth = beads
-    model = FourPiModel(beads[0].grid, (R, R), n_max=4, magnitude_n_max=2, kind=kind, bead_radius_nm=radius,
+    _, batch, truth = short_beads
+    model = FourPiModel(short_beads[0].grid, (R, R), n_max=4, magnitude_n_max=2, kind=kind, bead_radius_nm=radius,
                         intensity=PerObservation() if per_observation else None)
     start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
              "background": truth["emitter.background"]}
     values = dict(truth)
     if per_observation:
         values.pop("emitter.photons")
-        values["emitter.photons_per_slice"] = truth["emitter.photons"][:, None] * torch.linspace(0.8, 1.2, J * M)
+        slices = batch.data.shape[2]
+        values["emitter.photons_per_slice"] = truth["emitter.photons"][:, None] * torch.linspace(0.8, 1.2, slices)
     specs = model.specs(batch, start)
     shape = next(s.shape for s in specs if s.name == "pupil.magnitude")
     values["pupil.magnitude"] = torch.linspace(-0.03, 0.05, shape[0])          # a magnitude to differentiate
     values["lo.pupil.magnitude"] = -values["pupil.magnitude"]
     p = Params(specs, E, values=values)
-    sub = batch.subset(slice(0, 3))
-    pc = p.subset(slice(0, 3))
+    sub = batch.subset(slice(0, 1))
+    pc = p.subset(slice(0, 1))
     fast = Problem(model, ShiftedPoisson(), sub, tangents=4)._jacobians(pc, sub)
     slow = Problem(model, ShiftedPoisson(), sub, tangents=4, linearise=False)._jacobians(pc, sub)
     for a, b in zip(fast, slow, strict=True):
@@ -385,14 +399,14 @@ def test_the_linearised_jacobian_is_the_jvps_one(beads, kind, radius, per_observ
 
 
 @pytest.mark.parametrize("kind", ["scalar", "vector"])
-def test_a_magnitude_both_objectives_share_is_one_parameter_and_its_jacobian_sums_both_arms(beads, kind):
+def test_a_magnitude_both_objectives_share_is_one_parameter_and_its_jacobian_sums_both_arms(short_beads, kind):
     """``same_magnitude``: no ``lo.pupil.magnitude``, the lower pupil reading the upper's, and the solver's
     linearised column for it -- the sum of what it does through each objective -- the JVP's."""
     from uipsf.model.fourpi import lower_view
     from uipsf.noise import ShiftedPoisson
     from uipsf.solve.problem import Problem
-    _, batch, truth = beads
-    model = FourPiModel(beads[0].grid, (R, R), n_max=4, magnitude_n_max=2, kind=kind, same_magnitude=True)
+    _, batch, truth = short_beads
+    model = FourPiModel(short_beads[0].grid, (R, R), n_max=4, magnitude_n_max=2, kind=kind, same_magnitude=True)
     start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
              "background": truth["emitter.background"]}
     specs = model.specs(batch, start)
@@ -403,7 +417,7 @@ def test_a_magnitude_both_objectives_share_is_one_parameter_and_its_jacobian_sum
     values["pupil.magnitude"] = torch.linspace(-0.03, 0.05, shape[0])
     p = Params(specs, E, values=values)
     assert torch.equal(lower_view(p.physical())["pupil.magnitude"], p.physical()["pupil.magnitude"])
-    sub, pc = batch.subset(slice(0, 3)), p.subset(slice(0, 3))
+    sub, pc = batch.subset(slice(0, 1)), p.subset(slice(0, 1))
     fast = Problem(model, ShiftedPoisson(), sub, tangents=4)._jacobians(pc, sub)
     slow = Problem(model, ShiftedPoisson(), sub, tangents=4, linearise=False)._jacobians(pc, sub)
     for a, b in zip(fast, slow, strict=True):
@@ -425,12 +439,15 @@ def _minimal_model(grid, same_magnitude=True, learn_na=False, n_med=None, **kw):
     return FourPiModel(g, (R, R), n_max=4, pupils=pupils, same_magnitude=same_magnitude, **kw)
 
 
-@pytest.mark.parametrize("kind, same, na, n_med", [("vector", True, False, None), ("vector", False, False, None),
+# the fast tier keeps one case of each property -- shared γ and NA, separate ones, scalar -- the rest are slow
+@pytest.mark.parametrize("kind, same, na, n_med", [pytest.param("vector", True, False, None, marks=pytest.mark.slow),
+                                                    pytest.param("vector", False, False, None, marks=pytest.mark.slow),
                                                     ("scalar", True, False, None), ("vector", True, True, None),
-                                                    ("vector", False, True, None), ("vector", True, False, 1.406),
+                                                    ("vector", False, True, None),
+                                                    pytest.param("vector", True, False, 1.406, marks=pytest.mark.slow),
                                                     pytest.param("vector", True, False, 1.33, marks=pytest.mark.slow),
                                                     pytest.param("scalar", False, True, 1.33, marks=pytest.mark.slow)])
-def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvps(beads, kind, same, na, n_med):
+def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvps(short_beads, kind, same, na, n_med):
     """Minimal pupils in a 4Pi model: one γ (and a learnt NA) for both objectives under ``same_magnitude``
     (`MAGNITUDE`), each its own otherwise; no ring when the sample is index-matched; the solver's linearised
     columns -- γ's the sum over both arms when shared -- equal the JVPs', with the pixel's blur under the learnt
@@ -438,8 +455,8 @@ def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvp
     NA, with the ring and its h."""
     from uipsf.noise import ShiftedPoisson
     from uipsf.solve.problem import Problem
-    _, batch, truth = beads
-    model = _minimal_model(beads[0].grid, same_magnitude=same, learn_na=na, kind=kind, pixel_blur=True,
+    _, batch, truth = short_beads
+    model = _minimal_model(short_beads[0].grid, same_magnitude=same, learn_na=na, kind=kind, pixel_blur=True,
                            round_sigma=True, n_med=n_med, learn_n_med=n_med is not None)
     start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
              "background": truth["emitter.background"]}
@@ -466,7 +483,7 @@ def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvp
         if not same:
             values["lo.pupil.ring_h"] = torch.tensor(80.0)
     p = Params(specs, E, values=values)
-    sub, pc = batch.subset(slice(0, 3)), p.subset(slice(0, 3))
+    sub, pc = batch.subset(slice(0, 1)), p.subset(slice(0, 1))
     fast = Problem(model, ShiftedPoisson(), sub, tangents=4)._jacobians(pc, sub)
     slow = Problem(model, ShiftedPoisson(), sub, tangents=4, linearise=False)._jacobians(pc, sub)
     for a, b in zip(fast, slow, strict=True):

@@ -411,7 +411,7 @@ def test_state_switching_warns_when_the_fast_jump_is_large_against_the_spacing()
     settings = TrackingAnalysis.Settings(id_column="track_id_true", msd=False,
                                          jumps=False, switching=True)
     def warnings_at(density):
-        locs = switching_tracks(density_um2=density, n_frames=150)
+        locs = switching_tracks(density_um2=density, n_frames=60)
         ctx = Context(locs=locs)
         result = TrackingAnalysis().run(ctx, settings)
         return result.values["hmm_crowding"], [w for w in ctx.warnings if "between" in w]

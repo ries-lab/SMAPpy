@@ -130,8 +130,9 @@ def test_a_batch_processes_each_file_alone_and_writes_what_it_found(tmp_path, fo
 
 
 def test_a_rerun_skips_what_is_done_and_redoes_what_changed(tmp_path, folder):
+    # one trend panel: the page's twelve automatic ones, drawn after every run, were most of this test's time
     job = write(tmp_path, Job(chain=chain_spec(), inputs=[Input(folder=str(folder))],
-                              output=Output(figures="none")))
+                              output=Output(figures="none", trends=["n_localizations"])))
     batch.run(job)
     again = batch.run(job)
     assert [f["status"] for f in again["files"]] == ["unchanged"] * 3
@@ -318,7 +319,7 @@ def test_a_watch_runs_the_files_there_are_and_each_new_one_once_complete(tmp_pat
     import time
     from smappy.io.hdf5 import LocalizationWriter
     job = write(tmp_path, Job(chain=chain_spec(), inputs=[Input(folder=str(folder))],
-                              output=Output(figures="none")))
+                              output=Output(figures="none", trends=["n_localizations"])))
     events, stop = [], threading.Event()
     done = lambda: [e[2] for e in events if e[0] == "DONE"]
     watcher = threading.Thread(target=lambda: events.append(
@@ -371,7 +372,8 @@ def test_a_file_is_complete_when_it_has_stopped_changing(tmp_path):
 
 def test_the_summary_page_lists_every_file_with_its_figures_and_numbers(tmp_path, folder):
     job = write(tmp_path, Job(chain=chain_spec(), inputs=[Input(folder=str(folder))],
-                              output=Output(trends=["stats.*", "n_localizations"])))
+                              # a pattern, but not stats.*: that is 76 panels, 10 s of drawing
+                              output=Output(trends=["stats.distributions.photons.*", "n_localizations"])))
     batch.run(job)
     out = tmp_path / "job_output"
     page = (out / "index.html").read_text()

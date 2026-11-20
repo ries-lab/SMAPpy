@@ -16,10 +16,8 @@ PHASE = torch.tensor([0.6, -0.3, 0.2, 0.15])          # Noll 5–8: astigmatism 
 SIGMA = 40.0
 
 
-@pytest.fixture(scope="module")
-def beads():
-    """Ten bright beads through ±1 µm, aberrated, blurred by σ = 40 nm, with a uniform pupil magnitude."""
-    n, roi, K = 10, (13, 13), 21
+def _beads(n=10, K=21):
+    roi = (13, 13)
     model = bead_model(OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=4, magnitude="fixed", blur="free",
                                                                  pixel_blur=False)), roi,
                        z_max_nm=1000, device="cpu")
@@ -35,7 +33,19 @@ def beads():
 
 
 @pytest.fixture(scope="module")
-def symmetric_fixed(beads):
+def beads():
+    """Ten bright beads through ±1 µm, aberrated, blurred by σ = 40 nm, with a uniform pupil magnitude."""
+    return _beads()
+
+
+@pytest.fixture(scope="module")
+def symmetric_fixed():
+    """A model of the same beads, five of them in 11 slices: what the fast tests read of it (the fixed blur,
+    the phase to 0.01, the modes, the figures) needs no more, and each xdist worker learns it again."""
+    return _symmetric_fixed(_beads(n=5, K=11))
+
+
+def _symmetric_fixed(beads):
     psf = PSFModelSettings(zernike_order=4, magnitude="symmetric", blur="fixed", blur_nm=SIGMA, pixel_blur=False)
     return calibrate_beads(beads, OPTICS, BeadSettings(psf=psf), device="cpu")
 
@@ -100,9 +110,10 @@ def test_a_previous_model_starts_a_higher_order_by_its_noll_modes(symmetric_fixe
 
 
 @pytest.mark.long
-def test_a_previous_model_starts_the_first_stage_and_lands_on_the_truth(beads, symmetric_fixed):
+def test_a_previous_model_starts_the_first_stage_and_lands_on_the_truth(beads):
     """Into stage 1, not instead of it: on the lab's M2 that was faster and never failed, where replacing
     stage 1 from another camera's model once did (docs/uipsf/architecture.md, "How a bead fit starts")."""
+    symmetric_fixed = _symmetric_fixed(beads)        # of all ten beads: the fast tests' five land it elsewhere
     cal = calibrate_beads(beads, OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=6)), start=symmetric_fixed,
                           device="cpu")
     assert cal.first is not None

@@ -245,11 +245,13 @@ def test_a_frame_is_fitted_within_a_fraction_of_a_second_of_being_written(tmp_pa
         while not seen["blocks"] and time.monotonic() < deadline:
             time.sleep(0.01)              # the first block: the fit is running
         lags = []
-        for frame in frames[1:]:
+        for frame in frames[1:31]:
             data.write([frame])
             written = time.monotonic()
             n = data.n - 1
-            while time.monotonic() < written + 3:
+            # 1 s, twice the median allowed: a frame without a spot is never in a block, and two of
+            # these frames waited 3 s each, most of the test's time; a slower fit has too few lags
+            while time.monotonic() < written + 1:
                 hit = [t for t, which in seen["blocks"] if n in which]
                 if hit:
                     lags.append(hit[0] - written)
