@@ -42,12 +42,8 @@ def beads():
 def symmetric_fixed():
     """A model of the same beads, five of them in 11 slices: what the fast tests read of it (the fixed blur,
     the phase to 0.01, the modes, the figures) needs no more, and each xdist worker learns it again."""
-    return _symmetric_fixed(_beads(n=5, K=11))
-
-
-def _symmetric_fixed(beads):
     psf = PSFModelSettings(zernike_order=4, magnitude="symmetric", blur="fixed", blur_nm=SIGMA, pixel_blur=False)
-    return calibrate_beads(beads, OPTICS, BeadSettings(psf=psf), device="cpu")
+    return calibrate_beads(_beads(n=5, K=11), OPTICS, BeadSettings(psf=psf), device="cpu")
 
 
 def test_the_magnitude_choices_give_every_mode_the_symmetric_ones_or_none():
@@ -110,17 +106,18 @@ def test_a_previous_model_starts_a_higher_order_by_its_noll_modes(symmetric_fixe
 
 
 @pytest.mark.long
-def test_a_previous_model_starts_the_first_stage_and_lands_on_the_truth(beads):
+def test_a_previous_model_starts_the_first_stage_and_lands_on_the_truth(beads, symmetric_fixed):
     """Into stage 1, not instead of it: on the lab's M2 that was faster and never failed, where replacing
     stage 1 from another camera's model once did (docs/uipsf/architecture.md, "How a bead fit starts")."""
-    symmetric_fixed = _symmetric_fixed(beads)        # of all ten beads: the fast tests' five land it elsewhere
-    cal = calibrate_beads(beads, OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=6)), start=symmetric_fixed,
-                          device="cpu")
+    # the model the beads were drawn with, at a higher order: the default minimal model (a damped SAF ring,
+    # the pixel's blur, a drift) is not theirs, and its astigmatism came back 0.015 off
+    settings = BeadSettings(psf=PSFModelSettings(zernike_order=6, magnitude="free", blur="free", pixel_blur=False))
+    cal = calibrate_beads(beads, OPTICS, settings, start=symmetric_fixed, device="cpu")
     assert cal.first is not None
     assert {h["stage"] for h in cal.result.history} == {1, 2}
     # stage 1 began at the previous model's low modes, not at zero
     assert cal.first.history[0]["objective"] < calibrate_beads(
-        beads, OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=6)), device="cpu").first.history[0]["objective"]
+        beads, OPTICS, settings, device="cpu").first.history[0]["objective"]
     assert torch.allclose(cal.shared()["pupil.phase"][:4].cpu(), PHASE, atol=0.01)
 
 
