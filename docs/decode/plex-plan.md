@@ -787,3 +787,16 @@ and a ConvGRU per channel), 5.7 M on one frame.
 frames, 8 ms on 1, on the H100 while a training shared it; DECODE-Plex 77 -- 85 ms on the Mac's GPU,
 Spline 3D 2C 4 -- 93 ms on its CPU (growing with the density) -- different machines, so the speeds are
 not yet a comparison.
+
+**Colour from 500 photons** (`R1_colour.json`, 6 M samples, decodebox 2.0 h), on the blinking sets,
+Jaccard against Round 0's colour (from 3 000) and DECODE-Plex: 1 000 photons 0.632 / 0.561 / 0.341,
+3 000 photons 0.809 / 0.796 / 0.692, density 1 0.876 / 0.901 / 0.746, 10 000 photons 0.851 / 0.881 /
+0.796, the other densities within 0.004 of Round 0.  The dimmest molecules are found more often; the
+bright ones a little less (a wider range for the same network).  The dye (each matched molecule's share
+in channel 1 against the midpoint of 0.78 and 0.92) is not called better: right 89 % at 1 000 photons
+and 97 % at 3 000 (Round 0 the same), DECODE-Plex 98 % and 99 %.  netfit draws a molecule's share
+uniform over 0 -- 1, so a dim one's share is pulled towards 1/2 and lands below the midpoint;
+DECODE-Plex draws each channel's photons on its own (channel 0 200 -- 20 000, channel 1 1 000 --
+100 000), which puts most of its training's shares between 0.7 and 1, where both dyes are -- a prior
+that fits these dyes.  The fair test is netfit trained with the share over the dyes' window (0.6 --
+1), as a user who knows the two dyes would set it.
