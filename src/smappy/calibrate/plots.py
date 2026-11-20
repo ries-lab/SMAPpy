@@ -449,6 +449,10 @@ def draw_beads(figure, result, selected=(), excluded=(), dual=False):
 
 
 # ------------------------------------------------------------------- the CRLB
+#: the z range, ± nm about focus, the CRLB page opens on; the toolbar's house button shows the whole spline
+CRLB_VIEW_NM = 500.0
+
+
 def draw_crlb(figure, result, dual=False, pixel_nm="auto", calibration=None):
     """The precision the calibration allows against z, its Cramér-Rao lower bound (`calibrate.crlb`):
     x, y and z in nm on one axis, as SMAP draws it; in dual colour the joint bound of a Spline 3D 2C
@@ -492,10 +496,20 @@ def draw_crlb(figure, result, dual=False, pixel_nm="auto", calibration=None):
     ax.set(xlabel="z (nm)", ylabel="CRLB (nm)")
     # scaled to the first curve (the joint fit's in dual colour): a half alone can lose z where its
     # PSF is symmetric, and its peak would flatten everything else
-    first = np.concatenate([curves[0][2]["x_px"] * pixel_nm, curves[0][2]["y_px"] * pixel_nm,
-                            curves[0][2]["z_nm"]])
+    first = np.stack([curves[0][2]["x_px"] * pixel_nm, curves[0][2]["y_px"] * pixel_nm,
+                      curves[0][2]["z_nm"]])
     top = 1.5 * np.nanmax(first) if np.isfinite(first).any() else None
     ax.set_ylim(0, top)
+    # it opens on CRLB_VIEW_NM around focus, scaled to the curves there: over the whole spline the bound's
+    # blow-up at the ends flattens the part one fits in.  The toolbar's house button shows the whole
+    full = (ax.get_xlim(), ax.get_ylim())
+    near = np.abs(z) <= CRLB_VIEW_NM
+    if near.sum() >= 2 and not near.all():
+        inside = first[:, near]
+        ax.set_xlim(max(-CRLB_VIEW_NM, z[near].min()), min(CRLB_VIEW_NM, z[near].max()))
+        if np.isfinite(inside).any():
+            ax.set_ylim(0, 1.2 * np.nanmax(inside))
+        ax.full_view = full                      # what `gui.canvas.toolbar_class`'s house shows
     ax.grid(alpha=.3)
     ax.legend(fontsize=7)
     _sizes(ax)

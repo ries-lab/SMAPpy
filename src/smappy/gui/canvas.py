@@ -33,3 +33,37 @@ def canvas_class():
 
         _canvas = Canvas
     return _canvas
+
+
+_toolbar = None
+
+
+def toolbar_class():
+    """matplotlib's `NavigationToolbar2QT`, whose house button goes to an axis's *full view* when the
+    drawing gave it one: ``ax.full_view = (xlim, ylim)``, which a Qt-free drawing sets as a plain attribute.
+
+    A figure that opens zoomed onto what matters -- the CRLB around focus, its blow-up at the spline's ends
+    clipped -- would otherwise have its house button return to that same zoom, the first view the toolbar
+    saw, and the full range would be reachable only by zooming out by hand.
+    """
+    global _toolbar
+    if _toolbar is None:
+        from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+
+        class Toolbar(NavigationToolbar2QT):
+            def home(self, *args):
+                axes = [a for a in self.canvas.figure.axes if getattr(a, "full_view", None)]
+                if not axes:
+                    return super().home(*args)
+                self.push_current()                  # *back* returns to the zoom
+                for ax in axes:
+                    xlim, ylim = ax.full_view
+                    ax.set_xlim(xlim)
+                    ax.set_ylim(ylim)
+                self.push_current()
+                self.set_history_buttons()
+                self.canvas.draw_idle()
+
+        _toolbar = Toolbar
+    return _toolbar
+

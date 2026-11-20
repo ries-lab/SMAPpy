@@ -1283,12 +1283,18 @@ class PSFCalibrationWindow(QMainWindow):
         return holder
 
     def _page_widget(self, canvas, page) -> tuple:
-        """The canvas, with the page's choices (`Page.controls`) in a row above it; (widget, boxes)."""
-        if not page.controls:
-            return canvas, {}
+        """The canvas under matplotlib's toolbar (zoom, pan, and a house button that goes to the full range
+        where a page opens zoomed, `canvas.toolbar_class`), with the page's choices (`Page.controls`) in a
+        row above it; (widget, boxes)."""
+        from ..gui.canvas import toolbar_class
         holder = QWidget()
         layout = QVBoxLayout(holder)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(toolbar_class()(canvas, holder))
+        if not page.controls:
+            layout.addWidget(canvas, 1)
+            return holder, {}
         row = QHBoxLayout()
         boxes = {}
         for label, choices in page.controls.items():
@@ -1434,6 +1440,8 @@ class PSFCalibrationWindow(QMainWindow):
             return
         if isinstance(message, str) and message:
             self.status_bar.showMessage(message)
+        if canvas.toolbar is not None:          # its views were of the axes just cleared
+            canvas.toolbar.update()
         canvas.draw_idle()
 
     def _selection_changed(self) -> None:

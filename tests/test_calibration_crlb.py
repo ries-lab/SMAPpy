@@ -105,3 +105,33 @@ def test_a_pupil_runs_page_samples_its_spline_once_and_leaves_the_result_unsaved
     page.draw(figure, [], [])
     assert len(calls) == 1 and run.result.calibration is None and run.extra["crlb spline"] is cal
     assert "pixel size 110 nm" in figure.axes[0].get_title() and "ASSUMED" not in line
+
+
+def test_the_page_opens_around_focus_and_the_house_button_shows_the_whole_spline():
+    """The bound climbs at the spline's ends and flattened the part one fits in: the page opens on
+    ±CRLB_VIEW_NM scaled to the curves there, and the toolbar's house goes to the whole range."""
+    from types import SimpleNamespace
+
+    from matplotlib.figure import Figure
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.calibrate.plots import CRLB_VIEW_NM, draw_crlb
+    from smappy.gui.canvas import canvas_class, toolbar_class
+    app = QApplication.instance() or QApplication([])  # noqa: F841 -- the toolbar is a widget
+    cal = astigmatic()                                 # 41 planes 50 nm apart: ±950 nm drawn
+    figure = Figure()
+    canvas = canvas_class()(figure)
+    toolbar = toolbar_class()(canvas, None)
+    draw_crlb(figure, SimpleNamespace(calibration=cal), pixel_nm=100.0)
+    toolbar.update()
+    ax = figure.axes[0]
+    assert ax.get_xlim() == pytest.approx((-CRLB_VIEW_NM, CRLB_VIEW_NM))
+    shown = np.concatenate([line.get_ydata()[np.abs(line.get_xdata()) <= CRLB_VIEW_NM] for line in ax.lines])
+    everything = np.concatenate([line.get_ydata() for line in ax.lines])
+    assert ax.get_ylim()[1] == pytest.approx(1.2 * shown.max())
+    assert ax.get_ylim()[1] < ax.full_view[1][1]        # the ends' climb clipped
+    toolbar.home()
+    assert ax.get_xlim()[0] < -900 and ax.get_xlim()[1] > 900
+    assert ax.get_ylim()[1] == pytest.approx(1.5 * everything.max())
+    toolbar.back()                                       # and back to the zoom
+    assert ax.get_xlim() == pytest.approx((-CRLB_VIEW_NM, CRLB_VIEW_NM))

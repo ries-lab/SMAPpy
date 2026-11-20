@@ -671,7 +671,10 @@ with the model the fitter evaluates and Poisson noise only: on an EMCCD,
 whose gain doubles the variance, the real precision is about √2 worse.  x
 and y are converted with the pixel size the beads' camera gives (the file,
 then the camera database); where neither does, 100 nm is assumed, and the
-title says so in orange.  The status line gives the values at focus.  Good:
+title says so in orange.  The status line gives the values at focus.  The
+graph opens on ±500 nm around focus, scaled to the curves there, so the
+bound's climb at the spline's ends does not flatten them; the house button
+of the toolbar above it shows the whole range, and its magnifier zooms.  Good:
 a z bound that stays low and smooth over the range you want to image; a
 bound that climbs steeply marks where the PSF stops changing with z, and a
 jagged curve a noisy model -- more beads, or more smoothing.  It scales as
