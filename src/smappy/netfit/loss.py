@@ -37,6 +37,10 @@ For one frame with molecules ``m`` (photons, x, y, z) and the network's maps:
   could take a molecule early in training rather than handing all of it to one -- tried for whether
   it learns faster than the exact assignment (2026-11-15).
 
+With more than one channel (`network.Layout`) a molecule is the photons a slot holds -- one count,
+or one per channel -- and x, y, z, so the mixture and the matched loss are over ``P + 3`` dimensions,
+and the background term is summed over the channels' maps.
+
 Each frame's loss is the sum; the batch's the mean over frames.  The part ``loss`` names the terms
 (``terms``) and their weights (``weights``), so that step 4 can change one.
 """
@@ -50,9 +54,16 @@ LOG_2PI = math.log(2 * math.pi)
 
 
 def targets_scaled(batch, scaling):
-    """The batch's molecules in network units: (b, k, 4) photons, x, y, z."""
+    """The batch's molecules in network units: (b, k, P + 3) photons, x, y, z -- ``batch.photons``
+    (b, k) one count, or (b, k, P) one per channel."""
     xyz = batch.xyz
-    return torch.stack([batch.photons / scaling.phot_max, xyz[..., 0], xyz[..., 1], xyz[..., 2] / scaling.z_max], -1)
+    phot = batch.photons if batch.photons.dim() == 3 else batch.photons[..., None]
+    return torch.cat([phot / scaling.phot_max, xyz[..., 0:2], xyz[..., 2:3] / scaling.z_max], -1)
+
+
+def backgrounds(batch):
+    """(b, C): each channel's background of the middle frame, photons a pixel."""
+    return batch.background if batch.background.dim() == 2 else batch.background[:, None]
 
 
 def cell_counts(batch, h: int, w: int, scale: int = 1):
@@ -88,41 +99,46 @@ def window_counts(p, counts, window: int = 3):
     return -torch.log(pn.clamp_min(1e-30)).sum(1) / k
 
 
-def _slot_maps(out, h, w, scale):
-    """p (b, K h w), mu and sig (b, K h w, 4) over every slot of every cell (`network`'s layout)."""
-    from .network import grid, slots_of
-    b = out.shape[0]
-    k = slots_of(out)
-    v = out[:, :9 * k].reshape(b, k, 9, h, w)
+def _slot_maps(out, h, w, scale, layout=None):
+    """p (b, K, h, w), mu and sig (b, K, h, w, P + 3) over every slot of every cell (`network.Layout`)."""
+    from .network import Layout, grid
+    lay = Layout.of(out, layout)
+    b, k, P = out.shape[0], lay.slots, lay.photons
+    v = out[:, :lay.bg].reshape(b, k, lay.per_slot, h, w)
     rows, cols = grid(h, w, scale, out.device, out.dtype)
-    mu = torch.stack([v[:, :, 1], v[:, :, 2] + cols, v[:, :, 3] + rows, v[:, :, 4]], -1)       # (b, K, h, w, 4)
-    sig = v[:, :, 5:9].permute(0, 1, 3, 4, 2)
+    x0 = 1 + P
+    mu = torch.cat([v[:, :, 1:x0], (v[:, :, x0] + cols)[:, :, None], (v[:, :, x0 + 1] + rows)[:, :, None],
+                    v[:, :, x0 + 2:x0 + 3]], 2).permute(0, 1, 3, 4, 2)                 # (b, K, h, w, P + 3)
+    sig = v[:, :, x0 + 3:].permute(0, 1, 3, 4, 2)
     return v[:, :, 0], mu, sig, k
 
 
 def terms(out, batch, scaling, chunk: int = 64, names=("count", "mixture", "background"), window: int = 3,
-          gate_px: float = 1.5, assign: dict | None = None) -> dict:
+          gate_px: float = 1.5, assign: dict | None = None, layout=None) -> dict:
     """Each term of ``names`` per frame, (b,) tensors: DECODE's three by default, ``local_count`` (its
     ``window`` in cells) and ``matched`` (its ``gate_px``, and ``assign``: {"how": "hungarian" or
     "sinkhorn", "eps", "iterations"})."""
     b, _, h, w = out.shape
     # a finer output grid's cells a pixel (`network.TwoStageUNet.out_scale`), from the frames it saw
     scale = w // batch.frames.shape[-1] if batch.frames is not None else 1
-    pk, mu5, sig5, k = _slot_maps(out, h, w, scale)
+    from .network import Layout
+    lay = Layout.of(out, layout)
+    pk, mu5, sig5, _ = _slot_maps(out, h, w, scale, lay)
+    D = mu5.shape[-1]
     p = pk.reshape(b, -1)                                                         # (b, K hw)
-    mu, sig = mu5.reshape(b, -1, 4), sig5.reshape(b, -1, 4)
-    tgt = targets_scaled(batch, scaling)                                          # (b, n, 4)
+    mu, sig = mu5.reshape(b, -1, D), sig5.reshape(b, -1, D)
+    tgt = targets_scaled(batch, scaling)                                          # (b, n, D)
     mask = batch.mask
     n = mask.sum(1).to(out.dtype)
     out_terms = {}
     if "mixture" in names:
         # the mixture: log sum_k w_k N(t; mu_k, sig_k), chunked over the molecules for memory
         log_w = torch.log(p.clamp_min(1e-8)) - torch.log(p.sum(1, keepdim=True).clamp_min(1e-8))
-        norm = -0.5 * 4 * LOG_2PI - torch.log(sig).sum(-1)                       # (b, Khw)
+        norm = -0.5 * D * LOG_2PI - torch.log(sig).sum(-1)                       # (b, Khw)
         mix = torch.zeros(b, device=out.device, dtype=out.dtype)
         for s in range(0, tgt.shape[1], chunk):
-            t = tgt[:, s:s + chunk]                                               # (b, c, 4)
-            z = (t[:, :, None] - mu[:, None]) / sig[:, None]                     # (b, c, Khw, 4)
+            t = tgt[:, s:s + chunk]                                               # (b, c, D)
+            z = (t[:, :, None] - mu[:, None]) / sig[:, None]                     # (b, c, Khw, D)
             lp = torch.logsumexp(log_w[:, None] + norm[:, None] - 0.5 * (z ** 2).sum(-1), -1)   # (b, c)
             mix = mix - (lp * mask[:, s:s + chunk]).sum(1)
         out_terms["mixture"] = mix
@@ -131,7 +147,8 @@ def terms(out, batch, scaling, chunk: int = 64, names=("count", "mixture", "back
         var = (p * (1 - p)).sum(1).clamp_min(1e-6)
         out_terms["count"] = n * (0.5 * (n - mean) ** 2 / var + 0.5 * torch.log(2 * math.pi * var))
     if "background" in names:
-        out_terms["background"] = ((out[:, 9 * k] - (batch.background / scaling.bg_max)[:, None, None]) ** 2).sum((1, 2))
+        bg = backgrounds(batch) / scaling.bg_max                                   # (b, C)
+        out_terms["background"] = ((out[:, lay.bg:lay.bg + lay.backgrounds] - bg[:, :, None, None]) ** 2).sum((1, 2, 3))
     if "local_count" in names:
         out_terms["local_count"] = window_counts(pk.sum(1).clamp(max=1 - 1e-6), cell_counts(batch, h, w, scale), window)
     if "matched" in names:
@@ -156,14 +173,15 @@ def sinkhorn_terms(p, mu, sig, tgt, mask, xyz, scale: int, gate_px: float = 1.5,
     b, k, h, w = p.shape
     pc = p.clamp(1e-6, 1 - 1e-6).reshape(b, -1)                                 # (b, S), S = K h w
     neg = -torch.log1p(-pc)
-    mu, sig = mu.reshape(b, -1, 4), sig.reshape(b, -1, 4)
+    D = mu.shape[-1]
+    mu, sig = mu.reshape(b, -1, D), sig.reshape(b, -1, D)
     rows, cols = torch.meshgrid(torch.arange(h, device=p.device), torch.arange(w, device=p.device), indexing="ij")
     cx = ((cols.reshape(-1) + 0.5) / scale - 0.5).repeat(k)                       # (S,) slot cells' centres
     cy = ((rows.reshape(-1) + 0.5) / scale - 0.5).repeat(k)
     gate = (((cx[None, None] - xyz[..., 0:1]).abs() <= gate_px) & ((cy[None, None] - xyz[..., 1:2]).abs() <= gate_px)
             & mask[..., None])                                                    # (b, n, S)
-    z = (tgt[:, :, None] - mu[:, None]) / sig[:, None]                           # (b, n, S, 4)
-    nll = (torch.log(sig)[:, None] + 0.5 * z ** 2).sum(-1) + 2 * LOG_2PI
+    z = (tgt[:, :, None] - mu[:, None]) / sig[:, None]                           # (b, n, S, D)
+    nll = (torch.log(sig)[:, None] + 0.5 * z ** 2).sum(-1) + 0.5 * D * LOG_2PI
     cost = nll - torch.log(pc)[:, None] + torch.log1p(-pc)[:, None]               # (b, n, S)
     have = gate.any(-1)                                                           # molecules with a slot in reach
     scale_c = cost.detach()[gate].abs().median().clamp_min(1e-3) if gate.any() else cost.new_tensor(1.0)
@@ -222,7 +240,7 @@ def matched_terms(p, mu, sig, tgt, mask, xyz, scale: int, gate_px: float = 1.5) 
     m_sig = sig[frame, :, rr, cc]
     m_p = pc[frame, :, rr, cc]                                                    # (b, n, W2, K)
     zz = (tgt[:, :, None, None] - m_mu) / m_sig
-    nll = (torch.log(m_sig) + 0.5 * zz ** 2).sum(-1) + 2 * LOG_2PI
+    nll = (torch.log(m_sig) + 0.5 * zz ** 2).sum(-1) + 0.5 * zz.shape[-1] * LOG_2PI
     cost = nll - torch.log(m_p) + torch.log1p(-m_p)
     big = torch.finfo(cost.dtype).max / 4
     cost_cpu = torch.where(ok[..., None], cost, torch.full_like(cost, big)).detach().cpu().numpy()
@@ -260,7 +278,7 @@ def matched_terms(p, mu, sig, tgt, mask, xyz, scale: int, gate_px: float = 1.5) 
 DEFAULT_TERMS = {"mixture": ["count", "mixture", "background"], "matched": ["matched", "background"]}
 
 
-def loss(out, batch, scaling, part=None) -> tuple:
+def loss(out, batch, scaling, part=None, layout=None) -> tuple:
     """The batch's loss and its terms' means (0-d tensors), for the part ``part`` (`settings.Part`):
     ``mixture`` (DECODE's) or ``matched``, each with its default terms unless ``terms`` names others."""
     name = part.name if part is not None else "mixture"
@@ -268,7 +286,7 @@ def loss(out, batch, scaling, part=None) -> tuple:
     names = settings.get("terms", DEFAULT_TERMS[name])
     weights = settings.get("weights", {})
     t = terms(out, batch, scaling, names=names, window=settings.get("window", 3), gate_px=settings.get("gate_px", 1.5),
-              assign=settings.get("assign"))
+              assign=settings.get("assign"), layout=layout)
     total = sum(weights.get(k, 1.0) * t[k] for k in names).mean()
     # the terms as tensors: a float() here would wait for the GPU every step (`train`)
     return total, {k: v.detach().mean() for k, v in t.items()}
@@ -298,7 +316,7 @@ def match_nearest(t_xyz, t_mask, f_frame, f_xyz, pixel_nm, lateral_nm: float, ax
 
 
 def reported_term(out, batch, scaling, pixel_nm, threshold: float, how: str, scale: int = 1, head: str = "rep",
-                  lateral_nm: float = 250.0, axial_nm: float = 500.0):
+                  lateral_nm: float = 250.0, axial_nm: float = 500.0, layout=None):
     """The Gaussian negative log-likelihood of what the extraction reports (step 4, an honest sigma):
     each detection matched to its truth (`match_nearest`), per axis ``log sigma + (sg(mu) - x)^2 /
     (2 sigma^2)`` at its pixel, the position ``mu`` detached so that the term trains the sigma to the
@@ -306,14 +324,16 @@ def reported_term(out, batch, scaling, pixel_nm, threshold: float, how: str, sca
     only reports) or "mixture" (the mixture's own sigma, channels 6 - 8).  Per frame, summed over its
     matches; x and y in pixels, z in units of ``z_max``."""
     from . import extract
+    from .network import Layout
+    lay = Layout.of(out, layout)
     with torch.no_grad():
-        e = extract.extract(out.detach(), scaling, threshold, how, scale)
+        e = extract.extract(out.detach(), scaling, threshold, how, scale, layout=lay)
         f_xyz = torch.stack([e["x"], e["y"], e["z_nm"]], 1)
         d, k = match_nearest(batch.xyz, batch.mask, e["frame"], f_xyz, pixel_nm, lateral_nm, axial_nm)
     if not len(d):
         return out.sum() * 0.0
     b, i, j = e["frame"][d], e["row"][d], e["column"][d]
-    first = 10 if head == "rep" else 6
+    first = lay.rep if head == "rep" else lay.sig_xyz(0)
     sig = out[b, first:first + 3, i, j]                                   # (n, 3) with gradient
     truth = batch.xyz[b, k]
     err = f_xyz[d] - truth

@@ -21,6 +21,12 @@ With ``sigma_rep`` (step 4, an honest sigma) three more: 10 - 12, the *reported*
 x, y, z (same units, sigmoid * 3 + 0.001), from a head of their own on the features with their
 gradient stopped -- the loss term that trains them (`loss.reported_term`) cannot move anything else.
 
+**More than one channel** (C = 2, `docs/decode/plex-plan.md` §16): a slot holds ``P`` photon counts
+-- one for biplane, a molecule's total, each plane's share held in its spline; one per channel for
+colour -- so a slot is p, the P photons, x, y, z and their ``P + 3`` uncertainties, ``2 P + 7``
+channels, and the background is one map per channel.  `Layout` says where each is; one channel and
+one count is the table above, so a C = 1 model's output is read as it was saved.
+
 **Slots** (``slots`` K > 1; step 4, close molecules): each cell holds K molecules, not one -- channels
 ``9 k`` to ``9 k + 8`` are slot k's p, photons, offsets, z and their four uncertainties, channel ``9 K``
 the background (one slot is the table above).  Trained by the matched loss (`loss.matched_terms`),
@@ -297,13 +303,19 @@ class TimeGRU(nn.Module):
 
 
 class TwoStageUNet(nn.Module):
-    """``unet2``: a U-Net per frame, shared, then one over their concatenated features, then heads."""
+    """``unet2``: a U-Net per frame, shared, then one over their concatenated features, then heads.
+
+    With ``channels`` C > 1 (`docs/decode/plex-plan.md` §16, DECODE-Plex's arrangement): a per-frame
+    U-Net for each channel, weights of its own, each reading its frame and the ``aux`` offset maps; the
+    time model per channel; the channels' joined features and the offset maps into the union; ``photons``
+    counts a slot and a background per channel (`Layout`)."""
 
     def __init__(self, window: int = 3, features: int = 48, depth_frame: int = 2, depth_union: int = 2,
                  activation: str = "relu", upsample_kernel: int = 3, pool_act: bool = True, out_conv: bool = False,
                  init: str = "default", p_clamp: float | None = None, out_scale: int = 1,
                  blur: bool = False, block: str = "plain", offset_range: float = 1.0, sigma_rep: bool = False,
-                 slots: int = 1, time_model: str = "frame_stack", time_settings: dict | None = None):
+                 slots: int = 1, time_model: str = "frame_stack", time_settings: dict | None = None,
+                 channels: int = 1, photons: int = 1, aux: int = 0):
         """``upsample_kernel``, ``pool_act``, ``out_conv`` (`UNet`), ``init`` "kaiming" (every convolution
         Kaiming-normal, fan in, as DECODE's ``init_custom``; "default" PyTorch's, about 2.4 times smaller)
         and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details; ``out_scale`` the output
@@ -317,15 +329,29 @@ class TwoStageUNet(nn.Module):
         style = {"upsample_kernel": upsample_kernel, "pool_act": pool_act, "out_conv": out_conv, "blur": blur,
                  "block": block}
         self.offset_range = float(offset_range)
-        self.frame = UNet(1, features, depth_frame, act, **style)
+        self.channels, self.aux = int(channels), int(aux)
+        if self.channels < 1 or (self.channels == 1 and self.aux):
+            raise ValueError(f"channels {channels}, aux {aux}: at least one channel, offset maps only with two")
+        # one channel keeps its modules' names, so a C = 1 model saved before is read as it was trained
+        unet = lambda: UNet(1 + self.aux, features, depth_frame, act, **style)
+        if self.channels == 1:
+            self.frame = unet()
+        else:
+            self.frames = nn.ModuleList(unet() for _ in range(self.channels))
         self.time_model = time_model
         if time_model == "frame_stack":
-            self.time, joined = None, window * features
+            times, per_channel = None, window * features
         elif time_model in TIME_MODELS:
-            self.time = TIME_MODELS[time_model](features, window, **(time_settings or {}))
-            joined = self.time.out_channels
+            # made in the order the modules always were, so a seed gives a C = 1 network its old weights
+            times = [TIME_MODELS[time_model](features, window, **(time_settings or {})) for _ in range(self.channels)]
+            per_channel = times[0].out_channels
         else:
             raise ValueError(f"time model {time_model!r}: frame_stack, {', '.join(TIME_MODELS)}")
+        if self.channels == 1:
+            self.time = times[0] if times is not None else None
+        else:
+            self.times = nn.ModuleList(times) if times is not None else None
+        joined = self.channels * per_channel + self.aux
         self.union = UNet(joined, features, depth_union, act, **style)
         self.p_clamp = p_clamp
         self.out_scale = int(out_scale)
@@ -339,9 +365,14 @@ class TwoStageUNet(nn.Module):
         if self.slots < 1 or (self.slots > 1 and sigma_rep):
             raise ValueError(f"slots {slots}: at least 1, and 1 with sigma_rep")
         k = self.slots
-        self.heads = nn.ModuleDict({"p": Head(features, k, act), "phot_xyz": Head(features, 4 * k, act),
-                                    "sigma": Head(features, 4 * k, act), "bg": Head(features, 1, act)})
+        self.photons = int(photons)
+        if self.photons not in (1, self.channels):
+            raise ValueError(f"photons {photons}: 1, or one per channel ({self.channels})")
+        v = self.photons + 3
+        self.heads = nn.ModuleDict({"p": Head(features, k, act), "phot_xyz": Head(features, v * k, act),
+                                    "sigma": Head(features, v * k, act), "bg": Head(features, self.channels, act)})
         self.sigma_rep = bool(sigma_rep)
+        self.layout = Layout(slots=k, photons=self.photons, backgrounds=self.channels, reported=self.sigma_rep)
         if self.sigma_rep:
             self.heads["sigma_rep"] = Head(features, 3, act)
         self.fold = 2 ** max(depth_frame, depth_union)        # frames must be a multiple of this
@@ -366,9 +397,12 @@ class TwoStageUNet(nn.Module):
         p0 = p0 / self.out_scale ** 2 / self.slots    # the same molecules over more cells and slots
         nn.init.constant_(self.heads["p"].net[-1].bias, math.log(p0 / (1 - p0)))
 
-    def forward(self, x, windows: int = 1):
+    def forward(self, x, windows: int = 1, aux=None):
         """``x`` (b, window, rows, columns) in network units -> (b, 9 K + 1, rows * s, columns * s), ``s``
-        the ``out_scale``, K the ``slots`` (13 channels with ``sigma_rep``).
+        the ``out_scale``, K the ``slots`` (13 channels with ``sigma_rep``; `Layout`).
+
+        With ``channels`` C > 1, ``x`` is (b, C, window, rows, columns) and ``aux`` the offset maps,
+        (b, A, rows, columns) or (A, rows, columns) for every sample alike.
 
         ``windows`` > 1: ``x`` is (n, window + windows - 1, rows, columns), n movies each read as
         ``windows`` windows shifted by a frame, and the output (n windows, ...), a movie's windows
@@ -377,19 +411,38 @@ class TwoStageUNet(nn.Module):
         one -- nothing in the per-frame U-Net mixes samples -- for about 1 + (windows - 1) / window
         frames a window instead of window frames (training on cut movies, `simulate.draw_batch`'s
         ``movie_windows``, and the predictor's sliding window)."""
-        n, L, h, w = x.shape
-        t = L - windows + 1
-        feats = self.frame(x.reshape(n * L, 1, h, w)).reshape(n, L, -1, h, w)
-        if windows > 1:
-            idx = torch.arange(windows, device=x.device)[:, None] + torch.arange(t, device=x.device)[None]
-            feats = feats[:, idx]                                   # (n, windows, t, F, h, w)
-        feats = feats.reshape(n * windows, t, -1, h, w)
-        feats = feats.reshape(n * windows, -1, h, w) if self.time is None else self.time(feats)
-        u = self.refine(self.union(feats))
+        if self.channels == 1:
+            joined = self._channel(self.frame, self.time, x, None, windows)
+        else:
+            n, C, _, h, w = x.shape
+            if C != self.channels or aux is None or aux.shape[-3] != self.aux:
+                raise ValueError(f"{self.channels} channels and {self.aux} offset maps expected, "
+                                 f"got {C} and {None if aux is None else aux.shape[-3]}")
+            aux = aux.to(x.dtype).expand(n, self.aux, h, w)
+            times = self.times if self.times is not None else [None] * C
+            per = [self._channel(self.frames[c], times[c], x[:, c], aux, windows) for c in range(C)]
+            # a movie's windows share its offset maps
+            joined = torch.cat(per + [aux.repeat_interleave(windows, 0)], 1)
+        u = self.refine(self.union(joined))
         # the heads in full precision, whatever the backbone ran in: in bf16 an output of z over
         # +-1000 nm resolves only about 4 nm (`train`'s ``precision``)
         with torch.autocast(u.device.type, enabled=False):
             return self._heads(u.float())
+
+    def _channel(self, frame_net, time, x, aux, windows):
+        """One channel's frames ``x`` (n, L, h, w) through its per-frame U-Net (each frame with the
+        offset maps ``aux`` (n, A, h, w) beside it) and its time model: (n windows, F', h, w)."""
+        n, L, h, w = x.shape
+        t = L - windows + 1
+        inp = x.reshape(n * L, 1, h, w)
+        if aux is not None:
+            inp = torch.cat([inp, aux.repeat_interleave(L, 0)], 1)
+        feats = frame_net(inp).reshape(n, L, -1, h, w)
+        if windows > 1:
+            idx = torch.arange(windows, device=x.device)[:, None] + torch.arange(t, device=x.device)[None]
+            feats = feats[:, idx]                                   # (n, windows, t, F, h, w)
+        feats = feats.reshape(n * windows, t, -1, h, w)
+        return feats.reshape(n * windows, -1, h, w) if time is None else time(feats)
 
     def _heads(self, u):
         values = self.heads["phot_xyz"](u)
@@ -399,23 +452,78 @@ class TwoStageUNet(nn.Module):
         reach = self.offset_range / self.out_scale    # +-offset_range cells, in pixels
         sigma = torch.sigmoid(self.heads["sigma"](u)) * SIGMA_SCALE + SIGMA_FLOOR
         maps = []
+        P = self.photons
+        n = P + 3
         for k in range(self.slots):
-            v = values[:, 4 * k:4 * k + 4]
-            xyz = torch.tanh(v[:, 1:])
+            v = values[:, n * k:n * k + n]
+            xyz = torch.tanh(v[:, P:])
             if reach != 1:
                 xyz = torch.cat([xyz[:, :2] * reach, xyz[:, 2:]], 1)
-            maps += [torch.sigmoid(logit[:, k:k + 1]), torch.sigmoid(v[:, :1]), xyz, sigma[:, 4 * k:4 * k + 4]]
+            maps += [torch.sigmoid(logit[:, k:k + 1]), torch.sigmoid(v[:, :P]), xyz, sigma[:, n * k:n * k + n]]
         maps.append(torch.sigmoid(self.heads["bg"](u)))
         if self.sigma_rep:
             maps.append(torch.sigmoid(self.heads["sigma_rep"](u.detach())) * SIGMA_SCALE + SIGMA_FLOOR)
         return torch.cat(maps, 1)
 
 
-def slots_of(out) -> int:
-    """The slots a network's output holds (`TwoStageUNet`'s layout): 9 channels each and the background,
-    13 channels one slot with ``sigma_rep``'s three."""
-    c = out.shape[1]
-    return 1 if c == 13 else (c - 1) // 9
+@dataclass(frozen=True)
+class Layout:
+    """Where each of a network's output channels is (the module's docstring): ``slots`` K of
+    ``2 photons + 7`` channels each -- p, the ``photons`` counts, x, y, z, then their sigmas in the same
+    order -- the ``backgrounds`` maps, and with ``reported`` the reporting head's three sigmas."""
+    slots: int = 1
+    photons: int = 1
+    backgrounds: int = 1
+    reported: bool = False
+
+    @property
+    def per_slot(self) -> int:
+        return 2 * self.photons + 7
+
+    def p(self, k: int = 0) -> int:
+        return k * self.per_slot
+
+    def phot(self, k: int = 0) -> int:
+        """The first of slot ``k``'s photon counts."""
+        return k * self.per_slot + 1
+
+    def xyz(self, k: int = 0) -> int:
+        """Slot ``k``'s x; y and z follow."""
+        return k * self.per_slot + 1 + self.photons
+
+    def sig(self, k: int = 0) -> int:
+        """The first of slot ``k``'s sigmas: the photons', then x, y, z."""
+        return k * self.per_slot + 4 + self.photons
+
+    def sig_xyz(self, k: int = 0) -> int:
+        return self.sig(k) + self.photons
+
+    @property
+    def bg(self) -> int:
+        return self.slots * self.per_slot
+
+    @property
+    def rep(self) -> int:
+        """The reporting head's x sigma; y and z follow (``reported`` only)."""
+        return self.bg + self.backgrounds
+
+    @property
+    def channels(self) -> int:
+        return self.bg + self.backgrounds + 3 * self.reported
+
+    @classmethod
+    def of(cls, out, layout: Layout | None = None) -> Layout:
+        """``layout`` if given, else the one a network's output of C = 1 has: 9 channels a slot and the
+        background, 13 channels one slot with ``sigma_rep``'s three."""
+        if layout is not None:
+            return layout
+        c = out.shape[1]
+        return cls(slots=1, reported=True) if c == 13 else cls(slots=(c - 1) // 9)
+
+
+def slots_of(out, layout: Layout | None = None) -> int:
+    """The slots a network's output holds (`Layout.of`)."""
+    return Layout.of(out, layout).slots
 
 
 BACKBONES = {"unet2": TwoStageUNet}

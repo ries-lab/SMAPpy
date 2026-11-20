@@ -41,42 +41,62 @@ Z_PER_PX = 200.0                # nm of z that weigh as one pixel when a detecti
 KMEANS_ITERATIONS = 10
 
 
-def physical(out, scaling, scale: int = 1):
+def physical(out, scaling, scale: int = 1, layout=None):
     """(b, C, h, w) network units -> the same in photons, columns / rows, nm; ``scale`` the output
-    grid's cells a pixel.  Every slot's (`network.slots_of`)."""
-    from .network import grid, slots_of
+    grid's cells a pixel.  Every slot's (`network.Layout`)."""
+    from .network import Layout, grid
+    lay = Layout.of(out, layout)
     _, _, h, w = out.shape
     rows, cols = grid(h, w, scale, out.device, out.dtype)
     y = out.clone()
-    k = slots_of(out)
-    for s in range(k):
-        o = 9 * s
-        y[:, o + 1] *= scaling.phot_max
-        y[:, o + 2] += cols
-        y[:, o + 3] += rows
-        y[:, o + 4] *= scaling.z_max
-        y[:, o + 5] *= scaling.phot_max
-        y[:, o + 8] *= scaling.z_max
-    y[:, 9 * k] *= scaling.bg_max
-    if y.shape[1] == 13:                      # the reported sigmas (`network`, ``sigma_rep``)
-        y[:, 12] *= scaling.z_max
+    P = lay.photons
+    for s in range(lay.slots):
+        x0, s0 = lay.xyz(s), lay.sig(s)
+        y[:, lay.phot(s):x0] *= scaling.phot_max
+        y[:, x0] += cols
+        y[:, x0 + 1] += rows
+        y[:, x0 + 2] *= scaling.z_max
+        y[:, s0:s0 + P] *= scaling.phot_max
+        y[:, s0 + P + 2] *= scaling.z_max
+    y[:, lay.bg:lay.bg + lay.backgrounds] *= scaling.bg_max
+    if lay.reported:                          # the reported sigmas (`network`, ``sigma_rep``)
+        y[:, lay.rep + 2] *= scaling.z_max
     return y
 
 
-def by_threshold(y, threshold: float) -> dict:
+def _values(v, lay, k: int = 0) -> dict:
+    """A detection's values from its cell's physical channels ``v`` (m, channels), slot ``k``: photons the
+    total, and with a count per channel ``photons_c`` (m, P) and their sigmas beside it."""
+    P, x0, s0 = lay.photons, lay.xyz(k), lay.sig(k)
+    phot, sig_p = v[:, lay.phot(k):x0], v[:, s0:s0 + P]
+    out = {"photons": phot.sum(1), "photons_err": torch.sqrt((sig_p ** 2).sum(1)),
+           "x_err": v[:, s0 + P], "y_err": v[:, s0 + P + 1], "z_err_nm": v[:, s0 + P + 2]}
+    if lay.backgrounds == 1:
+        out["background"] = v[:, lay.bg]
+    else:
+        out["background_c"] = v[:, lay.bg:lay.bg + lay.backgrounds]
+        out["background"] = out["background_c"][:, 0]
+    if P > 1:
+        out.update(photons_c=phot, photons_c_err=sig_p)
+    return out
+
+
+def by_threshold(y, threshold: float, layout=None) -> dict:
     """``threshold`` (step 4, the matched loss): every slot of every cell whose own p reaches the
     threshold is a molecule, at its own values -- no peaks, no sums, no merging, the matched loss having
     taught one slot per molecule (`loss.matched_terms`).  ``y`` physical (`physical`)."""
-    from .network import slots_of
-    k = slots_of(y)
+    from .network import Layout
+    lay = Layout.of(y, layout)
+    k, ps = lay.slots, lay.per_slot
     b, h, w = y.shape[0], y.shape[2], y.shape[3]
-    v = y[:, :9 * k].reshape(b, k, 9, h, w)
+    v = y[:, :lay.bg].reshape(b, k, ps, h, w)
     f, s, i, j = (v[:, :, 0] >= threshold).nonzero(as_tuple=True)
-    u = v[f, s, :, i, j]                                                     # (m, 9)
-    return {"frame": f, "x": u[:, 2], "y": u[:, 3], "z_nm": u[:, 4], "photons": u[:, 1], "prob": u[:, 0],
-            "photons_err": u[:, 5], "x_err": u[:, 6], "y_err": u[:, 7], "z_err_nm": u[:, 8],
-            "background": y[f, 9 * k, i, j], "row": i, "column": j, "slot": s,
-            "split": torch.zeros_like(i)}
+    u = v[f, s, :, i, j]                                                     # (m, per slot)
+    one = Layout(photons=lay.photons, backgrounds=lay.backgrounds)          # a slot's values as slot 0's
+    cell = torch.cat([u, y[f, lay.bg:lay.bg + lay.backgrounds, i, j]], 1)
+    x0 = one.xyz()
+    return {"frame": f, "x": u[:, x0], "y": u[:, x0 + 1], "z_nm": u[:, x0 + 2], "prob": u[:, 0],
+            **_values(cell, one), "row": i, "column": j, "slot": s, "split": torch.zeros_like(i)}
 
 
 _KERNELS = {"plus": [[0.0, 1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0]], "square": [[1.0] * 3] * 3}
@@ -95,7 +115,7 @@ def detections(p, threshold, raw: float = RAW_P, summed_over: str = "plus"):
     return b, i, j, prob[b, i, j]
 
 
-def mixture_peak(y, b, i, j):
+def mixture_peak(y, b, i, j, layout=None):
     """Each detection's position at the peak of its 3 x 3 neighbourhood's p-weighted mixture (mean
     shift with diagonal Gaussians), in x, y and z; (m, 3) columns, rows, nm."""
     _, _, h, w = y.shape
@@ -106,8 +126,11 @@ def mixture_peak(y, b, i, j):
     ii, jj = ii.clamp(0, h - 1), jj.clamp(0, w - 1)
     bb = b[:, None].expand_as(ii)
     p = y[bb, 0, ii, jj] * inside
-    mu = torch.stack([y[bb, c, ii, jj] for c in (2, 3, 4)], -1)
-    sig = torch.stack([y[bb, c, ii, jj] for c in (6, 7, 8)], -1).clamp_min(1e-3)
+    from .network import Layout
+    lay = Layout.of(y, layout)
+    x0, s0 = lay.xyz(), lay.sig_xyz()
+    mu = torch.stack([y[bb, c, ii, jj] for c in (x0, x0 + 1, x0 + 2)], -1)
+    sig = torch.stack([y[bb, c, ii, jj] for c in (s0, s0 + 1, s0 + 2)], -1).clamp_min(1e-3)
     x = mu[:, 4].clone()
     inv = 1 / sig ** 2
     for _ in range(MEAN_SHIFT_ITERATIONS):
@@ -117,7 +140,7 @@ def mixture_peak(y, b, i, j):
     return x
 
 
-def gathered(y, b, xyz, scale: int = 1):
+def gathered(y, b, xyz, scale: int = 1, layout=None):
     """Each detection's gathered p and the cells it gathered: ``(mass (m,), window cells' index into
     the map's flattened (b, h, w), their ownership mask (m, k))``, every cell with p above
     `GATHER_P` given to the nearest detection of its frame whose position is within `GATHER_PX`."""
@@ -138,7 +161,9 @@ def gathered(y, b, xyz, scale: int = 1):
     inside = (ii >= 0) & (ii < h) & (jj >= 0) & (jj < w)
     cand = owner_map[cb[:, None].expand_as(ii), ii.clamp(0, h - 1), jj.clamp(0, w - 1)]
     cand = torch.where(inside, cand, torch.full_like(cand, -1))
-    pos = torch.stack([y[cb, 2, ri, rj], y[cb, 3, ri, rj]], -1)                  # the cells' positions
+    from .network import Layout
+    x0 = Layout.of(y, layout).xyz()
+    pos = torch.stack([y[cb, x0, ri, rj], y[cb, x0 + 1, ri, rj]], -1)            # the cells' positions
     dist = torch.linalg.norm(xyz[cand.clamp_min(0), :2] - pos[:, None], dim=-1)
     dist = torch.where(cand >= 0, dist, torch.full_like(dist, float("inf")))
     best, k = dist.min(1)
@@ -158,14 +183,16 @@ def gathered(y, b, xyz, scale: int = 1):
     return mass, flat, mine
 
 
-def split_two(y, flat, mine):
+def split_two(y, flat, mine, layout=None):
     """Two positions (m, 2, 3) for each detection from its own cells (`gathered`): a p-weighted
     2-means in x, y and z / `Z_PER_PX`, started along the cells' principal axis."""
     nb, c, h, w = y.shape
     yf = y.permute(0, 2, 3, 1).reshape(nb * h * w, c)
     v = yf[flat]                                                                  # (m, k, c)
     p = v[..., 0] * mine
-    pts = torch.stack([v[..., 2], v[..., 3], v[..., 4] / Z_PER_PX], -1)          # (m, k, 3)
+    from .network import Layout
+    x0 = Layout.of(y, layout).xyz()
+    pts = torch.stack([v[..., x0], v[..., x0 + 1], v[..., x0 + 2] / Z_PER_PX], -1)   # (m, k, 3)
     tot = p.sum(1, keepdim=True).clamp_min(1e-12)
     mu = (p[..., None] * pts).sum(1) / tot
     dev = pts - mu[:, None]
@@ -185,29 +212,32 @@ def split_two(y, flat, mine):
 
 
 def extract(out, scaling, threshold: float, how: str = "lookahead", scale: int = 1,
-            summed_over: str | None = None, split: float | None = None) -> dict:
+            summed_over: str | None = None, split: float | None = None, layout=None) -> dict:
     """The molecules of every frame of ``out`` (b, 10, h, w), as tensors: frame (in the batch),
     x, y (columns, rows), z_nm, photons, prob, their uncertainties, background.  ``scale``: the
     output grid's cells a pixel (`network.TwoStageUNet.out_scale`); ``summed_over`` "plus" or
     "square", by default plus at scale 1 and square on a finer grid; ``split`` a cut on the
     gathered p above which a detection is two molecules (`gathered`, `split_two`; a "split" 0 / 1 /
     2 column says which: 1 and 2 the two halves, the values but the position the detection's)."""
-    y = physical(out, scaling, scale)
+    from .network import Layout
+    lay = Layout.of(out, layout)
+    y = physical(out, scaling, scale, lay)
     if how == "threshold":
-        return by_threshold(y, threshold)
+        return by_threshold(y, threshold, lay)
     b, i, j, prob = detections(y[:, 0], threshold, summed_over=summed_over or ("plus" if scale == 1 else "square"))
-    v = y[b, :, i, j]                                                             # (m, 10)
-    xyz = v[:, 2:5]
+    v = y[b, :, i, j]                                                             # (m, channels)
+    x0 = lay.xyz()
+    xyz = v[:, x0:x0 + 3]
     if how == "mixture_peak" and len(b):
-        xyz = mixture_peak(y, b, i, j)
+        xyz = mixture_peak(y, b, i, j, lay)
     elif how not in ("lookahead", "mixture_peak"):
         raise ValueError(f"extraction {how!r}: lookahead, mixture_peak or threshold")
     half = torch.zeros(len(b), dtype=torch.long, device=out.device)
     if split is not None and len(b):
-        mass, flat, mine = gathered(y, b, xyz, scale)
+        mass, flat, mine = gathered(y, b, xyz, scale, lay)
         two = torch.nonzero(mass >= split).squeeze(1)
         if len(two):
-            pos = split_two(y, flat[two], mine[two])
+            pos = split_two(y, flat[two], mine[two], lay)
             xyz = xyz.clone()
             xyz[two] = pos[:, 0]
             idx = torch.cat([torch.arange(len(b), device=out.device), two])
@@ -215,10 +245,10 @@ def extract(out, scaling, threshold: float, how: str = "lookahead", scale: int =
             xyz = torch.cat([xyz, pos[:, 1]])
             half = torch.cat([half, torch.full_like(two, 2)])
             half[two] = 1
-    out = {"frame": b, "x": xyz[:, 0], "y": xyz[:, 1], "z_nm": xyz[:, 2], "photons": v[:, 1], "prob": prob,
-           "photons_err": v[:, 5], "x_err": v[:, 6], "y_err": v[:, 7], "z_err_nm": v[:, 8], "background": v[:, 9],
+    out = {"frame": b, "x": xyz[:, 0], "y": xyz[:, 1], "z_nm": xyz[:, 2], "prob": prob, **_values(v, lay),
            "row": i, "column": j, "split": half}
-    if v.shape[1] > 10:                       # a head that only reports: its sigma is the one reported
+    if lay.reported:                          # a head that only reports: its sigma is the one reported
+        r = lay.rep
         out.update(x_err_mix=out["x_err"], y_err_mix=out["y_err"], z_err_mix_nm=out["z_err_nm"],
-                   x_err=v[:, 10], y_err=v[:, 11], z_err_nm=v[:, 12])
+                   x_err=v[:, r], y_err=v[:, r + 1], z_err_nm=v[:, r + 2])
     return out
