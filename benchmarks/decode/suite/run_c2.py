@@ -367,7 +367,9 @@ def fit_netfit(name, out, model):
     xy = two.on_frame(np.c_[r["x_pix"] + c0, r["y_pix"] + r0])
     keep = {"frame": r["frame"], "x_nm": xy[:, 0] * S.PIXEL_NM[0], "y_nm": xy[:, 1] * S.PIXEL_NM[1], "z_nm": r["z_nm"],
             "x_err_nm": r["x_err_pix"] * S.PIXEL_NM[0], "y_err_nm": r["y_err_pix"] * S.PIXEL_NM[1],
-            "z_err_nm": r["z_err_nm"], "prob": r["prob"], "photons": r["photons"]}
+            "z_err_nm": r["z_err_nm"], "prob": r["prob"], "photons": r["photons"],
+            # where the network put them on its own grid, for the pixelation (`pixelation`)
+            "x_grid_px": r["x_pix"] + c0, "y_grid_px": r["y_pix"] + r0}
     if "photons_c" in r:
         keep["photons_c"] = two.in_order(r["photons_c"])
     np.savez(out, **keep)
@@ -425,7 +427,50 @@ def score(name, locs, keep):
     out = R.score_truth(truth, locs, keep, S.PIXEL_NM, (shape[1], shape[0]))
     out["area_molecules"] = int(sel.sum())
     out["by_z"] = by_z(truth, locs, keep, shape)
+    out["pixelation"] = pixelation(truth, locs, keep, shape)
     return out
+
+
+PIXEL_Z_BINS = (0, 150, 300, 500, 700, 1000)
+PIXEL_PHOTON_BINS = (0, 1000, 2000, 4000, 8000, 1e9)
+
+
+def pixelation(truth, locs, keep, shape):
+    """How far the matched localizations' sub-pixel positions are from uniform (KS, the larger of x's and
+    y's; the truth's own, at counting noise, beside it), overall and in bins of the true |z| and photons.
+    A netfit fit is measured on its own grid (``x_grid_px``): a model reading the secondary half as its
+    grid (`TwoChannels.main`) pixelates in that half's pixels, which the registration smears on the main
+    half's.  Other fitters on the frame's pixels, their grid's but for a flip."""
+    import itertools
+
+    from score_sets import match
+    ok = R.kept(locs, keep)
+    f = {"frame": np.asarray(locs["frame"])[ok].astype(np.int64), "x_px": np.asarray(locs["x_nm"])[ok] / S.PIXEL_NM[0],
+         "y_px": np.asarray(locs["y_nm"])[ok] / S.PIXEL_NM[1], "z_nm": np.asarray(locs["z_nm"])[ok]}
+    grid = "x_grid_px" in locs
+    gx, gy = ((np.asarray(locs["x_grid_px"])[ok], np.asarray(locs["y_grid_px"])[ok]) if grid else (f["x_px"], f["y_px"]))
+    w, h = shape[1], shape[0]
+    fi = R._inside(f["x_px"], f["y_px"], w, h)
+    f = {k: v[fi] for k, v in f.items()}
+    gx, gy = gx[fi], gy[fi]
+    ti = R._inside(truth["x_px"], truth["y_px"], w, h)
+    t = {k: v[ti] for k, v in truth.items()}
+    a, b = match(t, f, S.PIXEL_NM)
+    fx, fy, tx, ty = gx[b], gy[b], t["x_px"][a], t["y_px"][a]
+    ks = lambda x, y: max(R.ks_uniform(x), R.ks_uniform(y))
+
+    def binned(v, edges):
+        rows = []
+        for lo, hi in itertools.pairwise(edges):
+            s = (v >= lo) & (v < hi)
+            if s.sum() >= 300:
+                rows.append({"lo": float(lo), "hi": float(hi), "n": int(s.sum()), "ks": ks(fx[s], fy[s]),
+                             "ks_truth": ks(tx[s], ty[s])})
+        return rows
+    return {"grid": "network" if grid else "frame", "n": len(a), "ks": ks(fx, fy), "ks_truth": ks(tx, ty),
+            "by_abs_z": binned(np.abs(t["z_nm"][a]), PIXEL_Z_BINS),
+            "by_photons": binned(t["photons"][a], PIXEL_PHOTON_BINS),
+            "subpixel_x": R.subpixel_histogram(fx), "subpixel_y": R.subpixel_histogram(fy)}
 
 
 def by_z(truth, locs, keep, shape, width=100.0):
