@@ -627,6 +627,19 @@ drawn per frame) on B7 drawn again with a steady one (`SimulationSettings.backgr
 level a movie, 2 % from frame to frame; same molecules' statistics): Jaccard 0.568 on both, and on
 sparse twins (2 per 40 x 40 px, 8192 samples) precision 0.961 / 0.961, recall 0.786 / 0.787.  So
 DECODE-Plex's colour false localizations (above) are its training's steady window meeting jumps, not a
-general weakness of multi-frame networks.  Whether training on a steady background gains anything is
-the pilot running on gpuvm (`sbg_queue.sh`: GMN7C with `background_jitter` 0.02, three seeds, 6 M
-samples, each scored on B7, B7_l3 and B7_d2, each with the background jumping and steady).
+general weakness of multi-frame networks.
+
+**Training on a steady background gains nothing** (gpuvm, 2026-11-20, `sbg_queue.sh`: GMN7C with
+`background_jitter` 0.02, three seeds, 6 M samples each, against GMN7C_s0 / s2 trained per frame).
+Jaccard, background jumping / steady:
+
+| trained on | B7 | B7_l3 (on-time 3 frames) | B7_d2 (sparse) |
+| --- | --- | --- | --- |
+| per frame (2 seeds) | 0.568 / 0.568 | 0.696 / 0.697 | 0.757 / 0.759 |
+| steady (3 seeds) | 0.549 / 0.569 | 0.680 / 0.700 | 0.610 / 0.754 |
+
+On steady test background the two are equal (within 0.003; RMSE lateral / axial the same, 61/70 nm on
+B7); on a jumping one the steady-trained network loses 0.02 Jaccard on B7 and 0.15 on sparse frames,
+where its precision falls from 0.95 to 0.78 -- DECODE-Plex's colour failure, reproduced.  So netfit
+keeps the background drawn per frame for C = 2 too: it costs nothing where the background is steady
+and protects where it is not.  `background_jitter` stays, for test sets.
