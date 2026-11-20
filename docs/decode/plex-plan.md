@@ -715,3 +715,36 @@ mixture loss with the reported sigma, `mixture_peak`.
 **Scored** on the C = 2 sets by `run_c2` like DECODE-Plex, on the same overlap; a netfit C = 2 test set
 per context for the training's own scores.  Round 0 is done when both contexts train and score; the
 target is DECODE-Plex's numbers (§15) at each density.
+
+### Round 0, the first result (2026-11-20)
+
+One seed a context, 6 M samples each (`benchmarks/decode/netfit_c2/R0_*.json`: 64 features, depth 2,
+ConvGRU over 3 frames with an on-time of 1 frame, the mixture loss with the reported sigma; biplane on
+gpuvm, 1.7 h; colour on decodebox, 2 h), scored by `run_c2 netfit` on the C = 2 sets beside DECODE-Plex
+(§15's overlap, the same scored area).  Jaccard, and lateral / axial RMSE at |z| < 300 nm:
+
+| set | netfit J | DECODE-Plex J | netfit lat / ax | DECODE-Plex lat / ax |
+| --- | --- | --- | --- | --- |
+| biplane density 1 / 5 / 15 / 25 / 50 | 0.879 / 0.900 / 0.895 / 0.863 / 0.797 | 0.906 / 0.925 / 0.899 / 0.851 / 0.733 | 10.5 / 25.4 at 1, 24.3 / 55.1 at 50 | 10.7 / 24.2, 25.9 / 65.1 |
+| biplane 1 000 / 3 000 / 10 000 photons | 0.776 / 0.955 / 0.910 | 0.742 / 0.923 / 0.923 | 5.9 / 13.0 at 10 000 | 6.2 / 13.2 |
+| colour density 1 / 5 / 15 / 25 / 50 | 0.954 / 0.959 / 0.926 / 0.876 / 0.780 | 0.805 / 0.942 / 0.910 / 0.871 / 0.782 | 10.3 / 18.3 at 1, 50.5 / 79.8 at 50 | 12.0 / 21.1, 47.1 / 82.1 |
+| colour 1 000 / 3 000 / 10 000 photons | 0.927 / 0.987 / 0.971 | 0.769 / 0.985 / 0.922 | 10.8 / 18.3 at 10 000 | 11.5 / 18.8 |
+
+netfit's errors are as small or smaller nearly everywhere and it finds more molecules at every density
+(biplane recall 0.865 against 0.758 at density 50).  Where it loses is biplane's precision at low
+density (0.905 against 0.934 at density 1): its extra false localizations are faint (median 650
+photons) and far from any molecule of their frame, and 28 % of them lie within 1.5 px of a molecule in
+the frame before or after (DECODE-Plex's: 1 %).  netfit was trained on molecules that stay on over
+frames, so a bright spot next door is a faint tail to it; the C = 2 sets put each molecule in one frame
+alone, so there is never a tail -- the sets' lack, as §15's background was.
+
+**Colour assignment** (each matched molecule's share of its light in channel 1 against its dye's,
+0.78 or 0.92; the dye called by the midpoint): netfit and DECODE-Plex alike at density 1 -- 15 and at
+10 000 photons (share error sd 0.012 -- 0.020, the right dye 99.3 -- 100 %), and netfit's photons right
+where DECODE-Plex's are 9 -- 15 % high.  At 1 000 photons netfit calls the right dye 90 % of the time
+against 97 %: its share is pulled 0.045 towards 1/2 and its photons 7 % low, the molecules below its
+training's total of 3 000 -- 40 000 (DECODE-Plex's channels were trained from 200 and 1 000 photons).
+
+**Next** (open): the sets drawn with molecules that blink over frames, as real movies do and as the
+time model is for -- or netfit on single frames for biplane, matching the sets as they are; colour's
+training range down to the sets' 1 000 photons; then seeds, and the study of §7.
