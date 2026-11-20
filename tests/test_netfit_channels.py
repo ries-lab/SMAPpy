@@ -196,3 +196,15 @@ def test_a_total_and_a_share_come_out_as_each_channel_s_photons():
     b = Batch(torch.zeros(1, 2, 3, 3, 3), torch.tensor([[[1.0, 1.0, 0.0]]]), torch.tensor([[[1000.0, 3000.0]]]),
               torch.tensor([[True]]), torch.zeros(1, 2))
     torch.testing.assert_close(loss.targets_scaled(b, sc, lay)[0, 0, :2], torch.tensor([0.4, 0.75]))
+
+
+def test_known_dyes_put_each_molecule_s_share_near_one_of_them():
+    cal = dual()
+    two = CH.TwoChannels.from_calibration(cal)
+    sim = SimulationSettings(frame_px=24, photons_range=(1000.0, 5000.0), background=(10.0, 20.0), z_nm=(-300.0, 300.0))
+    chs = ChannelSettings(kind="colour", dyes=[0.78, 0.92], share_sd=0.01, share=(0.6, 1.0))
+    b = draw_batch_2c([SplineRenderer(s, whole=True) for s in CH.splines(cal, "colour")], CH.Grid(two), sim,
+                      CameraModel(), chs, 8, torch.Generator().manual_seed(5))
+    share = (b.photons[..., 1] / b.photons.sum(-1))[b.mask]
+    near = torch.minimum((share - 0.78).abs(), (share - 0.92).abs())
+    assert (near < 0.05).all() and ((share - 0.78).abs() < 0.05).any() and ((share - 0.92).abs() < 0.05).any()

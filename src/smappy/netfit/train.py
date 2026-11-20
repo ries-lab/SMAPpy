@@ -187,6 +187,8 @@ def load_settings(path) -> TrainingSettings:
     ch = dict(d.get("channels", {}))
     if ch.get("share") is not None:
         ch["share"] = tuple(ch["share"])
+    if ch.get("dyes") is not None:
+        ch["dyes"] = [float(v) for v in ch["dyes"]]
     if ch.get("background") is not None:
         ch["background"] = [tuple(r) for r in ch["background"]]
     return TrainingSettings(simulation=sim, camera=cam, parts=parts, calibration=d.get("calibration"),

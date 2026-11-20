@@ -800,3 +800,11 @@ DECODE-Plex draws each channel's photons on its own (channel 0 200 -- 20 000, ch
 100 000), which puts most of its training's shares between 0.7 and 1, where both dyes are -- a prior
 that fits these dyes.  The fair test is netfit trained with the share over the dyes' window (0.6 --
 1), as a user who knows the two dyes would set it.
+
+**The dyes' shares are the data's to say** (Jonas, 2026-11-20): approximate brightness ratios from the
+prefit, or typed.  netfit's colour training then draws each molecule's share around one of them
+(`ChannelSettings.dyes`, normal with ``share_sd`` 0.03, inside ``share``) -- or, a ratio known only
+roughly, uniform over a window (``share``).  Both queued after the study, three seeds each:
+``S_colour_dyes`` (0.78 and 0.92, decodebox) and ``S_colour_win`` (0.6 -- 1, gpuvm).  The prefit's part
+-- the dyes' ratios from the data's brightest isolated spots in both channels -- belongs to the fitter
+in SMAPpy (step 5's item 11).

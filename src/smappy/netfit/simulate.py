@@ -168,7 +168,13 @@ def draw_batch_2c(renderers, grid, sim: SimulationSettings, cam: CameraModel, ch
     d = grid.at(sample, x, y, r0, c0)                                             # (m, 2)
     ranges = channels.background or [sim.background] * 2
     bg = torch.stack([_uniform(*ranges[c], n * T, g, device).view(n, T) for c in range(2)], 1)   # (n, 2, T)
-    if channels.kind == "colour":
+    if channels.kind == "colour" and channels.dyes:
+        dyes = torch.as_tensor(channels.dyes, dtype=per_frame.dtype, device=device)
+        which = torch.randint(0, len(dyes), (len(sample),), generator=g, device=device)
+        share = (dyes[which] + channels.share_sd * torch.randn(len(sample), generator=g, device=device)).clamp(
+            *channels.share)
+        per_channel = [per_frame * (1 - share[:, None]), per_frame * share[:, None]]
+    elif channels.kind == "colour":
         share = _uniform(*channels.share, len(sample), g, device)
         per_channel = [per_frame * (1 - share[:, None]), per_frame * share[:, None]]
     else:

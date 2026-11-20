@@ -2,11 +2,13 @@
 # The C = 2 study's queue on one machine (plex-plan §16): each job of queue.txt trained in turn (a
 # stall of 30 minutes or a crash restarts it, three tries; a finished one is skipped), then its model
 # fitted on the blinking C = 2 sets.  Run from the study folder:
-#   PY=python ENV="env -u LD_LIBRARY_PATH" SRC=... SUITE=... DATA=... [WAIT=progress.jsonl] ./queue.sh
+#   PY=python ENV="env -u LD_LIBRARY_PATH" SRC=... SUITE=... DATA=... [WAIT=progress.jsonl] \
+#   [AFTER=queue.log, until a queue is done] [QUEUE=queue.txt] ./queue.sh
 cd "$(dirname "$0")"
 log=queue.log
 [ -n "$WAIT" ] && until grep -q '"finished"' "$WAIT"; do sleep 60; done
-for job in $(cat queue.txt); do
+[ -n "$AFTER" ] && until grep -q QUEUEDONE "$AFTER"; do sleep 60; done
+for job in $(cat ${QUEUE:-queue.txt}); do
   d=runs/$job
   for try in 1 2 3; do
     grep -q '"finished"' $d/progress.jsonl 2>/dev/null && break
@@ -32,4 +34,4 @@ for job in $(cat queue.txt); do
   fi
   echo "$(date '+%F %T') DONE $job" >> $log
 done
-echo "$(date '+%F %T') QUEUEDONE" >> $log
+echo "$(date '+%F %T') QUEUEDONE ${QUEUE:-queue.txt}" >> $log

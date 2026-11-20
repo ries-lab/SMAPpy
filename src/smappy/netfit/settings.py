@@ -55,6 +55,11 @@ class ChannelSettings:
     # colour: the share of a molecule's light in channel 1, uniform between the two (one network for
     # any pair of dyes); biplane's shares are in its splines
     share: tuple = (0.0, 1.0)
+    # colour, the dyes known -- their shares in channel 1 from a prefit or typed: each molecule one of
+    # them, its share drawn normal around it with ``share_sd`` and kept inside ``share`` (None: uniform
+    # over ``share``).  A dim molecule's share is then pulled towards its dye, not towards 1/2.
+    dyes: list | None = None
+    share_sd: float = 0.03
     # each channel's background range, photons a pixel, uniform per frame; None: the simulation's for both
     background: list | None = None
     # colour: what a molecule's two photon outputs are -- "counts", one per channel (DECODE-Plex's), or
