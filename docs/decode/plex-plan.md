@@ -618,9 +618,43 @@ on the biplane density sets 1 / 5 / 15 / 25 / 50, and z RMSE at |z| < 300 nm on 
 | a random pixel of the frame's channel 1 | 0.778 / 0.867 / 0.801 / 0.758 / 0.621 | 30.0 nm |
 
 With the edge copied, density 1 gives precision 0.901 and recall 0.963 at 0.5: DECODE-Plex on its own
-frames.  No fill is right at density 50, where copying an edge copies molecules.  Open: which the
-baseline uses -- as published, scored away from the bands; a fill; or the sets' biplane frames widened
-by the offset so that channel 1 has real pixels to shift in.
+frames.  No fill is right at density 50, where copying an edge copies molecules.
+
+**So the network reads only the channels' overlap** (`run_c2.overlap`, `fit_plex`; Jonas,
+2026-11-20): any fill breaks the planes' intensity relation (biplane) or leaves a channel dark
+(colour).  The overlap is found by sending a constant frame through DECODE-Plex's own splitter (biplane
+rows 47 -- 255, columns 0 -- 498 of the main half; colour the whole crop), the frame is cut to it after
+the split, mirror and integer shift, and the offset maps are cut from the whole crop's at the same
+pixels (DECODE-Plex's ``roi_shift`` would shift them through the transformation, but is off by twice
+the shift along the mirrored axis).  Every fitter is scored only there, 7 px in (`both_channels`).
+
+The U-Net (depth 3) reads a multiple of 8; the overlap is not one (209 x 499).  Biplane density 1,
+all on the same scored area, precision by distance from the padded / cut edge:
+
+| far edges | Jaccard | bottom 4 -- 8 / 8 -- 15 px | right 4 -- 8 / 8 -- 15 px | ms a frame |
+| --- | --- | --- | --- | --- |
+| trimmed to 208 x 496 (DECODE-Plex's way) | 0.906 | 0.90 / 0.92 | 0.89 / 0.94 | 77 |
+| mirrored out to 216 x 504 | 0.885 | 0.49 / 0.73 | 0.88 / 0.85 | |
+| repeated edge pixel | | 0.43 / 0.60 | 0.82 / 0.80 | |
+| zeros | | 0.04 / 0.09 | 0.23 / 0.31 | |
+| trimmed box from all four corners | 0.905 | 0.91 / 0.92 | 0.93 / 0.93 | 308 |
+| trimmed box and thin strips | 0.905 | 0.93 / 0.91 | 0.95 / 0.92 | 105 |
+
+Every invented pixel puts false molecules up to 15 px inside, mirrored ones too; the trim loses the cut
+rows' molecules (recall 0.40 in the right edge's last 4 px, 0.94 with strips).  **The strips**
+(`_strips`, ``--edges strips``): the trimmed box once, then strips along the lower and right edges and their
+corner, a multiple of 8 thick (32 px here), each taking over 13 px (half the spots' 26-px box) inside
+the box's cut and reaching 13 px before that -- every kept localization had half a box of real pixels
+on every side.  Each pass keeps the localizations in its own part (`_owned`); within 0.5 px of a line
+between parts both passes' are kept and, frame by frame, the less probable of two within 1 px
+dropped.  Pairs within 1 px from different passes: 5 of 20,016 localizations (a single pass has 367
+such pairs of its own).  Time 1.4 x the trim, with the strips' batches as many pixels as the box's.
+The last 4 rows above the split are poor (precision 0.32) whatever is done: the frame's edge, inside
+the scoring margin.  **The benchmark trims** (``EDGES = "trim"``, Jonas): the same scores, the fastest, and the
+strips an option for real movies, where the cut rows' molecules matter.  DECODE-Plex on the overlap, biplane Jaccard
+0.906 / 0.925 / 0.899 / 0.851 / 0.733 at densities 1 / 5 / 15 / 25 / 50 (0.512 / 0.752 / 0.882 / 0.765
+/ 0.731 with the zero padding); colour unchanged, 0.805 / 0.942 / 0.910 / 0.871 / 0.782
+(`reports/plex_c2.json`; Spline 3D 2C scored on the same area, `reports/spline_c2.json`).
 
 **C = 1 is not sensitive to the background's regime.**  netfit's GMN7C_s0 (trained on a background
 drawn per frame) on B7 drawn again with a steady one (`SimulationSettings.background_jitter` 0.02: one

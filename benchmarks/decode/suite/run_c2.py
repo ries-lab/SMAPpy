@@ -6,7 +6,8 @@
 
 **plex**: DECODE-Plex's published model of the set's context (`sets_c2.CONTEXTS`), through its
 notebook's steps (`decode_smlm.plex`), its raw threshold the notebooks' 0.1, the second channel
-shifted by the registration's own offset (the sets use the beads' registration as it is).  On MPS
+shifted by the registration's own offset (the sets use the beads' registration as it is), the
+network reading only where both channels hold the camera's pixels (`overlap`, `fit_plex`).  On MPS
 or CUDA where there is one; the device is recorded.
 
 **spline**: SMAPpy's Spline 3D 2C with the context's converted calibration, written ROI-local for
@@ -80,32 +81,210 @@ def crop_of(shape):
     return [math.floor(h / 2 / 8) * 8, math.floor(w / 8) * 8]
 
 
-def fit_plex(name, out):
+def _trafo_path(context):
+    return pathlib.Path(str(S.CONTEXTS[context]["smap"]).replace("_3dcal.mat", "_trafo.mat"))
+
+
+def overlap(context, shape):
+    """Where both channels hold the camera's pixels, in DECODE-Plex's frame of the main half: rows
+    ``r0:r1`` and columns ``c0:c1``.  Its inference moves the secondary channel by the registration's
+    global offset and pads what comes from beyond the chip with zeros (`FrameShiftCropPad`); the
+    network never saw a channel without background and answers the step with bright molecules far
+    from focus (plex-plan §15).  A fill would break the intensity relation between the channels
+    (biplane) or leave a channel dark (colour), so the network reads only this box (to a multiple
+    of 8: `fit_plex`'s ``edges``), and every fitter is scored only in it.  Found by sending a constant frame through the inference's own splitter."""
+    import torch
+
+    from decode_smlm.plex.io import param
+    from decode_smlm.plex.neuralfitter.train import setup_cfg
+    crop = crop_of(shape)
+    cfg = param.patch_img_size(_plex_cfg(context, "cpu"), crop, scenario=["Simulation", "Test"])
+    proc = setup_cfg.setup_processor_inference(cfg, cfg_sim=cfg["Test"], crop_to=crop, mode_camera="rois")
+    frame = torch.full((1, *shape), 3000.0)
+    for step in proc._m_input._frame_pre:
+        frame = step.forward(frame)
+    empty = torch.stack([(f == 0).reshape(f.shape[-2:]) for f in frame]).any(0).numpy()
+    rows, cols = np.flatnonzero(~empty.all(1)), np.flatnonzero(~empty.all(0))
+    return int(rows[0]), int(rows[-1]) + 1, int(cols[0]), int(cols[-1]) + 1
+
+
+EDGES = "trim"        # what fills the U-Net's multiple of 8 at the overlap's far edges: `fit_plex`
+HALF_BOX_PX = 13      # half the spots' box (26 px): the real pixels every kept localization has around it
+
+
+def fit_plex(name, out, edges=None):
+    """DECODE-Plex on the channels' overlap (`overlap`), by `infer`'s steps.  The U-Net (depth 3)
+    reads a multiple of 8, where the overlap is not one; ``edges`` says what is done about it:
+
+    * ``"trim"`` (the default, the fastest): DECODE-Plex's way, the box cut to it from its upper left
+      (`AutoLeftUpperCrop`), the last 0 -- 7 rows and columns not read;
+    * ``"mirror"``: both channels mirrored out to it at the lower and right edges, what is found in
+      the padding dropped -- false molecules up to 15 px inside (plex-plan §15);
+    * ``"corners"``: the trimmed box read once from each corner of the overlap, every pixel real;
+      each pass keeps the localizations in its own quarter, split at the overlap's middle (`_owned`);
+    * ``"strips"``: the trimmed box once, and thin strips (a multiple of 8) along the
+      lower and right edges and in their corner, each reaching `HALF_BOX_PX` past the line where it
+      takes over, which lies `HALF_BOX_PX` inside the box's cut (`_strips`): every kept localization
+      had half a spot's box of real pixels on every side; 1.4 x the trim's time, the same scores but
+      the cut rows' molecules found (plex-plan §15).
+
+    The offset maps are cut from the whole crop's at each pass's pixels -- the training's maps there
+    (DECODE-Plex's own ``roi_shift`` would do it through the transformation, but is off by twice the
+    shift along a mirrored axis)."""
     import tifffile
     import torch
 
-    import decode_smlm.plex.neuralfitter.inference.functional as infer_func
+    from decode_smlm.plex import io as plex_io
+    from decode_smlm.plex.neuralfitter import indicator
+    from decode_smlm.plex.neuralfitter.inference import inference
+    from decode_smlm.plex.neuralfitter.train import setup_cfg
+    edges = edges or EDGES
     spec = S.SETS[name]
     ctx = S.CONTEXTS[spec["context"]]
     dev = _device()
     cfg = _plex_cfg(spec["context"], dev)
     frames = torch.from_numpy(tifffile.imread(S.SETS_DIR / name / "frames.tif").astype(np.float32))
     h, w = frames.shape[-2:]
-    trafo = pathlib.Path(str(ctx["smap"]).replace("_3dcal.mat", "_trafo.mat"))
-    t0 = time.time()
-    em, _ = infer_func.infer(frames, frame_crop=crop_of((h, w)), cfg=cfg, model=next(ctx["model"].glob("*.ckpt")),
-                             mode="multi", trafo=trafo, mode_camera="rois", roi_shift=None, batch_size=4,
-                             num_workers=0, device=[dev])
-    seconds = time.time() - t0
-    xyz, sig = em.xyz_px.cpu().numpy(), em.xyz_sig.cpu().numpy()
-    row, col, srow, scol = xyz[:, 0], xyz[:, 1], sig[:, 0], sig[:, 1]
+    r0, r1, c0, c1 = overlap(spec["context"], (h, w))
+    box = [r1 - r0, c1 - c0]
+    size = [-(-n // 8) * 8 for n in box] if edges == "mirror" else [n // 8 * 8 for n in box]
+    if edges == "corners":
+        corners = sorted({(r, c) for r in (r0, r1 - size[0]) for c in (c0, c1 - size[1])})
+        mid = ((r0 + r1) / 2, (c0 + c1) / 2)
+        passes = [(ra, ca, size[0], size[1], (r0 if ra == r0 else mid[0], r1 if ra != r0 or len({c[0] for c in corners}) == 1
+                                              else mid[0]), (c0 if ca == c0 else mid[1], c1 if ca != c0 or len({c[1] for c in corners}) == 1
+                                                             else mid[1])) for ra, ca in corners]
+    elif edges == "strips":
+        passes = _strips((r0, r1, c0, c1), size)
+    else:
+        passes = [(r0, c0, size[0], size[1], (r0, r1), (c0, c1))]
+    cfg["Paths"]["trafo"] = _trafo_path(spec["context"])
+    aux_all = indicator.trafo_aux_factory(setup_cfg.setup_trafo(cfg, device="cpu"), crop_of((h, w)))
+    cfg = plex_io.param.patch_img_size(cfg, size, scenario=["Simulation", "Test"])
+    model = plex_io.model.load_model(next(ctx["model"].glob("*.ckpt")), cfg, device=dev)
+    parts, seconds = [], 0.0
+    for k, (ra, ca, ph, pw, _, _) in enumerate(passes):
+        cfg = plex_io.param.patch_img_size(cfg, [ph, pw], scenario=["Simulation", "Test"])
+        rb, cb = min(ra + ph, r1), min(ca + pw, c1)
+        aux = torch.nn.functional.pad(aux_all[None, :, ra:rb, ca:cb], (0, pw - (cb - ca), 0, ph - (rb - ra)),
+                                      mode="replicate")[0]
+        proc = setup_cfg.setup_processor_inference(
+            cfg, cfg_sim=cfg["Test"], crop_to=(slice(ra, rb), slice(ca, cb)), mode_camera="rois")
+        if edges == "mirror":
+            _pad_not_crop(proc, [ph, pw])
+        inf = inference.Infer(model=model, window=cfg["Trainer"]["frame_window"], pre=proc.pre_inference,
+                              post=proc.post, batch_size=max(4, 4 * (size[0] * size[1]) // (ph * pw)),
+                              num_workers=0, device=[dev],    # a strip: as many pixels a batch as the box
+                              validator=setup_cfg.setup_inference_validator(cfg))
+        t0 = time.time()
+        em = inf.forward(frames=frames, aux=aux)
+        seconds += time.time() - t0
+        xyz, sig = em.xyz_px.cpu().numpy(), em.xyz_sig.cpu().numpy()
+        parts.append({"frame": em.frame_ix.cpu().numpy(), "row": xyz[:, 0] + ra, "col": xyz[:, 1] + ca,
+                      "z": xyz[:, 2], "srow": sig[:, 0], "scol": sig[:, 1], "sz": sig[:, 2],
+                      "prob": em.prob.cpu().numpy(), "phot": em.phot.cpu().numpy().reshape(len(em), -1),
+                      "pass": np.full(len(em), k)})
+    loc = {key: np.concatenate([p[key] for p in parts]) for key in parts[0]}
+    loc = {key: v[_owned(loc, passes)] for key, v in loc.items()}
+    col = loc["col"]
     if cfg["Camera"][0]["specs"]["flip"]["gain"] is not None:     # it mirrored the frame in x first
         col = w - 1 - col
-    phot = em.phot.cpu().numpy().reshape(len(em), -1)
-    np.savez(out, frame=em.frame_ix.cpu().numpy(), x_nm=col * S.PIXEL_NM[0], y_nm=row * S.PIXEL_NM[1], z_nm=xyz[:, 2],
-             x_err_nm=scol * S.PIXEL_NM[0], y_err_nm=srow * S.PIXEL_NM[1], z_err_nm=sig[:, 2],
-             prob=em.prob.cpu().numpy(), photons=phot.sum(1), photons_c=phot)
-    return {"device": dev, "seconds": seconds, "frames": len(frames), "model": str(ctx["model"])}
+    np.savez(out, frame=loc["frame"], x_nm=col * S.PIXEL_NM[0], y_nm=loc["row"] * S.PIXEL_NM[1], z_nm=loc["z"],
+             x_err_nm=loc["scol"] * S.PIXEL_NM[0], y_err_nm=loc["srow"] * S.PIXEL_NM[1], z_err_nm=loc["sz"],
+             prob=loc["prob"], photons=loc["phot"].sum(1), photons_c=loc["phot"], plex_pass=loc["pass"])
+    return {"device": dev, "seconds": seconds, "frames": len(frames), "model": str(ctx["model"]),
+            "overlap": [r0, r1, c0, c1], "edges": edges, "read": size,
+            "passes": [[int(v) for v in p[:4]] for p in passes]}
+
+
+BAND_PX = 0.5         # either side of a split line both passes' localizations are kept, then paired
+
+
+def _strips(box, size):
+    """The passes of ``edges="strips"``: ``(row, col, height, width, rows owned, cols owned)``.
+
+    Along an axis the box's read loses ``lost`` pixels: it takes over at ``HALF_BOX_PX`` inside the
+    read's cut, and its strip, aligned to the overlap's far edge, reaches ``HALF_BOX_PX`` before that
+    line -- ``lost + 2 HALF_BOX_PX`` rounded up to 8, or the whole read where that is longer."""
+    r0, r1, c0, c1 = box
+    def axis(a0, a1, n):
+        if a1 - a0 == n:
+            return [(a0, n, (a0, a1))]
+        split = a0 + n - HALF_BOX_PX
+        m = min(-(-(a1 - split + HALF_BOX_PX) // 8) * 8, n)
+        return [(a0, n, (a0, split)), (a1 - m, m, (split, a1))]
+    return [(ra, ca, h, w, rown, cown) for ra, h, rown in axis(r0, r1, size[0]) for ca, w, cown in axis(c0, c1, size[1])]
+
+
+BAND_PX = 0.5         # either side of a line between two passes' parts both are kept, then paired
+
+
+def _owned(loc, passes):
+    """Which localizations to keep, each pass its own part of the overlap (``passes``' last two:
+    the rows and columns it owns).
+
+    A localization outside its pass's part is dropped, so no molecule is reported twice -- except
+    near a line between two parts, where two passes may place the same molecule on either side of
+    it (reported by both, or by neither).  Within `BAND_PX` of a line both passes' localizations are
+    kept and the duplicates removed: in a frame, the most probable first, any other pass's within
+    1 px of it dropped."""
+    k = loc["pass"]
+    own = np.array([[p[4][0], p[4][1], p[5][0], p[5][1]] for p in passes], float)[k]
+    read = np.array([[p[0], p[0] + p[2], p[1], p[1] + p[3]] for p in passes], float)[k]
+    row, col = loc["row"], loc["col"]
+    inside = (row > read[:, 0] - 0.5) & (row < read[:, 1] - 0.5) & (col > read[:, 2] - 0.5) & (col < read[:, 3] - 0.5)
+    keep = inside & (row >= own[:, 0] - BAND_PX) & (row < own[:, 1] + BAND_PX) \
+        & (col >= own[:, 2] - BAND_PX) & (col < own[:, 3] + BAND_PX)
+    lines_r = {v for p in passes for v in p[4]} - {min(p[4][0] for p in passes), max(p[4][1] for p in passes)}
+    lines_c = {v for p in passes for v in p[5]} - {min(p[5][0] for p in passes), max(p[5][1] for p in passes)}
+    near = np.zeros(len(row), bool)
+    for v in lines_r:
+        near |= np.abs(row - v) < BAND_PX
+    for v in lines_c:
+        near |= np.abs(col - v) < BAND_PX
+    near &= keep
+    for f in np.unique(loc["frame"][near]):
+        idx = np.flatnonzero(near & (loc["frame"] == f))
+        idx = idx[np.argsort(-loc["prob"][idx])]
+        for i in idx:
+            if not keep[i]:
+                continue
+            others = idx[(k[idx] != k[i]) & keep[idx]]
+            dup = others[np.hypot(row[others] - row[i], col[others] - col[i]) < 1.0]
+            keep[dup] = False
+    return keep
+
+
+class _ReflectPad:
+    """Mirror a frame out at its lower and right edges to ``size`` (the edge pixel not repeated)."""
+
+    def __init__(self, size):
+        self.size = size
+
+    def forward(self, frame):
+        import torch
+        h, w = frame.shape[-2:]
+        x = frame.reshape(-1, 1, h, w)
+        x = torch.nn.functional.pad(x, (0, self.size[1] - w, 0, self.size[0] - h), mode="reflect")
+        return x.reshape(*frame.shape[:-2], *self.size)
+
+
+def _pad_not_crop(proc, size):
+    """Put `_ReflectPad` where DECODE-Plex's splitter crops each channel to a multiple of 8."""
+    from decode_smlm.plex.neuralfitter import frame_processing as fp
+    from decode_smlm.plex.neuralfitter.processing.multichannel import (
+        MultiChannelSplitter,
+    )
+    found = 0
+    for step in proc._m_input._frame_pre:
+        if isinstance(step, MultiChannelSplitter):
+            for chain in step._per_channel:
+                for i, q in enumerate(chain):
+                    if isinstance(q, fp.AutoLeftUpperCrop):
+                        chain[i] = _ReflectPad(size)
+                        found += 1
+    if found != 2:
+        raise RuntimeError(f"expected a fold crop per channel in DECODE-Plex's splitter, found {found}")
 
 
 def local_calibration(context):
@@ -171,19 +350,20 @@ def trained_sensor(context):
 
 
 def both_channels(context, shape, flip_x: bool):
-    """A mask maker on main-channel frame pixels: inside the area both channels see, a network reads
-    and its model was trained on (`trained_sensor`, in DECODE-Plex's frame: x mirrored for EM)."""
+    """A mask maker on main-channel frame pixels: inside the area both channels see -- a partner inside
+    the secondary half and the frame inside the channels' overlap the network reads (`overlap`) -- and
+    its model was trained on (`trained_sensor`, in DECODE-Plex's frame: x mirrored for EM)."""
     cal = S.calibration(context)
     _, regions, to_sec, _ = S._layout(cal)
-    crop = crop_of(shape)
+    r0, r1, c0, c1 = overlap(context, shape)
     w = shape[1]
     rows, cols = trained_sensor(context)
 
     def mask(x, y):
-        ok = S._inside(to_sec(np.c_[x, y]), regions[1], margin=EDGE) & (y > EDGE) & (y < min(crop[0], rows) - EDGE)
-        lo, hi = (w - crop[1], w) if flip_x else (0, crop[1])
+        ok = S._inside(to_sec(np.c_[x, y]), regions[1], margin=EDGE)
         xd = (w - 1 - x) if flip_x else x                 # the column in DECODE-Plex's frame
-        return ok & (x > lo + EDGE) & (x < hi - 1 - EDGE) & (xd < cols - EDGE)
+        return (ok & (y > r0 + EDGE) & (y < min(r1, rows) - 1 - EDGE)
+                & (xd > c0 + EDGE) & (xd < min(c1, cols) - 1 - EDGE))
     return mask
 
 
@@ -239,7 +419,7 @@ def by_z(truth, locs, keep, shape, width=100.0):
     return rows
 
 
-def run(fitter, names=None, refit=False):
+def run(fitter, names=None, refit=False, edges=None):
     folder = FITS / fitter
     folder.mkdir(parents=True, exist_ok=True)
     report = {"fitter": fitter, "keep": KEEP[fitter], "frames_read": FRAMES_READ[fitter],
@@ -251,7 +431,7 @@ def run(fitter, names=None, refit=False):
         out = folder / f"{name}.npz"
         meta = folder / f"{name}.json"
         if refit or not out.exists():
-            info = FITTERS[fitter](name, out)
+            info = fit_plex(name, out, edges) if fitter == "plex" else FITTERS[fitter](name, out)
             meta.write_text(json.dumps(info))
         info = json.loads(meta.read_text())
         locs = dict(np.load(out))
@@ -293,11 +473,13 @@ def main():
     ap.add_argument("runs", nargs="*")
     ap.add_argument("--sets", nargs="*", default=None)
     ap.add_argument("--refit", action="store_true")
+    ap.add_argument("--edges", choices=("trim", "strips", "corners", "mirror"), default=EDGES,
+                    help="what fills the U-Net's multiple of 8 at the overlap's far edges (fit_plex)")
     a = ap.parse_args()
     if a.what == "table":
         table(a.runs or ["plex", "spline"])
     else:
-        run(a.what, a.sets, a.refit)
+        run(a.what, a.sets, a.refit, a.edges)
 
 
 if __name__ == "__main__":
