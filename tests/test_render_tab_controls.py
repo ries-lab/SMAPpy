@@ -280,3 +280,26 @@ def test_auto_scales_the_colours_to_what_is_shown(app):
     tab.color_auto.click()
     lo, hi = session.layers[0].state.settings.color_range
     assert lo < 50 and 450 < hi < 510
+
+
+def test_f1_help_opens_its_page_and_keeps_no_widget_alive(app, monkeypatch):
+    """A lambda slot over the widget made a cycle through C++ the collector
+    never saw: every window with F1 help lived as long as the process."""
+    import gc
+    import weakref
+    from PySide6.QtGui import QShortcut
+    from PySide6.QtWidgets import QWidget
+    from smappy.gui import help_window
+    opened = []
+    monkeypatch.setattr(help_window, "show_help",
+                        lambda path, parent=None: opened.append((path, parent)))
+    widget = QWidget()
+    help_window.attach_help(widget, "Panels/Render tab", within=True)
+    shortcut = widget.findChild(QShortcut)
+    shortcut.activated.emit()
+    assert opened == [("Panels/Render tab", widget)]
+    opened.clear()
+    alive = weakref.ref(widget)
+    del widget, shortcut
+    gc.collect()
+    assert alive() is None

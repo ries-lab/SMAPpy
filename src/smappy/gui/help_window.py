@@ -54,11 +54,31 @@ def attach_help(widget, path: str, within: bool = False) -> None:
     tab shares its window with the plugin panels, whose own F1 would
     otherwise make the key ambiguous, and Qt then fires neither.
     """
-    from PySide6.QtGui import QKeySequence, QShortcut
-    shortcut = QShortcut(QKeySequence.HelpContents, widget,
-                         lambda: show_help(path, widget.window()))
+    shortcut = _HelpShortcut(widget, path)
     if within:
         shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+
+
+class _HelpShortcut(QShortcut):
+    """F1 on its parent, opening a page through a method of its own.
+
+    Not ``QShortcut(key, widget, lambda: show_help(path, widget.window()))``:
+    PySide holds a lambda slot from C++, and this one held ``widget``, whose
+    C++ object holds the shortcut -- a cycle the collector cannot see, so
+    every window with F1 help lived as long as the process (a test worker
+    kept each window it made).  That overload is also PySide's own glue,
+    connecting through an old-style string signal; a worker of a loaded
+    ``--release -n auto`` run segfaulted inside it once (2026-11-20).  A
+    slot that is a bound method of the shortcut itself is held weakly.
+    """
+
+    def __init__(self, widget, path: str):
+        super().__init__(QKeySequence(QKeySequence.HelpContents), widget)
+        self.path = path
+        self.activated.connect(self._open)
+
+    def _open(self) -> None:
+        show_help(self.path, self.parent().window())
 
 
 def help_section(section, path: str) -> None:
