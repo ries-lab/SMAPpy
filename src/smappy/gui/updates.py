@@ -79,7 +79,8 @@ class UpdateChecker(QObject):
 def install_commands() -> Optional[List[List[str]]]:
     """What *Update and restart* would run here, or None where it is not offered."""
     return updater.commands(updates.how_installed(), sys.executable,
-                            workspace=updates.pixi_environment(), pip=updates.has_pip())
+                            workspace=updates.pixi_environment(), pip=updates.has_pip(),
+                            version=updates.known_newer())
 
 
 # where `updates.update_command` has none: an installer it does not know,
@@ -195,13 +196,24 @@ class Updates(QObject):
         (`leaving`).  If the helper cannot be started, nothing has closed.
         """
         install = install_commands()
-        if install is None or not self.window.may_close():
+        if install is None:
+            return
+        # a uv too old for the command fails after SMAPpy has closed, or
+        # installs PyPI's torch over the card's: said here, before anything
+        too_old = updater.uv_too_old(install[0][0]) if updates.how_installed() == "uv tool" else None
+        if too_old:
+            QMessageBox(QMessageBox.Warning, "Update and restart",
+                        f"{too_old}. Update uv first:\n{updates.UV_UPDATE}\n\n"
+                        "then use Update and restart again.", QMessageBox.Close, self.window).exec()
+            return
+        if not self.window.may_close():
             return
         try:
             plan = updater.write_plan(updater.new_plan_folder(), install,
                                       updater.relaunch_command(sys.executable),
                                       updates.result_file(), updates.log_file(),
-                                      updates.installed())
+                                      updates.installed(),
+                                      checks=updater.torch_check(sys.executable))
             updater.start_helper(plan)
         except OSError as error:
             QMessageBox.warning(self.window, "Update and restart",
@@ -218,6 +230,15 @@ class Updates(QObject):
             if done is None:
                 return
             before, now = done.get("from_version") or "?", updates.installed()
+            if done.get("lost"):
+                # the install worked and took something with it (issue 189)
+                box = QMessageBox(QMessageBox.Warning, "Update and restart",
+                                  updates.lost_message(done["lost"], before, now),
+                                  QMessageBox.Close, self.window)
+                box.setInformativeText(f"The whole output is in {done.get('log')}.")
+                box.setDetailedText(updates.log_tail())
+                box.exec()
+                return
             if done.get("ok") and updates.is_newer(now, before):
                 self.window.statusBar().showMessage(f"SMAPpy updated from {before} to {now}", 20000)
                 if self.button is not None and not updates.known_newer():

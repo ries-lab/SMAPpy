@@ -15,7 +15,9 @@ copy was installed, which the package's own metadata records:
   rather than leave the user on the old one, then ``pixi install`` of the
   environment, which ``upgrade`` installs only when it is the default;
 * a ``uv tool install`` (``uv-receipt.toml`` beside the tool's Python):
-  ``uv tool upgrade``;
+  ``uv tool install`` of the new version with everything the tool has --
+  never ``uv tool upgrade``, which drops what uv did not record
+  (`smappy.updater.tool_install`);
 * an ephemeral ``uvx`` environment (in uv's cache): ``uvx`` with ``@latest``;
 * anything else installed by uv (``INSTALLER`` says ``uv``): ``uv pip``;
 * otherwise pip, through this very Python, so it lands in this environment
@@ -180,6 +182,15 @@ def _quote(path, windows: bool) -> str:
     return f'"{text}"' if " " in text else text
 
 
+def _quote_arg(text: str, windows: bool) -> str:
+    """One argument for the terminal: quoted in a POSIX shell, whose ``[``
+    is a pattern and ``>`` a redirection, and in PowerShell where ``>`` and
+    the like would be read as its own (``smappy-smlm[uipsf]>=0.7.5``)."""
+    if not windows:
+        return shlex.quote(text)
+    return f'"{text}"' if re.search(r"[\s;&|<>()]", text) else text
+
+
 def _installer(dist) -> str:
     return ((dist.read_text("INSTALLER") if dist is not None else None) or "").strip()
 
@@ -191,7 +202,8 @@ def has_pip() -> bool:
 
 def update_command(kind: Optional[str] = None, windows: Optional[bool] = None,
                    python: Optional[str] = None, dist=None, prefix: Optional[str] = None,
-                   pip: Optional[bool] = None) -> str:
+                   pip: Optional[bool] = None, torch: Optional[str] = "?",
+                   version: Optional[str] = None, extras=None) -> str:
     """The command to run in a terminal, with SMAPpy closed, to update it;
     empty where there is none to give (the module's last paragraph).
 
@@ -200,7 +212,10 @@ def update_command(kind: Optional[str] = None, windows: Optional[bool] = None,
     elsewhere.  pip is run through this Python, so the update goes where
     SMAPpy is, whichever ``pip`` the PATH would find.  ``prefix`` is the
     environment (this one by default) and ``pip`` whether it has pip (asked
-    of this Python by default).
+    of this Python by default).  For a uv tool, ``version`` is the release
+    to install (a newer one a check found, else the newest), ``extras`` and
+    ``torch`` the tool's extras present and its torch, None for none
+    (`smappy.updater.tool_install`; this environment's by default).
     """
     windows = sys.platform.startswith("win") if windows is None else windows
     dist = _distribution() if dist is None else dist
@@ -231,15 +246,15 @@ def update_command(kind: Optional[str] = None, windows: Optional[bool] = None,
         return then.join([f"pixi upgrade {manifest} {DISTRIBUTION}",
                           f"pixi install {manifest} -e {pixi[1]}"])
     if kind == "uv tool":
-        # uv's copy of PyPI's list may predate the release, and how to ask
-        # afresh depends on the uv (`smappy.updater.refresh_args`)
-        import shutil
-        from .updater import refresh_args
-        uv = shutil.which("uv")
-        # no uv found: the option uv 0.12 and later have (--refresh-package
-        # is refused by their tool upgrade)
-        refresh = refresh_args(uv) if uv else ["--reinstall-package", DISTRIBUTION]
-        return f"uv tool upgrade {' '.join(refresh)} {DISTRIBUTION}"
+        # one install that keeps the tool as it is (`updater.tool_install`):
+        # never `uv tool upgrade`, which loses what the receipt does not hold
+        from .updater import tool_install
+        install = tool_install(Path(prefix or sys.prefix),
+                               known_newer() if version is None else version,
+                               extras=extras, torch=torch)
+        if install is None:
+            return f"uv tool upgrade {DISTRIBUTION}"
+        return " ".join(_quote_arg(arg, windows) for arg in ["uv", *install])
     if kind == "uvx":
         return f"uvx --from {DISTRIBUTION}@latest smappy-gui"
     if kind == "uv":
@@ -354,12 +369,10 @@ UV_UPDATE = ("uv self update (if uv came from its installer; otherwise as it was
              "installed: pip install -U uv, winget upgrade astral-sh.uv, brew upgrade uv)")
 _ADVICE = (
     (lambda log: "uv" in log and "unexpected argument" in log,
-     # SMAPpy's own choice of options can be what uv refuses -- an option it
-     # took for there from uv's help (`updater.refresh_args`) -- so the advice
-     # is the command by hand first, and uv's age only if that fails too
+     # the update checks uv's version first (`updater.uv_too_old`); a uv that
+     # still refuses an option is older than it says, or newer and changed
      "uv refused an option of the update's command (the error below names it). "
-     "Run the command below by hand; if uv refuses that too, update uv with\n"
-     f"{UV_UPDATE}\nand then use Update and restart again."),
+     f"Update uv with\n{UV_UPDATE}\nand then use Update and restart again."),
     (lambda log: any(text in log for text in (
         "os error 32", "being used by another process", "access is denied",
         "winerror 5", "winerror 32", "permission denied", "permissionerror")),
@@ -374,6 +387,17 @@ _ADVICE = (
      "set HTTPS_PROXY (and, for a company certificate, UV_NATIVE_TLS=1 for uv) "
      "before running the command below."),
 )
+
+
+def lost_message(lost, before: str, now: str) -> str:
+    """What the next start says when an update worked but what was here
+    before no longer imports (`smappy.updater.torch_check`): what is gone,
+    and the command that puts it back with the right build."""
+    names = ", ".join(sorted({str(item).replace("import ", "") for item in lost}))
+    was = f"from {before} to {now}" if is_newer(now, before) else f"(still {now})"
+    return (f"SMAPpy was updated {was}, but {names} no longer imports: the pupil model "
+            f"of the PSF calibration, and DECODE, need it. The PSF calibration window's "
+            f"Install PyTorch puts it back.")
 
 
 def failure_advice(ok: bool = False) -> str:

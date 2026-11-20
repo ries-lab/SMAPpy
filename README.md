@@ -39,8 +39,10 @@ running SMAPpy. Then, in the same environment you installed it into:
     pip install --upgrade smappy-smlm
 
 `pip show smappy-smlm` tells you which version you have; the newest is on
-[PyPI](https://pypi.org/project/smappy-smlm/). If you installed it with uv,
-run `uv tool upgrade smappy-smlm` instead; in a [pixi](https://pixi.sh)
+[PyPI](https://pypi.org/project/smappy-smlm/). If you installed it as a uv
+tool, update from SMAPpy (below) or run the command its *Copy command* gives:
+`uv tool upgrade smappy-smlm` removes a PyTorch added afterwards and replaces
+a CUDA build with PyPI's. In a [pixi](https://pixi.sh)
 project, `pixi upgrade smappy-smlm`. In a checkout, run `git pull`, then
 `.venv/bin/python -m pip install -e .` again, which rebuilds the C++
 extensions (in a pixi environment, `pixi reinstall smappy-smlm`).

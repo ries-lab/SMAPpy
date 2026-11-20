@@ -95,12 +95,21 @@ def test_the_command_runs_pip_through_this_python_in_each_shell(monkeypatch):
     plain = updates.update_command("pip", windows=True, python=r"C:\py\python.exe",
                                    dist=Dist(), pip=True)
     assert plain == r"C:\py\python.exe -m pip install --upgrade smappy-smlm"
-    # the options are this uv's (`updater.refresh_args`), not the PATH's of the test
-    from smappy import updater
-    monkeypatch.setattr(updater, "refresh_args",
-                        lambda uv: ["--reinstall-package", "smappy-smlm"])
-    assert updates.update_command("uv tool", dist=Dist()) == (
-        "uv tool upgrade --reinstall-package smappy-smlm smappy-smlm")
+    # a uv tool without a receipt to read: the plain upgrade is all there is to say
+    assert updates.update_command("uv tool", dist=Dist(), prefix="/nowhere") == (
+        "uv tool upgrade smappy-smlm")
+
+
+def test_the_command_for_a_uv_tool_is_its_install_quoted_for_each_shell(tmp_path):
+    _receipt(tmp_path, '{ name = "smappy-smlm", extras = ["uipsf"], specifier = "==0.7.1" }')
+    posix = updates.update_command("uv tool", windows=False, dist=Dist(), prefix=str(tmp_path),
+                                   extras=[], torch="2.9.0+cu126", version="0.7.5")
+    assert posix == ("uv tool install --refresh-package smappy-smlm 'smappy-smlm[uipsf]>=0.7.5' "
+                     "--torch-backend cu126")
+    windows = updates.update_command("uv tool", windows=True, dist=Dist(), prefix=str(tmp_path),
+                                     extras=[], torch=None, version="0.7.5")
+    # PowerShell's > is a redirection: the requirement is quoted there too
+    assert windows == 'uv tool install --refresh-package smappy-smlm "smappy-smlm[uipsf]>=0.7.5"'
 
 
 def _editable(url="file:///home/me/SMAPpy", installer=None):
@@ -309,51 +318,97 @@ def test_startup_offers_what_an_earlier_check_found_without_asking_again(own_con
 
 # ------------------------------------------------------- update and restart
 
-def test_update_and_restart_is_offered_where_pip_or_uv_can_do_it():
+def test_update_and_restart_is_offered_where_pip_or_uv_can_do_it(tmp_path):
     from smappy import updater
     py = "/env/bin/python"
     assert updater.commands("pip", py) == [[py, "-m", "pip", "install", "--upgrade", "smappy-smlm"]]
-    assert updater.commands("uv tool", py, uv="/bin/uv")[0][:3] == ["/bin/uv", "tool", "upgrade"]
+    assert updater.commands("uv tool", py, uv="/bin/uv", prefix=_receipt(
+        tmp_path, '{ name = "smappy-smlm" }'))[0][:3] == ["/bin/uv", "tool", "install"]
+    assert updater.commands("uv tool", py, uv="/bin/uv", prefix=tmp_path / "none") is None
     assert updater.commands("uv", py, uv="/bin/uv")[0][:3] == ["/bin/uv", "pip", "install"]
     assert updater.commands("uv tool", py, uv="") is None          # no uv on the PATH
     assert updater.commands("checkout", py) is None                # git pull is the user's
     assert updater.commands("uvx", py) is None
 
 
-# `uv tool upgrade --help` of uv 0.12.4, cut: --refresh-package is only named in
-# --reinstall-package's description, and uv refuses it
-UV_012_HELP = """\
-      --reinstall
-          Reinstall all packages, regardless of whether they're already installed. Implies
-          `--refresh`
-      --reinstall-package <REINSTALL_PACKAGE>
-          Reinstall a specific package, regardless of whether it's already installed. Implies
-          `--refresh-package`
-  -n, --no-cache               Avoid reading from or writing to the cache, instead using a temporary
-"""
+def _receipt(folder, *requirements, extra=""):
+    """A uv tool's environment as uv 0.12.4 writes its receipt."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "uv-receipt.toml").write_text(
+        "[tool]\nrequirements = [\n" + "".join(f"    {r},\n" for r in requirements) + "]\n"
+        'entrypoints = [\n    { name = "smappy-gui", install-path = "/bin/smappy-gui", '
+        'from = "smappy-smlm" },\n]\n' + extra)
+    return folder
 
 
-@pytest.mark.skipif(sys.platform.startswith("win"), reason="the stand-in uv is a shell script")
-def test_a_uv_tool_upgrade_asks_pypi_afresh_with_an_option_its_help_lists(tmp_path):
+def test_a_uv_tool_is_updated_by_one_install_that_keeps_everything_it_has(tmp_path):
+    """Issue 189: `uv tool upgrade` kept the pin of `smappy-smlm[uipsf]==0.7.1`
+    and fetched PyPI's torch over the CUDA build uv had not recorded.  The
+    install names the new version, repeats the receipt -- which it replaces --
+    and adds what the receipt cannot hold."""
     from smappy import updater
-    helps = {"new": "      --refresh-package <PKG>  Refresh cached data\n" + UV_012_HELP,
-             "now": UV_012_HELP,
-             "old": "      --prerelease-package <PKG>\n  -n, --no-cache   Avoid the cache\n"}
-    uv = {}
-    for name, text in helps.items():
-        uv[name] = tmp_path / name / "uv"
-        uv[name].parent.mkdir()
-        (tmp_path / name / "help.txt").write_text(text)
-        uv[name].write_text(f"#!/bin/sh\ncat '{tmp_path / name / 'help.txt'}'\n")
-        uv[name].chmod(0o755)
-    command = lambda name: updater.commands("uv tool", "py", uv=str(uv[name]))[0][3:]
-    assert command("new") == ["--refresh-package", "smappy-smlm", "smappy-smlm"]
-    # uv 0.12 and 0.13 name --refresh-package only in another option's description and
-    # refuse it: the update failed, and was blamed on the uv's age (November 2026)
-    assert command("now") == ["--reinstall-package", "smappy-smlm", "smappy-smlm"]
-    # an older uv refused --refresh-package and the update failed before it began
-    assert command("old") == ["--no-cache", "smappy-smlm"]
-    assert updater.refresh_args(str(tmp_path / "missing")) == ["--no-cache"]
+    prefix = _receipt(
+        tmp_path, '{ name = "smappy-smlm", extras = ["uipsf"], specifier = "==0.7.1" }',
+        '{ name = "rich", specifier = ">=13" }',
+        extra='python = "3.13"\n\n[tool.options]\nprerelease = "allow"\n'
+              'index = [{ name = "lab", url = "https://pypi.lab.org/simple", explicit = false, '
+              'default = false }]\nextra-index-url = ["https://more.org/simple"]\n')
+    assert updater.tool_install(prefix, "0.7.5", extras=["decode"], torch="2.9.0+cu126") == [
+        "tool", "install", "--refresh-package", "smappy-smlm", "smappy-smlm[decode,uipsf]>=0.7.5",
+        "--with", "rich>=13", "--python", "3.13", "--prerelease", "allow",
+        "--index", "lab=https://pypi.lab.org/simple", "--extra-index-url", "https://more.org/simple",
+        "--torch-backend", "cu126"]
+    # torch added afterwards by Install PyTorch, which the receipt never heard of
+    plain = _receipt(tmp_path / "plain", '{ name = "smappy-smlm" }')
+    assert updater.tool_install(plain, None, extras=["uipsf"], torch="2.9.0") == [
+        "tool", "install", "--refresh-package", "smappy-smlm", "smappy-smlm[uipsf]@latest"]
+    # SMAPpy from a folder or git: nothing an index could update
+    local = _receipt(tmp_path / "local", '{ name = "smappy-smlm", directory = "/src/SMAPpy" }')
+    assert updater.tool_install(local, "0.7.5", extras=[], torch=None) is None
+    assert updater.tool_install(tmp_path / "no receipt", "0.7.5", extras=[], torch=None) is None
+
+
+def test_the_torch_backend_is_read_from_the_installed_build():
+    from smappy import updater
+    assert updater.torch_backend("2.9.0+cu126") == "cu126"
+    assert updater.torch_backend("2.9.0+cpu") == "cpu"
+    assert updater.torch_backend("2.9.0+rocm6.3") == "rocm6.3"
+    assert updater.torch_backend("2.9.0") is None              # PyPI's own
+    assert updater.torch_backend("2.9.0+g1234") is None        # a local build of anything else
+    assert updater.torch_backend(None) is None
+
+
+def test_the_extras_kept_are_those_whose_packages_are_all_here():
+    from smappy import updater
+    requires = ["numpy>=1.24", "matplotlib>=3.7", 'matplotlib>=3.7.3; extra == "drift"',
+                'torch>=2.4; extra == "uipsf"', 'torch>=2.4; extra == "decode"',
+                'tqdm>=4.60; extra == "decode"', "pillow>=10.0 ; extra == 'image'"]
+    here = {"numpy", "torch", "pillow"}.__contains__
+    assert updater.extras_present(requires, here) == ["image", "uipsf"]
+    assert updater.extras_present(requires, lambda name: True) == ["decode", "image", "uipsf"]
+
+
+def test_a_uv_older_than_the_command_needs_is_said_before_the_update():
+    from smappy import updater
+    assert "0.9.19" in updater.uv_too_old("uv", (0, 8, 4))
+    assert updater.uv_too_old("uv", (0, 9, 19)) is None
+    assert updater.uv_too_old("uv", (0, 12, 4)) is None
+    assert updater.uv_too_old(None) is None                   # cannot tell: the install says
+
+
+def test_an_update_that_loses_torch_says_so_at_the_next_start(tmp_path):
+    from smappy import updater
+    plan = {"wait_for": [], "commands": [_python("pass")], "relaunch": [],
+            "checks": [_python("import torch_that_is_gone")],
+            "result": str(tmp_path / "r.json"), "log": str(tmp_path / "u.log"), "from_version": "0.7.1"}
+    result = updater.run_plan(plan, retry_pause_s=0)
+    assert result["ok"] and result["lost"] == ["import torch_that_is_gone"]
+    assert "after the update this fails" in (tmp_path / "u.log").read_text()
+    said = updates.lost_message(result["lost"], "0.7.1", "0.7.5")
+    assert said.startswith("SMAPpy was updated from 0.7.1 to 0.7.5, but torch_that_is_gone")
+    assert "Install PyTorch" in said
+    assert updater.torch_check("py", torch="2.9.0") == [["py", "-I", "-c", "import torch"]]
+    assert updater.torch_check("py", torch=None) == []
 
 
 def _python(code):
@@ -492,6 +547,42 @@ def test_a_failed_update_is_shown_with_pips_output(own_config, monkeypatch):
     window.deleteLater()
 
 
+def test_an_update_that_lost_torch_says_so_and_how_to_put_it_back(own_config, monkeypatch):
+    _app()
+    from PySide6.QtWidgets import QMainWindow, QMessageBox
+    from smappy.gui.updates import Updates
+    updates.log_file().write_text("after the update this fails: -I -c import torch\n")
+    updates.result_file().write_text(json.dumps({"ok": True, "from_version": "0.0.1",
+                                                 "lost": ["import torch"],
+                                                 "log": str(updates.log_file())}))
+    shown = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: shown.append(box.text()))
+    window = QMainWindow()
+    Updates(window).report_last_update()
+    assert shown and "torch no longer imports" in shown[0] and "Install PyTorch" in shown[0]
+    window.deleteLater()
+
+
+def test_a_uv_too_old_is_said_before_smappy_closes(own_config, monkeypatch):
+    _app()
+    from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
+    from smappy import updater
+    from smappy.gui import updates as gui_updates
+    monkeypatch.setattr(gui_updates, "install_commands", lambda: [["/old/uv", "tool", "install"]])
+    monkeypatch.setattr(updates, "how_installed", lambda *a, **k: "uv tool")
+    monkeypatch.setattr(updater, "uv_version", lambda uv: (0, 8, 0))
+    started, quits, shown = [], [], []
+    monkeypatch.setattr(updater, "start_helper", started.append)
+    monkeypatch.setattr(QApplication, "quit", lambda: quits.append(1))
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: shown.append(box.text()))
+    window = QMainWindow()
+    window.may_close = lambda: True
+    gui_updates.Updates(window).update_and_restart()
+    assert not started and not quits
+    assert "0.9.19" in shown[0] and "uv self update" in shown[0]
+    window.deleteLater()
+
+
 def test_update_and_restart_starts_the_helper_and_quits_only_if_the_window_agrees(
         own_config, monkeypatch):
     _app()
@@ -513,4 +604,5 @@ def test_update_and_restart_starts_the_helper_and_quits_only_if_the_window_agree
     plan = started[0]
     assert plan["commands"] == [["pip", "install"]] and plan["relaunch"][-2:] == ["-m", "smappy.cli.gui"]
     assert plan["result"] == str(updates.result_file())
+    assert plan["checks"] == updater.torch_check(sys.executable)
     window.deleteLater()

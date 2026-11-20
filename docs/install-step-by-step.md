@@ -195,17 +195,17 @@ to have it there too (on Windows 11, under *Show more options*).
 
 ## Updating, and removing
 
-The commands are the same on Mac and Windows. To get the newest version of
-SMAPpy:
+The easiest way to get the newest version of SMAPpy is from SMAPpy itself:
+*Help > Check for updates...*, then *Update and restart*. It closes SMAPpy,
+installs the new version, keeps what you added later (PyTorch for the PSF
+calibration, in the build for your graphics card), and starts SMAPpy again.
+It needs uv 0.9.19 or newer; `uv self update` brings that.
 
-```bash
-uv tool upgrade smappy-smlm
-```
-
-uv remembers the list of versions for ten minutes, so if a version released
-only just now is not found, add `--reinstall-package smappy-smlm` before
-the last word (or `--no-cache`, if your uv does not know that option).
-*Help > Check for updates...* in SMAPpy does this for you.
+To do the same by hand, close SMAPpy and run the command that *Copy command*
+in that dialog gives: it is a `uv tool install` that names everything your
+SMAPpy has. Plain `uv tool upgrade smappy-smlm` also works, but it removes
+PyTorch if SMAPpy's *Install PyTorch* put it there, and it replaces a
+PyTorch for an NVIDIA card with the one for the processor.
 
 To remove SMAPpy from your computer:
 
@@ -260,8 +260,9 @@ Rules:
   `sudo`, an administrator prompt, conda, or `pip` into any existing
   environment, unless the user asks for that.
 * If `uv` is already installed, do not install it again. If `uv tool list`
-  already shows `smappy-smlm`, run `uv tool upgrade smappy-smlm` instead of
-  installing.
+  already shows `smappy-smlm`, it is installed: ask the user to update it
+  from SMAPpy (*Help > Check for updates...*), whose command keeps PyTorch
+  and its build; `uv tool upgrade` can remove them.
 * Your shell will not see newly installed programs on its PATH. Call `uv` by
   its full path after installing it (`~/.local/bin/uv` on macOS,
   `$HOME\.local\bin\uv.exe` on Windows, unless the installer printed
