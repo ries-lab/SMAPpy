@@ -814,7 +814,7 @@ in SMAPpy (step 5's item 11).
 ### The architecture study: early fusion wins (2026-11-21)
 
 Five arrangements of Round 1's network, three seeds each (`benchmarks/decode/netfit_c2/study/`,
-6 M samples; biplane on gpuvm, colour on decodebox, colour *share* on gpuvm), scored on the
+3 M samples -- half of Round 1's, so a little behind it; biplane on gpuvm, colour on decodebox, colour *share* on gpuvm), scored on the
 blinking sets with 3 frames read:
 
 * **base**: Round 1's -- a per-frame U-Net per channel, a time model per channel, the offset maps
