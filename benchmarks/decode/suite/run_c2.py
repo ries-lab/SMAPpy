@@ -388,9 +388,80 @@ def fit_netfit(name, out, model, crlb=None):
             b = plugin_crlb(two, cal, p.channels.kind, r["frame"], grid, r["z_nm"], ph, bg, S.PIXEL_NM,
                             bool(c["em_on"]), window=w)
             keep.update({f"{pre}_x_nm": b[:, 0], f"{pre}_y_nm": b[:, 1], f"{pre}_z_nm": b[:, 2]})
+    import os
+    if os.environ.get("NETFIT_LL", "") not in ("", "0") and len(r["frame"]):
+        # each localization's goodness of fit, the network's own backgrounds (`smappy.netfit.goodness`)
+        from smappy.netfit.goodness import fit_goodness
+        ph = np.asarray(r["photons_c"]) if p.channels.kind == "colour" else np.asarray(r["photons"])
+        keep["goodness"] = fit_goodness(two, cal, p.channels.kind, stack[k:len(stack) - k], np.asarray(r["frame"], int),
+                                        np.c_[r["x_pix"], r["y_pix"]], r["z_nm"], ph, bg, bool(c["em_on"]))
     np.savez(out, **keep)
     return {"device": p.device, "seconds": seconds, "frames": len(adu), "model": str(model),
             "read": two.to_dict(), "window": 2 * k + 1}
+
+
+def netfit_goodness(name, label, radius=4, background="frame"):
+    """Each localization of a run's fit of ``name`` explained by the frames or not
+    (`smappy.netfit.goodness`), from the saved fit -- its own positions and photons, nothing run
+    again; written beside it as ``<name>_goodness.npz``.  ``background`` "fit": the network's own
+    per localization; "frame": each frame's median per channel, the same for every fitter (DECODE-Plex
+    keeps none; the sets' background is flat within a frame).  Biplane's photons one count, each
+    spline holding its plane's share (DECODE-Plex's two summed).  Some seconds a set."""
+    import tifffile
+
+    from smappy.netfit.channels import TwoChannels
+    from smappy.netfit.goodness import fit_goodness
+    spec = S.SETS[name]
+    context = spec["context"]
+    cal = S.calibration(context)
+    info = json.loads((FITS / label / f"{name}.json").read_text())
+    read = info.get("read")
+    main = int(read.get("main", 0)) if isinstance(read, dict) else 0
+    two = TwoChannels.from_calibration(cal, cal.geometry["sources"][0]["roi"][:2], main=main)
+    c = S.camera_of(context)
+    adu = tifffile.imread(S.SETS_DIR / name / "frames.tif").astype(np.float32)
+    photons = (adu - c["offset"]) * (c["conversion"] / c["emgain"] if c["em_on"] else c["conversion"])
+    stack = two.cut(photons)
+    L = dict(np.load(FITS / label / f"{name}.npz"))
+    r0, _, c0, _ = two.box
+    if "x_grid_px" in L:
+        grid = np.c_[L["x_grid_px"], L["y_grid_px"]]
+    else:
+        grid = two.layout.from_frame(0, np.c_[L["x_nm"] / S.PIXEL_NM[0], L["y_nm"] / S.PIXEL_NM[1]])
+    kind = S.CONTEXTS[context]["kind"]
+    ph = two.in_order(L["photons_c"]) if kind == "colour" else L["photons"]
+    frame = np.asarray(L["frame"], int)
+    bg = two.in_order(L["background_c"]) if background == "fit" else None
+    levels = np.full((len(frame), 2), np.nan)
+    g = fit_goodness(two, cal, kind, stack, frame, grid - [c0, r0], L["z_nm"], ph, bg, bool(c["em_on"]), radius,
+                     levels)
+    np.savez(FITS / label / f"{name}_goodness.npz", goodness=g, background=levels if bg is None else bg)
+    return g
+
+
+def plugin_bound(name, label):
+    """Each localization's one-frame plug-in bound (`smappy.netfit.bounds.plugin_crlb`) from a saved
+    fit, with the backgrounds `netfit_goodness` found (run it first): what a reported sigma
+    is held against without the truth.  Written as ``<name>_plugin.npz`` (x, y, z nm)."""
+    from smappy.netfit.bounds import plugin_crlb
+    from smappy.netfit.channels import TwoChannels
+    context = S.SETS[name]["context"]
+    cal = S.calibration(context)
+    info = json.loads((FITS / label / f"{name}.json").read_text())
+    read = info.get("read")
+    main = int(read.get("main", 0)) if isinstance(read, dict) else 0
+    two = TwoChannels.from_calibration(cal, cal.geometry["sources"][0]["roi"][:2], main=main)
+    c = S.camera_of(context)
+    L = dict(np.load(FITS / label / f"{name}.npz"))
+    grid = (np.c_[L["x_grid_px"], L["y_grid_px"]] if "x_grid_px" in L
+            else two.layout.from_frame(0, np.c_[L["x_nm"] / S.PIXEL_NM[0], L["y_nm"] / S.PIXEL_NM[1]]))
+    kind = S.CONTEXTS[context]["kind"]
+    ph = two.in_order(L["photons_c"]) if kind == "colour" else L["photons"]
+    frame = np.asarray(L["frame"], int)
+    bg = np.load(FITS / label / f"{name}_goodness.npz")["background"]      # `netfit_goodness`'s levels
+    b = plugin_crlb(two, cal, kind, frame, grid, L["z_nm"], ph, bg, S.PIXEL_NM, bool(c["em_on"]))
+    np.savez(FITS / label / f"{name}_plugin.npz", x_nm=b[:, 0], y_nm=b[:, 1], z_nm=b[:, 2])
+    return b
 
 
 FITTERS = {"plex": fit_plex, "spline": fit_spline}
