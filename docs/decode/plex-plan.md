@@ -1170,3 +1170,17 @@ density 50 Jaccard 0.720 → 0.739 -- but the dim found less: Jaccard at 1 000 p
 0.548 (10 000 photons 0.868 → 0.857), and the sigma more cautious (0.90 / 0.88 → 0.85 / 0.82).  So a
 broad prior buys dye calls and robustness in crowding with recall of the dimmest, as the priors on
 base did (§16, "The last runs"); both stay the user's choice.
+
+**Cheaper checks, and streaming** (2026-11-21).  The goodness of fit is now drawn and summed in torch
+(every spot of a chunk of frames with `render.SplineRenderer`, the deviance an image, each
+localization's square by a box filter, a background level per frame): the same numbers as the
+loop (largest difference 0.008 on 18 000 localizations), about 0.1 s for 10 000 on a GPU shared
+with a training -- what the network takes -- and 0.5 -- 1 s on a CPU.  The plug-in bound's spots and
+Fisher matrices likewise (`bounds.information`, identical to the loop): about 0.4 s for 10 000 on
+the GPU, some 9 s on a CPU, where its cost is the work itself (seven spline evaluations a spot and
+channel; splitting the renderer's contraction gave the same numbers no faster).  Streaming
+(`draw_batch_2c`'s ``movie_windows``, windows cut from one movie with its crop, as C = 1) halves the
+drawing at 4 -- 8 windows a movie; tonight's runs use 8: early (eswap in colour) and tjoin, on-times
+mixed over 1 -- 3 frames (``lifetime_max_frames`` 3), window 3, 6 M samples, 3 seeds a context
+(``M_*``), after the 6 M runs on on-time 1 (``L_*``).  5 or 7 frames come later, on the best of
+these, as for C = 1 (Jonas).

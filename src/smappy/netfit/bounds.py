@@ -1,6 +1,7 @@
 """The Cramer-Rao bound of each localization from the fit's own estimates, no truth needed: a reference
-beside the network's reported sigma (off by default -- `plugin_crlb` evaluates the spline seven times a
-spot and channel, some 20 s for 20 000 localizations).
+beside the network's reported sigma (off by default; the spline evaluated seven times a spot and
+channel, in torch: about 0.4 s for 10 000 localizations on a GPU shared with a training, some 9 s on
+a laptop's CPU, 2026-11-21).
 
 **Plug-in.**  The bound depends on the molecule's photons, background and z and on where it sits on
 the pixels, all of which the fit estimates; put in for the truth, they give the bound to a few percent
@@ -25,37 +26,70 @@ from __future__ import annotations
 import numpy as np
 
 
-def information(spline0, spline1, xy0, xy1, jacobian, z_nm, photons, background, excess: float = 1.0):
+def _derivatives(r, x, y, z, N, h=0.01):
+    """Spots of the renderer ``r`` with ``N`` photons and their derivatives by x, y (pixels), z (nm)
+    and the photons, (m, 4, pixels), and the spots (m, pixels): central differences with the square
+    held where the spot is, steps of 0.01 pixel and 0.01 of a z plane."""
+    import torch
+    half = r.size // 2
+    corner = (torch.round(x).long() - half, torch.round(y).long() - half)
+    at = lambda dx=0.0, dy=0.0, dz=0.0: r.spots(x + dx, y + dy, z + dz, corner)[0].flatten(1)
+    hz = h * r.dz
+    p = at()
+    n = N[:, None]
+    g = torch.stack([n * (at(dx=h) - at(dx=-h)) / (2 * h), n * (at(dy=h) - at(dy=-h)) / (2 * h),
+                     n * (at(dz=hz) - at(dz=-hz)) / (2 * hz), p], 1)
+    return n * p, g
+
+
+def information(spline0, spline1, xy0, xy1, jacobian, z_nm, photons, background, excess: float = 1.0,
+                device=None, chunk: int = 4096):
     """(n, 3, 3): each spot's Fisher information on x, y (channel 0's pixels) and z (nm), its photons
     and the two backgrounds taken out (the Schur complement): what adds over frames.
 
     ``xy0``, ``xy1`` (n, 2) the spot's positions in each channel's pixels; ``jacobian`` (n, 2, 2)
     d(xy1) / d(xy0), ``[k, a, b]`` = d xy1_a / d xy0_b; ``photons`` (n,) one count (each spline holds
-    its channel's share) or (n, 2) one per channel; ``background`` (n, 2) photons a pixel."""
-    from ..training.joint_crlb import spline_spots
+    its channel's share) or (n, 2) one per channel; ``background`` (n, 2) photons a pixel.
+
+    Each spot drawn alone as `training.joint_crlb.spline_spots` draws it (the spline's size less 3
+    around its nearest pixel), in torch with `render.SplineRenderer`, ``chunk`` spots at a time on
+    ``device`` (CUDA where there is one), only the (n, 3, 3) coming back."""
+    import torch
+
+    from .render import SplineRenderer
+    dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    f64 = torch.float64
+    rend = [SplineRenderer(s, dev, dtype=f64) for s in (spline0, spline1)]
     photons = np.asarray(photons, float)
     P = 1 if photons.ndim == 1 else photons.shape[1]
     n = len(z_nm)
-    big = (1 << 15, 1 << 15)                                   # a spot alone: never clipped
-    fisher = np.zeros((n, 3 + P + 2, 3 + P + 2))
-    for c, (spline, xy) in enumerate(((spline0, xy0), (spline1, xy1))):
-        ph = photons if P == 1 else photons[:, c]
-        s = spline_spots(spline, np.zeros(n, int), xy[:, 0] + 4096, xy[:, 1] + 4096, z_nm, ph,
-                         np.zeros(1), big)
-        g = s.grads.reshape(n, 4, -1)
-        if c == 1:
-            j = np.asarray(jacobian, float)
-            gx = j[:, 0, 0, None] * g[:, 0] + j[:, 1, 0, None] * g[:, 1]
-            gy = j[:, 0, 1, None] * g[:, 0] + j[:, 1, 1, None] * g[:, 1]
-            g = np.stack([gx, gy, g[:, 2], g[:, 3]], 1)
-        mu = np.maximum(s.model.reshape(n, -1) + background[:, c, None], 1e-9)
-        d = np.zeros((n, 3 + P + 2, g.shape[-1]))
-        d[:, :3] = g[:, :3]
-        d[:, 3 + (c if P == 2 else 0)] = g[:, 3]
-        d[:, 3 + P + c] = 1.0
-        fisher += np.einsum("nip,njp->nij", d / mu[:, None, :], d) / float(excess)
-    a, b, cc = fisher[:, :3, :3], fisher[:, :3, 3:], fisher[:, 3:, 3:]
-    return a - b @ np.linalg.solve(cc, np.transpose(b, (0, 2, 1)))
+    xys = [np.asarray(xy0, float), np.asarray(xy1, float)]
+    jac = np.asarray(jacobian, float)
+    background = np.asarray(background, float)
+    out = np.empty((n, 3, 3))
+    t = lambda v: torch.as_tensor(np.ascontiguousarray(v), dtype=f64, device=dev)
+    for a in range(0, n, chunk):
+        s = slice(a, a + chunk)
+        m = len(z_nm[s])
+        z = t(np.asarray(z_nm, float)[s])
+        fisher = torch.zeros((m, 3 + P + 2, 3 + P + 2), dtype=f64, device=dev)
+        for c in range(2):
+            N = t(photons[s] if P == 1 else photons[s, c])
+            model, g = _derivatives(rend[c], t(xys[c][s, 0]), t(xys[c][s, 1]), z, N)
+            if c == 1:
+                j = t(jac[s])
+                gx = j[:, 0, 0, None] * g[:, 0] + j[:, 1, 0, None] * g[:, 1]
+                gy = j[:, 0, 1, None] * g[:, 0] + j[:, 1, 1, None] * g[:, 1]
+                g = torch.stack([gx, gy, g[:, 2], g[:, 3]], 1)
+            mu = (model + t(background[s, c])[:, None]).clamp_min(1e-9)
+            d = torch.zeros((m, 3 + P + 2, g.shape[-1]), dtype=f64, device=dev)
+            d[:, :3] = g[:, :3]
+            d[:, 3 + (c if P == 2 else 0)] = g[:, 3]
+            d[:, 3 + P + c] = 1.0
+            fisher += torch.einsum("nip,njp->nij", d / mu[:, None, :], d) / float(excess)
+        A, B, C = fisher[:, :3, :3], fisher[:, :3, 3:], fisher[:, 3:, 3:]
+        out[s] = (A - B @ torch.linalg.solve(C, B.transpose(1, 2))).cpu().numpy()
+    return out
 
 
 def links(frame, xy, half: int = 1, link_px: float = 1.0):

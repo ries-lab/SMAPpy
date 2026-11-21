@@ -57,12 +57,17 @@ class SplineRenderer:
     def _monomials(self, d):
         return d[..., None] ** self._powers                                  # (..., 4)
 
-    def spots(self, x, y, z_nm):
-        """Unit-photon spots ``(m, size, size)`` and the frame pixel of their corner (columns, rows)."""
+    def spots(self, x, y, z_nm, corner=None):
+        """Unit-photon spots ``(m, size, size)`` and the frame pixel of their corner (columns, rows).
+        ``corner`` (ox, oy) holds the squares where given: a derivative by a small step in x must not
+        move the square when x crosses a half pixel (`bounds.information`)."""
         half = self.size // 2
         a = torch.arange(self.size, device=self.device)
-        ox = torch.round(x).long() - half                                   # rint, as numpy's
-        oy = torch.round(y).long() - half
+        if corner is None:
+            ox = torch.round(x).long() - half                               # rint, as numpy's
+            oy = torch.round(y).long() - half
+        else:
+            ox, oy = corner
         u = (ox[:, None] + a[None]).to(self.dtype) - x[:, None] + self.cx    # (m, size)
         v = (oy[:, None] + a[None]).to(self.dtype) - y[:, None] + self.cy
         w = -z_nm / self.dz + self.z0
