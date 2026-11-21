@@ -534,3 +534,114 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ----------------------------------------------------------------------------- the multi-emitter bound
+#: a Gaussian prior on each molecule's position (pixels) and z (the range's sd), as the C = 1 suite's
+#: joint bound (`sets.joint_bounds`): what caps it where two spots merge
+JOINT_PRIOR_PX = 1.0
+
+
+def joint_crlb(name, context=1):
+    """Every molecule-frame's multi-emitter bound for a fit reading frames ``t - context .. t +
+    context``, both channels together (`smappy.training.joint_crlb`'s, made two-channel): each
+    channel's spots drawn on its own half with the splines the set was drawn with, channel 1's x and
+    y derivatives taken through the registration onto the main channel's, a background per channel
+    and overlap group, photons one per row (biplane) or one per row and channel (colour), a
+    molecule's x, y and z one over the frames it is on.  A Gaussian prior on x, y (`JOINT_PRIOR_PX`)
+    and z (the range's sd) as C = 1's.
+
+    **Local, not the frame's matrix.**  At density 50 a frame's patches all overlap: one group of
+    thousands.  Each molecule's bound frees the parameters of the spots whose patch overlaps one of its
+    own in either channel, within the window, with their molecules' other rows there, and holds the
+    rest known -- the exact joint bound where the overlap groups are that small, slightly optimistic
+    where they chain on (a spot two patches away barely couples).  Returns (n, 3) nm and the nearest
+    other emitter of the frame, nm."""
+    from scipy.sparse import coo_matrix
+
+    from smappy.training import joint_crlb as J
+    spec = SETS[name]
+    ctx = spec["context"]
+    cal, colour = calibration(ctx), CONTEXTS[ctx]["kind"] == "colour"
+    splines = drawn_splines(ctx, cal)
+    shape, _, _, jacobian = _layout(cal)
+    t = dict(np.load(SETS_DIR / name / "truth.npz"))
+    n = len(t["frame"])
+    frame, mol = t["frame"].astype(int), t["molecule"]
+    excess = excess_of(ctx)
+    sp = []
+    for c, (xs, ys) in enumerate((("x_px", "y_px"), ("x2_px", "y2_px"))):
+        phot = t["photons_0" if c == 0 else "photons_1"] if colour else t["photons"]
+        s = J.spline_spots(splines[c], frame, t[xs], t[ys], t["z_nm"], phot, t[f"frame_background_{c}"],
+                           tuple(shape), ident=mol)
+        if c == 1:
+            jac = jacobian(np.c_[t["x_px"], t["y_px"]])            # (n, 2, 2)
+            g0, g1 = s.grads[:, 0].copy(), s.grads[:, 1].copy()
+            s.grads[:, 0] = jac[:, 0, 0, None, None] * g0 + jac[:, 1, 0, None, None] * g1
+            s.grads[:, 1] = jac[:, 0, 1, None, None] * g0 + jac[:, 1, 1, None, None] * g1
+        sp.append(s)
+    with J.one_blas_thread():
+        mats = [J.frame_matrices(s, excess) for s in sp]
+    h, w = sp[0].model.shape[1:]
+    P = 2 if colour else 1
+    z_sd = 2 * float(max(abs(v) for v in CONTEXTS[ctx]["z_nm"])) / np.sqrt(12.0)
+    prior = np.array([1 / JOINT_PRIOR_PX ** 2, 1 / JOINT_PRIOR_PX ** 2, 1 / z_sd ** 2])
+    sd = np.full((n, 3), np.nan)
+    frames = sorted(mats[0])
+    with J.one_blas_thread():
+        for tc in frames:
+            window = [f for f in range(tc - context, tc + context + 1) if f in mats[0]]
+            rows = np.concatenate([mats[0][f][0] for f in window])
+            idents, slot = np.unique(mol[rows], return_inverse=True)
+            n_id, n_rows = len(idents), len(rows)
+            r_all, c_all, v_all = [], [], []
+            at, b_at = 0, 3 * n_id + P * n_rows
+            for f in window:
+                k = len(mats[0][f][0])
+                s = slot[at:at + k]
+                for c in range(2):
+                    _, fisher, n_groups = mats[c][f]
+                    local = np.empty(4 * k + n_groups, int)
+                    ph = 3 * n_id + P * (at + np.arange(k)) + (c if colour else 0)
+                    local[:4 * k] = np.c_[3 * s, 3 * s + 1, 3 * s + 2, ph].ravel()
+                    local[4 * k:] = b_at + np.arange(n_groups)
+                    r_all.append(local[fisher.row]); c_all.append(local[fisher.col]); v_all.append(fisher.data)
+                    b_at += n_groups
+                at += k
+            r_all.append(np.arange(3 * n_id)); c_all.append(np.arange(3 * n_id)); v_all.append(np.tile(prior, n_id))
+            big = coo_matrix((np.concatenate(v_all), (np.concatenate(r_all), np.concatenate(c_all))),
+                             shape=(b_at, b_at)).tocsr()
+            big.sum_duplicates()
+            # which rows' patches overlap, in either channel: the neighbourhoods
+            corners = [s_.corner[rows] for s_ in sp]
+            win_frame = frame[rows]
+            bg_of = big[:3 * n_id + P * n_rows, 3 * n_id + P * n_rows:].tocsr()
+            for i in np.flatnonzero(win_frame == tc):
+                own = np.flatnonzero(slot == slot[i])
+                near = np.zeros(n_rows, bool)
+                for cr in corners:
+                    d = np.abs(cr[:, None, :] - cr[None, own, :])
+                    near |= ((d[..., 0] < h) & (d[..., 1] < w)).any(1)
+                near &= np.isin(win_frame, win_frame[own])
+                near_mol = np.unique(slot[near])
+                rr = np.flatnonzero(np.isin(slot, near_mol))
+                params = np.r_[(3 * near_mol[:, None] + np.arange(3)).ravel(),
+                               (3 * n_id + P * rr[:, None] + np.arange(P)).ravel()]
+                bgs = 3 * n_id + P * n_rows + np.unique(bg_of[params].indices)
+                sub = np.r_[params, bgs]
+                var, _ = J.variances(big[sub][:, sub].toarray(), False)
+                me = int(np.flatnonzero(near_mol == slot[i])[0])
+                sd[rows[i]] = np.sqrt(var[3 * me:3 * me + 3])
+    nn = J.nearest_neighbour(frame, np.c_[t["x_px"] * PIXEL_NM[0], t["y_px"] * PIXEL_NM[1]])
+    return sd * [PIXEL_NM[0], PIXEL_NM[1], 1.0], nn
+
+
+def draw_joint_crlb(names, context=1):
+    """``crlb_joint_w{2 context + 1}.npz`` beside each set's truth (`joint_crlb`)."""
+    import time
+    for name in names:
+        t0 = time.time()
+        b, nn = joint_crlb(name, context)
+        np.savez(SETS_DIR / name / f"crlb_joint_w{2 * context + 1}.npz", x_nm=b[:, 0], y_nm=b[:, 1], z_nm=b[:, 2], nn_nm=nn)
+        print(f"{name} ({2 * context + 1} frames): median joint bound x / z {np.nanmedian(b[:, 0]):.1f} / "
+              f"{np.nanmedian(b[:, 2]):.1f} nm, {time.time() - t0:.0f} s", flush=True)

@@ -344,8 +344,11 @@ def fit_spline(name, out):
     return {"device": "cpu", "seconds": seconds, "calibration": str(local_calibration(spec["context"]))}
 
 
-def fit_netfit(name, out, model):
-    """A two-channel netfit model on one set (the module's docstring)."""
+def fit_netfit(name, out, model, crlb=None):
+    """A two-channel netfit model on one set (the module's docstring).  ``crlb`` (default: the
+    environment's ``NETFIT_CRLB``, off): each localization's plug-in bound from its own estimates
+    (`smappy.netfit.bounds`), ``crlb_*_nm`` for its frame and ``crlb_win_*_nm`` for the frames read --
+    for testing, some 20 s a set."""
     import tifffile
 
     from smappy.netfit.channels import TwoChannels
@@ -372,6 +375,19 @@ def fit_netfit(name, out, model):
             "x_grid_px": r["x_pix"] + c0, "y_grid_px": r["y_pix"] + r0}
     if "photons_c" in r:
         keep["photons_c"] = two.in_order(r["photons_c"])
+    bg = np.asarray(r["background_c"]) if "background_c" in r else np.repeat(np.asarray(r["background"])[:, None], 2, 1)
+    keep["background_c"] = two.in_order(bg)
+    if crlb is None:
+        import os
+        crlb = os.environ.get("NETFIT_CRLB", "") not in ("", "0")
+    if crlb and len(r["frame"]):
+        from smappy.netfit.bounds import plugin_crlb
+        grid = np.c_[r["x_pix"] + c0, r["y_pix"] + r0]
+        ph = np.asarray(r["photons_c"]) if p.channels.kind == "colour" else np.asarray(r["photons"])
+        for w, pre in ((1, "crlb"), (2 * k + 1, "crlb_win")):
+            b = plugin_crlb(two, cal, p.channels.kind, r["frame"], grid, r["z_nm"], ph, bg, S.PIXEL_NM,
+                            bool(c["em_on"]), window=w)
+            keep.update({f"{pre}_x_nm": b[:, 0], f"{pre}_y_nm": b[:, 1], f"{pre}_z_nm": b[:, 2]})
     np.savez(out, **keep)
     return {"device": p.device, "seconds": seconds, "frames": len(adu), "model": str(model),
             "read": two.to_dict(), "window": 2 * k + 1}
@@ -419,6 +435,12 @@ def score(name, locs, keep):
     w3 = S.SETS_DIR / name / "crlb_w3.npz"
     if w3.exists():
         t.update({f"crlb_w3_{k}": v for k, v in np.load(w3).items()})
+    # the multi-emitter bounds (`sets_c2.joint_crlb`), 1 frame and 3, where drawn; ``nn_nm`` with them
+    for f, key in (("crlb_joint_w1.npz", "crlb_joint"), ("crlb_joint_w3.npz", "crlb_jw3")):
+        if (S.SETS_DIR / name / f).exists():
+            jb = dict(np.load(S.SETS_DIR / name / f))
+            t["nn_nm"] = jb.pop("nn_nm")
+            t.update({f"{key}_{k}": v for k, v in jb.items()})
     truth = {k: v for k, v in t.items() if np.ndim(v) == 1 and len(v) == n}
     sel = mask(truth["x_px"], truth["y_px"])
     truth = {k: v[sel] for k, v in truth.items()}

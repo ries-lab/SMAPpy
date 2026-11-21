@@ -186,7 +186,7 @@ def score_truth(truth, locs, keep, px, size, shift=False):
         if len(claims) == 3:
             c["claim_width_lat"] = robust_width(np.r_[dx[core] / cx[core], dy[core] / cy[core]])
             c["claim_width_ax"] = robust_width(dz[core] / cz[core])
-        for key, sfx in (("crlb", ""), ("crlb_joint", "_joint"), ("crlb_w3", "_w3")):
+        for key, sfx in (("crlb", ""), ("crlb_joint", "_joint"), ("crlb_w3", "_w3"), ("crlb_jw3", "_jw3")):
             if f"{key}_x_nm" in t:
                 bx, by, bz = (t[f"{key}_{a}_nm"][ti][core] for a in "xyz")
                 c[f"crlb_width_lat{sfx}"] = robust_width(np.r_[dx[core] / bx, dy[core] / by])
@@ -194,7 +194,7 @@ def score_truth(truth, locs, keep, px, size, shift=False):
                 c[f"rmse_over_crlb_lat{sfx}"] = float(c["rmse_lat_nm"] / np.sqrt(np.nanmean(bx ** 2 + by ** 2)))
                 c[f"rmse_over_crlb_ax{sfx}"] = float(c["rmse_ax_nm"] / np.sqrt(np.nanmean(bz ** 2)))
         out["core"] = c
-    for key in ("crlb", "crlb_full", "crlb_joint", "crlb_w3"):
+    for key in ("crlb", "crlb_full", "crlb_joint", "crlb_w3", "crlb_jw3"):
         if f"{key}_x_nm" not in t:
             continue
         bx, by, bz = (t[f"{key}_{a}_nm"][ti] for a in "xyz")
@@ -216,7 +216,7 @@ def score_truth(truth, locs, keep, px, size, shift=False):
         for lo, hi in zip(NEIGHBOUR_EDGES_NM, (*NEIGHBOUR_EDGES_NM[1:], np.inf)):
             s = (nn >= lo) & (nn < hi)
             row = {"lo": float(lo), "hi": None if np.isinf(hi) else float(hi), "n": int(s.sum())}
-            for key, sfx in (("crlb", ""), ("crlb_full", "_full"), ("crlb_joint", "_joint")):
+            for key, sfx in (("crlb", ""), ("crlb_full", "_full"), ("crlb_joint", "_joint"), ("crlb_w3", "_w3"), ("crlb_jw3", "_jw3")):
                 if f"{key}_x_nm" in t and s.sum() >= 10:
                     bx, by, bz = (t[f"{key}_{a}_nm"][ti][s] for a in "xyz")
                     row[f"lat{sfx}"] = robust_width(np.r_[dx[s] / bx, dy[s] / by])
