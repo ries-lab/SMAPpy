@@ -876,9 +876,8 @@ Colour, 1 000 photons: DECODE-Plex 0.091, base 0.028, early 0.025, tjoin 0.038, 
 spread, colour as good as the best, the best axial precision, the least pixelation, a third fewer
 parameters and 40 % faster.  Joining the time models buys little (a little Jaccard at high density, a
 worse z at 1 000 photons in biplane) and costs time; feeding the offset maps only to the union loses
-everywhere but colour at 1 000 photons; *share* gains nothing over two counts.  Still running: early
-with the halves swapped (``S_*_eswap``, channel 1 -- the bright one in colour -- as the grid), and
-colour's dye priors (``S_colour_dyes``, ``S_colour_win``).
+everywhere but colour at 1 000 photons; *share* gains nothing over two counts.  Early with the halves
+swapped and colour's dye priors: below, "The last runs".
 
 **Early's dye calls, molecule by molecule** (colour, 1 000 photons; `dye_wrong.py`-style matching, each
 model's matches of the same truth).  On the ~5 100 molecules both early and DECODE-Plex find, early
@@ -895,7 +894,7 @@ settles on, not molecules that are hard.  base has it worse (0.92 dye 77 % on th
 **Going on** (Jonas, 2026-11-21): early fusion is the arrangement optimised from here; a late-fusion
 model with the offset maps as input -- DECODE-Plex's published design, `two_fuse="late"`, base or
 tjoin -- stays as an option for the user.  None of the study's trainings converged: the in-focus
-RMSE on the training's test frames still falls at 6 M samples (`training_vs_time.png`, scratch).
+RMSE on the training's test frames still falls at their end, 3 M samples (92 epochs) (`training_vs_time.png`, scratch).
 
 **The fair bound for a fit that reads several frames** (`sets_c2.window_crlb`, ``crlb_w3.npz``
 beside each blinking set's truth; `report` scores ``*_w3`` beside the one-frame bound, and RMSE / CRLB
@@ -959,3 +958,48 @@ streaming in `draw_batch_2c` (C = 1: 20 s an epoch instead of 35, the same numbe
 on-times mixed over 1 -- 3 frames -- tested on C = 2 sets drawn with a mean on-time of 3 frames
 beside the 1-frame ones, which show how the networks pool a molecule across frames (the 3-frame
 networks sit 28 -- 66 % above their multi-emitter 3-frame bound, the 1-frame network 16 -- 22 %).
+
+**The last runs** (3 seeds each, scored as the rest, 2026-11-21).  *eswap*, early fusion with channel
+1 as the main -- the grid and positions follow it -- is early's equal in biplane (Jaccard 0.829 /
+0.826 / 0.759 at densities 1, 15, 50 against 0.829 / 0.827 / 0.760; 0.535 against 0.564 at 1 000
+photons; pixelation 0.040 against 0.046) and in colour, where channel 1 is the bright one, a shade
+better: Jaccard 0.881 / 0.867 / 0.726 and 0.590 at 1 000 photons, RMSE / CRLB in focus 1.13 / 1.09
+at 10 000 photons against 1.15 / 1.12, the multi-emitter bound at density 50 1.63 / 1.64 against
+1.66 / 1.65, right dye 95.0 % against 93.6 %.  Which channel is main hardly matters; the bright one,
+if anything.  The dye priors -- *win* (share 0.6 -- 1) and *dyes* (normal around 0.78 and 0.92, sd
+0.03), both on base, not early -- do what they were for: the share's bias at 1 000 photons goes from
+-0.04 -- -0.06 to -0.01 -- 0.00, its spread from 0.040 to 0.027 -- 0.030, the right dye from 89 %
+(base) to 96.5 / 94.1 % (97.3 % both, seed 0).  They cost recall on the dim: Jaccard at 1 000 photons
+0.49 / 0.47 against base's 0.58 (recall 0.50 / 0.47 against 0.56 at seed 0, precision the same
+0.996 -- 0.998); at density 1 -- 50 and 10 000 photons nothing changes, pixelation halves (0.017 /
+0.018 against 0.028).  A network that knows the share must be near one of two values keeps fewer of
+the spots too dim to tell which.  So the priors belong on early -- *early + win*, *early + dyes*, on
+eswap's channel order -- and their recall at 1 000 photons is the thing to watch.
+
+**Cost, measured fairly** (`benchmarks/decode/netfit_c2/study/timing.py`; every architecture with
+the same script on gpuvm's H100, nvidia-smi empty before and after each).  Epochs to 99 % of the
+final test Jaccard, from the runs' own logs (machine-free: every epoch draws the same 32 768
+samples), times one epoch there (epochs 2 and 3: drawing, steps, test evaluation); fit of the
+density-1 set (646 frames) after a warm-up.  *eswap* is timed as early, *win* and *dyes* as share.
+
+| | params | epochs to 99 % | s / epoch | train h | fit ms / frame |
+|---|---|---|---|---|---|
+| biplane base | | 58 | 30.3 | 0.49 | 16.3 |
+| biplane tjoin | | 57 | 31.3 | 0.50 | 17.7 |
+| biplane tboth | | 57 | 35.7 | 0.56 | 27.2 |
+| biplane early | 4.4 M | 56 | 25.6 | 0.40 | 9.7 |
+| biplane auxu | | 60 | 31.0 | 0.51 | 16.3 |
+| colour base | | 54 | 30.7 | 0.46 | 7.1 |
+| colour tjoin | | 56 | 31.4 | 0.49 | 7.7 |
+| colour tboth | | 59 | 36.0 | 0.59 | 11.8 |
+| colour early | 4.4 M | 58 | 31.3 | 0.50 | 4.2 |
+| colour auxu | | 54 | 41.2 | 0.61 | 7.1 |
+| colour share | | 56 | 30.9 | 0.48 | 7.1 |
+
+Every architecture reaches 99 % in 53 -- 60 epochs (1.7 -- 2.0 M samples), the same within the
+seeds; the time to train is the epoch's.  Drawing one epoch's batches alone takes 17.6 -- 17.9 s for
+all of them -- it runs in a thread beside the steps, so it sets no architecture's pace, but it is
+more than half of the fastest epoch: a faster network gains less than its steps suggest, and
+streaming (C = 1: 20 s an epoch instead of 35) is worth having before the time model.  Early is the
+cheapest to train in biplane and as cheap as base in colour, and the fastest to fit in both (9.7 and
+4.2 ms a frame against 16.3 and 7.1).
