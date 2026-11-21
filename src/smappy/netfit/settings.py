@@ -69,6 +69,9 @@ class ChannelSettings:
     # them.  Everything the network reads and puts out is in the grid's order -- a colour share is the
     # share in the grid's channel 1 -- and is put back in the calibration's where it is reported.
     main: int = 0
+    # biplane: each plane's photons a count of its own (a molecule's count times 2 (1 - s) and 2 s, s
+    # uniform over ``share``), as DECODE-Plex draws them -- a test of what linking the planes is worth
+    unlinked: bool = False
 
     @property
     def n(self) -> int:
@@ -77,7 +80,7 @@ class ChannelSettings:
     @property
     def photons(self) -> int:
         """The photon counts a molecule has: one (C = 1, biplane), or one per channel (colour)."""
-        return 2 if self.kind == "colour" else 1
+        return 2 if self.kind == "colour" or (self.kind == "biplane" and self.unlinked) else 1
 
 
 @dataclass

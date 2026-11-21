@@ -227,3 +227,19 @@ def test_known_dyes_put_each_molecule_s_share_near_one_of_them():
     share = (b.photons[..., 1] / b.photons.sum(-1))[b.mask]
     near = torch.minimum((share - 0.78).abs(), (share - 0.92).abs())
     assert (near < 0.05).all() and ((share - 0.78).abs() < 0.05).any() and ((share - 0.92).abs() < 0.05).any()
+
+
+def test_unlinked_biplane_planes_carry_counts_of_their_own_around_the_molecule_s():
+    cal = dual()
+    two = CH.TwoChannels.from_calibration(cal)
+    sim = SimulationSettings(frame_px=24, photons_range=(1000.0, 5000.0), background=(10.0, 20.0), z_nm=(-300.0, 300.0))
+    chs = ChannelSettings(kind="biplane", unlinked=True, share=(0.25, 0.75))
+    assert chs.photons == 2
+    b = draw_batch_2c([SplineRenderer(s, whole=True) for s in CH.splines(cal, "biplane")], CH.Grid(two), sim,
+                      CameraModel(), chs, 8, torch.Generator().manual_seed(5))
+    ph = b.photons[b.mask]
+    share = ph[:, 1] / ph.sum(-1)
+    assert b.photons.shape[-1] == 2 and ((share > 0.25 - 1e-5) & (share < 0.75 + 1e-5)).all()
+    # the two counts sum to twice the molecule's in the frame (a linked plane's count is the
+    # molecule's), at most twice the range's top: a frame it is on for part of holds less
+    assert (ph.sum(-1) <= 2 * 5000 + 1).all() and (ph.sum(-1) > 2 * 1000).any()

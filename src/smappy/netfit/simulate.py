@@ -177,6 +177,9 @@ def draw_batch_2c(renderers, grid, sim: SimulationSettings, cam: CameraModel, ch
     elif channels.kind == "colour":
         share = _uniform(*channels.share, len(sample), g, device)
         per_channel = [per_frame * (1 - share[:, None]), per_frame * share[:, None]]
+    elif channels.unlinked:
+        share = _uniform(*channels.share, len(sample), g, device)
+        per_channel = [per_frame * 2 * (1 - share[:, None]), per_frame * 2 * share[:, None]]
     else:
         per_channel = [per_frame, per_frame]
     image = bg[..., None, None].expand(n, 2, T, s, s).contiguous()
@@ -201,7 +204,7 @@ def draw_batch_2c(renderers, grid, sim: SimulationSettings, cam: CameraModel, ch
     mask[ks, rank] = True
     window = torch.zeros((n, k, T), device=device)
     window[ks, rank] = per_frame[i]
-    if channels.kind == "colour":
+    if channels.photons == 2:
         photons = torch.zeros((n, k, 2), device=device)
         photons[ks, rank] = torch.stack([per_channel[0][i, mid], per_channel[1][i, mid]], 1)
     else:

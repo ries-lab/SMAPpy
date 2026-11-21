@@ -70,6 +70,7 @@ Z_LIMIT = 700.0
 Z_BINS = (0, 150, 300, 450, 600, 700)          # |z| bins of the pixelation
 PHOTON_BINS = (0, 2000, 4000, 8000, 16000, 1e9)
 CORE_Z_NM = 300.0
+CORE_TRIM = 5.0                                # an error beyond this many of its bound is an outlier
 CORE_PHOTONS_MIN = 0.0                         # a molecule's photons in the frame, for the core; 0: all
 #: the nearest other emitter's distance the joint bound's widths are split by, nm
 NEIGHBOUR_EDGES_NM = (0, 200, 400, 600, 800, 1200, 2000)
@@ -194,6 +195,13 @@ def score_truth(truth, locs, keep, px, size, shift=False):
                 c[f"crlb_width_ax{sfx}"] = robust_width(dz[core] / bz)
                 c[f"rmse_over_crlb_lat{sfx}"] = float(c["rmse_lat_nm"] / np.sqrt(np.nanmean(bx ** 2 + by ** 2)))
                 c[f"rmse_over_crlb_ax{sfx}"] = float(c["rmse_ax_nm"] / np.sqrt(np.nanmean(bz ** 2)))
+                # outliers: errors beyond CORE_TRIM of their own bound on any axis left out of both sums
+                ex, ey, ez = dx[core] / bx, dy[core] / by, dz[core] / bz
+                ok = (np.abs(ex) <= CORE_TRIM) & (np.abs(ey) <= CORE_TRIM) & (np.abs(ez) <= CORE_TRIM)
+                c[f"outliers{sfx}"] = float(1 - ok.mean())
+                c[f"rmse_over_crlb_lat{sfx}_trim"] = float(np.sqrt(np.mean(dx[core][ok] ** 2 + dy[core][ok] ** 2)
+                                                                / np.nanmean(bx[ok] ** 2 + by[ok] ** 2)))
+                c[f"rmse_over_crlb_ax{sfx}_trim"] = float(np.sqrt(np.mean(dz[core][ok] ** 2) / np.nanmean(bz[ok] ** 2)))
         out["core"] = c
     for key in ("crlb", "crlb_full", "crlb_joint", "crlb_w3", "crlb_jw3"):
         if f"{key}_x_nm" not in t:
