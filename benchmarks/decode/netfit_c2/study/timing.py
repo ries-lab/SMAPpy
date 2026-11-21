@@ -36,6 +36,7 @@ def gpu_busy() -> str:
 
 def main():
     import torch
+
     from smappy.netfit.train import Drawer, load_settings, train
     out = pathlib.Path(sys.argv[1]).resolve()
     study = pathlib.Path.cwd()
