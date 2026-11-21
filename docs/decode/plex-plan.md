@@ -709,8 +709,10 @@ channels' features joined, the offset maps beside them, into the union U-Net; he
 photons (one, or one per channel for colour: DECODE-Plex's), x, y, z, their sigmas, and a background
 per channel.  The output's channels are described by a layout object (`network.Layout`), which the
 loss, the extraction and the predictor read, so that C = 1 models are read as they were saved.
-Netfit's C = 1 choices stay: 64 features (the size screen), ConvGRU over 3 frames (GMN7C), the
-mixture loss with the reported sigma, `mixture_peak`.
+Netfit's C = 1 choices stay: 64 features (the size screen), GMN7C's ConvGRU with its normalised input
+-- but over 3 frames, DECODE-Plex's window, not GMN7C's 7; each window drawn on its own, not streamed
+(`draw_batch_2c` refuses ``movie_windows`` > 1); one mean on-time, 1 frame as the sets, not 1 -- 3 --
+the mixture loss with the reported sigma, `mixture_peak`.
 
 **Scored** on the C = 2 sets by `run_c2` like DECODE-Plex, on the same overlap; a netfit C = 2 test set
 per context for the training's own scores.  Round 0 is done when both contexts train and score; the
