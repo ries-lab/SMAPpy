@@ -428,7 +428,40 @@ def score(name, locs, keep):
     out["area_molecules"] = int(sel.sum())
     out["by_z"] = by_z(truth, locs, keep, shape)
     out["pixelation"] = pixelation(truth, locs, keep, shape)
+    dyes = S.CONTEXTS[context].get("dyes", S.DYES)
+    if "photons_c" in locs and "dye" in truth and len(dyes) > 1:
+        out["colour"] = colour(truth, locs, keep, shape, dyes)
     return out
+
+
+def colour(truth, locs, keep, shape, dyes):
+    """Each matched molecule's share of its light in channel 1 against its dye's, and the dye called by
+    the midpoint between the two dyes' shares: overall and at the dimmest (the set's lower photon half),
+    where a share is pulled towards 1/2 first."""
+    from score_sets import match
+    ok = R.kept(locs, keep)
+    pc = np.asarray(locs["photons_c"])[ok].astype(float)
+    f = {"frame": np.asarray(locs["frame"])[ok].astype(np.int64), "x_px": np.asarray(locs["x_nm"])[ok] / S.PIXEL_NM[0],
+         "y_px": np.asarray(locs["y_nm"])[ok] / S.PIXEL_NM[1], "z_nm": np.asarray(locs["z_nm"])[ok]}
+    w, h = shape[1], shape[0]
+    fi = R._inside(f["x_px"], f["y_px"], w, h)
+    f, pc = {k: v[fi] for k, v in f.items()}, pc[fi]
+    ti = R._inside(truth["x_px"], truth["y_px"], w, h)
+    t = {k: v[ti] for k, v in truth.items()}
+    a, b = match(t, f, S.PIXEL_NM)
+    dyes = np.asarray(dyes, float)
+    share = pc[b, 1] / np.maximum(pc[b].sum(1), 1e-9)
+    true = dyes[t["dye"][a].astype(int)]
+    called = np.abs(share[:, None] - dyes[None]).argmin(1)
+    right = called == t["dye"][a].astype(int)
+    photons = t["photons"][a]
+    dim = photons < np.median(photons)
+
+    def summary(s):
+        e = share[s] - true[s]
+        return {"n": int(s.sum()), "right": float(right[s].mean()), "share_bias": float(e.mean()),
+                "share_sd": float(e.std()), "photons_ratio": float(np.median(pc[b][s].sum(1) / photons[s]))}
+    return {**summary(np.ones(len(a), bool)), "dim": summary(dim)}
 
 
 PIXEL_Z_BINS = (0, 150, 300, 500, 700, 1000)

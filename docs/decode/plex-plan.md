@@ -808,3 +808,72 @@ roughly, uniform over a window (``share``).  Both queued after the study, three 
 ``S_colour_dyes`` (0.78 and 0.92, decodebox) and ``S_colour_win`` (0.6 -- 1, gpuvm).  The prefit's part
 -- the dyes' ratios from the data's brightest isolated spots in both channels -- belongs to the fitter
 in SMAPpy (step 5's item 11).
+
+### The architecture study: early fusion wins (2026-11-21)
+
+Five arrangements of Round 1's network, three seeds each (`benchmarks/decode/netfit_c2/study/`,
+6 M samples; biplane on gpuvm, colour on decodebox, colour *share* on gpuvm), scored on the
+blinking sets with 3 frames read:
+
+* **base**: Round 1's -- a per-frame U-Net per channel, a time model per channel, the offset maps
+  into every per-frame net and the union;
+* **tjoin** (`two_time="joined"`): one time model over both channels' features;
+* **tboth** (`"both"`): per channel and joined;
+* **early** (`two_fuse="early"`): channel 1 resampled onto channel 0's grid inside the network (the
+  registration's offsets, `grid_sample` at p + d(p)), one per-frame U-Net reading both -- 4.4 M
+  parameters against 6.7 M;
+* **auxu** (`two_aux="union"`): the offset maps only into the union;
+* colour only, **share** (`photon_out="share"`): a total and channel 1's share instead of two counts.
+
+Mean (sd over seeds), DECODE-Plex and Spline 3D 2C one run each:
+
+| biplane, Jaccard | d 1 | d 15 | d 50 | 1 000 ph | 3 000 ph | 10 000 ph |
+|---|---|---|---|---|---|---|
+| DECODE-Plex | 0.792 | 0.762 | 0.642 | 0.469 | 0.662 | 0.777 |
+| base | 0.814 (0.014) | 0.815 (0.001) | 0.737 (0.001) | 0.525 (0.022) | 0.737 (0.006) | 0.797 (0.018) |
+| tjoin | 0.808 (0.013) | 0.822 (0.000) | 0.745 (0.002) | 0.541 (0.011) | 0.745 (0.003) | 0.784 (0.020) |
+| tboth | 0.803 (0.012) | 0.820 (0.001) | 0.744 (0.002) | 0.530 (0.014) | 0.737 (0.008) | 0.785 (0.014) |
+| **early** | **0.829** (0.011) | **0.827** (0.002) | **0.760** (0.001) | **0.564** (0.013) | **0.768** (0.006) | **0.801** (0.024) |
+| auxu | 0.786 (0.012) | 0.790 (0.002) | 0.695 (0.003) | 0.527 (0.019) | 0.698 (0.007) | 0.771 (0.016) |
+
+| biplane, \|z\| < 300 lat / ax nm | d 1 | d 15 | d 50 | 1 000 ph | 10 000 ph |
+|---|---|---|---|---|---|
+| DECODE-Plex | 22.5 / 47.7 | 25.2 / 56.3 | 32.8 / 78.9 | 36.9 / 86.7 | 22.5 / 48.7 |
+| Spline 3D 2C | 15.6 / 32.6 | 39.3 / 58.9 | 54.1 / 83.3 | 30.6 / 64.7 | 15.9 / 35.2 |
+| base | 16.5 / 39.1 | 19.1 / 42.8 | 24.2 / 53.1 | 25.4 / 60.3 | 15.1 / 33.7 |
+| early | 16.3 / 35.5 | 18.4 / 40.8 | 23.4 / 51.6 | 25.1 / 61.7 | 14.4 / 30.6 |
+| auxu | 17.6 / 47.5 | 19.8 / 51.6 | 27.6 / 67.1 | 29.7 / 84.7 | 16.2 / 41.3 |
+
+| colour, Jaccard / dye right | d 1 | d 15 | d 50 | 1 000 ph | 3 000 ph | 10 000 ph |
+|---|---|---|---|---|---|---|
+| DECODE-Plex | 0.746 / 0.991 | 0.830 / 0.985 | 0.675 / 0.975 | 0.341 / 0.973 | 0.692 / 0.986 | 0.796 / 0.990 |
+| base | 0.882 / 0.992 | 0.859 / 0.984 | 0.712 / 0.972 | 0.578 / 0.887 | 0.796 / 0.969 | 0.862 / 0.987 |
+| tjoin | 0.888 / 0.993 | 0.863 / 0.983 | 0.717 / 0.975 | 0.574 / 0.933 | 0.797 / 0.971 | 0.864 / 0.989 |
+| tboth | 0.889 / 0.994 | 0.864 / 0.984 | 0.720 / 0.975 | 0.579 / 0.926 | 0.794 / 0.976 | 0.862 / 0.989 |
+| **early** | 0.886 / 0.993 | 0.863 / 0.985 | 0.720 / 0.973 | 0.597 / 0.936 | 0.796 / 0.980 | 0.868 / 0.989 |
+| auxu (2 seeds) | 0.862 / 0.984 | 0.851 / 0.974 | 0.690 / 0.965 | 0.613 / 0.945 | 0.790 / 0.969 | 0.844 / 0.978 |
+| share | 0.872 / 0.992 | 0.860 / 0.984 | 0.716 / 0.971 | 0.562 / 0.932 | 0.792 / 0.971 | 0.849 / 0.988 |
+
+Colour at \|z\| < 300, lat / ax nm, 1 000 photons: DECODE-Plex 44.1 / 84.7, base 39.4 / 76.2, early
+37.5 / 64.1; at 10 000: 24.3 / 44.1, 23.4 / 42.7, 22.8 / 39.9.  The dye seeds' spread at 1 000
+photons is large (base 0.887 sd 0.056).
+
+**Pixelation** (`run_c2.pixelation`: KS from uniform of the matched localizations' sub-pixel
+positions on the network's grid, the larger of x and y; the truth's own, the counting noise, 0.01 --
+0.02): at the counting noise for every fitter from density 1 to 50 and at 10 000 photons.  At 1 000
+photons, biplane: DECODE-Plex 0.144, base 0.069 (0.006), tjoin 0.055, tboth 0.074, **early 0.046
+(0.009)**, auxu 0.075, Spline 0.018 (Round 1's one-frame network 0.033).  It grows with \|z\|: base
+0.030 at \|z\| < 150 nm to 0.171 at 500 -- 700, early 0.042 to 0.087 -- early halves it far from focus.
+Colour, 1 000 photons: DECODE-Plex 0.091, base 0.028, early 0.025, tjoin 0.038, share 0.039.
+
+**Speed** (density 15, the sets' 512 x 512 frames, ms a frame): biplane on the H100 base 17.3, tjoin
+18.8, tboth 28.0, early 10.7, auxu 17.3; colour on the 4090 base 13.0, tjoin 15.0, tboth 22.8, early
+7.6 (share 7.4 on the H100, not comparable).
+
+**So early fusion is the arrangement**: the best Jaccard in biplane on every set, beyond the seeds'
+spread, colour as good as the best, the best axial precision, the least pixelation, a third fewer
+parameters and 40 % faster.  Joining the time models buys little (a little Jaccard at high density, a
+worse z at 1 000 photons in biplane) and costs time; feeding the offset maps only to the union loses
+everywhere but colour at 1 000 photons; *share* gains nothing over two counts.  Still running: early
+with the halves swapped (``S_*_eswap``, channel 1 -- the bright one in colour -- as the grid), and
+colour's dye priors (``S_colour_dyes``, ``S_colour_win``).
