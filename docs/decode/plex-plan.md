@@ -1160,3 +1160,13 @@ for longer (6 M samples, 3 seeds), which says whether the bright out-of-focus lo
 crowded outliers are undertraining, and the dye prior chosen from ``S_colour_dyesb``; then the time
 model (streaming first: drawing is half an epoch); then real data and the SMAPpy fitter, with the
 dyes' ratios from a prefit and the flags as options.
+
+**The dyes known, broadly** (``S_colour_dyesb``: early, each molecule's share drawn around 0.78 or
+0.92 with sd 0.06, 3 M samples, 3 seeds; against early's independent counts, standard report):
+outliers a quarter fewer (density 15 5.9 → 4.5 %, on 3 frames 7.1 → 5.2 %), the inliers closer to
+the bound everywhere (density 15 1.26 / 1.29 → 1.23 / 1.23, 1 000 photons 1.24 / 1.25 → 1.21 /
+1.20), the right dye at 1 000 photons 93.6 → 97.5 % with no whole swaps (the exact link: 81 %),
+density 50 Jaccard 0.720 → 0.739 -- but the dim found less: Jaccard at 1 000 photons 0.597 →
+0.548 (10 000 photons 0.868 → 0.857), and the sigma more cautious (0.90 / 0.88 → 0.85 / 0.82).  So a
+broad prior buys dye calls and robustness in crowding with recall of the dimmest, as the priors on
+base did (§16, "The last runs"); both stay the user's choice.
