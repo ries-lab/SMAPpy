@@ -1086,3 +1086,77 @@ ax 1.63 / 1.63 → 1.44 / 1.52 at density 15, 1.89 / 1.91 → 1.59 / 1.70 at 50,
 (1.7 → 1.1 %, 4.2 → 2.2 %), dyes 98.3 → 99.0 %; at 1 000 photons the dye calls fall (86.5 → 81.4 %,
 a wrong call now a whole swap).  So linking is worth its bound in biplane and robustness against
 neighbours in colour, half of colour's gap to biplane at density 15.
+
+### The standard report, filters, and how to go on (Jonas, 2026-11-21)
+
+**Decided.**  (1) Precision is reported over |z| < 500 nm, not 300: normalised by the bound, the
+order of the fitters is the in-focus one (checked on the four sets below: one flip, bright biplane,
+where the 3-frame networks lose some 6 % against their bound at 300 -- 500 nm and DECODE-Plex does
+not -- which the wider band now shows).  (2) How colour uses the dyes is the user's choice at
+training (and a GUI option): ratios from the prefit or typed, a wider range, or independent counts
+(isotropic -- what four dyes in one data set will need).  Tested next: the ratios known with a broad
+spread (``S_colour_dyesb``, sd 0.06, 3 seeds) against independent counts (early), on sets with
+known ratios.  (3) Both outlier flags -- the reported sigma over the plug-in bound and the goodness
+of fit -- are options; the GUI should say what each costs (a tooltip, a colour, a line).
+(4) Land after this step.
+
+**The standard report** (`suite/standard_c2.py`, ``python standard_c2.py CONTEXT RUN ...``): four
+sets -- 10 000 and 1 000 photons isolated, density 15 with molecules on for 1 and for 3 frames --
+and Jaccard; outliers (matched, error beyond 5 of its own single-emitter bound for the frames read,
+any axis); the inliers' RMSE / CRLB against the multi-emitter bound for the frames read (density
+sets) or the single-emitter one; pixelation at 1 000 photons, KS of the inliers less the truth's at
+the same molecules (outliers pixelate no differently: KS 0.058 all, 0.058 inliers, biplane early);
+the right dye on inliers; and sigma honesty at density 15, the robust width of the inliers' errors
+over their reported sigma (1 honest, below it cautious).  |z| < 500 nm; density sets from 2 000
+photons in the frame.  Mean (sd) over 3 seeds:
+
+biplane
+
+| model | J 10k | J 1k | J d15 | J on3 | out d15 % | out on3 % | 10k lat | 10k ax | 1k lat | 1k ax | d15 lat | d15 ax | on3 lat | on3 ax | pix 1k | dye 1k % | dye d15 % | σ lat | σ ax |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| DECODE-Plex | 0.777 | 0.469 | 0.762 | 0.849 | 4.1 | 7.8 | 1.11 | 1.14 | 1.30 | 1.49 | 1.18 | 1.26 | 1.26 | 1.37 | 0.130 |  |  | 1.04 | 1.18 |
+| early | 0.801 (0.024) | 0.564 (0.013) | 0.827 (0.002) | 0.907 (0.001) | 1.5 (0.1) | 3.5 (0.1) | 1.17 (0.02) | 1.18 (0.02) | 1.18 (0.02) | 1.33 (0.04) | 1.14 (0.01) | 1.19 (0.01) | 1.17 (0.00) | 1.30 (0.02) | 0.032 (0.009) |  |  | 0.96 (0.01) | 0.93 (0.01) |
+| eswap | 0.812 (0.021) | 0.535 (0.002) | 0.826 (0.001) | 0.910 (0.002) | 1.7 (0.2) | 3.2 (0.1) | 1.15 (0.00) | 1.17 (0.00) | 1.16 (0.01) | 1.29 (0.03) | 1.12 (0.01) | 1.17 (0.00) | 1.18 (0.00) | 1.31 (0.03) | 0.028 (0.001) |  |  | 0.92 (0.00) | 0.89 (0.00) |
+| tjoin | 0.784 (0.020) | 0.541 (0.011) | 0.822 (0.000) | 0.902 (0.000) | 1.9 (0.1) | 5.0 (0.1) | 1.19 (0.01) | 1.24 (0.02) | 1.30 (0.01) | 1.55 (0.05) | 1.16 (0.01) | 1.19 (0.02) | 1.23 (0.01) | 1.36 (0.02) | 0.042 (0.012) |  |  | 0.86 (0.00) | 0.85 (0.01) |
+| base | 0.797 (0.018) | 0.525 (0.022) | 0.815 (0.001) | 0.895 (0.001) | 2.3 (0.1) | 5.9 (0.3) | 1.20 (0.00) | 1.26 (0.02) | 1.25 (0.01) | 1.47 (0.03) | 1.15 (0.01) | 1.22 (0.01) | 1.27 (0.01) | 1.43 (0.02) | 0.055 (0.006) |  |  | 0.86 (0.01) | 0.85 (0.01) |
+
+colour
+
+| model | J 10k | J 1k | J d15 | J on3 | out d15 % | out on3 % | 10k lat | 10k ax | 1k lat | 1k ax | d15 lat | d15 ax | on3 lat | on3 ax | pix 1k | dye 1k % | dye d15 % | σ lat | σ ax |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| DECODE-Plex | 0.796 | 0.341 | 0.830 | 0.882 | 10.0 | 12.5 | 1.31 | 1.30 | 1.56 | 1.65 | 1.39 | 1.43 | 1.46 | 1.47 | 0.069 | 97.5 | 98.7 | 1.02 | 1.13 |
+| early | 0.868 (0.005) | 0.597 (0.022) | 0.863 (0.002) | 0.917 (0.003) | 5.9 (0.2) | 7.1 (0.1) | 1.14 (0.00) | 1.11 (0.01) | 1.24 (0.01) | 1.25 (0.01) | 1.26 (0.01) | 1.29 (0.02) | 1.30 (0.01) | 1.27 (0.00) | 0.011 (0.005) | 93.6 (1.9) | 98.7 (0.0) | 0.90 (0.01) | 0.88 (0.01) |
+| eswap | 0.861 (0.008) | 0.590 (0.032) | 0.867 (0.002) | 0.919 (0.003) | 5.2 (0.1) | 6.2 (0.1) | 1.12 (0.01) | 1.10 (0.01) | 1.24 (0.02) | 1.27 (0.03) | 1.24 (0.01) | 1.25 (0.01) | 1.27 (0.02) | 1.25 (0.01) | 0.017 (0.005) | 95.0 (0.9) | 98.5 (0.1) | 0.92 (0.01) | 0.90 (0.02) |
+| tjoin | 0.864 (0.003) | 0.574 (0.013) | 0.863 (0.000) | 0.917 (0.001) | 6.1 (0.1) | 7.5 (0.1) | 1.13 (0.01) | 1.11 (0.02) | 1.26 (0.01) | 1.28 (0.02) | 1.28 (0.02) | 1.28 (0.02) | 1.30 (0.03) | 1.25 (0.01) | 0.023 (0.009) | 93.3 (2.1) | 98.5 (0.1) | 0.84 (0.01) | 0.85 (0.01) |
+| base | 0.862 (0.004) | 0.578 (0.017) | 0.859 (0.002) | 0.913 (0.002) | 6.8 (0.3) | 8.3 (0.2) | 1.14 (0.01) | 1.15 (0.02) | 1.30 (0.03) | 1.42 (0.08) | 1.28 (0.01) | 1.31 (0.01) | 1.33 (0.01) | 1.30 (0.01) | 0.014 (0.005) | 88.7 (5.6) | 98.6 (0.1) | 0.85 (0.01) | 0.88 (0.02) |
+
+Early fusion (eswap -- the bright channel main -- in colour) leads or ties on every number but
+bright biplane, where DECODE-Plex reading one frame is 4 -- 5 % closer to its bound; it has a third
+to a half of the outliers of late fusion and DECODE-Plex, the least pixelation in biplane, and the
+most honest sigma (0.89 -- 0.96; late fusion 0.85, cautious; DECODE-Plex 1.04 / 1.18,
+overconfident in z).  Cost: `timing.py`'s table above.
+
+**Flagging outliers from the fit alone** (`flag2.py`, scratch; the plug-in bound and the goodness
+from the saved fits, `run_c2.plugin_bound`, `run_c2.netfit_goodness`): AUC of the sigma over the
+plug-in bound 0.74 -- 0.87 for the networks (lower than over the truth's bound, 0.88 -- 0.92), of
+the goodness 0.61 -- 0.71, of the two together no better than the first.  For DECODE-Plex at 1 000
+photons the sigma says nothing (0.46 -- 0.58) and the goodness does (0.71 -- 0.74).  Cost on the
+Mac's CPU, 10 000 localizations: the goodness 2 s, the plug-in bound 8.5 s (python loops; the
+network 0.1 s on the GPU).
+
+**After filtering** (`filt.py`, scratch; each fitter keeps its best 95 / 90 / 80 % by a flag,
+scored on what remains, |z| < 300 nm): keeping 90 % by sigma over bound halves the outliers
+(biplane early 1.5 → 0.6 %, colour early 5.5 → 3.4 %) and brings the RMSE / CRLB down (colour
+early 1.49 → 1.37) while the robust width hardly moves (1.24 → 1.22) -- it cuts the tails; the
+recall falls with the share dropped.  The goodness removes false positives too (precision biplane
+DECODE-Plex 0.972 → 0.989, early 0.968 → 0.975), which the sigma does not.  At an equal share kept
+the order does not change, and no filter brings a weaker fitter to early unfiltered (biplane density
+15: DECODE-Plex keeping 80 % 1.17 / 1.27, early keeping all 1.15 / 1.15).  So: the sigma over the
+plug-in bound for positions, the goodness for false positives, both options; neither decides
+between models.
+
+**Going on.**  Land.  Then one training round on the winner -- early, the bright channel main --
+for longer (6 M samples, 3 seeds), which says whether the bright out-of-focus loss and colour's
+crowded outliers are undertraining, and the dye prior chosen from ``S_colour_dyesb``; then the time
+model (streaming first: drawing is half an epoch); then real data and the SMAPpy fitter, with the
+dyes' ratios from a prefit and the flags as options.
