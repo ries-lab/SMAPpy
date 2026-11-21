@@ -919,3 +919,34 @@ Every fitter is at or above its bound now (the 0.6 -- 0.7 before were the one-fr
 3-frame networks use the neighbouring frames' photons less well than the 1-frame network uses its
 own frame's: 12 -- 25 % above the bound in focus, the 1-frame netfit 5 -- 15 %.  Room for the time
 model.
+
+**The multi-emitter bound** (`sets_c2.joint_crlb`, ``crlb_joint_w1.npz`` / ``crlb_joint_w3.npz``
+beside the density sets' truth; `smappy.training.joint_crlb` made two-channel: channel 1's
+derivatives through the registration, a background per channel and overlap group, the photons per
+row and channel, x, y, z one per molecule over the frames read, C = 1's prior of 1 pixel and the
+range's sd).  Local: each molecule frees the spots whose patch overlaps one of its own in either
+channel and holds the rest known -- at density 50 a frame's patches all chain.  At density 1 it is
+the single-emitter bound (median 0.999).  RMSE / CRLB in focus against it, each fitter's window,
+lat / ax:
+
+| | frames | d 15 | d 25 | d 50 |
+|---|---|---|---|---|
+| biplane DECODE-Plex | 1 | 1.33 / 1.31 | 1.46 / 1.48 | 1.68 / 1.77 |
+| biplane netfit Round 1 | 1 | 1.16 / 1.12 | 1.19 / 1.17 | 1.22 / 1.19 |
+| biplane base | 3 | 1.34 / 1.32 | 1.41 / 1.47 | 1.55 / 1.56 |
+| biplane early | 3 | 1.28 / 1.26 | 1.34 / 1.45 | 1.44 / 1.46 |
+| colour DECODE-Plex | 3 | 1.77 / 1.75 | 1.83 / 1.82 | 1.93 / 1.96 |
+| colour base | 3 | 1.53 / 1.44 | 1.58 / 1.62 | 1.70 / 1.69 |
+| colour early | 3 | 1.51 / 1.44 | 1.57 / 1.54 | 1.66 / 1.65 |
+
+Crowding's own cost taken out, the 1-frame network stays within 22 % of its bound up to density 50;
+the 3-frame networks are 28 -- 66 % above theirs, and the gap grows with density: they use the
+neighbouring frames' photons least where they would help most.  The time model's job.
+
+**A bound at inference** (`smappy.netfit.bounds.plugin_crlb`, off by default; ``NETFIT_CRLB`` in
+`run_c2.fit_netfit`): the single-emitter bound from the fit's own position, z, photons and the
+network's background per channel, on both channels, and over the frames read by linking each
+detection to the nearest one within a pixel in the neighbouring frames.  On early's fits it is the
+truth's bound within 1 % at the median (80 % within 5 -- 12 %), 1 and 3 frames, density 1 -- 15 and
+1 000 photons; some 15 s for 10 000 localizations.  The network's reported sigma is above the
+3-frame plug-in bound for 85 -- 99 % of localizations (median 1.2 -- 1.6 times it).
