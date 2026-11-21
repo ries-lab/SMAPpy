@@ -1041,3 +1041,48 @@ yet understood.  Pixelation at density 15 is at the counting noise for all (KS 0
 calls 98.3 -- 98.5 % on 1, 99.3 % on 3 for all, DECODE-Plex the same with photons 11 % high.  So the
 time model's work is biplane's, and trained with on-times of 1 -- 3 frames it should close what early
 already closes best.
+
+**Robust metrics and outliers** (2026-11-21; `report`'s core now leaves out errors beyond
+``CORE_TRIM`` = 5 of their bound on any axis -- ``*_trim`` -- and counts them, ``outliers*``; the
+robust width, ``crlb_width_*``, beside it).  In focus, ≥ 2 000 photons in the frame (the photon sets
+all), multi-emitter bound for each fitter's window, lat / ax; outliers against the single-emitter
+bound:
+
+| | d 15: all / trimmed / robust | outliers d 15 / d 50 | d 50 robust | on 3, d 15 robust |
+|---|---|---|---|---|
+| biplane early | 1.15 / 1.15, 1.14 / 1.13, 1.13 / 1.24 | 1.5 / 9.6 % | 1.25 / 1.37 | 1.23 / 1.37 |
+| biplane tjoin | 1.23 / 1.20, 1.18 / 1.17, 1.20 / 1.26 | 1.9 / 11.6 % | 1.35 / 1.45 | 1.33 / 1.47 |
+| biplane base | 1.21 / 1.26, 1.19 / 1.24, 1.22 / 1.31 | 2.1 / 12.6 % | 1.38 / 1.54 | 1.36 / 1.57 |
+| biplane DECODE-Plex | 1.32 / 1.43, 1.27 / 1.27, 1.23 / 1.31 | 3.8 / 21.8 % | 1.55 / 1.58 | 1.36 / 1.48 |
+| colour eswap | 1.46 / 1.48, 1.34 / 1.36, 1.21 / 1.29 | 4.8 / 25.1 % | 1.41 / 1.50 | 1.27 / 1.32 |
+| colour early | 1.49 / 1.49, 1.37 / 1.40, 1.24 / 1.36 | 5.5 / 26.4 % | 1.46 / 1.53 | 1.34 / 1.40 |
+| colour tjoin | 1.50 / 1.49, 1.41 / 1.38, 1.30 / 1.33 | 5.8 / 27.8 % | 1.49 / 1.55 | 1.38 / 1.38 |
+| colour base | 1.52 / 1.50, 1.41 / 1.40, 1.33 / 1.37 | 6.4 / 28.7 % | 1.51 / 1.59 | 1.42 / 1.43 |
+| colour DECODE-Plex | 1.76 / 1.80, 1.54 / 1.55, 1.46 / 1.54 | 8.9 / 34.1 % | 1.68 / 1.74 | 1.53 / 1.60 |
+
+The order holds -- early (eswap in colour) first on every robust measure, every set -- but the
+distances shrink: most of what separates the fitters at density 15 is how often they fail, not how
+precise they are when they do not (DECODE-Plex biplane 1.32 / 1.43 is 1.23 / 1.31 robust, against
+early's 1.13 / 1.24).  At density 50 and on molecules on for 3 frames real gaps stay (biplane
+robust ax 1.37 early, 1.54 -- 1.57 base).  Colour's gap to biplane is mostly its outliers: 3 -- 4
+times as many, robust widths 1.21 -- 1.33 against 1.13 -- 1.22.  Isolated (the photon sets),
+outliers are 0.1 -- 1 % and nothing changes.  The outlier rate goes beside Jaccard as a headline
+number.
+
+**Flagging them from the fit** (`flag.py`, scratch): the reported sigma over the plug-in bound ranks
+outliers with AUC 0.92 (biplane early), 0.88 (colour early), 0.80 at density 50 -- dropping its
+highest 5 % removes 69 % / 38 % of the outliers at density 15; the probability (AUC 0.47 -- 0.58)
+and the photons (0.45 -- 0.52) do not.  An outlier's error is a median 1.7 -- 2.2 of its reported
+sigma (0.9 -- 1.0 for the rest): the network knows it is unsure, not how much.
+
+**Linking the channels' photons**, two quick trainings against early's own 1 M-sample snapshot (same
+schedule to there).  The bound: unlinked / linked 1.28 in z for biplane (its planes' different focus
+makes the ratio tell z; with plane 0's spline in both it is 1.000), 1.000 for colour (one focus).
+*Biplane unlinked* (each plane its own count, share 0.25 -- 0.75): z loses what the bound says --
+multi-emitter ax 1.38 → 1.76 at density 1, 1.30 → 1.71 at 15, 1.21 → 1.49 at 10 000 photons -- the
+Jaccard 0.01 -- 0.05, outliers 3 -- 6 times as many.  *Colour linked* (each molecule exactly one of
+the two dyes): no gain where the bound has none (density 1, 10 000 photons) but in crowding -- lat /
+ax 1.63 / 1.63 → 1.44 / 1.52 at density 15, 1.89 / 1.91 → 1.59 / 1.70 at 50, outliers halved
+(1.7 → 1.1 %, 4.2 → 2.2 %), dyes 98.3 → 99.0 %; at 1 000 photons the dye calls fall (86.5 → 81.4 %,
+a wrong call now a whole swap).  So linking is worth its bound in biplane and robustness against
+neighbours in colour, half of colour's gap to biplane at density 15.
