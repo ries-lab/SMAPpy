@@ -243,3 +243,34 @@ def test_unlinked_biplane_planes_carry_counts_of_their_own_around_the_molecule_s
     # the two counts sum to twice the molecule's in the frame (a linked plane's count is the
     # molecule's), at most twice the range's top: a frame it is on for part of holds less
     assert (ph.sum(-1) <= 2 * 5000 + 1).all() and (ph.sum(-1) > 2 * 1000).any()
+
+
+@pytest.mark.parametrize("kind", ["biplane", "colour"])
+def test_a_streamed_two_channel_movie_is_cut_into_windows_that_share_its_crop(kind):
+    """Movies of window + W - 1 frames cut into W windows: each window the movie's frames from its
+    offset, its maps the movie's, its targets the molecules of its own middle frame; read whole, the
+    network gives what it gives the windows one by one."""
+    from smappy.netfit.train import run
+    cal = dual()
+    two = CH.TwoChannels.from_calibration(cal)
+    sim = SimulationSettings(frame_px=16, photons_range=(3000.0, 6000.0), background=(10.0, 20.0),
+                             z_nm=(-300.0, 300.0), density_per_40px=20.0, lifetime_frames=1.0,
+                             lifetime_max_frames=3.0, movie_windows=3)
+    chs = ChannelSettings(kind=kind)
+    b = draw_batch_2c([SplineRenderer(s, whole=True) for s in CH.splines(cal, kind)], CH.Grid(two), sim,
+                      CameraModel(), chs, 7, torch.Generator().manual_seed(3))
+    assert b.frames.shape == (7, 2, 3, 16, 16) and b.movie.shape == (3, 2, 5, 16, 16) and b.movie_windows == 3
+    for k in range(7):
+        m, w = divmod(k, 3)
+        torch.testing.assert_close(b.frames[k], b.movie[m, :, w:w + 3])
+        torch.testing.assert_close(b.aux[k], b.aux[3 * m])
+    assert b.mask.any() and (b.photons[b.mask] > 0).all()
+    # a molecule on over frames is a target of every window whose middle frame it is on in
+    assert (b.photons_window[b.mask][:, 1] > 0).all()
+    torch.manual_seed(5)
+    model = network.TwoStageUNet(window=3, features=8, channels=2, photons=chs.photons, aux=2,
+                                 time_model="convgru", time_settings={"norm": True}).eval()
+    with torch.no_grad():
+        whole = run(model, b.movie, b, 3)[:7]
+        one = model(b.frames, aux=b.aux)
+    torch.testing.assert_close(whole, one, atol=1e-4, rtol=1e-4)

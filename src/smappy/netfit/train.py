@@ -242,7 +242,8 @@ class Drawer:
 def run(model, x, batch, windows: int = 1):
     """The network on network-unit frames ``x`` of ``batch``, with its offset maps where it has them."""
     if batch.aux is not None:
-        return model(x, windows, batch.aux)
+        # per window; a movie's windows share its maps, and a movie is read once
+        return model(x, windows, batch.aux[::windows] if windows > 1 else batch.aux)
     return model(x, windows) if windows > 1 else model(x)
 
 
