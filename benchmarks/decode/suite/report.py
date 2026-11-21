@@ -186,13 +186,15 @@ def score_truth(truth, locs, keep, px, size, shift=False):
         if len(claims) == 3:
             c["claim_width_lat"] = robust_width(np.r_[dx[core] / cx[core], dy[core] / cy[core]])
             c["claim_width_ax"] = robust_width(dz[core] / cz[core])
-        for key, sfx in (("crlb", ""), ("crlb_joint", "_joint")):
+        for key, sfx in (("crlb", ""), ("crlb_joint", "_joint"), ("crlb_w3", "_w3")):
             if f"{key}_x_nm" in t:
                 bx, by, bz = (t[f"{key}_{a}_nm"][ti][core] for a in "xyz")
                 c[f"crlb_width_lat{sfx}"] = robust_width(np.r_[dx[core] / bx, dy[core] / by])
                 c[f"crlb_width_ax{sfx}"] = robust_width(dz[core] / bz)
+                c[f"rmse_over_crlb_lat{sfx}"] = float(c["rmse_lat_nm"] / np.sqrt(np.nanmean(bx ** 2 + by ** 2)))
+                c[f"rmse_over_crlb_ax{sfx}"] = float(c["rmse_ax_nm"] / np.sqrt(np.nanmean(bz ** 2)))
         out["core"] = c
-    for key in ("crlb", "crlb_full", "crlb_joint"):
+    for key in ("crlb", "crlb_full", "crlb_joint", "crlb_w3"):
         if f"{key}_x_nm" not in t:
             continue
         bx, by, bz = (t[f"{key}_{a}_nm"][ti] for a in "xyz")

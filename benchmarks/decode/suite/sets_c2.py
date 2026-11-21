@@ -377,6 +377,40 @@ def simulate(spec, cal):
 def crlb(cal, splines, truth, colour: bool, excess=EXCESS_NOISE):
     """Each molecule's bound in x, y (nm, the main channel's pixels) and z, both channels together, on
     the splines the frames were drawn with; ``excess`` the camera's, 2 for an EM register, 1 perfect."""
+    info = position_information(cal, splines, truth, colour, excess)
+    return _bounds(info)
+
+
+def _bounds(info):
+    out = np.full((len(info), 3), np.nan)
+    for k, I in enumerate(info):
+        if np.all(np.isfinite(I)):
+            try:
+                out[k] = np.sqrt(np.diag(np.linalg.inv(I)))
+            except np.linalg.LinAlgError:
+                pass
+    return out * [PIXEL_NM[0], PIXEL_NM[1], 1.0]
+
+
+def window_crlb(info, truth, half=1):
+    """The bound of a fit that reads the frames ``f - half .. f + half``: a molecule stays put while it is
+    on, so the frames it is on within the window share x, y and z and each has its own photons and
+    backgrounds -- their position information (`position_information`, the nuisances already taken out)
+    adds.  ``half`` 1 is the 3-frame networks' window; a molecule on in one frame only keeps its bound."""
+    mol, frame = np.asarray(truth["molecule"]), np.asarray(truth["frame"])
+    order = np.lexsort((frame, mol))
+    total = info.copy()
+    for d in range(1, half + 1):
+        a, b = order[:-d], order[d:]
+        near = (mol[a] == mol[b]) & (frame[b] - frame[a] <= half)
+        total[a[near]] += info[b[near]]
+        total[b[near]] += info[a[near]]
+    return _bounds(total)
+
+
+def position_information(cal, splines, truth, colour: bool, excess=EXCESS_NOISE):
+    """Each molecule-frame's Fisher information on x, y (pixels) and z alone, its photons and the
+    channels' backgrounds taken out (the Schur complement): the part that adds over frames."""
     from smappy.training.joint_crlb import spline_spots
     _, _, _, jacobian = _layout(cal)
     n = len(truth["frame"])
@@ -389,7 +423,7 @@ def crlb(cal, splines, truth, colour: bool, excess=EXCESS_NOISE):
         spots.append((s, bg))
     J = jacobian(np.c_[truth["x_px"], truth["y_px"]])
     n_par = 7 if colour else 6                      # x, y, z, N (or N0, N1), b0, b1
-    out = np.full((n, 3), np.nan)
+    out = np.full((n, 3, 3), np.nan)
     for k in range(n):
         F = np.zeros((n_par, n_par))
         for c, (s, bg) in enumerate(spots):
@@ -409,11 +443,32 @@ def crlb(cal, splines, truth, colour: bool, excess=EXCESS_NOISE):
             D = d.reshape(n_par, -1)
             F += (D / (mu.reshape(-1) * excess)) @ D.T
         try:
-            cov = np.linalg.inv(F)
-            out[k] = np.sqrt(np.diag(cov)[:3])
+            out[k] = np.linalg.inv(np.linalg.inv(F)[:3, :3])
         except np.linalg.LinAlgError:
             pass
-    return out * [PIXEL_NM[0], PIXEL_NM[1], 1.0]
+    return out
+
+
+def draw_window_crlb(names=None, half=1):
+    """``crlb_w{2 half + 1}.npz`` beside each set's truth: `window_crlb` on the splines it was drawn with."""
+    for name, spec in SETS.items():
+        if names and name not in names:
+            continue
+        folder = SETS_DIR / name
+        if not (folder / "truth.npz").exists() or spec["context"] not in CONTEXTS:
+            continue
+        ctx = spec["context"]
+        cal, colour = calibration(ctx), CONTEXTS[ctx]["kind"] == "colour"
+        t = dict(np.load(folder / "truth.npz"))
+        n = len(t["frame"])
+        truth = {k: v for k, v in t.items() if np.ndim(v) == 1 and len(v) == n}
+        info = position_information(cal, drawn_splines(ctx, cal), truth, colour, excess=excess_of(ctx))
+        b = window_crlb(info, truth, half)
+        one = _bounds(info)
+        np.savez(folder / f"crlb_w{2 * half + 1}.npz", x_nm=b[:, 0], y_nm=b[:, 1], z_nm=b[:, 2])
+        print(f"{name}: median bound x / z, 1 frame {np.nanmedian(one[:, 0]):.1f} / {np.nanmedian(one[:, 2]):.1f}, "
+              f"{2 * half + 1} frames {np.nanmedian(b[:, 0]):.1f} / {np.nanmedian(b[:, 2]):.1f} nm; "
+              f"stored 1-frame x {np.nanmedian(t['crlb_x_nm']):.1f}", flush=True)
 
 
 def fingerprint(path) -> dict:

@@ -415,6 +415,10 @@ def score(name, locs, keep):
     flip = bool(S.calibration(context).parameters["smap"]["EMon"][0])   # DECODE-Plex mirrors an EM frame first
     mask = both_channels(context, shape, flip)
     n = len(t["frame"])
+    # the bound of a fit reading 3 frames (`sets_c2.window_crlb`), where drawn: ``crlb_w3`` beside ``crlb``
+    w3 = S.SETS_DIR / name / "crlb_w3.npz"
+    if w3.exists():
+        t.update({f"crlb_w3_{k}": v for k, v in np.load(w3).items()})
     truth = {k: v for k, v in t.items() if np.ndim(v) == 1 and len(v) == n}
     sel = mask(truth["x_px"], truth["y_px"])
     truth = {k: v[sel] for k, v in truth.items()}

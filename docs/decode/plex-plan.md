@@ -894,3 +894,28 @@ settles on, not molecules that are hard.  base has it worse (0.92 dye 77 % on th
 model with the offset maps as input -- DECODE-Plex's published design, `two_fuse="late"`, base or
 tjoin -- stays as an option for the user.  None of the study's trainings converged: the in-focus
 RMSE on the training's test frames still falls at 6 M samples (`training_vs_time.png`, scratch).
+
+**The fair bound for a fit that reads several frames** (`sets_c2.window_crlb`, ``crlb_w3.npz``
+beside each blinking set's truth; `report` scores ``*_w3`` beside the one-frame bound, and RMSE / CRLB
+in focus, ``core.rmse_over_crlb_*``).  A molecule stays put while it is on, so in the frames it is on
+within the window x, y and z are shared and each frame keeps its own photons and backgrounds: each
+frame's information on x, y, z (its nuisances taken out, the Schur complement) adds.  A dim first or
+last frame adds little; the window's total photons put into one frame would drop two frames'
+background and sit 15 -- 28 % lower (colour, density 1).  Against the bound for the frames each
+fitter reads, RMSE / CRLB in focus (|z| < 300 nm), lat / ax:
+
+| | frames | 10 000 ph | 1 000 ph | density 15 |
+|---|---|---|---|---|
+| biplane DECODE-Plex | 1 | 1.13 / 1.17 | 1.33 / 1.49 | 1.50 / 1.45 |
+| biplane Spline 3D 2C | 1 | 1.05 / 1.09 | 1.08 / 1.08 | 4.18 / 2.73 |
+| biplane netfit Round 1 | 1 | 1.07 / 1.05 | 1.15 / 1.26 | 1.31 / 1.26 |
+| biplane base | 3 | 1.18 / 1.25 | 1.22 / 1.38 | 1.52 / 1.48 |
+| biplane early | 3 | 1.12 / 1.14 | 1.19 / 1.39 | 1.45 / 1.41 |
+| colour DECODE-Plex | 3 | 1.33 / 1.35 | 1.77 / 1.95 | 2.18 / 2.08 |
+| colour base | 3 | 1.17 / 1.18 | 1.31 / 1.45 | 1.81 / 1.64 |
+| colour early | 3 | 1.15 / 1.12 | 1.23 / 1.20 | 1.83 / 1.68 |
+
+Every fitter is at or above its bound now (the 0.6 -- 0.7 before were the one-frame bound).  The
+3-frame networks use the neighbouring frames' photons less well than the 1-frame network uses its
+own frame's: 12 -- 25 % above the bound in focus, the 1-frame netfit 5 -- 15 %.  Room for the time
+model.
