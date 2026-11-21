@@ -877,3 +877,20 @@ worse z at 1 000 photons in biplane) and costs time; feeding the offset maps onl
 everywhere but colour at 1 000 photons; *share* gains nothing over two counts.  Still running: early
 with the halves swapped (``S_*_eswap``, channel 1 -- the bright one in colour -- as the grid), and
 colour's dye priors (``S_colour_dyes``, ``S_colour_win``).
+
+**Early's dye calls, molecule by molecule** (colour, 1 000 photons; `dye_wrong.py`-style matching, each
+model's matches of the same truth).  On the ~5 100 molecules both early and DECODE-Plex find, early
+is right 96.3 / 97.9 / 97.6 % (seeds 0 -- 2) against DECODE-Plex's 97.4 %; at 3 000 photons 98.9 --
+99.0 % against 98.7 %.  Early's lower overall number (93.6 %) is the 3 500 -- 4 300 dim molecules it
+finds and DECODE-Plex misses, called right 83 -- 92 %.  Where early is wrong and DECODE-Plex right
+(136 molecules, seed 0), the true photons are lower (median 810 against 1 000: a molecule on for part
+of a frame) and the dye is almost always the 0.92 one, its share read 0.84 -- pulled towards 1/2.
+Which dye a seed favours differs (seed 0 loses the 0.92 dye, 91 %; seed 2 the 0.78, 97 %), and the
+seeds' wrong molecules hardly overlap (117 in all three, 1 236 in any): a share bias each training
+settles on, not molecules that are hard.  base has it worse (0.92 dye 77 % on the common molecules);
+``win`` (share 0.6 -- 1) removes it (98.3 %), the dye priors are the cure.
+
+**Going on** (Jonas, 2026-11-21): early fusion is the arrangement optimised from here; a late-fusion
+model with the offset maps as input -- DECODE-Plex's published design, `two_fuse="late"`, base or
+tjoin -- stays as an option for the user.  None of the study's trainings converged: the in-focus
+RMSE on the training's test frames still falls at 6 M samples (`training_vs_time.png`, scratch).
