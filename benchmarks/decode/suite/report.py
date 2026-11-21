@@ -70,6 +70,7 @@ Z_LIMIT = 700.0
 Z_BINS = (0, 150, 300, 450, 600, 700)          # |z| bins of the pixelation
 PHOTON_BINS = (0, 2000, 4000, 8000, 16000, 1e9)
 CORE_Z_NM = 300.0
+CORE_PHOTONS_MIN = 0.0                         # a molecule's photons in the frame, for the core; 0: all
 #: the nearest other emitter's distance the joint bound's widths are split by, nm
 NEIGHBOUR_EDGES_NM = (0, 200, 400, 600, 800, 1200, 2000)
 PHOTONS_MIN = 100.0                            # DECODE's evaluation: dimmer molecules count neither way                              # |z| below it is what a fitter is for; see score_truth
@@ -176,7 +177,7 @@ def score_truth(truth, locs, keep, px, size, shift=False):
     # the range that matters (Jonas, 2026-11-12): |z| < CORE_Z_NM.  Positions, uncertainties and
     # pixelation of the emitters there, so that no variant is judged better for gains far from focus
     # bought near it; detection stays over the whole range
-    core = np.abs(t["z_nm"][ti]) < CORE_Z_NM
+    core = (np.abs(t["z_nm"][ti]) < CORE_Z_NM) & (t["photons"][ti] >= CORE_PHOTONS_MIN)
     if core.sum() >= 100:
         c = {"n": int(core.sum()),
              "rmse_lat_nm": float(np.sqrt(np.mean(dx[core] ** 2 + dy[core] ** 2))),

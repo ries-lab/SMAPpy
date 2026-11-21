@@ -1003,3 +1003,41 @@ more than half of the fastest epoch: a faster network gains less than its steps 
 streaming (C = 1: 20 s an epoch instead of 35) is worth having before the time model.  Early is the
 cheapest to train in biplane and as cheap as base in colour, and the fastest to fit in both (9.7 and
 4.2 ms a frame against 16.3 and 7.1).
+
+**A dim channel, and molecules on for 3 frames** (2026-11-21; `sets_c2`'s ``<context>_blink_l3_density_15``,
+mean on-time 3 frames, and colour's ``_blink_dimmain_3000`` / ``_dimsecond_3000``: the same molecules,
+one dye, 3 000 photons, 97 % of its light in channel 1 -- the main channel dim -- or in channel 0;
+the trained models, no retraining: their share is uniform over 0 -- 1, their on-time 1 frame).
+`report.CORE_PHOTONS_MIN` adds a photon threshold to the in-focus core.
+
+*The dim channel.*  Jaccard, dim main / dim registered channel: early 0.791 / 0.812, eswap (channel 1
+its main) 0.808 / 0.798, base 0.797 / 0.804, tjoin 0.792 / 0.809, DECODE-Plex 0.657 / 0.805.  Each
+network loses 0.01 -- 0.02 when its own main channel is the dim one, precision unchanged, RMSE / CRLB
+1.10 -- 1.16 either way; the share's bias -0.01 -- -0.02 / +0.02 -- +0.03.  Early's resampling of the
+registered channel costs nothing extra; DECODE-Plex loses 0.15 with the dim main channel and puts a
++0.12 bias on the share with the dim second one.
+
+*Density 15, on-time 1 against 3*, mean over seeds, RMSE / CRLB in focus against each fitter's
+window (single / multi-emitter, lat / ax, ≥ 2 000 photons in the frame; DECODE-Plex biplane 1 frame):
+
+| | J, on 1 / 3 | single, on 1 | single, on 3 | multi, on 1 | multi, on 3 |
+|---|---|---|---|---|---|
+| biplane DECODE-Plex | 0.762 / 0.849 | 1.64 / 1.78 | 2.07 / 2.25 | 1.32 / 1.43 | 1.57 / 1.71 |
+| biplane early | 0.827 / 0.907 | 1.41 / 1.45 | 1.62 / 1.90 | 1.15 / 1.15 | 1.27 / 1.50 |
+| biplane tjoin | 0.822 / 0.902 | 1.50 / 1.52 | 1.83 / 2.27 | 1.23 / 1.20 | 1.44 / 1.79 |
+| biplane base | 0.815 / 0.895 | 1.48 / 1.59 | 2.04 / 2.41 | 1.21 / 1.26 | 1.60 / 1.91 |
+| colour DECODE-Plex | 0.830 / 0.882 | 2.36 / 2.27 | 2.55 / 2.38 | 1.76 / 1.80 | 1.93 / 1.90 |
+| colour early | 0.863 / 0.917 | 2.03 / 1.91 | 2.03 / 1.89 | 1.49 / 1.49 | 1.53 / 1.50 |
+| colour eswap | 0.867 / 0.919 | 1.99 / 1.89 | 1.98 / 1.89 | 1.46 / 1.48 | 1.49 / 1.50 |
+| colour tjoin | 0.863 / 0.917 | 2.04 / 1.91 | 2.02 / 1.92 | 1.50 / 1.49 | 1.52 / 1.53 |
+| colour base | 0.859 / 0.913 | 2.07 / 1.92 | 2.04 / 1.95 | 1.52 / 1.50 | 1.54 / 1.55 |
+
+Longer on-times find more and localise better for every fitter (biplane early in focus 18.4 / 40.8 nm
+to 10.3 / 24.6), but in biplane the 3-frame networks reach less of what the extra frames offer: early
+from 1.15 to 1.27 / 1.50 of the multi-emitter bound, tjoin to 1.44 / 1.79, base to 1.60 / 1.91 --
+late fusion pools frames worst, axially most.  In colour nothing changes with the on-time (1.5 for
+all) and the arrangements tie; colour sits at 1.5 of its bound even bright, biplane at 1.15 -- not
+yet understood.  Pixelation at density 15 is at the counting noise for all (KS 0.008 -- 0.022); dye
+calls 98.3 -- 98.5 % on 1, 99.3 % on 3 for all, DECODE-Plex the same with photons 11 % high.  So the
+time model's work is biplane's, and trained with on-times of 1 -- 3 frames it should close what early
+already closes best.

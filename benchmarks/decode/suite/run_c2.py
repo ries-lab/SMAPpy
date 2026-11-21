@@ -454,8 +454,8 @@ def score(name, locs, keep):
     out["area_molecules"] = int(sel.sum())
     out["by_z"] = by_z(truth, locs, keep, shape)
     out["pixelation"] = pixelation(truth, locs, keep, shape)
-    dyes = S.CONTEXTS[context].get("dyes", S.DYES)
-    if "photons_c" in locs and "dye" in truth and len(dyes) > 1:
+    dyes = S.SETS[name].get("dyes", S.CONTEXTS[context].get("dyes", S.DYES))
+    if "photons_c" in locs and "dye" in truth:
         out["colour"] = colour(truth, locs, keep, shape, dyes)
     return out
 

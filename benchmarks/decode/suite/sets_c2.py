@@ -152,6 +152,17 @@ def _sets():
             out[f"{name}_blink_photons_{p}"] = {"kind": "simulated", "context": name, "seed": 5250 + 100 * c + i,
                                                 "density": 1, "photons": float(p), "background": "2%",
                                                 "lifetime": LIFETIME}
+        # molecules on for 3 frames on average: how a fit pools a molecule over the frames it reads
+        out[f"{name}_blink_l3_density_15"] = {"kind": "simulated", "context": name, "seed": 5280 + 100 * c,
+                                              "density": 15, "photons": "training", "background": "training",
+                                              "lifetime": 3.0}
+        if ctx["kind"] == "colour":
+            # one dye, nearly all its light in one channel: the same molecules with it in channel 1
+            # (dim main channel) and in channel 0 (dim registered one)
+            for i, (tag, share) in enumerate((("dimmain", 0.97), ("dimsecond", 0.03))):
+                out[f"{name}_blink_{tag}_3000"] = {"kind": "simulated", "context": name, "seed": 5290 + 100 * c,
+                                                   "density": 1, "photons": 3000.0, "background": "2%",
+                                                   "lifetime": LIFETIME, "dyes": (share,)}
     return out
 
 
@@ -335,7 +346,7 @@ def simulate(spec, cal):
     truth = {"frame": frame, "x_px": xy[:, 0], "y_px": xy[:, 1], "z_nm": z, "x2_px": xy2[:, 0], "y2_px": xy2[:, 1],
              "molecule": mol}
     if colour:
-        dyes = np.asarray(ctx.get("dyes", DYES))
+        dyes = np.asarray(spec.get("dyes", ctx.get("dyes", DYES)))
         dye = rng.integers(0, len(dyes), m)[mol]
         fraction = dyes[dye]
         # a molecule's flux while on, times the share of the frame it is on for
