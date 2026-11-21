@@ -1184,3 +1184,15 @@ drawing at 4 -- 8 windows a movie; tonight's runs use 8: early (eswap in colour)
 mixed over 1 -- 3 frames (``lifetime_max_frames`` 3), window 3, 6 M samples, 3 seeds a context
 (``M_*``), after the 6 M runs on on-time 1 (``L_*``).  5 or 7 frames come later, on the best of
 these, as for C = 1 (Jonas).
+
+**Twice the training** (``L_*``: the winner, early -- eswap in colour -- to 6 M samples, on-time 1,
+3 seeds a context, 1.5 h each on one GPU; against the 3 M runs ``S_*``, standard report, |z| < 500
+nm).  Biplane: the bright out-of-focus loss was undertraining -- 10 000 photons 1.17 / 1.18 →
+1.12 / 1.15, DECODE-Plex 1.11 / 1.14, a tie now -- and everything else moves a little the same way
+(1 000 photons Jaccard 0.564 → 0.595, axial 1.33 → 1.25; outliers on 3 frames 3.5 → 2.8 %; the
+sigma 0.96 / 0.93 → 0.98 / 0.97).  Colour gains far less: outliers 5.2 → 4.6 % at density 15
+(6.2 → 5.5 % on 3 frames), the inliers 1.24 / 1.25 → 1.22 / 1.23, so its crowded outliers are mostly
+not undertraining -- the broad dye prior did more (5.9 → 4.5 %, above).  The right dye at 1 000
+photons 95.0 → 91.1 % (seeds' sd 2.7, Jaccard there 0.590 → 0.604 with sd 0.06): within the seeds'
+scatter for now, to watch.  So 6 M for a model to keep; the comparisons go on at 3 M where the
+order is what is asked.
