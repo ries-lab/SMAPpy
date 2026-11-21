@@ -952,3 +952,10 @@ detection to the nearest one within a pixel in the neighbouring frames.  On earl
 truth's bound within 1 % at the median (80 % within 5 -- 12 %), 1 and 3 frames, density 1 -- 15 and
 1 000 photons; some 15 s for 10 000 localizations.  The network's reported sigma is above the
 3-frame plug-in bound for 85 -- 99 % of localizations (median 1.2 -- 1.6 times it).
+
+**For later: the time model of the best arrangement** (Jonas, 2026-11-21).  Time is one of the
+optimisations of early fusion, not part of the architecture study: GMN7C's full recipe at C = 2 --
+streaming in `draw_batch_2c` (C = 1: 20 s an epoch instead of 35, the same numbers), 5 -- 7 frames,
+on-times mixed over 1 -- 3 frames -- tested on C = 2 sets drawn with a mean on-time of 3 frames
+beside the 1-frame ones, which show how the networks pool a molecule across frames (the 3-frame
+networks sit 28 -- 66 % above their multi-emitter 3-frame bound, the 1-frame network 16 -- 22 %).
