@@ -1487,3 +1487,33 @@ each within the seeds' spread.  Colour's channel 0 is mapped at 0.71 of the trut
 as much light spread flat (0.68) -- the background beyond the training's range, a range matter and not
 the pattern's.  Uneven backgrounds are worth having in the window's training (a share of the movies, as
 here), with a seed or two more before the default changes; Fig. 2c's F models are the real-data check.
+
+**Fig. 2c, the models from the last frames' estimates** (`real_c2.py fig2c|fig2c_last`, 300 frames each,
+prob > 0.6; F trained on the last 1 000 frames' prefit, bleached -- background 0 -- 195; P and B on the suite's
+biplane ranges, R on backgrounds up to 1 000; no DECODE-Plex localizations for the last frames):
+
+| | F flat | F uneven | R bg 1 000 | P (flat) | B (uneven) |
+|---|---|---|---|---|---|
+| first frames: per frame (Plex 1 257) | 2 224 | 1 967 | 2 915 | 3 047 | 2 937 |
+| first frames: of Plex's matched | 0.62 | 0.63 | 0.75 | 0.77 | 0.77 |
+| first frames: sigma lat / ax nm | 70 / 310 | 41 / 152 | 42 / 105 | 39 / 102 | 36 / 99 |
+| first frames: z 5 -- 95 % (Plex -601 -- 691) | -1046 -- 425 | -300 -- 496 | -873 -- 610 | -889 -- 616 | -647 -- 691 |
+| first frames: pixelation KS | 0.031 | 0.022 | 0.030 | 0.033 | 0.016 |
+| first frames: goodness median / 90 % | 112 / 1160 | 204 / 1343 | 55 / 298 | 57 / 321 | 100 / 594 |
+| last frames: per frame | 554 | 629 | 617 | 641 | 636 |
+| last frames: sigma lat / ax nm | 40 / 134 | 34 / 105 | 39 / 98 | 40 / 102 | 37 / 106 |
+| last frames: z 5 -- 95 % | -1028 -- 495 | -484 -- 560 | -942 -- 621 | -947 -- 644 | -812 -- 653 |
+| last frames: pixelation KS | 0.023 | 0.012 | 0.038 | 0.035 | 0.019 |
+| last frames: goodness median / 90 % | 17 / 131 | 35 / 318 | 23 / 101 | 24 / 115 | 30 / 213 |
+
+A model trained for the late, bleached frames fails on the early ones (their background up to 1 500, eight
+times its range): fewer molecules, twice the sigma, a fifth fewer of DECODE-Plex's found.  On the late
+frames it is no better than the suite's models -- fewer localizations, z as wide -- so the window's prefit
+over the whole movie (blocks spread over it) is the right one, not the last frames'.  Trained on uneven
+backgrounds, every model pixelates half as much on the real movie (0.016 against 0.033, 0.012 against
+0.023) and puts z narrower, B's nearest DECODE-Plex's (-647 -- 691 against -601 -- 691); molecules found and
+matched as many.  Their goodness is worse, but the statistic draws a flat background per frame
+(`goodness`), and these models put more of the light into their background map and less into the spots
+(photons 3 344 against 3 754): it penalises the very thing they learnt.  Judging them on real data needs
+the goodness with the network's own background map -- the next step before uneven backgrounds go into
+the window's default.

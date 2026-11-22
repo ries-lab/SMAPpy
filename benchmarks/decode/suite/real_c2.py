@@ -26,7 +26,9 @@ D = pathlib.Path.home() / ".cache/decode_smlm/plex"
 OUT = S.SETS_DIR.parent / "real_c2"
 MOVIES = {"fig2a": ("colour_2a", "Fig2a-SmallTest/first300.tif", "oracles/plex_fig2a_cpu.npz", None, False),
           "fig2c": ("biplane_2c", "Fig2c-240619_NC_LivingCell_HMSir_Tub_i20_2/first300.tif", "oracles/plex_fig2c_cpu.npz",
-                    (175, 0), True)}
+                    (175, 0), True),
+          # the movie's last 300 frames (9 700 -- 10 000): bleached, an eighth of the early background; no oracle
+          "fig2c_last": ("biplane_2c", "Fig2c-240619_NC_LivingCell_HMSir_Tub_i20_2/last300.tif", None, (175, 0), True)}
 
 
 def fit(movie, model, shift=0.0, n=200, goodness=True):
@@ -95,23 +97,29 @@ def agree(a, b, radius_nm=150.0):
     return np.concatenate(ia), np.concatenate(ib), np.concatenate(d)
 
 
-def summary(movie, L, P, prob=0.6):
+def summary(movie, L, P, prob=0.6, n_frames=None):
+    """``P`` None (a movie without DECODE-Plex's localizations): ours alone."""
     L = {k: v[L["prob"] > prob] if np.ndim(v) and len(v) == len(L["prob"]) else v for k, v in L.items()}
-    P = {k: v[P["prob"] > prob] for k, v in P.items()}
-    n = len(np.unique(P["frame"]))
-    ia, ib, d = agree(L, P)
-    med = np.median(d, 0)
-    spread = 1.4826 * np.median(np.abs(d - med), 0)
-    out = {"per_frame": len(L["frame"]) / n, "plex_per_frame": len(P["frame"]) / n,
-           "matched_of_ours": len(np.unique(ia)) / len(L["frame"]), "matched_of_plex": len(np.unique(ib)) / len(P["frame"]),
-           "offset_nm": med.round(1).tolist(), "spread_nm": spread.round(1).tolist(),
+    out = {"per_frame": len(L["frame"]) / (n_frames or len(np.unique(P["frame"]))),
            "sigma_ours": [float(np.median(L[k])) for k in ("x_err_nm", "y_err_nm", "z_err_nm")],
-           "sigma_plex": [float(np.median(P[k])) for k in ("x_err_nm", "y_err_nm", "z_err_nm")],
            "pix_ours": max(ks_uniform(L["x_grid_px"]), ks_uniform(L["y_grid_px"])),
-           "pix_plex": max(ks_uniform(P["x_px"]), ks_uniform(P["y_px"])),
            "z_pct_ours": np.percentile(L["z_nm"], [5, 50, 95]).round(0).tolist(),
-           "z_pct_plex": np.percentile(P["z_nm"], [5, 50, 95]).round(0).tolist(),
-           "photons_med": [float(np.median(L["photons"])), float(np.median(P["photons"]))]}
+           "photons_med": [float(np.median(L["photons"]))],
+           "background_med": np.median(L["background_c"], 0).round(1).tolist()}
+    if P is not None:
+        P = {k: v[P["prob"] > prob] for k, v in P.items()}
+        n = len(np.unique(P["frame"]))
+        out["per_frame"] = len(L["frame"]) / n
+        ia, ib, d = agree(L, P)
+        med = np.median(d, 0)
+        spread = 1.4826 * np.median(np.abs(d - med), 0)
+        out.update({"plex_per_frame": len(P["frame"]) / n,
+                    "matched_of_ours": len(np.unique(ia)) / len(L["frame"]), "matched_of_plex": len(np.unique(ib)) / len(P["frame"]),
+                    "offset_nm": med.round(1).tolist(), "spread_nm": spread.round(1).tolist(),
+                    "sigma_plex": [float(np.median(P[k])) for k in ("x_err_nm", "y_err_nm", "z_err_nm")],
+                    "pix_plex": max(ks_uniform(P["x_px"]), ks_uniform(P["y_px"])),
+                    "z_pct_plex": np.percentile(P["z_nm"], [5, 50, 95]).round(0).tolist()})
+        out["photons_med"].append(float(np.median(P["photons"])))
     if "goodness" in L:
         g = L["goodness"]
         out["goodness_pct"] = np.nanpercentile(g, [50, 90, 99]).round(2).tolist()
@@ -129,6 +137,8 @@ if __name__ == "__main__":
     n = int(sys.argv[4]) if len(sys.argv) > 4 else 200
     OUT.mkdir(exist_ok=True)
     L = fit(movie, model, shift, n)
-    name = f"{movie}_{pathlib.Path(model).stem}_{shift:+.1f}"
+    m = pathlib.Path(model)
+    name = f"{movie}_{m.parent.name if m.stem == 'model' else m.stem}_{shift:+.1f}"
     np.savez(OUT / f"{name}.npz", **L)
-    print(name, json.dumps(summary(movie, L, plex(movie, n))), flush=True)
+    P = plex(movie, n) if MOVIES[movie][2] else None
+    print(name, json.dumps(summary(movie, L, P, n_frames=n)), flush=True)
