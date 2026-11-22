@@ -1196,3 +1196,19 @@ not undertraining -- the broad dye prior did more (5.9 → 4.5 %, above).  The r
 photons 95.0 → 91.1 % (seeds' sd 2.7, Jaccard there 0.590 → 0.604 with sd 0.06): within the seeds'
 scatter for now, to watch.  So 6 M for a model to keep; the comparisons go on at 3 M where the
 order is what is asked.
+
+**The time model** (``M_*``, 2026-11-22: early -- eswap in colour -- and tjoin, window 3, on-times
+drawn over 1 -- 3 frames, streamed 8 windows a movie, 6 M samples, 3 seeds a context; early against
+``L_*``, which differ only in the on-times and the streaming).  Mixed on-times do not help early
+even where molecules stay on: on the on-time 3 set outliers 2.9 against 2.8 % in biplane (colour 5.2
+against 5.5 %), precision the same.  They cost the dim molecules on for one frame, which most of the
+sets are: Jaccard at 1 000 photons 0.595 → 0.536 in biplane and 0.604 → 0.555 in colour, biplane's
+precision there 1.14 / 1.25 → 1.19 / 1.31, and colour's right dye at 1 000 photons 91 → 82 % --
+whole swaps, as with the photons linked exactly.  A network that expects a molecule to persist
+under-calls one that does not.  Streaming was neutral at C = 1 and is likely not the cause here; it is
+not separated.  tjoin gains from the mixed on-times on the on-time 3 set (outliers biplane 5.0 → 4.4
+%, colour 7.5 → 6.3 % against the 3 M runs) and still loses to early everywhere but the dye call
+(colour 95.8 % at 1 000 photons, DECODE-Plex 97.5 %).  So the model is early, trained on on-time 1:
+its three frames already pool a molecule that stays.  Streaming makes a run 1 h 05 instead of 1 h 30
+on one GPU.  Next: 5 and 7 frames on early with on-time 1 (and one 3 M run with streaming and on-time
+1, which separates the streaming); then real data and the SMAPpy fitter.
