@@ -128,13 +128,13 @@ that architecture here: what the study compared it as.
 
 ## 4. Order
 
-1. **I1**: netfit one-channel models in *Localize/DECODE*.  The smallest step that makes netfit usable:
+1. **I1** (done 2026-11-22: `training.predictors`): netfit one-channel models in *Localize/DECODE*.  The smallest step that makes netfit usable:
    models trained by script are fitted in the GUI.
-2. **T1, T2**: netfit jobs in the training window, one channel; *DECODE, optimised* the default.
+2. **T1, T2** (done 2026-11-22: `netfit/job.py`): netfit jobs in the training window, one channel; *DECODE, optimised* the default.
 3. **I2 -- I4**: two-channel models in the fitter.  The model file carries the registration; the move
    since the beads and the checks are options.
 4. **T3, T4**: two-channel jobs: Spline 3D 2C's prefit, the kind, the main channel, the dyes.
-5. **T6** with step 2 (one channel) and step 4 (two).
+5. **T6** with step 2 (one channel: done, outliers and the inliers' RMSE / CRLB in *Follow*) and step 4 (two).
 6. **I5**: DECODE-Plex's published models, exported, as a baseline in the GUI.
 7. **T5** alongside each step, not after: each step's page, tests (a simulated two-channel movie
    trained a few epochs and fitted, as the one-channel tests do) and the slow tier.
