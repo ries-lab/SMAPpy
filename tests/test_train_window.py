@@ -416,7 +416,8 @@ def test_the_follow_line_says_what_the_stop_rule_waits_for():
 
 
 def test_a_typed_density_reaches_both_kinds_of_job_and_hd_is_the_default(movie):
-    """HD (25) the default, UHD beside it, any other typed under *manual* (plex-plan §16, 2026-11-22)."""
+    """HD (1 per µm²) the default, UHD beside it, any other typed under *manual*; the jobs take molecules
+    in 40 x 40 pixels, 16 µm² at 100 nm (plex-plan §16, 2026-11-22)."""
     from dataclasses import replace
 
     from smappy.gui.train_window import (
@@ -425,13 +426,12 @@ def test_a_typed_density_reaches_both_kinds_of_job_and_hd_is_the_default(movie):
         method_params,
         netfit_params,
         prepared_by_hand,
-        training_density,
+        per_um2,
     )
-    assert PrepareSettings().density == "HD" and training_density(PrepareSettings()) == "HD"
+    assert PrepareSettings().density == "HD" and per_um2(PrepareSettings()) == 1.0
     path, cal_path = movie
-    typed = replace(_prepare_settings(path, cal_path), density="manual", density_manual=7.5)
-    assert training_density(typed) == 7.5
+    typed = replace(_prepare_settings(path, cal_path), density="manual", density_manual=0.5)
     prepared = prepared_by_hand(typed, EstimateSettings(photons=3000.0, photons_sd=500.0, background_min=10.0,
                                                         background_max=60.0, z_min_nm=-300.0, z_max_nm=300.0))
-    assert method_params(prepared, prepared.estimates)["Simulation"]["emitter_av"] == 7.5
-    assert netfit_params(prepared, prepared.estimates)["simulation"]["density_per_40px"] == 7.5
+    assert method_params(prepared, prepared.estimates)["Simulation"]["emitter_av"] == pytest.approx(8.0)
+    assert netfit_params(prepared, prepared.estimates)["simulation"]["density_per_40px"] == pytest.approx(8.0)

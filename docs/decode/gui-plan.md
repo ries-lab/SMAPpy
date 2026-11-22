@@ -85,7 +85,8 @@ that architecture here: what the study compared it as.
   (photons and their spread, background, z, on-time) map onto `SimulationSettings`: photons as a
   range around the estimate, background from its least to its most, the most taken high.  Fig. 2c's
   lesson: the background's 95th percentile per pixel, not its median.  z and on-time are mapped too.
-  The density is HD (25, the default) or UHD (50), or typed (*manual*): plex-plan §16, LD (15) dropped.
+  The density is per µm² of the sample: HD (1, the default), UHD (2.5) or typed (*manual*), converted to the
+  jobs' molecules in 40 x 40 pixels with the movie's pixel size (plex-plan §16; LD dropped).
 - **T3, two channels.**  The calibration decides: a dual ``_2ct.h5`` (the PSF calibration window's
   dual mode, or converted from SMAP's) gives two channels.  What else is needed:
   - ***kind***, biplane or colour.  From the calibration where it says (two planes' focus offset

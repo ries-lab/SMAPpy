@@ -1419,3 +1419,7 @@ training to the data is not the optimum: training somewhat denser than the data 
 under *manual*.  25 is never more than about 0.025 in Jaccard behind the best of the trainings at any test
 density; LD (15) gained at most 0.012 over it, at density 1 only, within the seeds' scatter, and had more
 outliers at every density from 5 up, so it is no longer offered (DECODE's and netfit's jobs still read it).
+The window states the density per µm² of the sample (Jonas): HD 1, UHD 2.5, converted to the jobs' 40 x 40
+pixels with the movie's pixel size.  At these sets' 117 x 127 nm pixels (23.8 µm²) HD is 24, the 25 tested,
+and UHD 59, a little denser than the 50 tested; with smaller pixels the same µm² density is fewer molecules
+in 40 x 40 pixels -- the overlap the network must undo is the sample's, set by the PSF's size in nm.
