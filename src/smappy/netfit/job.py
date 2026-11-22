@@ -30,6 +30,8 @@ from .settings import CameraModel, SimulationSettings, TrainingSettings
 SETTINGS, STOP, LOCK = "settings.json", "STOP", "lock.json"
 DENSITIES = {"LD": 15.0, "HD": 25.0, "UHD": 50.0}       # emitters in a 40 x 40 frame, as DECODE's jobs
 GMN7C_WINDOW = 7                                          # one channel's frames read (poc-plan, step 4)
+DECAY_SAMPLES = 327680                                    # the studies' schedule: 10 epochs of 32 768
+TARGET_PHOTONS_MIN = 100.0                                # the studies' targets
 
 
 class JobError(Exception):
@@ -87,6 +89,10 @@ def settings_from_estimates(est, camera_section: dict, density: str, calibration
     s.seed = int(seed)
     # no snapshots in a job: the model file of the last epoch is the one kept, as DECODE's jobs keep it
     s.parts.schedule.settings["snapshots"] = []
+    # as the studies' winners trained (GMN7C, the C = 2 L_ runs): the rate falling every 327 680 samples
+    # whatever the batch, molecules from 100 photons a frame the targets
+    s.parts.schedule.settings["decay_samples"] = DECAY_SAMPLES
+    s.simulation = SimulationSettings(**{**s.simulation.__dict__, "target_photons_min": TARGET_PHOTONS_MIN})
     from .settings import Part
     if channels is None:
         # one channel: step 4's time model, GMN7C (docs/decode/poc-plan.md, "Step 4: the time model"):
@@ -106,8 +112,10 @@ def settings_from_estimates(est, camera_section: dict, density: str, calibration
         s.channels = channels
         s.parts.backbone.settings.update(two_fuse=fuse, features=64)
         s.parts.time_model = Part("convgru", {"frames": int(window), "norm": True})
+        # on-time 1: at C = 2 it tied mixed on-times 1 -- 3 on molecules on for 3 frames and beat them on
+        # the brief dim ones (plex-plan §16, "The time model"); the prefit's on-time is not used
         s.simulation = SimulationSettings(**{**s.simulation.__dict__, "movie_windows": 8, "spots": "whole",
-                                             "target_photons_min": 100.0})
+                                             "lifetime_frames": 1.0, "lifetime_max_frames": 0.0})
     return s
 
 

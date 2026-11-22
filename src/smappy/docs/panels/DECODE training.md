@@ -225,7 +225,10 @@ and a model to *start from*.
 frames through a ConvGRU and is trained on blinks lasting 1 to 3 frames on
 average.  That one network served brief and long blinks within 2 % of a
 network trained for either.  The prefit's *on-time* is therefore not used
-for it yet; a short fine-tune to the measured on-time is to come.  The optimised one's job holds `settings.json` in
+for it yet; a short fine-tune to the measured on-time is to come.  For two
+channels it reads 3 frames, and is trained on blinks of 1 frame on average,
+which on simulated data did as well as mixed on-times on molecules on for 3
+frames and better on brief dim ones.  The optimised one's job holds `settings.json` in
 place of DECODE's `method.yaml`: the same photons, background, z range,
 on-time, density and camera, SMAPpy's settings for the rest.  Its *Follow*
 draws two more curves: the share of the test set's molecules more than 5
@@ -244,7 +247,8 @@ same shape and of the same *model* (the window says so when it is not).  The DEC
 a model...* fills in the fitter's own model.
 
 *LD*, *HD* and *UHD*
-are SMAP's: 15, 25 and 50 molecules in a frame of 40 x 40 pixels.  A model
+are SMAP's: 15, 25 and 50 molecules in a frame of 40 x 40 pixels.  *UHD* is
+the default: the optimised networks were studied and chosen at 50.  A model
 trained dense also localizes sparse data well: the example package's, trained
 at 50, found 96 % of the molecules at one in 40 x 40 pixels.
 

@@ -84,6 +84,11 @@ def test_a_two_channel_job_without_a_prefit_trains_through_the_decode_command(mo
     ch = params["channels"]
     assert ch["kind"] == "colour" and ch["main"] == 1 and ch["dyes"] == pytest.approx([0.2])
     assert params["parts"]["backbone"]["settings"]["two_fuse"] == "early"
+    # the C = 2 study's winners: 64 features, the ConvGRU over 3 frames, on-time 1, the schedule in samples
+    sim = params["simulation"]
+    assert params["parts"]["backbone"]["settings"]["features"] == 64 and sim["window"] == 3
+    assert (sim["lifetime_frames"], sim["lifetime_max_frames"], sim["target_photons_min"]) == (1.0, 0.0, 100.0)
+    assert params["parts"]["schedule"]["settings"]["decay_samples"] == 327680
     assert jobfile.check(folder) == [] and job.calibration["sha256"] == jobfile.file_sha256(cal)
     s = json.loads((folder / "settings.json").read_text())
     s["simulation"].update(frame_px=16, density_per_40px=15.0, movie_windows=2)

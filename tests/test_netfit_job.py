@@ -42,6 +42,8 @@ def test_the_window_writes_an_optimised_job_from_the_prefits_ranges_with_its_pat
     # step 4's time model (GMN7C): the ConvGRU over 7 frames, on-times drawn over 1 - 3, streamed
     assert params["parts"]["time_model"] == {"name": "convgru", "settings": {"frames": 7, "norm": True}}
     assert (sim["window"], sim["lifetime_frames"], sim["lifetime_max_frames"], sim["movie_windows"]) == (7, 1.0, 3.0, 8)
+    # the winners' schedule and targets
+    assert params["parts"]["schedule"]["settings"]["decay_samples"] == 327680 and sim["target_photons_min"] == 100.0
     assert params["camera"]["conversion"] == 0.5 and params["camera"]["em_gain"] == 0.0
     assert params["calibration"] == "calibration.h5" and params["parts"]["schedule"]["settings"]["snapshots"] == []
     assert jobfile.check(folder) == []
