@@ -94,6 +94,9 @@ class TwoChannelPredictor:
         self.cal = moved_calibration(cal, moved)
         self.corner = tuple(round(v) for v in corner)
         self.moved = tuple(float(v) for v in moved)
+        # what the run's record says of the move (`fit_decode.provenance`): one dict, updated where the move
+        # is measured -- the record is made before the first frames and written after the last
+        self.moved_record = {"rows": self.moved[1], "columns": self.moved[0], "measured": False}
         self.em, self.goodness, self.bound = bool(em), bool(goodness), bool(bound)
         self.pixel_nm = tuple(float(v) for v in pixel_nm)
         self.kind = predictor.channels.kind
@@ -126,6 +129,7 @@ class TwoChannelPredictor:
             self.moved = measure_move(self.predictor, self.beads, self.corner, photons[:MOVE_FRAMES + 2 * k],
                                       self.moved)
             self.cal = moved_calibration(self.beads, self.moved)
+            self.moved_record.update(rows=self.moved[1], columns=self.moved[0], measured=True)
         two = self.channels(photons.shape[1:])
         k = self.predictor.window
         stack = two.cut(photons)

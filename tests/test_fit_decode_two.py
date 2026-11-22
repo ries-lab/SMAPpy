@@ -119,3 +119,18 @@ def test_another_calibration_than_the_model_s_is_refused(files):
     with pytest.raises(ValueError, match="not the calibration the model was trained on"):
         plugins.get("Localize/DECODE")().run(Context(), _settings(
             files, **{"two_channels.calibration": str(files["root"] / "other_2ct.h5")}))
+
+
+def test_a_move_measured_on_the_first_frames_is_what_the_run_s_record_says(files, monkeypatch):
+    import json
+
+    import h5py
+
+    from smappy.netfit import fit_two
+    monkeypatch.setattr(fit_two, "measure_move", lambda predictor, cal, corner, photons, start: (0.5, -1.25))
+    out = files["root"] / "fit_locs.hdf5"
+    r = plugins.get("Localize/DECODE")().run(Context(), _settings(files, **{"two_channels.measure_move": True,
+                                                                             "output.path": str(out)}))
+    moved = json.loads(h5py.File(out, "r").attrs["metadata"])["decode"]["moved_since_beads"]
+    assert moved == {"rows": -1.25, "columns": 0.5, "measured": True}
+    assert any("-1.25 rows and 0.50 columns" in w for w in r.locs.metadata.get("warnings", []))

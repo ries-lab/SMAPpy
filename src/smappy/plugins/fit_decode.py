@@ -354,7 +354,7 @@ class DecodeFit(_FitPlugin):
         meta = dict(model.metadata)
         return {"source": str(source) if source is not None else None, "camera": camera.to_dict(),
                 "decode": {"model": str(settings.model.path), "device": model.device,
-                           **({"moved_since_beads": {"rows": model.moved[1], "columns": model.moved[0]},
+                           **({"moved_since_beads": model.moved_record,
                                "two_channel_calibration": str(model.cal_path)} if hasattr(model, "moved") else {}),
                            "threshold": model.raw_th, "frames_mirrored": model.frames_mirrored,
                            "window": model.window, "calibration": meta.get("calibration_source"),
