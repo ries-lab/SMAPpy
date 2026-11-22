@@ -75,6 +75,14 @@ def measure_move(predictor, cal, corner, photons, start=(0.0, 0.0), reach: float
     return tuple(moved)
 
 
+def biplane_total(cal) -> float:
+    """The light a biplane molecule of one drawn photon puts in both planes: the two PSFs as the network
+    draws them (`channels.splines`), summed at focus.  Fig. 1c's: 0.987 + 0.767."""
+    from ..psf import light_at_focus
+    from .channels import splines
+    return float(sum(light_at_focus(s) for s in splines(cal, "biplane")))
+
+
 class TwoChannelPredictor:
     """A two-channel `Predictor` as the engine drives a one-channel one (the module's docstring)."""
 
@@ -89,6 +97,9 @@ class TwoChannelPredictor:
         self.em, self.goodness, self.bound = bool(em), bool(goodness), bool(bound)
         self.pixel_nm = tuple(float(v) for v in pixel_nm)
         self.kind = predictor.channels.kind
+        # a biplane's photons as the molecule's total over both planes (Jonas, 2026-11-22): the network
+        # draws each plane's PSF with its count, the planes' shares in the PSFs (`biplane_total`)
+        self.total = biplane_total(self.cal) if self.kind == "biplane" else 1.0
         self.two = None
         self.check_seconds = 0.0
 
@@ -125,7 +136,7 @@ class TwoChannelPredictor:
         frame = np.asarray(r["frame"], np.int64)
         out = {"frame": frame + int(first_frame), "x_pix": xy[:, 0], "y_pix": xy[:, 1], "z_nm": r["z_nm"],
                "prob": r["prob"], "x_err_pix": r["x_err_pix"], "y_err_pix": r["y_err_pix"], "z_err_nm": r["z_err_nm"],
-               "photons": r["photons"], "photons_err": r["photons_err"]}
+               "photons": r["photons"] * self.total, "photons_err": r["photons_err"] * self.total}
         bg_grid = np.asarray(r["background_c"]) if "background_c" in r else \
             np.repeat(np.asarray(r["background"])[:, None], 2, 1)
         bg = two.in_order(bg_grid)

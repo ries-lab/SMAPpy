@@ -2774,7 +2774,9 @@ class DualSplineFit(_TwoChannelFit):
     # 13: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`), drawn on either
     # 14: *in the sample* on auto by default: a pupil (Zernike) dual calibration drawn for the focus found from
     #     the main channel's lowest localizations, z the height above the coverslip (`calibrate.depth`)
-    version = "15"
+    # 16: a SMAP two-channel calibration's photons as photons: each half's own light at focus its share
+    #     (`psf.signal_integral`), a linked N the total over both halves (Jonas, 2026-11-22)
+    version = "16"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 

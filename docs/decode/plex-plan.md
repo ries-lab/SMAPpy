@@ -1268,3 +1268,25 @@ out of reach.  The light a flat background misses is uneven -- out-of-focus mole
 range costs the dim molecules: Jaccard at 1 000 photons 0.609 → 0.490, pixelation 0.032 → 0.058, at
 10 000 photons 0.832 → 0.856.  The range stays the prefit's; an uneven background in the
 simulation is the open question for live-cell movies.
+
+**Photons, defined** (Jonas, 2026-11-22): a biplane's linked N is the molecule's total over both
+planes; a colour's total is N1 + N2, each its channel's own count.  SMAP's converted two-channel
+calibrations had not met it.  Their PSFs carry the beads' split (Fig. 1c 0.987 and 0.767 at focus,
+Fig. 2a 0.901 and 4.18) but no stored share, so Spline 3D 2C read one photon per channel: a linked
+biplane N came out 2 N_draw for 1.754 N_draw of light, and a colour's second count was off by its
+split.  Each channel's own light at focus is now its share (`psf.signal_integral`, Spline 3D 2C
+version 16).  netfit's biplane reports the draw's N times the planes' light (`fit_two.biplane_total`),
+and its training records its ranges so; the prefit converts by the same factor, not a fixed 2.
+Checked on the 10 000-photon sets, both fitters, matched molecules, |z| < 500 nm:
+
+| | photons / light drawn | colour: total - (N1 + N2) | each channel / truth | lateral / axial σ or bound over the CRLB |
+|---|---|---|---|---|
+| biplane, Spline 3D 2C | 0.999 | | | 1.016 / 1.053 (reported σ) |
+| biplane, netfit | 0.997 | | | 1.006 / 1.006 (bound, 1 frame), 1.006 (3 frames, against crlb_w3) |
+| colour, Spline 3D 2C | 1.000 | 1.5e-11 | 0.996 / 1.000 | 1.019 / 1.073 |
+| colour, netfit | 1.003 | 1e-7 relative | 1.002 / 1.003 | 0.997 / 0.993 (1 frame), 0.998 / 0.994 (3 frames) |
+
+The bounds use the network's draw counts with the PSFs as drawn, so the convention changes no bound.  On
+Fig. 2a the two fitters' counts now agree in both channels (Spline 3D 2C 0.91 and 0.92 of netfit's;
+shares 0.794 and 0.798 at the median).  The suite's biplane Spline 3D 2C photons change with it (from
+2 N_draw to 1.754 N_draw); none of its scores reads them.

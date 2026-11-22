@@ -10,13 +10,13 @@ import json
 import numpy as np
 import pytest
 import tifffile
+from test_netfit_channels import SHAPE, dual
 
 from smappy.calibrate.dual import save_dual_color_calibration
 from smappy.netfit import prefit_two
 from smappy.netfit.job import two_channel_settings
 from smappy.training import job as jobfile
 from smappy.training import progress
-from test_netfit_channels import SHAPE, dual
 
 
 def test_the_dyes_are_the_peaks_of_the_shares_and_a_lone_outlier_is_none():
@@ -99,3 +99,19 @@ def test_a_two_channel_job_without_a_prefit_trains_through_the_decode_command(mo
     meta = model_file.read_metadata(folder / "model.safetensors")
     assert meta["channels"]["main"] == 1 and meta["calibration_sha256"] == jobfile.file_sha256(cal)
     del torch
+
+
+def test_a_smap_pair_s_photons_are_each_half_s_own_light_and_a_biplane_s_total_is_both():
+    """SMAP's two-channel calibrations hold the beads' split in their PSFs (Fig. 1c's 0.99 and 0.77 at
+    focus): each half's light is its share, so a linked N is the total (Jonas, 2026-11-22)."""
+    from dataclasses import replace
+
+    from smappy.netfit.fit_two import biplane_total
+    from smappy.psf import SMAP_PAIR, light_at_focus, signal_integral
+    cal = dual()
+    second = replace(cal.secondary, psf=cal.secondary.psf * 0.77, parameters={"smappy_conversion": SMAP_PAIR + " ..."})
+    assert signal_integral(second) == pytest.approx(light_at_focus(second))
+    assert light_at_focus(second) == pytest.approx(0.77 * light_at_focus(cal.secondary))
+    assert signal_integral(replace(second, parameters={})) == 1.0        # not SMAP's pair: as before
+    pair = replace(cal, secondary=second)
+    assert biplane_total(pair) == pytest.approx(light_at_focus(cal.main) + light_at_focus(second))

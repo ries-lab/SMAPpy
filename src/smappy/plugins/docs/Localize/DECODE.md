@@ -354,7 +354,8 @@ within 10 to 30 % at every size of uncertainty -- where Spline 3D's CRLB was
 up to 2.5 times too small for the bright spots.
 
 A two-channel model writes `photons_ch0` and `photons_ch1`, each channel's
-photons (colour; biplane gives one count, `photons`), and `background_ch0`
+photons (colour; their sum is `photons`; biplane gives one count, `photons`, the molecule's
+total over both planes), and `background_ch0`
 and `background_ch1`; `background` is the main channel's.  With its checks
 it adds `goodness` and `crlb_x_nm`, `crlb_y_nm`, `crlb_z_nm`.  The move used,
 typed or measured, is in the run's file, and a measured one is also in the

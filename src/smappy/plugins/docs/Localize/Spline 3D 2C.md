@@ -1,6 +1,6 @@
 ---
-version: "15"
-covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.pipeline.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus]
+version: "16"
+covers: [smappy.psf.GlobalSplinePSF, smappy.psf.signal_integral, smappy.psf.light_at_focus, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.pipeline.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus]
 ---
 
 ## What it does
@@ -161,6 +161,18 @@ whether they are linked.
   multiplied by its stored share.  `photons_ch0` and `photons_ch1` are then
   the photons in each half, `photons` their sum, and `ratio` the dye's own
   fraction in the secondary half -- whatever the beads' split was.
+
+A calibration converted from SMAP's two-channel calibration stores no
+shares, and its PSFs do not hold one photon together.  SMAP scales the pair
+by one half, so the other carries the beads' split: DECODE-Plex's biplane
+beads hold 0.99 and 0.77 at focus, its two-colour beads 0.90 and 4.2.  Each
+half's own light at focus is then taken as its share.  So here too a linked
+$N$ is the molecule's total over both halves, and free photons are each
+half's own.  On simulated biplane and two-colour sets the photons came back
+at 1.00 of the light drawn, and the CRLB at 1.02 of the true one laterally.
+Before this, a linked $N$ was read as one photon per half: a biplane
+molecule's total came out 14 % high and a colour's second half off by the
+split.
 
 ```figure Both uses give photons back as photons.  Left, two colours: molecules of 2000 photons with a quarter in the secondary half, fitted with the photons free -- each half's photons and their sum, against the truth (grey).  Right, biplane: molecules that split as the beads did, fitted with one photon number, which is the total.
 dye = pairs(np.repeat(levels, 60), 0.25)[0]

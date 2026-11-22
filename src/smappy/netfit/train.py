@@ -223,6 +223,7 @@ class Drawer:
             from ..calibrate.dual import load_dual_color_calibration
             from . import channels
             cal = load_dual_color_calibration(settings.calibration)
+            self.cal = cal
             self.two = channels.TwoChannels.from_calibration(cal, main=ch.main)
             self.grid = channels.Grid(self.two, device)
             self.renderers = [SplineRenderer(s, device, whole=whole)
@@ -349,7 +350,8 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     meta_base = {"method": METHOD, "settings": settings.to_dict(), "scaling": asdict(scaling), "window": sim.window,
                  "parameters": network.parameters(model), "calibration_sha256": _sha256(settings.calibration),
                  "calibration_em_on": bool(cam.em_gain), "calibration_source": str(settings.calibration),
-                 "trained_on": trained_on(sim, settings.channels), "smappy_version": _smappy_version(),
+                 "trained_on": trained_on(sim, settings.channels, _biplane_total(drawer)),
+                 "smappy_version": _smappy_version(),
                  **({"channels": drawer.two.to_dict()} if drawer.two is not None else {})}
     # on a CPU the thread would only take cores from the network
     feed = _Prefetch(lambda: drawer(batch_size, g), device) \
@@ -363,20 +365,29 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
             feed.close()
 
 
-def trained_on(sim, channels=None) -> dict:
+def trained_on(sim, channels=None, total: float = 1.0) -> dict:
     """What the training drew, as the DECODE fitter compares a fit with it (`fit_decode.range_warnings`):
-    the photons as a mean and spread or a range, the background a pixel (each channel's, for two), z."""
+    the photons as a mean and spread or a range, the background a pixel (each channel's, for two), z.
+    ``total``: a biplane's photons as the fitter reports them, the total over both planes
+    (`fit_two.biplane_total`), where the drawing's count is each plane's PSF's."""
     out = {"z_nm": [float(v) for v in sim.z_nm]}
     if sim.photons_range:
-        out["photons_range"] = [float(v) for v in sim.photons_range]
+        out["photons_range"] = [float(v) * total for v in sim.photons_range]
     else:
-        out["photons_mu_sig"] = [float(sim.photons_mean), float(sim.photons_sd)]
+        out["photons_mu_sig"] = [float(sim.photons_mean) * total, float(sim.photons_sd) * total]
     if channels is not None and channels.kind and channels.background:
         out["background_c"] = [[float(v) for v in b] for b in channels.background]
         out["background"] = [min(b[0] for b in out["background_c"]), max(b[1] for b in out["background_c"])]
     else:
         out["background"] = [float(v) for v in sim.background]
     return out
+
+
+def _biplane_total(drawer) -> float:
+    if drawer.two is None or drawer.channels.kind != "biplane":
+        return 1.0
+    from .fit_two import biplane_total
+    return biplane_total(drawer.cal)
 
 
 def _smappy_version() -> str:

@@ -31,7 +31,6 @@ FOCUS_APART_NM = 200.0        # planes in focus this far apart are a biplane's
 PEAK_SHARE = 0.15             # a dye's peak at least this share of the highest
 PEAK_APART = 0.05             # two dyes' shares at least this far apart
 MAX_DYES = 4
-BIPLANE_LINK = 2.0            # Spline 3D 2C's linked photons over netfit's biplane photons
 
 
 def is_dual(path) -> bool:
@@ -98,15 +97,24 @@ def prefit_two(movie, camera_settings, calibration, kind: str = "auto", moved=(0
     `training.prefit.Prefit` with total photons and the main channel's background, and `TwoChannels`."""
     import tempfile
 
-    from ..calibrate.dual import load_dual_color_calibration, save_dual_color_calibration
+    from ..calibrate.dual import (
+        load_dual_color_calibration,
+        save_dual_color_calibration,
+    )
     from ..group import GroupSettings, group
     from ..locs import Localizations
     from ..pipeline import FitSettings as PipelineFitSettings
     from ..plugins import Context
-    from ..plugins.fit import (DualModelSettings, DualSplineFit, DualSplineFitSettings, FinishSettings,
-                               OutputSettings, SourceSettings)
+    from ..plugins.fit import (
+        DualModelSettings,
+        DualSplineFit,
+        DualSplineFitSettings,
+        FinishSettings,
+        OutputSettings,
+        SourceSettings,
+    )
     from ..training.prefit import GROUP_DX_NM, Prefit, blocks
-    from .fit_two import moved_calibration
+    from .fit_two import biplane_total, moved_calibration
     cal = load_dual_color_calibration(calibration)
     kind = kind_of(cal) if kind == "auto" else kind
     if n_frames is None:
@@ -132,10 +140,10 @@ def prefit_two(movie, camera_settings, calibration, kind: str = "auto", moved=(0
             if "photons_ch0" in block and "photons_ch1" in block:   # colour: the total the estimates read
                 block.columns["photons"] = np.asarray(block["photons_ch0"]) + np.asarray(block["photons_ch1"])
             elif kind == "biplane":
-                # Spline 3D 2C's linked count is shared equally by the two planes, each plane's PSF
-                # drawn with half of it; netfit draws each plane's PSF with the molecule's count
-                # (`simulate.draw_batch_2c`): half the fit's (the biplane sets: fit / truth 2.00)
-                block.columns["photons"] = np.asarray(block["photons"]) / BIPLANE_LINK
+                # Spline 3D 2C's linked count is the molecule's total over both planes (`psf.signal_integral`);
+                # netfit draws each plane's PSF with one count, the planes' shares in the PSFs: the
+                # total over their light (`fit_two.biplane_total`)
+                block.columns["photons"] = np.asarray(block["photons"]) / biplane_total(cal)
             if "background_ch0" in block and "background" not in block:
                 block.columns["background"] = np.asarray(block["background_ch0"])
             blinks, _ = group(block, GroupSettings(dx=GROUP_DX_NM))

@@ -245,6 +245,18 @@ class _GlobalPSF(PSFModel):
         return ", ".join(n for n, on in zip(names, self.shared) if on)
 
 
+#: how `calibrate.smap_dual` marks a channel of SMAP's two-channel calibration
+SMAP_PAIR = "an SXY entry of a SMAP global"
+
+
+def light_at_focus(calibration) -> float:
+    """A spline's PSF summed over its pixels at focus (its z0), the mean of the planes 2 either side."""
+    psf = np.asarray(calibration.psf, float)
+    z = int(round(calibration.z0))
+    value = float(psf[max(z - 2, 0):z + 3].sum(axis=(1, 2)).mean())
+    return value if np.isfinite(value) and value > 0 else 1.0
+
+
 def signal_integral(calibration) -> float:
     """What a spline gives a fitted photon of, at focus.
 
@@ -255,11 +267,23 @@ def signal_integral(calibration) -> float:
     record (SMAP's calibrations, one built by hand) is taken to be normalised
     to one -- unless it is a dual bead calibration of this program's, whose
     shares are then unknown and which has to be rebuilt.
+
+    A channel of SMAP's two-channel calibration (`calibrate.smap_dual`) is not
+    normalised to one: SMAP scales the pair by one channel, so the other
+    carries the beads' split (Fig. 1c's biplane: 0.987 and 0.767 at focus;
+    Fig. 2a's colours 0.901 and 4.18).  Taken as one, a linked biplane fit
+    reported 2 N for the 1.754 N its model put in the frames, and a colour's
+    second count was off by the split.  So its own light at focus is taken:
+    a linked N is then the molecule's total over the channels and a free one
+    each channel's count, as for this program's pairs (Jonas, 2026-11-22: a
+    biplane's N is the total).
     """
     p = getattr(calibration, "parameters", None) or {}
     if "photon_normalization" in p:              # stored with the PSF
         value = float(p["photon_normalization"])
         return value if np.isfinite(value) and value > 0 else 1.0
+    if str(p.get("smappy_conversion", "")).startswith(SMAP_PAIR):
+        return light_at_focus(calibration)
     if str(p.get("method", "")).startswith("smappy_dual_bead"):
         source = getattr(calibration, "source", None)
         raise ValueError(f"{source or 'this dual calibration'} does not store "
