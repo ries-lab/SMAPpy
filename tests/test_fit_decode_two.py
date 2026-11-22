@@ -14,6 +14,8 @@ import tifffile
 
 torch = pytest.importorskip("torch")
 
+from test_netfit_channels import SHAPE, dual
+
 from smappy import plugins
 from smappy.calibrate.dual import save_dual_color_calibration
 from smappy.netfit import channels as CH
@@ -22,7 +24,6 @@ from smappy.netfit.settings import ChannelSettings, SimulationSettings, Training
 from smappy.netfit.train import METHOD, trained_on
 from smappy.plugins import Context
 from smappy.training import model_file
-from test_netfit_channels import SHAPE, dual
 
 
 def _sha(path):

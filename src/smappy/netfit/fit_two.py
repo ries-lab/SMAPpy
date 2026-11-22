@@ -60,7 +60,7 @@ def measure_move(predictor, cal, corner, photons, start=(0.0, 0.0), reach: float
     within ``reach`` of where it stands and then of ``step`` about the best."""
     moved = [float(start[0]), float(start[1])]
     for axis in (1, 0, 1):
-        def at(v):
+        def at(v, axis=axis):
             m = list(moved)
             m[axis] = v
             return count_at(predictor, cal, corner, photons, m)
@@ -84,7 +84,7 @@ class TwoChannelPredictor:
         self.beads = cal                     # the registration as the beads measured it
         self.measure = bool(measure)         # the move measured on the first frames (`measure_move`)
         self.cal = moved_calibration(cal, moved)
-        self.corner = tuple(int(round(v)) for v in corner)
+        self.corner = tuple(round(v) for v in corner)
         self.moved = tuple(float(v) for v in moved)
         self.em, self.goodness, self.bound = bool(em), bool(goodness), bool(bound)
         self.pixel_nm = tuple(float(v) for v in pixel_nm)
