@@ -1354,3 +1354,40 @@ fusion with the bright channel the grid, 64 features, the ConvGRU over 3 frames,
 the whole grid, streamed (being tested at C = 2); the density the data's (LD, HD or UHD, chosen for the sample -- Jonas: settings, not models), targets from 100
 photons, the rate decaying every 327 680 samples, 6 M samples.  Still not the winners': GMN7C's
 fine-tune to the prefit's on-time.
+
+### End to end on our own data (2026-11-22)
+
+SMAPpy's chain on a real two-colour movie, every step the plugins' and the training window's own:
+the movie of 2025-12-11 (M2, microtubules and actin, CF660C and Phalloidin-647, Evolve, EM gain 100,
+ROI 150-0-226-512, 200 000 frames) and the beads of the next day (Zenodo 21348704's
+`Fig2a-251212_MM_BeadCal_2C_M2`, 11 positions, the raw stacks behind DECODE-Plex's Fig. 2a calibration).
+
+- **The calibration**: *PSF calibration*, dual colour, bead average, the arrangement the microscope
+  database's: 47 pairs, 28 used, in 6 s.  The database had M2's Evolve setup unmirrored; its beads (and our
+  2026-07 ones: 44 pairs against 7) pair only with the reflected arm mirrored along y -- corrected
+  (`microscopes.json`).  Our 2026-07-09 beads do not serve this movie: its spots pair under the 2025-12
+  beads' map (a peak 32 times the median of the spot-difference histogram) and not under theirs (2.9);
+  the splitter was changed between.
+- **The prefit** (Spline 3D 2C, 4 blocks of 50 frames, 19 s): two colours, the brighter half the second,
+  shares at 0.795 with a tail towards 0.9; no move -- the shares are narrowest at none (sd 0.051) and every
+  2 x 3 pixel move spreads them.  The job: early fusion, independent counts, the window's estimates.
+- **The training**: on decodebox by `smappy-decode train`, 6 M samples in 52 min (17 s an epoch);
+  its test set at the end Jaccard 0.785, RMSE 40 / 43 nm, KS 0.005.
+- **The fit** (*Localize/DECODE*, frames 2 000 -- 2 399, *measure the move* and the goodness on, on this
+  Mac): 4.2 frames a second; the move measured -0.25 rows, 0 columns; *after the fit*'s colours kept
+  89.5 %.  Against DECODE-Plex's fit of the same frames (the paper's code, `beadpsf-swap`, prob > 0.6 both):
+
+  | | per frame | paired | precision across 3 frames, the 172 000 both found | sigma honesty | KS | dyes' shares |
+  |---|---|---|---|---|---|---|
+  | netfit, our calibration | 741 | 62 % of ours | 19.0 / 21.6 / 47.6 nm | 1.51 / 1.26 / 1.04 | 0.003 | 0.79, 0.94 |
+  | DECODE-Plex | 490 | 90 % of theirs | 21.4 / 25.2 / 51.6 nm | 2.01 / 1.76 / 1.67 | 0.007 | 0.79, 0.94 |
+
+  offset between them 1 / -18 / 20 nm, spread 14 / 23 / 49 nm.  Each fitter's own pairs (not the same
+  molecules): netfit 24 / 28 / 70 nm, DECODE-Plex 23 / 26 / 57 -- netfit's include 50 % more molecules and
+  a wider z (5th -- 95th percentile -435 -- 619 nm against -350 -- 307).
+- **Found on the way**: the biplane photon total imported the compiled fitter, which a training host
+  lacks (fixed: `io.calibration.light_at_focus`); the run's record kept the move before it was measured
+  (fixed); the prefit cannot pair a moved splitter, and *measure the move* needs a trained network -- the
+  spot-pair vote (each channel's spots, the differences' histogram) finds a move with none, a candidate
+  for the prefit; the training's test set has no bound at C = 2, so the outliers and inliers' numbers are
+  missing from a two-channel *Follow*.
