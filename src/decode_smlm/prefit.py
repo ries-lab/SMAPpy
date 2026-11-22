@@ -245,7 +245,7 @@ def camera(conversion: float, offset: float, pixel_size_nm, em_gain: float | Non
             "spur_noise": SPURIOUS_EM if em else 0.0, "convert2photons": True}
 
 
-def method_params(est: Estimates, camera_section: dict, density: str, frame_px: int = DENSITY_FRAME_PX,
+def method_params(est: Estimates, camera_section: dict, density, frame_px: int = DENSITY_FRAME_PX,
                   calibration_file: str = "calibration.h5") -> dict:
     """A job's ``method.yaml``: DECODE's minimal parameter file (its ``param_friendly.yaml``), filled.
 
@@ -262,11 +262,22 @@ def method_params(est: Estimates, camera_section: dict, density: str, frame_px: 
                            "intensity_mu_sig": sim["intensity_mu_sig"], "lifetime_avg": sim["lifetime_avg"]}}
 
 
-def simulation(est: Estimates, density: str) -> dict:
-    """The parts of DECODE's ``Simulation`` section the estimates and the chosen density set."""
-    if density not in DENSITIES:
-        raise ValueError(f"density {density!r}: one of {', '.join(DENSITIES)}")
-    return {"emitter_av": DENSITIES[density], "lifetime_avg": est.lifetime_frames,
+def density_per_frame(density) -> float:
+    """Emitters in a 40 x 40 frame: a name of `DENSITIES`, or the number itself (a density typed)."""
+    if isinstance(density, str):
+        if density not in DENSITIES:
+            raise ValueError(f"density {density!r}: one of {', '.join(DENSITIES)}, or a number")
+        return float(DENSITIES[density])
+    value = float(density)
+    if not value > 0:
+        raise ValueError(f"density {density!r}: emitters in a 40 x 40 frame, more than 0")
+    return value
+
+
+def simulation(est: Estimates, density) -> dict:
+    """The parts of DECODE's ``Simulation`` section the estimates and the chosen density set: a name of
+    `DENSITIES` or emitters in a 40 x 40 frame."""
+    return {"emitter_av": density_per_frame(density), "lifetime_avg": est.lifetime_frames,
             "intensity_mu_sig": [float(v) for v in est.intensity_mu_sig],
             "bg_uniform": [float(v) for v in est.background],
             "z_extent_nm": [round(est.z_nm[0]), round(est.z_nm[1])]}
