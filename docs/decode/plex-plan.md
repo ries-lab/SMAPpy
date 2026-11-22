@@ -1406,5 +1406,11 @@ Below the training density's neighbourhood a sparser training finds 3-4 % more a
 (colour lateral RMSE/CRLB 1.16 against 1.26 at density 1); at 15 they tie; above, the dense training wins,
 and the sparse one's outliers grow fastest (colour at 50: 38 % trained at 15, 32 % at 25, 27 % at 50;
 at density 5 already 1.4 against 1.0 %).  The loss from training too sparse is larger than the gain from
-training to match, so **if in doubt, train at the higher density** (Jonas).  No model trained at 1 or 5 yet:
-whether one matched to sparse data gains more than the 15-trained one's 3-4 % is open.
+training to match, so **if in doubt, train at the higher density** (Jonas).
+
+Trained at 5 (`D_*_d5_s0`, one seed each), Jaccard biplane / colour 0.894 / 0.922 at density 1, 0.850 / 0.896
+at 5, 0.807 / 0.823 at 15, 0.625 / 0.587 at 50.  Only at density 1 does it gain over the 15-trained model
+(+0.02 / +0.014, about the seeds' scatter).  At its own density it ties in Jaccard (0.850 against 0.852,
+0.896 against 0.905) and has twice the outliers (1.3 against 0.5 %, 2.4 against 1.4 %).  Matching the
+training to the data is not the optimum: training somewhat denser than the data does as well or better, and LD
+(15) is low enough for sparse samples; no sparser choice is needed in the window.
