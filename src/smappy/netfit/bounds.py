@@ -92,6 +92,22 @@ def information(spline0, spline1, xy0, xy1, jacobian, z_nm, photons, background,
     return out
 
 
+def drawn_crlb(cal, channels, xy0, shift, z_nm, photons, background, pixel_nm, em: bool,
+               device=None) -> np.ndarray:
+    """(n, 3) the bound in x, y, z (nm) of two-channel molecules as the training draws them
+    (`simulate.draw_batch_2c`): channel 0's spot at ``xy0`` (n, 2), channel 1's at ``xy0 + shift``, each
+    from its spline (`channels.splines`), one count (``photons`` (n,), linked biplane) or one per channel
+    ((n, 2)), ``background`` (n, 2) each channel's at the molecule.  The training's test set has its
+    truth, so this is the bound a two-channel *Follow* scores the inliers against."""
+    from .channels import splines
+    s0, s1 = splines(cal, channels.kind, channels.main)
+    xy0 = np.asarray(xy0, float)
+    jac = np.broadcast_to(np.eye(2), (len(xy0), 2, 2))     # the drawn shift is the registration's remainder
+    info = information(s0, s1, xy0, xy0 + np.asarray(shift, float), jac, np.asarray(z_nm, float), photons,
+                       np.asarray(background, float), 2.0 if em else 1.0, device=device)
+    return bound(info, pixel_nm)
+
+
 def links(frame, xy, half: int = 1, link_px: float = 1.0):
     """For each localization, the nearest localization in each frame ``frame +- 1 .. half`` within
     ``link_px``: a list of (rows, partners) pairs, one per frame offset."""
@@ -134,6 +150,12 @@ def plugin_crlb(two, cal, kind: str, frame, xy, z_nm, photons, background, pixel
         for rows, partners in links(frame, xy, window // 2, link_px):
             total[rows] += info[partners]
         info = total
+    return bound(info, pixel_nm)
+
+
+def bound(info, pixel_nm) -> np.ndarray:
+    """(n, 3) the bound in x, y, z (nm) from (n, 3, 3) informations on x, y (pixels) and z (nm); NaN
+    where one cannot be inverted."""
     out = np.full((len(info), 3), np.nan)
     good = np.all(np.isfinite(info.reshape(len(info), -1)), 1)
     try:

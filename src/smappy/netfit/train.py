@@ -166,7 +166,7 @@ class _Prefetch:
             here = torch.cuda.current_stream(self.device)
             here.wait_event(done)
             for t in (b.frames, b.xyz, b.photons, b.mask, b.background, b.photons_window, b.background_window,
-                      b.movie, b.background_map):
+                      b.movie, b.background_map, b.shift):
                 if t is not None:
                     t.record_stream(here)        # not freed for the drawing stream while used here
         return b
@@ -325,9 +325,18 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         if ph.ndim == 2:                         # colour: a count per channel, the total scored
             ph = ph.sum(1)
         # the bound of the PSF as drawn (a mirror changes no bound), in torch: no compiled SMAPpy needed;
-        # two channels' joint bound is not written yet
-        bound = None if renderer is None else metrics.crlbs_torch(
-            renderer, ph, local_background(test, frame, xyz), xyz[:, 2], cam.pixel_nm, bool(cam.em_gain))
+        # two channels' from both spots as drawn, x, y and z shared (`bounds.drawn_crlb`)
+        if renderer is not None:
+            bound = metrics.crlbs_torch(renderer, ph, local_background(test, frame, xyz), xyz[:, 2], cam.pixel_nm,
+                                        bool(cam.em_gain))
+        elif drawer.two is not None and test.shift is not None:
+            from .bounds import drawn_crlb
+            bound = drawn_crlb(drawer.cal, drawer.channels, xyz[:, :2], test.shift.cpu().numpy()[m],
+                               xyz[:, 2], test.photons.cpu().numpy()[m],
+                               np.c_[local_background(test, frame, xyz, 0), local_background(test, frame, xyz, 1)],
+                               cam.pixel_nm, bool(cam.em_gain))
+        else:
+            bound = None
         truth = {"frame": frame, "xyz": xyz, "photons": ph, "crlb": bound}
     start, seconds = 0, 0.0
     ckpt = folder / "checkpoint.pt"
@@ -524,7 +533,8 @@ def _slice(batch, a, b):
     from .simulate import Batch
     return Batch(batch.frames[a:b], batch.xyz[a:b], batch.photons[a:b], batch.mask[a:b], batch.background[a:b],
                  aux=None if batch.aux is None else batch.aux[a:b],
-                 background_map=None if batch.background_map is None else batch.background_map[a:b])
+                 background_map=None if batch.background_map is None else batch.background_map[a:b],
+                 shift=None if batch.shift is None else batch.shift[a:b])
 
 
 def main(argv=None):

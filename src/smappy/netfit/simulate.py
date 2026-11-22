@@ -57,6 +57,9 @@ class Batch:
     # an uneven background (``SimulationSettings.background_uneven``): the middle frame's per pixel,
     # (b, C, rows, columns); None: flat, ``background`` everywhere
     background_map: torch.Tensor | None = None
+    # two channels: each target's channel-1 spot relative to its channel-0 one (the registration's
+    # remainder), pixels, (b, k, 2) -- what the test set's bound needs (`bounds.drawn_crlb`)
+    shift: torch.Tensor | None = None
 
 
 def _uniform(lo, hi, n, g, device):
@@ -274,7 +277,9 @@ def draw_batch_2c(renderers, grid, sim: SimulationSettings, cam: CameraModel, ch
     else:
         photons = torch.zeros((batch, k), device=device)
         photons[ks, rank] = per_frame[i, w + mid]
+    shift = torch.zeros((batch, k, 2), device=device)
+    shift[ks, rank] = d[i].to(shift.dtype)
     aux_w = aux.repeat_interleave(W, 0)[:batch]
     bg_map = None if mod is None else mod.repeat_interleave(W, 0)[:batch] * bgw[:, :, mid, None, None]
     return Batch(frames, xyz, photons, mask, bgw[:, :, mid], window, bgw, movie if W > 1 else None, W, aux=aux_w,
-                 background_map=bg_map)
+                 background_map=bg_map, shift=shift)

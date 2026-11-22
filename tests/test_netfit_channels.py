@@ -296,3 +296,28 @@ def test_a_streamed_two_channel_movie_is_cut_into_windows_that_share_its_crop(ki
         whole = run(model, b.movie, b, 3)[:7]
         one = model(b.frames, aux=b.aux)
     torch.testing.assert_close(whole, one, atol=1e-4, rtol=1e-4)
+
+
+def test_the_drawn_bound_is_one_channel_s_with_all_the_light_in_it_and_the_batch_carries_its_shift():
+    """The two-channel test set's bound (`bounds.drawn_crlb`, a two-channel training's *Follow*): with
+    all of a colour molecule's light in channel 0 it is channel 0's one-channel bound; the batch carries
+    each target's channel-1 shift, the registration's remainder at it."""
+    from smappy.netfit import metrics
+    from smappy.netfit.bounds import drawn_crlb
+    cal = dual()
+    rng = np.random.default_rng(0)
+    n = 40
+    xy, z = rng.uniform(8, 16, (n, 2)), rng.uniform(-200, 200, n)
+    photons, background = np.c_[np.full(n, 3000.0), np.zeros(n)], np.full((n, 2), 20.0)
+    two_channels = drawn_crlb(cal, ChannelSettings(kind="colour"), xy, np.zeros((n, 2)), z, photons, background,
+                              (100.0, 100.0), False, device="cpu")
+    s0, _ = CH.splines(cal, "colour", 0)
+    one = metrics.crlbs_torch(SplineRenderer(s0, whole=True), photons[:, 0], background[:, 0], z, (100.0, 100.0), False)
+    np.testing.assert_allclose(np.median(two_channels / one, 0), 1.0, atol=0.01)
+    two = CH.TwoChannels.from_calibration(cal)
+    sim = SimulationSettings(frame_px=24, photons_range=(1000.0, 5000.0), z_nm=(-300.0, 300.0))
+    b = draw_batch_2c([SplineRenderer(s, whole=True) for s in CH.splines(cal, "biplane")], CH.Grid(two), sim,
+                      CameraModel(), ChannelSettings(kind="biplane"), 6, torch.Generator().manual_seed(1))
+    d = torch.as_tensor(two.offsets())
+    assert b.shift.shape == (*b.mask.shape, 2) and torch.all(b.shift[~b.mask] == 0)
+    assert float(b.shift[b.mask].abs().max()) <= float(d.abs().max()) + 1e-4
