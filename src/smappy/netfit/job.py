@@ -107,16 +107,15 @@ def settings_from_estimates(est, camera_section: dict, density: str, calibration
     if channels is not None:
         # the C = 2 study's settings, the ones its comparisons were made with (plex-plan §16;
         # `benchmarks/decode/netfit_c2/study/L_*.json`): 64 features, the ConvGRU joining the frames,
-        # spots over the spline's whole grid, targets from 100 photons.  Not streamed, as the winners were
-        # not: streamed alone it found fewer dim molecules in biplane (Jaccard at 1 000 photons 0.569 ->
-        # 0.533) and named fewer dyes right at 1 000 photons (95.3 -> 89.3 %), one seed each, within the
-        # seeds' scatter but in the direction the streamed time-model runs went (plex-plan §16)
+        # spots over the spline's whole grid, targets from 100 photons.  Streamed, as one channel's
+        # (windows cut from one movie: half the drawing); at C = 2 one seed of it was a little worse than
+        # unstreamed (plex-plan §16, "The C runs so far"), being tested with more seeds before deciding
         s.channels = channels
         s.parts.backbone.settings.update(two_fuse=fuse, features=64)
         s.parts.time_model = Part("convgru", {"frames": int(window), "norm": True})
         # on-time 1: at C = 2 it tied mixed on-times 1 -- 3 on molecules on for 3 frames and beat them on
         # the brief dim ones (plex-plan §16, "The time model"); the prefit's on-time is not used
-        s.simulation = SimulationSettings(**{**s.simulation.__dict__, "movie_windows": 1, "spots": "whole",
+        s.simulation = SimulationSettings(**{**s.simulation.__dict__, "movie_windows": 8, "spots": "whole",
                                              "lifetime_frames": 1.0, "lifetime_max_frames": 0.0})
     return s
 
