@@ -78,7 +78,7 @@ def measure_move(predictor, cal, corner, photons, start=(0.0, 0.0), reach: float
 def biplane_total(cal) -> float:
     """The light a biplane molecule of one drawn photon puts in both planes: the two PSFs as the network
     draws them (`channels.splines`), summed at focus.  Fig. 1c's: 0.987 + 0.767."""
-    from ..psf import light_at_focus
+    from ..io.calibration import light_at_focus
     from .channels import splines
     return float(sum(light_at_focus(s) for s in splines(cal, "biplane")))
 

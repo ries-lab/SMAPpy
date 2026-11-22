@@ -120,3 +120,27 @@ def test_a_smap_pair_s_photons_are_each_half_s_own_light_and_a_biplane_s_total_i
     assert signal_integral(replace(second, parameters={})) == 1.0        # not SMAP's pair: as before
     pair = replace(cal, secondary=second)
     assert biplane_total(pair) == pytest.approx(light_at_focus(cal.main) + light_at_focus(second))
+
+
+def test_a_biplane_training_s_photon_total_needs_no_compiled_fitter(tmp_path):
+    """A training host has SMAPpy's Python alone, no compiled fitter: the biplane total the training writes
+    (`fit_two.biplane_total`) must not import it (2026-11-22: it did, and every biplane job failed there)."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import smappy
+    save_dual_color_calibration(tmp_path / "pair_2ct.h5", dual())
+    code = ("import sys, importlib.abc\n"
+            "class Block(importlib.abc.MetaPathFinder):\n"
+            "    def find_spec(self, name, path, target=None):\n"
+            "        if name.endswith('_fit3d'): raise ImportError('no compiled fitter on this host')\n"
+            "sys.meta_path.insert(0, Block())\n"
+            "from smappy.calibrate.dual import load_dual_color_calibration\n"
+            "from smappy.netfit.fit_two import biplane_total\n"
+            f"print(biplane_total(load_dual_color_calibration({str(tmp_path / 'pair_2ct.h5')!r})))\n")
+    env = {**os.environ, "PYTHONPATH": str(Path(smappy.__file__).parents[1])}
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, check=False)
+    assert out.returncode == 0, out.stderr
+    assert float(out.stdout) > 0

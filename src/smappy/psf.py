@@ -17,7 +17,7 @@ from typing import Dict, Optional
 import numpy as np
 
 from . import _fit3d
-from .io.calibration import SplineCalibration
+from .io.calibration import SplineCalibration, light_at_focus  # noqa: F401 (light_at_focus: here too)
 
 
 @dataclass
@@ -247,14 +247,6 @@ class _GlobalPSF(PSFModel):
 
 #: how `calibrate.smap_dual` marks a channel of SMAP's two-channel calibration
 SMAP_PAIR = "an SXY entry of a SMAP global"
-
-
-def light_at_focus(calibration) -> float:
-    """A spline's PSF summed over its pixels at focus (its z0), the mean of the planes 2 either side."""
-    psf = np.asarray(calibration.psf, float)
-    z = int(round(calibration.z0))
-    value = float(psf[max(z - 2, 0):z + 3].sum(axis=(1, 2)).mean())
-    return value if np.isfinite(value) and value > 0 else 1.0
 
 
 def signal_integral(calibration) -> float:

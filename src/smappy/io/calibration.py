@@ -492,3 +492,14 @@ def _load_native_calibration(path):
         mirrored = bool(f.attrs.get('em_mirror', False))
     _validate_native_calibration(cal)
     return _unmirror_x(cal) if mirrored else cal
+
+
+def light_at_focus(calibration) -> float:
+    """A spline's PSF summed over its pixels at focus (its z0), the mean of the planes 2 either side: what
+    one fitted photon of a channel is where its PSF carries the beads' split (`psf.signal_integral`).
+    Here, not in `psf`, so that the training on a host without SMAPpy's compiled fitter can take it
+    (`netfit.fit_two.biplane_total`)."""
+    psf = np.asarray(calibration.psf, float)
+    z = round(float(calibration.z0))
+    value = float(psf[max(z - 2, 0):z + 3].sum(axis=(1, 2)).mean())
+    return value if np.isfinite(value) and value > 0 else 1.0
