@@ -28,7 +28,6 @@ from pathlib import Path
 from .settings import CameraModel, SimulationSettings, TrainingSettings
 
 SETTINGS, STOP, LOCK = "settings.json", "STOP", "lock.json"
-DENSITIES = {"LD": 15.0, "HD": 25.0, "UHD": 50.0}       # emitters in a 40 x 40 frame, as DECODE's jobs
 GMN7C_WINDOW = 7                                          # one channel's frames read (poc-plan, step 4)
 DECAY_SAMPLES = 327680                                    # the studies' schedule: 10 epochs of 32 768
 TARGET_PHOTONS_MIN = 100.0                                # the studies' targets
@@ -64,15 +63,15 @@ def two_channel_settings(two, *, main="auto", dyes="independent", typed=(), spre
     return out, fuse
 
 
-def settings_from_estimates(est, camera_section: dict, density: str, calibration: str = "calibration.h5",
+def settings_from_estimates(est, camera_section: dict, density, calibration: str = "calibration.h5",
                             window: int = 3, seed: int = 0, channels=None, fuse: str = "early") -> TrainingSettings:
     """A training's settings from the prefit's estimates (`decode_smlm.prefit.Estimates`) and the
     movie's camera (`decode_smlm.prefit.camera`'s section); everything else netfit's defaults.  With
     ``channels`` (`two_channel_settings`) a two-channel training: the calibration a two-channel one, the
     channels read together from the first layer (``fuse`` "early", *aligned channels*) or apart and
     joined later ("late", *DECODE-Plex-like*)."""
-    if density not in DENSITIES:
-        raise ValueError(f"density {density!r}: one of {', '.join(DENSITIES)}")
+    from decode_smlm.prefit import density_per_frame
+    per_40px = density_per_frame(density)          # a name (LD, HD, UHD) or emitters in 40 x 40 typed
     s = TrainingSettings()
     mean, sd = (float(v) for v in est.intensity_mu_sig)
     py, px = camera_section["px_size"]                  # DECODE's order: rows, then columns
@@ -80,7 +79,7 @@ def settings_from_estimates(est, camera_section: dict, density: str, calibration
                                          "photons_sd": sd, "background": tuple(float(v) for v in est.background),
                                          "z_nm": tuple(float(v) for v in est.z_nm),
                                          "lifetime_frames": float(est.lifetime_frames),
-                                         "density_per_40px": DENSITIES[density]})
+                                         "density_per_40px": per_40px})
     s.camera = CameraModel(conversion=float(camera_section["e_per_adu"]), offset=float(camera_section["baseline"]),
                            em_gain=float(camera_section.get("em_gain") or 0.0),
                            read_noise_e=float(camera_section["read_sigma"]), qe=float(camera_section.get("qe", 1.0)),

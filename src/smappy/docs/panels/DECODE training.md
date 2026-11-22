@@ -246,21 +246,21 @@ it trained faster (not yet measured in SMAPpy).  It must be a network of the
 same shape and of the same *model* (the window says so when it is not).  The DECODE fitter's *Train
 a model...* fills in the fitter's own model.
 
-*LD*, *HD* and *UHD*
-are SMAP's: 15, 25 and 50 molecules in a frame of 40 x 40 pixels.  The density
-is the sample's and the acquisition's: choose it for the data, the same
-for either model.  **If in doubt, train at the higher density**, which is why
-the window starts on *UHD*.  A model
-trained dense also localizes sparse data well: the example package's, trained
-at 50, found 96 % of the molecules at one in 40 x 40 pixels.  The cost of
-erring the other way is larger.  In the two-channel studies, a model trained at
-15 found 3 to 4 % more molecules than one trained at 50 on data at 1 to 5 molecules in
-40 x 40 pixels, tied at 15, and above it found fewer and made more outliers:
-at 50 it misplaced 38 % of the molecules it found where the model trained at 50 misplaced 27 %.
-Training at 5 gained only at one molecule in 40 x 40 pixels and doubled the
-outliers even at 5 itself: a training a little denser than the data does as
-well as one that matches it.  Choose *LD* or *HD* for data you know to be
-sparse.
+*HD* and *UHD* are SMAP's names: 25 and 50 molecules in a frame of 40 x 40
+pixels; *manual* takes any other number, typed in *molecules*.  The density is
+the sample's and the acquisition's: choose it for the data, the same for
+either model.  The window starts on *HD*, which in the two-channel studies was
+never far from the best model at any density from 1 to 50 molecules in 40 x 40
+pixels: it found 2 to 3 % more molecules than a model trained at 50 on sparse
+data, tied with it at 25, and lost 1 to 2 % at 50.  Choose *UHD* for data you
+know to be dense.
+
+**If in doubt, train at the higher density.**  A model trained dense
+localizes sparse data well, but not the other way round.  A model trained at 15
+found at most 1 % more than one trained at 25, and only on sparse data; above
+15 it found fewer and misplaced more: at 50, 38 % of the molecules it found
+against 27 % for a model trained at 50.  One trained at 5 gained only at one
+molecule in 40 x 40 pixels and had twice the outliers even at 5 itself.
 
 *in the sample* appears for a calibration made with the pupil (Zernike)
 method, and is [Spline 3D](plugin:Localize/Spline 3D)'s *focus*: the

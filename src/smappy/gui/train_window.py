@@ -44,7 +44,9 @@ MODELS = (("optimised", "DECODE, optimised"), ("decode", "DECODE"), ("plexlike",
 #: together from the network's first layer), *DECODE-Plex-like* reads them apart and joins them later
 TWO_CHANNEL_MODELS = ("optimised", "plexlike")
 CALIBRATION_FILTER = "Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat);;All files (*)"
-DENSITIES = (("LD", "LD, 15 in 40 x 40 px"), ("HD", "HD, 25 in 40 x 40 px"), ("UHD", "UHD, 50 in 40 x 40 px"))
+#: the densities offered (plex-plan §16, Jonas 2026-11-22): 25 robust from sparse data to 25, 50 for dense
+#: data, any other typed -- LD (15) gained at most 0.012 in Jaccard over 25, and only on sparse data
+DENSITIES = (("HD", "HD, 25 in 40 x 40 px"), ("UHD", "UHD, 50 in 40 x 40 px"), ("manual", "manual"))
 REFRESH_MS = 5000
 TRY_FRAMES = 20
 FOLLOW_S = 15                           # a host's jobs followed this often
@@ -165,10 +167,12 @@ class PrepareSettings:
     sample: SampleSettings = param(default_factory=SampleSettings, label="in the sample",
                                    help="where in the sample the pupil calibration is drawn for: the network "
                                         "learns that PSF, and its z is the height above the coverslip")
-    # the sample's and the acquisition's, chosen for the data, not the model's; UHD by default, since
-    # training too sparse costs more than training too dense (Jonas, 2026-11-22; plex-plan §16)
-    density: str = param("UHD", label="density", choices=DENSITIES,
-                         help="how many molecules a training frame holds: LD, HD or UHD, as SMAP's")
+    # the sample's and the acquisition's, chosen for the data, not the model's; HD by default, never far
+    # from the best from sparse data to UHD's (Jonas, 2026-11-22; plex-plan §16)
+    density: str = param("HD", label="density", choices=DENSITIES,
+                         help="how many molecules a training frame holds: HD or UHD, as SMAP's, or typed")
+    density_manual: float = param(25.0, label="molecules", unit="in 40 x 40 px", min=0.5, max=200.0, beside=True,
+                                  help="the density typed: molecules in a training frame of 40 x 40 pixels")
     two_channels: TwoChannelPrepare = param(default_factory=TwoChannelPrepare, label="two channels",
                                             collapsed=True)
     model: str = param("optimised", label="model", choices=MODELS, advanced=True,
@@ -181,6 +185,11 @@ class PrepareSettings:
     blocks: int = param(10, label="blocks", min=1, advanced=True,
                         help="blocks of the movie the prefit fits, spread over it")
     block_frames: int = param(50, label="frames a block", min=5, advanced=True, help="frames in each block")
+
+
+def training_density(s: PrepareSettings):
+    """The density a job trains at: the choice's name (HD, UHD), or the number typed under *manual*."""
+    return float(s.density_manual) if s.density == "manual" else s.density
 
 
 @dataclass
@@ -437,7 +446,7 @@ def method_params(prepared: Prepared, est) -> dict:
     """DECODE's parameter file of the job: what the figure draws its ranges from, and the job's own for
     a DECODE model (`netfit_params` for an optimised one: the same ranges)."""
     from decode_smlm.prefit import method_params as params
-    return params(est, camera_section(prepared.camera), prepared.settings.density)
+    return params(est, camera_section(prepared.camera), training_density(prepared.settings))
 
 
 def netfit_params(prepared: Prepared, est, seed: int = 0) -> dict:
@@ -451,7 +460,7 @@ def netfit_params(prepared: Prepared, est, seed: int = 0) -> dict:
         t = s.two_channels
         channels, fuse = two_channel_settings(prepared.two, main=t.main, dyes=t.dyes, typed=typed_shares(t.typed),
                                               spread=t.spread, fuse="late" if s.model == "plexlike" else "early")
-    return settings_from_estimates(est, camera_section(prepared.camera), s.density, seed=seed,
+    return settings_from_estimates(est, camera_section(prepared.camera), training_density(s), seed=seed,
                                    channels=channels, fuse=fuse).to_dict()
 
 
@@ -486,7 +495,7 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
     else:
         params = params or method_params(prepared, est)
     cam = prepared.camera
-    job = jobfile.Job.new(method=method, seed=seed, device="auto", ranges=simulation(est, s.density),
+    job = jobfile.Job.new(method=method, seed=seed, device="auto", ranges=simulation(est, training_density(s)),
                           camera={**camera_section(cam), "name": cam.camera_name},
                           calibration={"source": str(Path(s.calibration).resolve()),
                                        **calibration_conditions(s.calibration),
@@ -1307,6 +1316,7 @@ class TrainWindow(QWidget):
             shown["sample"] = shown.pop("sample.focus")
             from ..netfit.prefit_two import is_dual
             shown["two_channels"] = bool(s.calibration) and is_dual(s.calibration)
+            shown["density_manual"] = s.density == "manual"
             self.prepare_form.set_shown(shown)
             self.prepare_form.set_active(active)
             self.prepare_form.set_hints(hints)

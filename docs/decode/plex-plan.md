@@ -1414,3 +1414,8 @@ at 5, 0.807 / 0.823 at 15, 0.625 / 0.587 at 50.  Only at density 1 does it gain 
 0.896 against 0.905) and has twice the outliers (1.3 against 0.5 %, 2.4 against 1.4 %).  Matching the
 training to the data is not the optimum: training somewhat denser than the data does as well or better, and LD
 (15) is low enough for sparse samples; no sparser choice is needed in the window.
+
+**The window's densities** (Jonas, 2026-11-22): HD (25), the default, and UHD (50), with any other typed
+under *manual*.  25 is never more than about 0.025 in Jaccard behind the best of the trainings at any test
+density; LD (15) gained at most 0.012 over it, at density 1 only, within the seeds' scatter, and had more
+outliers at every density from 5 up, so it is no longer offered (DECODE's and netfit's jobs still read it).

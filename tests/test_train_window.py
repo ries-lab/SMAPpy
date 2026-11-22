@@ -50,7 +50,7 @@ def _prepare_settings(movie, cal_path, model="decode"):
     tests/test_netfit_job.py."""
     from smappy.gui.train_window import PrepareSettings
     from smappy.plugins.fit import CameraSettings
-    return PrepareSettings(movie=str(movie), calibration=str(cal_path), density="LD", blocks=3, block_frames=50,
+    return PrepareSettings(movie=str(movie), calibration=str(cal_path), density="HD", blocks=3, block_frames=50,
                            model=model,
                            camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1, em_on=False))
 
@@ -412,3 +412,26 @@ def test_the_follow_line_says_what_the_stop_rule_waits_for():
         "trains every epoch (stop when it no longer improves is off)"
     done = lines + [{"kind": "finished", "epoch": 199, "converged": True}]
     assert rule_line(done).startswith("converged at epoch 199")
+
+
+
+def test_a_typed_density_reaches_both_kinds_of_job_and_hd_is_the_default(movie):
+    """HD (25) the default, UHD beside it, any other typed under *manual* (plex-plan §16, 2026-11-22)."""
+    from dataclasses import replace
+
+    from smappy.gui.train_window import (
+        EstimateSettings,
+        PrepareSettings,
+        method_params,
+        netfit_params,
+        prepared_by_hand,
+        training_density,
+    )
+    assert PrepareSettings().density == "HD" and training_density(PrepareSettings()) == "HD"
+    path, cal_path = movie
+    typed = replace(_prepare_settings(path, cal_path), density="manual", density_manual=7.5)
+    assert training_density(typed) == 7.5
+    prepared = prepared_by_hand(typed, EstimateSettings(photons=3000.0, photons_sd=500.0, background_min=10.0,
+                                                        background_max=60.0, z_min_nm=-300.0, z_max_nm=300.0))
+    assert method_params(prepared, prepared.estimates)["Simulation"]["emitter_av"] == 7.5
+    assert netfit_params(prepared, prepared.estimates)["simulation"]["density_per_40px"] == 7.5

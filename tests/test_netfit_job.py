@@ -38,7 +38,7 @@ def test_the_window_writes_an_optimised_job_from_the_prefits_ranges_with_its_pat
     sim = params["simulation"]
     assert sim["photons_mean"] == pytest.approx(est.intensity_mu_sig[0])
     assert sim["background"] == pytest.approx(list(est.background)) and sim["z_nm"] == pytest.approx(list(est.z_nm))
-    assert sim["density_per_40px"] == 15.0
+    assert sim["density_per_40px"] == 25.0                  # HD, the window's default
     # step 4's time model (GMN7C): the ConvGRU over 7 frames, on-times drawn over 1 - 3, streamed
     assert params["parts"]["time_model"] == {"name": "convgru", "settings": {"frames": 7, "norm": True}}
     assert (sim["window"], sim["lifetime_frames"], sim["lifetime_max_frames"], sim["movie_windows"]) == (7, 1.0, 3.0, 8)

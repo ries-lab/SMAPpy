@@ -58,7 +58,7 @@ def movie(tmp_path):
 def _settings(movie, cal, **two):
     from smappy.gui.train_window import PrepareSettings, TwoChannelPrepare
     from smappy.plugins.fit import CameraSettings
-    return PrepareSettings(movie=str(movie), calibration=str(cal), density="LD", blocks=1, block_frames=20,
+    return PrepareSettings(movie=str(movie), calibration=str(cal), density="HD", blocks=1, block_frames=20,
                            model=two.pop("model", "optimised"), two_channels=TwoChannelPrepare(**two),
                            camera=CameraSettings(conversion=1.0, offset=0.0, pixelsize_um=0.1, em_on=False))
 
