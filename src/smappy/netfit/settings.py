@@ -40,6 +40,13 @@ class SimulationSettings:
     # frame that level times 1 + this times a normal -- a real movie's background drifts slowly, and a
     # network trained on jumps reads a jump as a molecule (plex-plan §15, the C = 1 pilot)
     background_jitter: float = -1.0
+    # uneven backgrounds (plex-plan §16, 2026-11-22): this share of the movies gets a smooth field over the
+    # frame, the level times 1 + c (2 f - 1), f in [0, 1] smooth over a few to 20 pixels, the contrast c
+    # uniform up to ``background_contrast`` -- the mean kept, a pixel's background up to (1 + c) / (1 - c)
+    # times another's (Fig. 2c's halves: 10).  The field is fixed over the movie, as a cell's is; the
+    # target is the map.  0: flat, as before
+    background_uneven: float = 0.0
+    background_contrast: float = 0.8
     z_nm: tuple = (-800.0, 800.0)
     target_photons_min: float = 0.0           # a target is a molecule with at least this many photons in the frame
     # "box": each spot in the spline's square less 3 pixels, as SMAPpy's simulation draws it (version 1);

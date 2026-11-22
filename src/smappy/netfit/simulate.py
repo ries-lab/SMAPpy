@@ -15,6 +15,9 @@ the camera reads it), then the camera -- Poisson, the EM register (a gamma of sh
 the excess noise), read noise, rounding to ADU -- and back to photons by the fitter's own factor
 (`CameraModel.adu_to_photons`), so the network is trained on what it will be given.
 
+**Uneven backgrounds** (``background_uneven``): a share of the movies has its background multiplied by
+a smooth field, fixed over the movie (`background_modulation`); their target is then the map.
+
 **Targets**: the molecules on in the middle frame, at least ``target_photons_min`` photons in it,
 as padded tensors with a mask: columns, rows (pixels), z (nm), photons in that frame; and that
 frame's background.
@@ -51,10 +54,53 @@ class Batch:
     movie: torch.Tensor | None = None
     movie_windows: int = 1
     aux: torch.Tensor | None = None               # two channels: the offset maps, (b, 2, rows, columns)
+    # an uneven background (``SimulationSettings.background_uneven``): the middle frame's per pixel,
+    # (b, C, rows, columns); None: flat, ``background`` everywhere
+    background_map: torch.Tensor | None = None
 
 
 def _uniform(lo, hi, n, g, device):
     return lo + (hi - lo) * torch.rand(n, generator=g, device=device)
+
+
+def smooth_fields(n: int, s: int, g: torch.Generator, device, shared: torch.Tensor | None = None,
+                  own: float = 0.3) -> torch.Tensor:
+    """(n, s, s) smooth random fields in [0, 1]: noise on a coarse grid of 2 to 6 knots a side (one
+    draw a batch), bicubic up to the frame, so it varies over 7 to 40 pixels of a 40-pixel frame.
+    With ``shared`` (n, s, s), the field is that and ``own`` of a field of its own (a second channel
+    sees mostly the same light, `background_modulation`)."""
+    import torch.nn.functional as F
+    k = int(torch.randint(2, 7, (1,), generator=g, device=device))
+    coarse = torch.randn((n, 1, k + 2, k + 2), generator=g, device=device)
+    f = F.interpolate(coarse, size=(s + 2 * s // k, s + 2 * s // k), mode="bicubic", align_corners=True)
+    a = s // k
+    f = f[:, 0, a:a + s, a:a + s]
+    if shared is not None:
+        f = (1 - own) * shared + own * _unit(f)
+    return _unit(f)
+
+
+def _unit(f: torch.Tensor) -> torch.Tensor:
+    lo = f.amin((1, 2), keepdim=True)
+    return (f - lo) / (f.amax((1, 2), keepdim=True) - lo).clamp_min(1e-6)
+
+
+def background_modulation(sim: SimulationSettings, n: int, channels: int, s: int, g: torch.Generator,
+                          device) -> torch.Tensor | None:
+    """(n, channels, s, s): the factor each movie's background is multiplied by, 1 + c (2 f - 1) with f a
+    smooth field (`smooth_fields`) and c uniform up to ``background_contrast``, for a share
+    ``background_uneven`` of the movies and 1 elsewhere; None when the share is 0.  The channels share
+    most of the field's shape (the same sample's light), each its own contrast."""
+    if sim.background_uneven <= 0:
+        return None
+    first = smooth_fields(n, s, g, device)
+    fields = [first] + [smooth_fields(n, s, g, device, shared=first) for _ in range(channels - 1)]
+    uneven = torch.rand((n, 1, 1), generator=g, device=device) < sim.background_uneven     # a movie's, both channels
+    out = []
+    for f in fields:
+        c = sim.background_contrast * torch.rand((n, 1, 1), generator=g, device=device)
+        out.append(torch.where(uneven, 1 + c * (2 * f - 1), torch.ones_like(f)))
+    return torch.stack(out, 1)
 
 
 def emitters(sim: SimulationSettings, batch: int, g: torch.Generator, device, frames: int | None = None):
@@ -119,7 +165,10 @@ def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraMod
     else:
         level = _uniform(*sim.background, n, g, device)[:, None]
         bg = (level * (1 + sim.background_jitter * torch.randn((n, L), generator=g, device=device))).clamp_min(0)
+    mod = background_modulation(sim, n, 1, s, g, device)                         # (n, 1, s, s) or None
     image = bg[:, :, None, None].expand(n, L, s, s).contiguous()
+    if mod is not None:
+        image = image * mod
     on = per_frame > 0
     m, f = on.nonzero(as_tuple=True)
     renderer.draw(image.view(n * L, s, s), sample[m] * L + f, x[m], y[m], z[m], per_frame[m, f])
@@ -149,7 +198,9 @@ def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraMod
     window = torch.zeros((batch, max(k, 1), T), device=device)
     window[ks, rank] = per_frame[i[:, None], idx[w]]
     mask[ks, rank] = True
-    return Batch(frames, xyz, photons, mask, bgw[:, mid], window, bgw, movie if W > 1 else None, W)
+    bg_map = None if mod is None else mod.repeat_interleave(W, 0)[:batch] * bgw[:, mid, None, None, None]
+    return Batch(frames, xyz, photons, mask, bgw[:, mid], window, bgw, movie if W > 1 else None, W,
+                 background_map=bg_map)
 
 
 def draw_batch_2c(renderers, grid, sim: SimulationSettings, cam: CameraModel, channels, batch: int,
@@ -185,7 +236,10 @@ def draw_batch_2c(renderers, grid, sim: SimulationSettings, cam: CameraModel, ch
         per_channel = [per_frame * 2 * (1 - share[:, None]), per_frame * 2 * share[:, None]]
     else:
         per_channel = [per_frame, per_frame]
+    mod = background_modulation(sim, n, 2, s, g, device)                         # (n, 2, s, s) or None
     image = bg[..., None, None].expand(n, 2, L, s, s).contiguous()
+    if mod is not None:
+        image = image * mod[:, :, None]
     for c, (renderer, px, py) in enumerate(zip(renderers, (x, x + d[:, 0]), (y, y + d[:, 1]))):
         on = per_channel[c] > 0
         m, f = on.nonzero(as_tuple=True)
@@ -221,4 +275,6 @@ def draw_batch_2c(renderers, grid, sim: SimulationSettings, cam: CameraModel, ch
         photons = torch.zeros((batch, k), device=device)
         photons[ks, rank] = per_frame[i, w + mid]
     aux_w = aux.repeat_interleave(W, 0)[:batch]
-    return Batch(frames, xyz, photons, mask, bgw[:, :, mid], window, bgw, movie if W > 1 else None, W, aux=aux_w)
+    bg_map = None if mod is None else mod.repeat_interleave(W, 0)[:batch] * bgw[:, :, mid, None, None]
+    return Batch(frames, xyz, photons, mask, bgw[:, :, mid], window, bgw, movie if W > 1 else None, W, aux=aux_w,
+                 background_map=bg_map)

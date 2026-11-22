@@ -153,8 +153,14 @@ def terms(out, batch, scaling, chunk: int = 64, names=("count", "mixture", "back
         var = (p * (1 - p)).sum(1).clamp_min(1e-6)
         out_terms["count"] = n * (0.5 * (n - mean) ** 2 / var + 0.5 * torch.log(2 * math.pi * var))
     if "background" in names:
-        bg = backgrounds(batch) / scaling.bg_max                                   # (b, C)
-        out_terms["background"] = ((out[:, lay.bg:lay.bg + lay.backgrounds] - bg[:, :, None, None]) ** 2).sum((1, 2, 3))
+        pred = out[:, lay.bg:lay.bg + lay.backgrounds]
+        if getattr(batch, "background_map", None) is not None:       # uneven: the map, on the output's grid
+            bg = batch.background_map / scaling.bg_max                               # (b, C, s, s)
+            if bg.shape[-2:] != pred.shape[-2:]:
+                bg = torch.nn.functional.interpolate(bg, size=pred.shape[-2:], mode="nearest")
+        else:
+            bg = (backgrounds(batch) / scaling.bg_max)[:, :, None, None]            # (b, C, 1, 1)
+        out_terms["background"] = ((pred - bg) ** 2).sum((1, 2, 3))
     if "local_count" in names:
         out_terms["local_count"] = window_counts(pk.sum(1).clamp(max=1 - 1e-6), cell_counts(batch, h, w, scale), window)
     if "matched" in names:

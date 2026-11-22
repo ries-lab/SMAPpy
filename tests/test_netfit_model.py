@@ -379,3 +379,17 @@ def test_windows_read_from_one_movie_give_the_maps_of_the_windows_one_by_one(tim
         alone = model(torch.stack([movies[m, w:w + 5] for m in range(2) for w in range(4)]))
     assert whole.shape == alone.shape == (8, 10, 8, 8)
     assert torch.allclose(whole, alone, atol=1e-5)
+
+
+def test_the_background_term_is_the_maps_error_where_the_background_is_uneven():
+    """An uneven background's target is its map (`simulate.Batch.background_map`), a flat one's its level."""
+    field = torch.linspace(0.0, 200.0, 64).view(1, 1, 8, 8)
+    out = _maps(8, 8)
+    out[:, 9:10] = field / SCALING.bg_max                                   # the network's map: the field
+    flat = Batch(frames=torch.zeros(1, 1, 8, 8), xyz=torch.zeros(1, 1, 3), photons=torch.zeros(1, 1),
+                 mask=torch.zeros(1, 1, dtype=torch.bool), background=torch.tensor([100.0]))
+    uneven = Batch(frames=flat.frames, xyz=flat.xyz, photons=flat.photons, mask=flat.mask,
+                   background=flat.background, background_map=field)
+    assert loss.terms(out, uneven, SCALING, names=("background",))["background"].item() == pytest.approx(0.0, abs=1e-9)
+    expect = ((field - 100.0) / SCALING.bg_max).pow(2).sum().item()
+    assert loss.terms(out, flat, SCALING, names=("background",))["background"].item() == pytest.approx(expect, rel=1e-5)

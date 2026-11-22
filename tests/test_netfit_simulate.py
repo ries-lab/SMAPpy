@@ -138,3 +138,41 @@ def test_a_background_per_movie_is_one_level_jittered_by_the_fraction_asked():
     jumpy = simulate.draw_batch(SplineRenderer(cal), SimulationSettings(frame_px=16, window=7), CameraModel(), 64,
                                 torch.Generator().manual_seed(5))
     assert (jumpy.background_window / jumpy.background_window.mean(1, keepdim=True) - 1).std().item() > 0.3
+
+
+def test_an_uneven_background_is_a_smooth_field_that_keeps_the_mean_and_is_the_target():
+    """plex-plan §16 (2026-11-22): a share of the movies gets a smooth field, fixed over the movie, the
+    level times 1 + c (2 f - 1); the map is the target, and the frames show it."""
+    cal = _calibration()
+    sim = SimulationSettings(frame_px=32, window=3, movie_windows=2, density_per_40px=0.0, background=(100.0, 100.0),
+                             background_uneven=0.5, background_contrast=0.8)
+    b = simulate.draw_batch(SplineRenderer(cal), sim, CameraModel(em_gain=0.0), 400, torch.Generator().manual_seed(2))
+    m = b.background_map[:, 0]
+    uneven = m.flatten(1).std(1) > 0
+    assert 0.4 < uneven.float().mean().item() < 0.6
+    assert torch.all(m[~uneven] == 100.0)
+    assert m.mean().item() == pytest.approx(100.0, rel=0.03)              # the field keeps the level
+    assert 20.0 - 1e-3 <= m.min().item() and m.max().item() <= 180.0 + 1e-3  # contrast at most 0.8
+    # smooth: neighbouring pixels differ far less than the field's spread
+    step = (m[uneven, :, 1:] - m[uneven, :, :-1]).abs().mean()
+    assert step < 0.1 * m[uneven].std()
+    # the frames show it: the middle frame's pixels follow the map, the camera's noise around it
+    mid = b.frames[:, 1]
+    assert (mid - m).mean().abs().item() < 1.0
+    smooth = torch.nn.functional.avg_pool2d(mid[uneven][:, None], 8)[:, 0]
+    assert np.corrcoef(smooth.flatten(), torch.nn.functional.avg_pool2d(m[uneven][:, None], 8).flatten())[0, 1] > 0.9
+    # fixed over the movie: two windows of one movie share their map
+    assert torch.equal(b.background_map[0], b.background_map[1])
+
+
+def test_two_channels_share_most_of_the_field_and_the_choice_to_be_uneven():
+    cal = _calibration()
+    sim = SimulationSettings(frame_px=32, background_uneven=0.5)
+    m = simulate.background_modulation(sim, 300, 2, 32, torch.Generator().manual_seed(3), "cpu")
+    flat = m.flatten(2).std(2) == 0                                            # (n, 2)
+    assert torch.equal(flat[:, 0], flat[:, 1])
+    a, b = m[~flat[:, 0], 0].flatten(1), m[~flat[:, 0], 1].flatten(1)
+    r = [np.corrcoef(a[i], b[i])[0, 1] for i in range(len(a))]
+    assert 0.6 < np.median(r) < 0.98                                           # mostly shared, not identical
+    del cal
+

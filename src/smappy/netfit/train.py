@@ -166,7 +166,7 @@ class _Prefetch:
             here = torch.cuda.current_stream(self.device)
             here.wait_event(done)
             for t in (b.frames, b.xyz, b.photons, b.mask, b.background, b.photons_window, b.background_window,
-                      b.movie):
+                      b.movie, b.background_map):
                 if t is not None:
                     t.record_stream(here)        # not freed for the drawing stream while used here
         return b
@@ -327,7 +327,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         # the bound of the PSF as drawn (a mirror changes no bound), in torch: no compiled SMAPpy needed;
         # two channels' joint bound is not written yet
         bound = None if renderer is None else metrics.crlbs_torch(
-            renderer, ph, test.background.cpu().numpy()[frame], xyz[:, 2], cam.pixel_nm, bool(cam.em_gain))
+            renderer, ph, local_background(test, frame, xyz), xyz[:, 2], cam.pixel_nm, bool(cam.em_gain))
         truth = {"frame": frame, "xyz": xyz, "photons": ph, "crlb": bound}
     start, seconds = 0, 0.0
     ckpt = folder / "checkpoint.pt"
@@ -508,10 +508,23 @@ def _snapshot(folder, settings, epoch, at, seen, tensors, meta_base, seconds, de
         f"  KS {r.get('pixel_ks') or float('nan'):.4f}")
 
 
+def local_background(batch, frame, xyz, channel: int = 0) -> np.ndarray:
+    """Each molecule's background, photons a pixel: its frame's level, or with an uneven background
+    (`simulate.Batch.background_map`) the map at its pixel -- the bound is the molecule's own."""
+    bg = batch.background.cpu().numpy()
+    if batch.background_map is None:
+        return bg[frame] if bg.ndim == 1 else bg[frame, channel]
+    m = batch.background_map[:, channel].cpu().numpy()
+    rows = np.clip(np.rint(xyz[:, 1]).astype(int), 0, m.shape[1] - 1)
+    cols = np.clip(np.rint(xyz[:, 0]).astype(int), 0, m.shape[2] - 1)
+    return m[frame, rows, cols]
+
+
 def _slice(batch, a, b):
     from .simulate import Batch
     return Batch(batch.frames[a:b], batch.xyz[a:b], batch.photons[a:b], batch.mask[a:b], batch.background[a:b],
-                 aux=None if batch.aux is None else batch.aux[a:b])
+                 aux=None if batch.aux is None else batch.aux[a:b],
+                 background_map=None if batch.background_map is None else batch.background_map[a:b])
 
 
 def main(argv=None):
