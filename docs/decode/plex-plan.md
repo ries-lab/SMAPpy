@@ -1255,3 +1255,16 @@ test of either until a model is trained for its background and density.
 whole pixels (a splitter, a day), and an uncorrected move loses half the molecules -- the fitter needs
 it, measured from the movie (the shares collapsing to 0 and 1, the goodness, pairing with a prefit)
 or typed; and the training's background range is set from the movie (a prefit), not from the beads.
+
+**Fig. 2c's background, trained for** (``R_biplane_early_bg1000_s0``: early, each plane's background
+drawn over 0 -- 1 000 photons a pixel where the others drew 0 -- 300, 6 M samples, streamed; 2026-11-22).
+The movie's floor -- each pixel's 5th percentile over 100 frames -- is 200 photons at the median and
+670 at the 95th percentile, and the earlier models' background stopped at their range's top.  This
+one's reaches 325 (95th percentile), but nothing else moves: 2 100 localizations a frame (DECODE-Plex
+1 260), 51 % of ours paired with DECODE-Plex's and 75 % of theirs, precision across 3 frames 31 / 28 /
+70 nm (the same), the goodness's median 66 (50 -- 64 before).  So the range was not what kept the movie
+out of reach.  The light a flat background misses is uneven -- out-of-focus molecules and the cell
+-- and without a truth this movie cannot say which fitter is right.  On the simulated sets the wider
+range costs the dim molecules: Jaccard at 1 000 photons 0.609 → 0.490, pixelation 0.032 → 0.058, at
+10 000 photons 0.832 → 0.856.  The range stays the prefit's; an uneven background in the
+simulation is the open question for live-cell movies.
