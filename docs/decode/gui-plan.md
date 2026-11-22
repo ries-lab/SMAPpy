@@ -17,7 +17,7 @@ calibration (one channel or a dual one):
 | 1 | *DECODE, optimised* | ``netfit-v1``, `settings.Parts`' defaults (poc-plan, "netfit's settings decided") | yes (`smappy.netfit.train`) | ✓ |
 | 2 | *DECODE-Plex* | the published models, inference only | no: an exported model is fitted, not trained | |
 | 2 | *DECODE-Plex-like* | ``netfit-v1``, two channels, late fusion (``two_fuse`` "late", offset maps) | yes | |
-| 2 | *early fusion* | ``netfit-v1``, two channels, early fusion, the bright channel main | yes | ✓ |
+| 2 | *aligned channels* (label open, §5) | ``netfit-v1``, two channels, early fusion, the bright channel main | yes | ✓ |
 
 The fitter has no model choice: it reads the method and the channels from the model file's header
 (`model_file.read_metadata`, numpy alone) and shows what that model needs.  *DECODE-Plex* is not a
@@ -108,6 +108,18 @@ that architecture here: what the study compared it as.
     plex-plan §16), streaming always.
 - **T4, Try** (a few frames fitted with the model so far): through I1's predictor dispatch, the
   channels as I2 cuts them.
+- **T6, the scoreboard** (*Follow*, the early stop): the standard report's numbers (plex-plan §16)
+  every epoch, at no extra cost.  The test set is drawn once with each molecule's bound
+  (`testset.draw`, `metrics.crlbs_torch`, ``crlb_pooled`` for the frames read), so per epoch they are
+  array operations on the matched pairs:
+  - *outliers*: the share beyond 5 times the single bound;
+  - *inliers' RMSE / CRLB*, lateral and axial;
+  - *pixelation* (KS less the truth's own);
+  - *right dye* (colour);
+  - *sigma honesty*, beside the Jaccard.
+  Two channels' test set has no bound yet (`train.py`: "two channels' joint bound is not written
+  yet").  `netfit.bounds.information` draws it once at the start, under a second on a GPU.  The early
+  stop keeps its rule (loss, Jaccard, efficiencies); the new numbers are shown, not stopped on.
 - **T5, the pages.** *Localize/DECODE*'s page and the training window's (`docs/panels/`) say what each
   model is, with the study's numbers where they help choose: early fusion against DECODE-Plex in
   outliers, precision and pixelation; netfit against DECODE in Jaccard and pixelation.  The tooltips
@@ -122,20 +134,30 @@ that architecture here: what the study compared it as.
 3. **I2 -- I4**: two-channel models in the fitter.  The model file carries the registration; the move
    since the beads and the checks are options.
 4. **T3, T4**: two-channel jobs: Spline 3D 2C's prefit, the kind, the main channel, the dyes.
-5. **I5**: DECODE-Plex's published models, exported, as a baseline in the GUI.
-6. **T5** alongside each step, not after: each step's page, tests (a simulated two-channel movie
+5. **T6** with step 2 (one channel) and step 4 (two).
+6. **I5**: DECODE-Plex's published models, exported, as a baseline in the GUI.
+7. **T5** alongside each step, not after: each step's page, tests (a simulated two-channel movie
    trained a few epochs and fitted, as the one-channel tests do) and the slow tier.
 
-## 5. Open, to decide
+## 5. Decided (Jonas, 2026-11-22), and open
 
-- **The default for one channel**: *DECODE, optimised* (netfit) as above, with *DECODE* under *more*?
-  netfit is better on every measure of the study (poc-plan), but a user's existing jobs and models are
-  DECODE's, and they keep working either way.
-- **The labels**: "DECODE, optimised", "DECODE-Plex-like", "early fusion", or names with the method
-  in them ("netfit", "netfit, late fusion")?  The GUI says DECODE (Jonas), so the method's name
-  appears only in *Model info...* and the file.
-- **The splitter move's *auto***: the goodness scan (any kind, needs the network) or a
-  cross-correlation (colour only, no network)?  Both are cheap.
+- **One channel's default is netfit** (*DECODE, optimised*); *DECODE* under *more*.
+- **No "netfit" in the GUI's names**: the method's name is in *Model info...* and the file only.
+- **Early fusion's label** is open; "early fusion" is possible but not telling.  What it is: channel
+  1 resampled onto channel 0's pixels through the registration, both read as one two-colour image
+  from the first layer; late fusion gives each channel its own first layers and joins them later.
+  Candidates: *aligned channels* (proposed), *channels overlaid*, *joint image*, *channels read
+  together*; its counterpart stays *DECODE-Plex-like*.
+- **The channels' move since the beads: measured by the goodness, reported as a move.**  A scan over
+  shifts of the registration on a few frames, each fitted by the network and drawn back
+  (`netfit.goodness`).  The shift where the goodness is best is the move, a correction to the
+  registration at inference, never a retraining.  The goodness at that shift is the model's fit to
+  the data: still poor there means a model mismatch (Fig. 2c's background), not a move.  So one scan
+  answers both, and the form says both.  Retraining is not needed for a move: the network takes the
+  registration as offset maps at its input, and a translation leaves them within what it saw
+  (Fig. 2a, fitted with its 5.8 rows by a model trained on the beads' map).  A map changed beyond a
+  translation (scale, turn) is a new bead calibration's matter.  Learning the whole map from the data
+  (colour: the same molecules in both channels) is possible later.
 - **Fig. 2c's background**: whether a range set from the prefit is enough or the simulation needs an
   uneven background.  The model training now (R_biplane_early_bg1000) answers that for this movie.
 - **DECODE-Plex training** (porting its Lightning loop): not planned; *DECODE-Plex-like* trains the
