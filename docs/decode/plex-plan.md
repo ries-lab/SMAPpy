@@ -1423,3 +1423,11 @@ The window states the density per µm² of the sample (Jonas): HD 1, UHD 2.5, co
 pixels with the movie's pixel size.  At these sets' 117 x 127 nm pixels (23.8 µm²) HD is 24, the 25 tested,
 and UHD 59, a little denser than the 50 tested; with smaller pixels the same µm² density is fewer molecules
 in 40 x 40 pixels -- the overlap the network must undo is the sample's, set by the PSF's size in nm.
+
+**Streaming at C = 2, three seeds each** (2026-11-22, standard report; S unstreamed on the code of 2026-11-21,
+P streamed and U unstreamed on today's): biplane Jaccard at 1 000 photons S 0.564 (0.013), P 0.541 (0.008),
+U 0.545; outliers at density 15 1.5 / 1.7 / 1.7 %; colour Jaccard at 1 000 photons S 0.590 (0.032), P 0.590
+(0.041), right dye at 1 000 photons S 95.0 (0.9), P 91.6 (2.0), U 83.9 %; every other number within 0.01.
+On the same code, streamed and unstreamed agree (biplane 0.541 against 0.545); the gap to S is the code's
+or one seed's, not streaming's.  The two-channel job stays streamed, as one channel's.  Open: why today's
+unstreamed seed is below S in both contexts (one seed each; the settings are identical).
