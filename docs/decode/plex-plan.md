@@ -1213,3 +1213,45 @@ its three frames already pool a molecule that stays.  Streaming makes a run 1 h 
 on one GPU.  Next: 5 and 7 frames on early with on-time 1 (and one 3 M run with streaming and on-time
 1, which separates the streaming); when a GPU is idle, one run trained on on-time 3 alone, tested
 on both on-times (Jonas); then real data and the SMAPpy fitter.
+
+### Real data: the paper's movies (2026-11-22)
+
+netfit's 6 M models (early; eswap in colour; 3 seeds) on the first 200 frames of Figs. 2a and 2c,
+against the paper's own DECODE-Plex run of the same frames (prob > 0.6 for both;
+`benchmarks/decode/suite/real_c2.py`, `real_c2_compare.py`).  The seeds agree to a nanometre, so one
+line each.  Both networks were trained with the same EM camera (DECODE-Plex's `param_run.yaml`), so
+neither has an advantage there, though Fig. 2a was taken without EM gain.
+
+**Fig. 2a (colour, 226 columns, the beads' ROI).**  The splitter moved **5.8 rows** since the beads
+(§13): read without it, 39 % of netfit's localizations have one of DECODE-Plex's within 150 nm and the
+shares fall to 0 and 1; with it, 80 % of ours and 72 % of DECODE-Plex's are paired, offset -0.3 / -12.6
+/ +6.3 nm and spread 11 / 22 / 39 nm (x / y / z).  The y offset vanishes at 5.95 rows, the move
+DECODE-Plex's own `Test` offset holds; the spread and the goodness are best at 5.5 -- 5.8.  netfit finds
+486 molecules a frame, DECODE-Plex 528.
+
+* **Precision across frames**, from molecules found again 3 frames later (the nearest within 100 nm, the
+  differences' robust width over sqrt 2; each fitter's own pairs, 9 % of its localizations):
+  netfit 21 / 26 / 55 nm, DECODE-Plex 25 / 28 / 68 nm.  Against the reported sigma of the same pairs
+  netfit is honest (0.9 -- 1.0) and DECODE-Plex overconfident (1.4 -- 1.8).  Pairs 1 frame apart are
+  not a measure for a network reading 3 frames: two of their inputs are the same frames, the errors
+  correlated, and netfit came out three times better than its own sigma.
+* **Pixelation** (KS of the sub-pixel positions): 0.010 -- 0.015 against 0.031.
+* **The dyes**, from independent counts, no prior: the share in channel 1 peaks at **0.785** (most
+  molecules, and nearly all the brightest) and at **0.92**, the two dyes the sets were drawn with.
+  DECODE-Plex's run keeps one total, so its shares cannot be compared here.
+* The goodness of fit: median 8, 90th percentile 41 -- 46.
+
+**Fig. 2c (biplane, a 248-column camera ROI of a 512-wide calibration; `TwoChannels.from_calibration`'s
+``shape``).**  Out of both models' training: the frames' median is about 500 photons a pixel in each
+plane (the training background 0 -- 300), a live cell crowded to 1 300 -- 2 300 molecules a frame.
+netfit finds 2 100 -- 2 350 a frame, DECODE-Plex 1 260; 50 % of ours and 77 % of DECODE-Plex's are
+paired, offset +26 / +20 / +25 nm, spread 60 / 52 / 190 nm.  Across 3 frames both are as precise
+(31 / 28 / 69 nm against 31 / 29 / 79 nm); netfit's sigma is cautious (0.7), DECODE-Plex's overconfident
+(1.2); pixelation 0.022 -- 0.039 against 0.057.  The goodness says neither explains the frames (median
+netfit 50 -- 64; DECODE-Plex's localizations drawn the same way 389 on 50 frames).  So Fig. 2c is not a
+test of either until a model is trained for its background and density.
+
+**What follows for the fitter**: the registration moves between the beads and the measurement by
+whole pixels (a splitter, a day), and an uncorrected move loses half the molecules -- the fitter needs
+it, measured from the movie (the shares collapsing to 0 and 1, the goodness, pairing with a prefit)
+or typed; and the training's background range is set from the movie (a prefit), not from the beads.
