@@ -10,6 +10,11 @@ A two-channel model (`docs/decode/plex-plan.md` §16) takes the channels already
 rows, columns)``, and their offset maps ``aux`` ``(2, rows, columns)`` -- `channels.TwoChannels.cut` and
 ``offsets`` -- and gives positions on channel 0's grid, with each channel's photons (colour) and
 background beside them.
+
+The DECODE fitter runs it (`smappy.training.predictors.load`, `plugins.fit_decode`) as it runs the
+port's predictor: the same columns, ``window``, ``device``, ``raw_th`` and ``frames_mirrored``.  The
+photons need no correction for the camera's ``qe``: the training drew frames with it and converted
+them back with ``conversion`` alone (`simulate.camera`), as the fitter converts the data.
 """
 from __future__ import annotations
 
@@ -23,6 +28,29 @@ from . import extract, network
 from .settings import ChannelSettings, Part, Parts
 
 
+#: inference memory a pixel of a batch, the default network (48 features, 3 frames): 4 700 bytes on
+#: Apple's GPU, the driver's pools included (8 frames of 256 x 224: 2.2 GB, 2026-11-22); DECODE's
+#: SigmaMUNet takes 2 100 (`decode_smlm.predict.BYTES_PER_PIXEL`)
+BYTES_PER_PIXEL = 5000
+MEMORY_SHARE = 0.5          # of a CUDA device's free memory a batch may take
+MPS_BUDGET = 3e9            # Apple's GPU shares the computer's memory: a fixed budget, as DECODE's
+MAX_BATCH, CPU_BATCH = 256, 8
+
+
+def auto_batch(device: str, rows: int, columns: int) -> int:
+    """Frames of ``rows`` x ``columns`` a batch takes on ``device``: half of a CUDA device's free memory,
+    at most `MPS_BUDGET` on Apple's GPU, `CPU_BATCH` on the CPU.  On Apple's GPU the frame rate still
+    rises with the batch (9.8 frames a second at 4, 26.5 at 8, 47 at 16; 256 x 224)."""
+    kind = str(device).split(":")[0]
+    if kind == "cuda":
+        budget = MEMORY_SHARE * torch.cuda.mem_get_info(torch.device(device))[0]
+    elif kind == "mps":
+        budget = min(MPS_BUDGET, MEMORY_SHARE * (torch.mps.recommended_max_memory() - torch.mps.driver_allocated_memory()))
+    else:
+        return CPU_BATCH
+    return max(1, min(MAX_BATCH, int(budget // (BYTES_PER_PIXEL * rows * columns))))
+
+
 class Predictor:
     def __init__(self, path, device=None, *, frames_mirrored: bool = False, threshold: float | None = None,
                  extraction: str | None = None, batch: int = 32):
@@ -30,8 +58,8 @@ class Predictor:
         self.metadata = meta
         s = meta["settings"]
         parts = Parts(**{k: Part(**v) for k, v in s["parts"].items()})
-        self.device = device or ("cuda" if torch.cuda.is_available()
-                                 else "mps" if torch.backends.mps.is_available() else "cpu")
+        self.device = device if device not in (None, "auto") else (
+            "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         ch = dict(s.get("channels") or {})
         self.channels = ChannelSettings(**{k: tuple(v) if k == "share" else v for k, v in ch.items()})
         self.model = network.build(parts, int(meta["window"]), self.channels).to(self.device).eval()
@@ -41,9 +69,14 @@ class Predictor:
         self.threshold = threshold if threshold is not None else parts.schedule.settings.get("threshold", 0.5)
         self.extraction = extraction or parts.extraction.name
         self.frames_mirrored = frames_mirrored
-        self.batch = batch
+        self.batch = batch                 # 0: `auto_batch`
         self.fold = self.model.fold
         self.scale = getattr(self.model, "out_scale", 1)
+
+    @property
+    def raw_th(self) -> float:
+        """The threshold under DECODE's name, for the fitter's record."""
+        return self.threshold
 
     def crop(self, h, w):
         """The rows and columns kept: (row0, col0, rows, columns)."""
@@ -69,9 +102,11 @@ class Predictor:
             maps = torch.as_tensor(np.asarray(aux, np.float32)[:, r0:r0 + hh, c0:c0 + ww]).to(self.device)
         layout = self.model.layout
         parts = []
+        size = self.batch or auto_batch(self.device, hh * self.scale, ww * self.scale) // (2 if two else 1)
+        size = max(1, size)
         with torch.no_grad():
-            for a in range(0, n, self.batch):
-                b = min(a + self.batch, n)
+            for a in range(0, n, size):
+                b = min(a + size, n)
                 # the windows a..b-1 as one movie: each frame through the per-frame U-Net once
                 if two:
                     out = self.model(x[:, a:b + 2 * k][None].to(self.device), b - a, maps[None])

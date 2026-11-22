@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
+covers: [smappy.plugins.fit_decode.DecodeFit, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
 ## What it does
@@ -34,6 +34,22 @@ has it.
 
 There is no peak finding and no fit box: the form has none of the other
 fitters' detection and fit parts.
+
+**Two kinds of model.**  A model is one of two networks, and the fitter
+reads which from the file; there is nothing to choose here.
+
+* **DECODE, optimised** -- SMAPpy's own network, the default for a new
+  training.  It reads the same three frames as DECODE.  Trained alike, it
+  finds as many molecules as DECODE and places them as precisely; its
+  settings since then pixelate less (its positions crowd less towards pixel
+  centres or edges) and report an uncertainty of their own, trained against
+  the errors (docs/decode/poc-plan.md, netfit's steps 3 and 4).
+* **DECODE** -- the original's network, ported: models trained before, and
+  models the original DECODE trained, exported.
+
+The form's line and *Model info...* name the kind.  Both fit the same way:
+the same columns, the same checks, *run on* and *frames per batch*.  A model
+that reads a split camera's two channels at once is refused for now.
 
 ## How it works
 
@@ -244,8 +260,9 @@ be undone.
 ### model.batch
 
 0 lets SMAPpy choose: on an NVIDIA GPU as many frames as half its free
-memory holds, at 2.5 kB a pixel (the network takes 1.8 kB a pixel on CUDA,
-2.1 on an Apple GPU), up to 256; on a Mac's GPU at most 3 GB -- it has no
+memory holds, at 2.5 kB a pixel for a DECODE model (the network takes 1.8 kB
+a pixel on CUDA, 2.1 on an Apple GPU) and 5 kB for an optimised one (4.7 on
+an Apple GPU), up to 256; on a Mac's GPU at most 3 GB -- it has no
 memory of its own and shares the computer's, and half of what macOS allows
 it put a Mac into swap, one frame a second; 8 on the CPU.  Set a number if
 the GPU runs out of memory, or the computer slows down, with others using it.
@@ -280,6 +297,11 @@ so for data unlike it.  On DECODE's example movie, a molecule localized in two
 consecutive frames moved between them by what the two uncertainties say,
 within 10 to 30 % at every size of uncertainty -- where Spline 3D's CRLB was
 up to 2.5 times too small for the bright spots.
+
+An optimised model also writes `x_err_mix_pix`, `y_err_mix_pix` (pixels)
+and `z_err_mix_nm`: the uncertainty its probability maps imply, kept beside
+the reported one for comparison.  The reported `x_err_nm` and so on are the
+ones to use.
 
 No `logl` or `iterations` is written: nothing is fitted.  The file records
 the model, the device, the threshold, whether the frames were flipped and the

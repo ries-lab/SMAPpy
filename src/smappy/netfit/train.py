@@ -342,7 +342,8 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     g = torch.Generator(device).manual_seed(settings.seed + 1000 + start)
     meta_base = {"method": METHOD, "settings": settings.to_dict(), "scaling": asdict(scaling), "window": sim.window,
                  "parameters": network.parameters(model), "calibration_sha256": _sha256(settings.calibration),
-                 "calibration_em_on": bool(cam.em_gain),
+                 "calibration_em_on": bool(cam.em_gain), "calibration_source": str(settings.calibration),
+                 "trained_on": trained_on(sim, settings.channels), "smappy_version": _smappy_version(),
                  **({"channels": drawer.two.to_dict()} if drawer.two is not None else {})}
     # on a CPU the thread would only take cores from the network
     feed = _Prefetch(lambda: drawer(batch_size, g), device) \
@@ -354,6 +355,27 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     finally:
         if feed is not None:
             feed.close()
+
+
+def trained_on(sim, channels=None) -> dict:
+    """What the training drew, as the DECODE fitter compares a fit with it (`fit_decode.range_warnings`):
+    the photons as a mean and spread or a range, the background a pixel (each channel's, for two), z."""
+    out = {"z_nm": [float(v) for v in sim.z_nm]}
+    if sim.photons_range:
+        out["photons_range"] = [float(v) for v in sim.photons_range]
+    else:
+        out["photons_mu_sig"] = [float(sim.photons_mean), float(sim.photons_sd)]
+    if channels is not None and channels.kind and channels.background:
+        out["background_c"] = [[float(v) for v in b] for b in channels.background]
+        out["background"] = [min(b[0] for b in out["background_c"]), max(b[1] for b in out["background_c"])]
+    else:
+        out["background"] = [float(v) for v in sim.background]
+    return out
+
+
+def _smappy_version() -> str:
+    from .. import __version__
+    return __version__
 
 
 def _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, truth, scaling, start, epochs,

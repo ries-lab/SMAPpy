@@ -5,11 +5,14 @@ fit* -- with no peak finder and no PSF fit: a network trained on simulated frame
 microscope's PSF finds the molecules and gives their positions, photons, background and
 uncertainties at once.  The network is a *model file* (``.safetensors``, `smappy.training.
 model_file`), trained by ``smappy-decode train`` on a job folder or exported from a model the
-original DECODE trained (`decode_smlm.predict.export_original`).
+original DECODE trained (`decode_smlm.predict.export_original`).  Two methods train one: the port of
+DECODE v0.10.2 (``decode-v0.10.2``) and SMAPpy's own network (``netfit-v1``, *DECODE, optimised*,
+`smappy.netfit`; docs/decode/gui-plan.md), loaded alike by `training.predictors.load`.
 
 What this module is: the settings, the checks a model can be refused by, and the hooks into
 `_FitPlugin.run`.  The engine is `smappy.window_engine.WindowEngine` (blocks of frames joined
-without a seam); the network is `decode_smlm.predict`, imported only when a fit runs, so the
+without a seam); the network is `decode_smlm.predict` or `smappy.netfit.predict`, imported only when
+a fit runs, so the
 form, the discovery and `describe` never load torch -- the model file's header is read with
 numpy alone (`model_file.read_metadata`).
 
@@ -45,7 +48,7 @@ from .fit import (CameraMetadata, CameraSettings, FinishSettings, OutputSettings
 
 MODEL_FILTER = "DECODE models (*.safetensors);;All files (*)"
 DEVICES = (("auto", "auto"), ("cpu", "CPU"), ("cuda", "CUDA"), ("mps", "Apple GPU"))
-METHOD = "decode-v0.10.2"
+METHOD = "decode-v0.10.2"           # the port's; `training.predictors.METHODS` are every one the fitter runs
 #: what fraction of the fit may lie outside what the training drew before the run says so
 OUTSIDE_WARN = 0.05
 
@@ -89,10 +92,14 @@ def read_model(path) -> dict:
         raise ValueError("choose a trained model (.safetensors)")
     if not Path(path).is_file():
         raise ValueError(f"{Path(path).name}: no such model file")
+    from ..training.predictors import METHODS, two_channel
     meta = model_file.read_metadata(path)
-    if meta.get("method") != METHOD:
+    if meta.get("method") not in METHODS:
         raise ValueError(f"{Path(path).name} is not a DECODE model"
                          + (f" (it is {meta['method']})" if meta.get("method") else ""))
+    if two_channel(meta):
+        raise ValueError(f"{Path(path).name} reads two channels: the DECODE fitter takes one-channel models "
+                         f"for now")
     return meta
 
 
@@ -124,7 +131,9 @@ def summary_line(meta: dict) -> str:
     jac = (meta.get("test_metrics") or {}).get("jaccard")
     if jac is not None:
         bits.append(f"test Jaccard {jac:.2f}")
-    return "model: " + (", ".join(bits) if bits else "trained by " + str(meta.get("trained_by") or "DECODE"))
+    from ..training.predictors import DECODE, describe
+    kind = "" if meta.get("method") == DECODE else f" ({describe(meta)})"     # the original's, as before
+    return f"model{kind}: " + (", ".join(bits) if bits else "trained by " + str(meta.get("trained_by") or "DECODE"))
 
 
 def _drawn_for(meta: dict) -> str:
@@ -146,23 +155,28 @@ def model_summary(meta: dict, data: Optional[dict] = None) -> list:
     rows = []
     for d in differences(meta.get("calibration_microscope"), data):
         rows.append(("differs from the data", d))
+    from ..training.predictors import describe
     drew = meta.get("trained_on") or {}
     mu = drew.get("photons_mu_sig")
+    span = drew.get("photons_range")
     bg = drew.get("background")
     z = drew.get("z_nm")
     scope = meta.get("calibration_microscope")
     test = meta.get("test_metrics") or {}
+    window = meta.get("channels_in") or meta.get("window")
     rows += [
+        ("model", f"{describe(meta)} ({meta.get('method')})"),
         ("PSF calibration", Path(meta["calibration_source"]).name if meta.get("calibration_source") else "not recorded"),
         ("calibration file", meta.get("calibration_source") or ""),
         ("microscope", one_line(scope) if scope else "not recorded"),
         ("EM gain of the beads", {True: "on", False: "off"}.get(meta.get("calibration_em_on"), "not recorded")),
         ("PSF drawn for", _drawn_for(meta)),
-        ("photons a frame", f"{mu[0]:,.0f} \u00b1 {mu[1]:,.0f}" if mu else ""),
+        ("photons a frame", f"{mu[0]:,.0f} \u00b1 {mu[1]:,.0f}" if mu
+         else f"{span[0]:,.0f} to {span[1]:,.0f}" if span else ""),
         ("background", f"{bg[0]:g} to {bg[1]:g} photons a pixel" if bg else ""),
         ("z", f"{z[0]:g} to {z[1]:g} nm" if z else ""),
         ("density", str(meta.get("density") or "")),
-        ("frame window", str(meta.get("channels_in") or "")),
+        ("frame window", str(window or "")),
         ("trained", f"epoch {meta['epoch']} of at most {meta.get('epochs')}" if meta.get("epoch") is not None else ""),
         ("started from", str(meta.get("base_model") or "scratch")),
         ("test set", ", ".join(f"{k} {v:.3g}" for k, v in (("Jaccard", test.get("jaccard")),
@@ -182,13 +196,14 @@ def range_warnings(locs, meta: dict) -> list:
     n = len(locs)
     if not n:
         return out
-    mu_sig = drew.get("photons_mu_sig")
-    if mu_sig and "photons" in locs:
-        top = mu_sig[0] + 3 * mu_sig[1]
+    mu_sig, span = drew.get("photons_mu_sig"), drew.get("photons_range")
+    if (mu_sig or span) and "photons" in locs:
+        top = mu_sig[0] + 3 * mu_sig[1] if mu_sig else span[1]
+        how = "its mean and three spreads" if mu_sig else "the top of its range"
         above = float(np.mean(np.asarray(locs["photons"]) > top))
         if above > OUTSIDE_WARN:
             out.append(f"{above:.0%} of the localizations have more photons than the training drew "
-                       f"({top:,.0f}, its mean and three spreads): their photons and positions are "
+                       f"({top:,.0f}, {how}): their photons and positions are "
                        f"extrapolated; train on the data's range")
     bg = drew.get("background")
     if bg and "background" in locs:
@@ -243,10 +258,10 @@ class DecodeFit(_FitPlugin):
             return remote_predictor(settings, meta, camera)
         if not torch_here():
             raise ValueError(NO_TORCH)
-        from decode_smlm.predict import load_predictor
-        return load_predictor(settings.model.path, None if device == "auto" else device,
-                              frames_mirrored=_mirrored(meta, camera), raw_th=settings.model.threshold,
-                              batch_size=settings.model.batch)
+        from ..training.predictors import load
+        return load(settings.model.path, None if device == "auto" else device,
+                    frames_mirrored=_mirrored(meta, camera), threshold=settings.model.threshold,
+                    batch=settings.model.batch)
 
     def engine(self, settings, camera, finder, model, source=None):
         from ..window_engine import WindowEngine

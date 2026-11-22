@@ -1,0 +1,53 @@
+"""The network a model file holds, ready to localize: one loader for every method the DECODE fitter runs.
+
+A model file names its method (``method`` in its header, `model_file`): ``decode-v0.10.2``, the port
+of DECODE (`decode_smlm.predict`), or ``netfit-v1``, SMAPpy's own (`smappy.netfit.predict`).  The
+fitter (`plugins.fit_decode`) and the server on a training host (`decode_smlm.serve`) both load
+through `load`, so a model fits the same wherever it runs.  Both predictors give the
+`window_engine.WindowEngine` one interface: ``window``, a call on frames in photons with their
+context giving SMAPpy's pixel columns, and ``device``, ``raw_th``, ``frames_mirrored``, ``metadata``
+for the run's record.
+
+Nothing here imports torch: the form reads a model's header to say what it is (`describe`).
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+DECODE = "decode-v0.10.2"
+NETFIT = "netfit-v1"
+METHODS = (DECODE, NETFIT)
+
+
+def describe(meta: dict) -> str:
+    """What a model is, in the GUI's words: DECODE, whatever trained it (docs/decode/gui-plan.md §1)."""
+    method = meta.get("method")
+    if method == NETFIT:
+        return "DECODE, aligned channels" if (meta.get("channels") or {}) else "DECODE, optimised"
+    return "DECODE"
+
+
+def two_channel(meta: dict) -> bool:
+    """Whether a model reads a split camera's two channels (plex-plan §16)."""
+    return bool(meta.get("channels"))
+
+
+def load(path, device=None, *, frames_mirrored: bool = False, threshold: float | None = None, batch: int = 0):
+    """The model file at ``path`` as a predictor on ``device`` (None or "auto": the fastest there is).
+    ``threshold``: the detection probability a localization starts from (DECODE's ``raw_th``; None:
+    the model's own); ``batch``: frames through the network at once, 0 as many as memory allows."""
+    from . import model_file
+    meta = model_file.read_metadata(Path(path))
+    method = meta.get("method")
+    if method == DECODE:
+        from decode_smlm.predict import RAW_TH, load_predictor
+        return load_predictor(path, device, frames_mirrored=frames_mirrored,
+                              raw_th=RAW_TH if threshold is None else threshold, batch_size=batch)
+    if method == NETFIT:
+        if two_channel(meta):
+            raise ValueError(f"{Path(path).name} reads two channels: the DECODE fitter takes one-channel "
+                             f"models for now (docs/decode/gui-plan.md, step 3)")
+        from ..netfit.predict import Predictor
+        return Predictor(path, None if device in (None, "auto") else device, frames_mirrored=frames_mirrored,
+                         threshold=threshold, batch=batch)
+    raise ValueError(f"{Path(path).name} is not a DECODE model" + (f" (it is {method})" if method else ""))
