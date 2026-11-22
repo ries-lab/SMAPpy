@@ -48,11 +48,12 @@ def serve(stdin=None, stdout=None) -> int:
 
 
 def _load(model: bytes, hello: dict):
-    from .predict import load_predictor
+    # every method the DECODE fitter runs, as it loads them here (`smappy.training.predictors`)
+    from smappy.training.predictors import load
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / "model.safetensors"
         path.write_bytes(model)
         device = hello.get("device", "auto")
-        return load_predictor(path, None if device == "auto" else device,
-                              frames_mirrored=bool(hello.get("frames_mirrored", False)),
-                              raw_th=float(hello.get("raw_th", 0.1)), batch_size=int(hello.get("batch_size", 0)))
+        return load(path, None if device == "auto" else device,
+                    frames_mirrored=bool(hello.get("frames_mirrored", False)),
+                    threshold=float(hello.get("raw_th", 0.1)), batch=int(hello.get("batch_size", 0)))
