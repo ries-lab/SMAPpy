@@ -1290,3 +1290,33 @@ The bounds use the network's draw counts with the PSFs as drawn, so the conventi
 Fig. 2a the two fitters' counts now agree in both channels (Spline 3D 2C 0.91 and 0.92 of netfit's;
 shares 0.794 and 0.798 at the median).  The suite's biplane Spline 3D 2C photons change with it (from
 2 N_draw to 1.754 N_draw); none of its scores reads them.
+
+**An uneven background, simulated** (`benchmarks/decode/suite/uneven_bg.py`, 2026-11-22; Jonas: DECODE trained
+on a flat background predicted realistic background maps, and Perlin backgrounds in training did not
+help).  The density-15 sets with a smooth random field added -- noise filtered 16 pixels wide, scaled to
+0 -- 100 or 0 -- 300 photons a pixel, the same in every frame, through the camera -- and, as the control,
+the field's mean spread evenly; fitted by the 6 M models trained on a flat background.  Scored against the
+flat set's truth and bounds, so the added light's own cost is in every ratio; the comparison is uneven
+against even:
+
+| density 15 | Jaccard | outliers | inliers lat / ax | right dye |
+|---|---|---|---|---|
+| colour, the set | 0.873 | 4.8 % | 1.23 / 1.23 | 98.7 % |
+| colour, + even (field 0 -- 100's mean) | 0.858 | 6.0 % | 1.33 / 1.34 | 97.7 % |
+| colour, + field 0 -- 100 | 0.783 | 7.7 % | 1.42 / 1.52 | 95.8 % |
+| colour, + even (0 -- 300's mean) | 0.553 | 10.5 % | 1.48 / 1.57 | 90.5 % |
+| colour, + field 0 -- 300 | 0.524 | 20.5 % | 1.59 / 1.85 | 91.0 % |
+| biplane, the set | 0.834 | 1.3 % | 1.11 / 1.16 | |
+| biplane, + even (0 -- 100's mean) | 0.814 | 1.8 % | 1.22 / 1.25 | |
+| biplane, + field 0 -- 100 | 0.787 | 2.1 % | 1.23 / 1.32 | |
+| biplane, + even (0 -- 300's mean) | 0.791 | 3.2 % | 1.39 / 1.50 | |
+| biplane, + field 0 -- 300 | 0.656 | 7.7 % | 1.42 / 1.66 | |
+
+The unevenness costs beyond its light: Jaccard 0.03 -- 0.14, outliers up to twice, axial worst.  The colour
+model's dimmer channel was trained to 100 photons a pixel, so at 0 -- 300 it is out of range either way.
+The network's background at each matched molecule, within the training's range, is 0.89 -- 1.00 of the
+truth's (the set's level and the field there) at the median, but follows the field's shape weakly: the
+correlation of its excess with the field 0.06 -- 0.44 per channel.  So the local level is roughly right
+and the 16-pixel structure is not mapped -- less than DECODE's maps were remembered to be.  A training
+with an uneven background is worth one run (a field per sample, smooth at a few widths), judged by this
+script's uneven sets against the flat-trained model and on Fig. 2c.
