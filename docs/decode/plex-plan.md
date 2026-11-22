@@ -1338,3 +1338,19 @@ area's level and follows 2 -- 24 % of its pattern.  The colour model's dimmer ch
 photons a pixel, saturates above it (0.85 at an even 120).  The training crops are 40 pixels, each one
 level: the network never had to map a background inside a crop.  An uneven background in training is
 the experiment; these maps are its measure, beside the localizations' scores.
+
+**The C runs so far** (3 M samples, seed 0, standard report; against `S_*`, the same unstreamed):
+streamed alone (`P_*`) biplane Jaccard at 1 000 photons 0.569 → 0.533, outliers 1.4 → 1.8 %; colour the
+same but the right dye at 1 000 photons 95.3 → 89.3 % -- within the seeds' scatter (0.03, 2.7 points), in
+the direction the streamed time-model runs went, so the two-channel job is not streamed until more seeds
+say.  On-time 3 alone (biplane): no gain on molecules on for 3 frames (outliers 3.9 against 3.6 %, the
+same precision), Jaccard at 1 000 photons 0.477 -- on-time 1 stays.  5 frames: Jaccard no better
+(biplane 10 000 photons 0.765 against 0.814; colour equal); their precision waits for the sets' 5-frame
+bounds (`standard_c2` has 1 and 3).
+
+**The window's defaults checked against the winners** (2026-11-22): one channel is GMN7C -- the ConvGRU
+with norm over 7 frames, on-times 1 -- 3, streamed, 48 features; two channels the `L_*` runs -- early
+fusion with the bright channel the grid, 64 features, the ConvGRU over 3 frames, on-time 1, spots over
+the whole grid, not streamed; both at density 50 (the window's default now UHD), targets from 100
+photons, the rate decaying every 327 680 samples, 6 M samples.  Still not the winners': GMN7C's
+fine-tune to the prefit's on-time.
