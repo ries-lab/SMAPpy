@@ -36,12 +36,19 @@ class TwoChannels:
     main: int = 0
 
     @classmethod
-    def from_calibration(cls, cal, corner=(0, 0), main: int = 0) -> TwoChannels:
+    def from_calibration(cls, cal, corner=(0, 0), main: int = 0, shape=None) -> TwoChannels:
+        """``corner`` the frames' corner on the chip; ``shape`` (rows, columns) the frames', where a
+        camera ROI narrower than the beads' cuts into the channels (`ChannelLayout.on_camera`): a real
+        movie's, as Fig. 2c's 248 columns of a 512-wide calibration."""
         from ..channels import ChannelLayout
         chip = cal.layout()
-        x0, y0 = (int(v) for v in corner)
-        regions = [(x - x0, y - y0, w, h) for x, y, w, h in chip.regions]
-        layout = ChannelLayout(regions, chip.flips, chip.maps, name=chip.name, warps=chip.warps)
+        if shape is not None:
+            layout = chip.on_camera(corner, tuple(shape), cut_into=True)
+        else:
+            x0, y0 = (int(v) for v in corner)
+            regions = [(x - x0, y - y0, w, h) for x, y, w, h in chip.regions]
+            layout = ChannelLayout(regions, chip.flips, chip.maps, name=chip.name, warps=chip.warps)
+        regions = layout.regions
         if main not in (0, 1):
             raise ValueError(f"main is 0 or 1, not {main!r}")
         if main == 1:

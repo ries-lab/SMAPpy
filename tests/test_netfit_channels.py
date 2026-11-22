@@ -85,6 +85,28 @@ def test_swapped_channels_read_the_secondary_as_the_grid_and_report_on_the_main_
     assert np.allclose(first.psf, cal.layer_splines()[1].psf) and np.allclose(second.psf, cal.layer_splines()[0].psf)
 
 
+@pytest.mark.parametrize("main", [0, 1])
+def test_a_camera_roi_narrower_than_the_beads_reads_each_partner_where_the_chip_has_it(main):
+    """A real movie's ROI cuts into both channels (Fig. 2c: 248 of 512 columns): positions and the
+    partner's pixels are the whole chip's, moved by the ROI's corner."""
+    cal = dual()
+    corner, shape = (7, 0), (SHAPE[0], SHAPE[1] - 12)
+    two = CH.TwoChannels.from_calibration(cal, corner, main=main, shape=shape)
+    rows, cols = np.mgrid[0:SHAPE[0], 0:SHAPE[1]]
+    chip = (1000 * rows + cols).astype(float)
+    cut = two.cut(chip[None, :shape[0], corner[0]:corner[0] + shape[1]])[0]
+    r0, r1, c0, c1 = two.box
+    gr, gc = np.mgrid[r0:r1, c0:c1]
+    p = np.c_[gc.ravel(), gr.ravel()].astype(float)
+    # channel 0's pixel and channel 1's are where the chip has them, and channel 1's is the partner
+    own = two.layout.on_frame(0, p).round().astype(int) + corner
+    np.testing.assert_array_equal(cut[0].ravel(), 1000 * own[:, 1] + own[:, 0])
+    partner = two.layout.on_frame(1, p + np.asarray(two.shift) + two.remainder(p)) + corner
+    # reported on the main half: its secondary partner is channel 1 (main 0) or the grid itself (main 1)
+    secondary = partner if main == 0 else two.layout.on_frame(0, p) + corner
+    np.testing.assert_allclose(cal.to_secondary(two.on_frame(p) + corner), secondary, atol=1e-6)
+
+
 def test_the_cut_brings_channel_one_onto_channel_zero_s_grid_by_whole_pixels():
     cal = dual()
     two = CH.TwoChannels.from_calibration(cal)
