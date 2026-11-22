@@ -165,8 +165,9 @@ class PrepareSettings:
     sample: SampleSettings = param(default_factory=SampleSettings, label="in the sample",
                                    help="where in the sample the pupil calibration is drawn for: the network "
                                         "learns that PSF, and its z is the height above the coverslip")
-    # the sample's and the acquisition's, chosen for the data, not the model's (Jonas, 2026-11-22)
-    density: str = param("LD", label="density", choices=DENSITIES,
+    # the sample's and the acquisition's, chosen for the data, not the model's; UHD by default, since
+    # training too sparse costs more than training too dense (Jonas, 2026-11-22; plex-plan §16)
+    density: str = param("UHD", label="density", choices=DENSITIES,
                          help="how many molecules a training frame holds: LD, HD or UHD, as SMAP's")
     two_channels: TwoChannelPrepare = param(default_factory=TwoChannelPrepare, label="two channels",
                                             collapsed=True)
