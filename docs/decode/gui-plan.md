@@ -131,7 +131,11 @@ that architecture here: what the study compared it as.
 1. **I1** (done 2026-11-22: `training.predictors`): netfit one-channel models in *Localize/DECODE*.  The smallest step that makes netfit usable:
    models trained by script are fitted in the GUI.
 2. **T1, T2** (done 2026-11-22: `netfit/job.py`): netfit jobs in the training window, one channel; *DECODE, optimised* the default.
-3. **I2 -- I4**: two-channel models in the fitter.  The model file carries the registration; the move
+3. **I2 -- I4** (done 2026-11-22: `netfit/fit_two.py`): two-channel models in the fitter.  As done,
+   the registration is read from the model's calibration file, checked against the model's sha256
+   of it, not carried in the header: the goodness and the bound need its splines too.  The move's
+   *auto* is *measure the move*: the fewest localizations, which found Fig. 2a's 5.5 rows (the
+   frames' deviance did not find it).  Remote runs take one-channel models only, for now.  The model file carries the registration; the move
    since the beads and the checks are options.
 4. **T3, T4**: two-channel jobs: Spline 3D 2C's prefit, the kind, the main channel, the dyes.
 5. **T6** with step 2 (one channel: done, outliers and the inliers' RMSE / CRLB in *Follow*) and step 4 (two).

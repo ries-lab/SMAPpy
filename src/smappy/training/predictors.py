@@ -45,8 +45,8 @@ def load(path, device=None, *, frames_mirrored: bool = False, threshold: float |
                               raw_th=RAW_TH if threshold is None else threshold, batch_size=batch)
     if method == NETFIT:
         if two_channel(meta):
-            raise ValueError(f"{Path(path).name} reads two channels: the DECODE fitter takes one-channel "
-                             f"models for now (docs/decode/gui-plan.md, step 3)")
+            raise ValueError(f"{Path(path).name} reads two channels: its frames are cut into them first "
+                             f"(the DECODE fitter's two channels, `netfit.fit_two`); this loads one-channel models")
         from ..netfit.predict import Predictor
         return Predictor(path, None if device in (None, "auto") else device, frames_mirrored=frames_mirrored,
                          threshold=threshold, batch=batch)

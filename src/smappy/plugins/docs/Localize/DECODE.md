@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_decode.DecodeFit, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
+covers: [smappy.plugins.fit_decode.DecodeFit, smappy.netfit.fit_two.TwoChannelPredictor, smappy.netfit.fit_two.measure_move, smappy.netfit.fit_two.moved_calibration, smappy.plugins.fit_decode.two_channel_calibration, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
 ## What it does
@@ -48,8 +48,18 @@ reads which from the file; there is nothing to choose here.
   models the original DECODE trained, exported.
 
 The form's line and *Model info...* name the kind.  Both fit the same way:
-the same columns, the same checks, *run on* and *frames per batch*.  A model
-that reads a split camera's two channels at once is refused for now.
+the same columns, the same checks, *run on* and *frames per batch*.
+
+**Two channels.**  An optimised model can read a split camera's two
+channels as one molecule: two colours, or two focal planes (biplane).  It
+is trained on a two-channel calibration, and its *two channels* part
+appears in the form.  The fitter cuts each frame into the two channels
+through the calibration's registration, the second channel resampled onto
+the first's pixels (*aligned channels*).  It reports positions on the
+calibration's main half, as [Spline 3D 2C](plugin:Localize/Spline 3D 2C)
+does, with each channel's photons and background.  For two colours,
+[Assign colours](plugin:Analysis/After fit/Assign colours) then tells the
+dyes apart from the two counts, as *after the fit* does by default.
 
 ## How it works
 
@@ -280,6 +290,51 @@ hosts...*, at the foot of *model*: *File > Preferences*, *Training
 hosts*, the same list the training window trains on
 ([how to connect one](plugin:Panels/Training hosts)).
 
+### two_channels.calibration
+
+The model file names the calibration it was trained on and its fingerprint;
+empty takes that file where it is.  A copy elsewhere is fine; a different
+calibration is refused, since the registration is part of what the network
+learned.
+
+### two_channels.moved_rows
+
+A splitter moves between the bead calibration and the measurement, by a
+pixel or more: DECODE-Plex's Fig. 2a movie lies 5.8 rows from where its
+beads put the second channel.  Left out, the network sees each molecule as
+two spots that do not pair.  It finds many more, and the colour shares
+fall to 0 and 1.  A move is a translation, which the network handles
+without new training.  Type it when you know it, or tick *measure the
+move*.
+
+### two_channels.measure_move
+
+Before the fit, the move is scanned on the first 20 frames: the network is
+run at each trial move, first across whole pixels within 8 of the typed
+move, then in steps of a quarter pixel, rows, then columns, then rows again.
+The move kept is where it finds the fewest molecules.  On Fig. 2a it found
+5.5 rows, where the spline fitters' likelihood put it at 5.5 to 6.0, and
+DECODE-Plex's own offset at 5.95.  Measure once per day or setup, then type
+the result: it takes about half a minute.
+
+### two_channels.goodness
+
+`goodness` is each localization's neighbourhood -- 9 x 9 pixels in each
+channel -- against every localization of the frame drawn back with the
+calibration.  It is the [Poisson](plugin:Panels/Glossary) deviance, scaled
+so that 0 is noise alone.  Values of a few and more mark a neighbour the
+network missed or merged, or a false molecule.  On simulated data it
+removed false positives better than the reported sigma did.  Filter on it
+after the fit.
+
+### two_channels.bound
+
+The bound computed from each localization's own fitted values (its photons,
+background, z), with the frames read: what a perfect fit of that molecule
+could reach.  A reported sigma well above it marks a position outlier.  On
+simulated data it found the outliers better than goodness did
+(plex-plan §16).
+
 ### model
 
 *Train a model...* opens the [training window](plugin:Panels/DECODE training)
@@ -297,6 +352,13 @@ so for data unlike it.  On DECODE's example movie, a molecule localized in two
 consecutive frames moved between them by what the two uncertainties say,
 within 10 to 30 % at every size of uncertainty -- where Spline 3D's CRLB was
 up to 2.5 times too small for the bright spots.
+
+A two-channel model writes `photons_ch0` and `photons_ch1`, each channel's
+photons (colour; biplane gives one count, `photons`), and `background_ch0`
+and `background_ch1`; `background` is the main channel's.  With its checks
+it adds `goodness` and `crlb_x_nm`, `crlb_y_nm`, `crlb_z_nm`.  The move used,
+typed or measured, is in the run's file, and a measured one is also in the
+run's text.
 
 An optimised model also writes `x_err_mix_pix`, `y_err_mix_pix` (pixels)
 and `z_err_mix_nm`: the uncertainty its probability maps imply, kept beside

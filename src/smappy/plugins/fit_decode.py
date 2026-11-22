@@ -72,6 +72,40 @@ class DecodeModelSettings:
                             "0: as many as half the GPU's free memory holds")
 
 
+DUAL_FILTER = "Two-channel calibrations (*_2ct.h5 *.h5);;All files (*)"
+
+
+@dataclass
+class DecodeChannelSettings:
+    """A model that reads a split camera's two channels (*aligned channels*): where they are, and
+    the checks (docs/decode/gui-plan.md, step 3).  Shown for such a model only."""
+    calibration: str = param("", label="calibration", kind="open_file", file_filter=DUAL_FILTER,
+                             help="the two-channel calibration the model was trained on, for its registration; "
+                                  "empty: the one the model names, where it is on this computer")
+    roi_column: Optional[int] = param(None, label="camera ROI at column", min=0, advanced=True,
+                                      help="where the frames' first column lies on the chip; empty: the "
+                                           "file's camera ROI (a file that names none: 0)")
+    roi_row: Optional[int] = param(None, label="row", min=0, advanced=True, beside=True,
+                                   help="where the frames' first row lies on the chip; empty: the file's")
+    moved_rows: float = param(0.0, label="moved since the beads", unit="rows",
+                              help="how far channel 1 lies from where the beads' registration puts it, along "
+                                   "the rows: a splitter moved between calibration and measurement")
+    moved_columns: float = param(0.0, label="and", unit="columns", beside=True,
+                                 help="the same along the columns")
+    measure_move: bool = param(False, label="measure the move",
+                               help="find how far the channels moved since the beads on the first 20 frames -- "
+                                    "where the network finds the fewest molecules -- starting from the move "
+                                    "typed; about a minute; the move found is in the run's text and file")
+    goodness: bool = param(False, label="goodness of fit",
+                           help="each localization's neighbourhood against the fit drawn back, a column "
+                                "goodness (about 0 explained, a few and more not): finds false positives; "
+                                "about 0.1 s per 10 000 localizations on a GPU, 1 s on a CPU")
+    bound: bool = param(False, label="bound from the fit", beside=True,
+                        help="each localization's CRLB from its own fitted values, crlb_x_nm and so on: a "
+                             "reported sigma far above it marks a position outlier; about 0.4 s per 10 000 "
+                             "on a GPU, 9 s on a CPU")
+
+
 @dataclass
 class DecodeFitSettings:
     """The other fitters' parts under the same names (`fit._Reading`, `_Writing`, `_Finishing`),
@@ -80,6 +114,8 @@ class DecodeFitSettings:
     camera: CameraSettings = param(default_factory=CameraSettings, label="microscope",
                                    collapsed=True, kind="microscope")
     model: DecodeModelSettings = field(default_factory=DecodeModelSettings)
+    # not ``channels``: `_FitPlugin` reads a part of that name as the spline fitters' split camera
+    two_channels: DecodeChannelSettings = param(default_factory=DecodeChannelSettings, label="two channels")
     output: OutputSettings = field(default_factory=OutputSettings)
     finish: FinishSettings = param(default_factory=FinishSettings, label="after the fit", collapsed=True)
 
@@ -97,10 +133,28 @@ def read_model(path) -> dict:
     if meta.get("method") not in METHODS:
         raise ValueError(f"{Path(path).name} is not a DECODE model"
                          + (f" (it is {meta['method']})" if meta.get("method") else ""))
-    if two_channel(meta):
-        raise ValueError(f"{Path(path).name} reads two channels: the DECODE fitter takes one-channel models "
-                         f"for now")
     return meta
+
+
+def two_channel_calibration(settings, meta: dict) -> Path:
+    """The two-channel calibration a model's registration is read from: the one typed, else the one
+    the model names; checked against the model's sha256 of it."""
+    import hashlib
+    typed = settings.two_channels.calibration
+    path = Path(typed) if typed else Path(meta.get("calibration_source") or "")
+    if not str(path) or not path.is_file():
+        raise ValueError("the model reads two channels: choose its two-channel calibration (the model names "
+                         + (f"{Path(meta['calibration_source']).name}, not on this computer)" if meta.get("calibration_source")
+                            else "none)"))
+    want = meta.get("calibration_sha256")
+    if want:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+        if h.hexdigest() != want:
+            raise ValueError(f"{path.name} is not the calibration the model was trained on")
+    return path
 
 
 #: what a run on this computer says without PyTorch: the base install has none, and the fitter is
@@ -252,16 +306,44 @@ class DecodeFit(_FitPlugin):
         return None                       # the network finds the molecules
 
     def model(self, settings, camera: CameraMetadata):
+        from ..training.predictors import two_channel
         meta = read_model(settings.model.path)
         device = settings.model.device
+        if settings.model.run_on != "here" and two_channel(meta):
+            raise ValueError("a two-channel model runs on this computer for now: set run on to this computer")
         if settings.model.run_on != "here":
             return remote_predictor(settings, meta, camera)
         if not torch_here():
             raise ValueError(NO_TORCH)
-        from ..training.predictors import load
-        return load(settings.model.path, None if device == "auto" else device,
-                    frames_mirrored=_mirrored(meta, camera), threshold=settings.model.threshold,
-                    batch=settings.model.batch)
+        from ..training.predictors import load, two_channel
+        if not two_channel(meta):
+            return load(settings.model.path, None if device == "auto" else device,
+                        frames_mirrored=_mirrored(meta, camera), threshold=settings.model.threshold,
+                        batch=settings.model.batch)
+        return self.two_channel_model(settings, meta, camera)
+
+    def two_channel_model(self, settings, meta: dict, camera: CameraMetadata):
+        """A two-channel model with its registration, moved as typed (`netfit.fit_two`)."""
+        if _mirrored(meta, camera):
+            raise ValueError("the data were taken with the EM register set otherwise than the beads: a "
+                             "two-channel model takes frames as its calibration has them")
+        from ..calibrate.dual import load_dual_color_calibration
+        from ..netfit.fit_two import TwoChannelPredictor
+        from ..netfit.predict import Predictor
+        c = settings.two_channels
+        cal = load_dual_color_calibration(two_channel_calibration(settings, meta))
+        device = settings.model.device
+        predictor = Predictor(settings.model.path, None if device == "auto" else device,
+                              threshold=settings.model.threshold, batch=settings.model.batch)
+        sizes, _ = camera.pixelsize_nm_or_default
+        ox, oy = camera.roi_offset
+        corner = (ox if c.roi_column is None else c.roi_column, oy if c.roi_row is None else c.roi_row)
+        model = TwoChannelPredictor(predictor, cal, corner, (c.moved_columns, c.moved_rows),
+                                    em=bool(camera.em_on), goodness=c.goodness, bound=c.bound, pixel_nm=sizes,
+                                    measure=c.measure_move)
+        model.cal_path = two_channel_calibration(settings, meta)
+        self._two = model                  # for the run's text: the move used (`checks`)
+        return model
 
     def engine(self, settings, camera, finder, model, source=None):
         from ..window_engine import WindowEngine
@@ -272,6 +354,8 @@ class DecodeFit(_FitPlugin):
         meta = dict(model.metadata)
         return {"source": str(source) if source is not None else None, "camera": camera.to_dict(),
                 "decode": {"model": str(settings.model.path), "device": model.device,
+                           **({"moved_since_beads": {"rows": model.moved[1], "columns": model.moved[0]},
+                               "two_channel_calibration": str(model.cal_path)} if hasattr(model, "moved") else {}),
                            "threshold": model.raw_th, "frames_mirrored": model.frames_mirrored,
                            "window": model.window, "calibration": meta.get("calibration_source"),
                            "model_metadata": meta},
@@ -284,11 +368,18 @@ class DecodeFit(_FitPlugin):
             meta = read_model(settings.model.path)
         except ValueError:
             return []
-        return self.condition_warnings(settings, meta) + range_warnings(locs, meta)
+        said = []
+        two = getattr(self, "_two", None)
+        if two is not None and two.measure:
+            said.append(f"the channels moved since the beads by {two.moved[1]:.2f} rows and {two.moved[0]:.2f} "
+                        f"columns (measured); type them under two channels to fit this microscope's data so")
+        return said + self.condition_warnings(settings, meta) + range_warnings(locs, meta)
 
     # ---------------------------------------------------------- the form
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
+        # the two channels' part for a model that reads them, nothing for one that does not
+        state.shown["two_channels"] = self._two_channel(settings)
         if settings.model.run_on == "here" and not torch_here():
             state.notice = Notice(NO_TORCH)        # said before the run, not after it
             return state
@@ -306,6 +397,14 @@ class DecodeFit(_FitPlugin):
             except Exception as error:      # a path still being typed, a file that is not a model
                 state.notice = Notice(str(error))
         return state
+
+    @staticmethod
+    def _two_channel(settings) -> bool:
+        from ..training.predictors import two_channel
+        try:
+            return two_channel(read_model(settings.model.path))
+        except Exception:                   # no model yet, a path being typed: nothing to show
+            return False
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
         """Localize one frame, with the neighbours the network needs, and draw what it found."""

@@ -104,10 +104,15 @@ def test_a_fit_brighter_than_a_netfit_training_drew_is_warned_about(files):
     assert len(said) == 1 and "10%" in said[0] and "the top of its range" in said[0]
 
 
-def test_a_two_channel_model_is_refused_until_the_fitter_reads_two_channels(files):
+def test_the_one_channel_loader_refuses_a_two_channel_model_which_the_fitter_cuts_itself(files):
+    """`predictors.load` gives the engine a predictor of whole frames: a two-channel model needs its
+    channels cut first (`netfit.fit_two`, the fitter's ``two_channel_model``); the remote server, which
+    loads through it, runs one-channel models only."""
+    from smappy.training.predictors import load
     path = _write(files["root"] / "two.safetensors", channels={"shift": [0, 0], "box": [0, 8, 0, 8], "main": 0})
+    assert read_model(path)["channels"]
     with pytest.raises(ValueError, match="reads two channels"):
-        read_model(path)
+        load(path, "cpu")
 
 
 def test_the_automatic_batch_fills_the_memory_it_is_given_and_is_fixed_on_a_cpu(monkeypatch):
