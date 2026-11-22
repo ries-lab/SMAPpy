@@ -1455,3 +1455,8 @@ The cell bleaches: the late frames' background is an eighth of the early ones', 
 of a dye; the early photons look inflated by overlapping molecules.  Two models from the last frames'
 estimates (`F_fig2c_last_s0`, flat; `F_fig2c_last_uneven_s0`, half the movies uneven) train on decodebox,
 to be fitted on the first and the last 300 frames (`last300.tif`).
+
+**UHD's 2.5 per µm² checked** (`D_*_d59_s0`, 59 in 40 x 40 at these pixels, against the 50 tested): Jaccard
+biplane / colour at densities 1, 5, 15, 25, 50: 0.837 / 0.874, 0.822 / 0.882, 0.822 / 0.863, 0.799 / 0.832,
+0.757 / 0.723 -- the model at 50 within 0.007 everywhere (0.832 / 0.877 ... 0.758 / 0.725), outliers and
+RMSE / CRLB alike (outliers at 50: 11.1 / 26.5 % against 12.2 / 26.9 %).  UHD stays 2.5.
