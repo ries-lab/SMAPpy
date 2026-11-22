@@ -16,11 +16,11 @@ import tifffile
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+import sets_c2 as S
+
 from smappy.netfit.channels import TwoChannels
 from smappy.netfit.predict import Predictor
 from smappy.training.reference import ks_uniform
-
-import sets_c2 as S
 
 D = pathlib.Path.home() / ".cache/decode_smlm/plex"
 OUT = S.SETS_DIR.parent / "real_c2"

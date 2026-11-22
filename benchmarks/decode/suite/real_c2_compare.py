@@ -21,10 +21,10 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from smappy.training.reference import ks_uniform, robust_width
-
 import real_c2 as R
 import sets_c2 as S
+
+from smappy.training.reference import ks_uniform, robust_width
 
 R_NM = 100.0
 PROB = 0.6

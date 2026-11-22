@@ -17,7 +17,7 @@ from typing import Dict, Optional
 import numpy as np
 
 from . import _fit3d
-from .io.calibration import SplineCalibration, light_at_focus  # noqa: F401 (light_at_focus: here too)
+from .io.calibration import SplineCalibration, light_at_focus
 
 
 @dataclass

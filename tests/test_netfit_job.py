@@ -8,10 +8,10 @@ import json
 
 import numpy as np
 import pytest
+from test_train_window import _prepare_settings, movie  # noqa: F401  (the fixture)
 
 from smappy.training import job as jobfile
 from smappy.training import model_file, progress
-from test_train_window import _prepare_settings, movie  # noqa: F401  (the fixture)
 
 torch = pytest.importorskip("torch")
 
@@ -27,7 +27,7 @@ def _tiny(folder):
     path.write_text(json.dumps(s, indent=1))
 
 
-def test_the_window_writes_an_optimised_job_from_the_prefits_ranges_with_its_paths_inside(movie):  # noqa: F811
+def test_the_window_writes_an_optimised_job_from_the_prefits_ranges_with_its_paths_inside(movie):
     from smappy.gui.train_window import NETFIT, default_folder, run_prefit, write_job
     path, cal_path = movie
     prepared = run_prefit(_prepare_settings(path, cal_path, model="optimised"))
@@ -49,7 +49,7 @@ def test_the_window_writes_an_optimised_job_from_the_prefits_ranges_with_its_pat
     assert jobfile.check(folder) == []
 
 
-def test_an_optimised_job_trains_stops_at_a_stop_file_and_resumes_through_the_decode_command(movie, tmp_path):  # noqa: F811
+def test_an_optimised_job_trains_stops_at_a_stop_file_and_resumes_through_the_decode_command(movie, tmp_path):
     from decode_smlm.cli import main
     from smappy.gui.train_window import run_prefit, write_job
     path, cal_path = movie
@@ -73,7 +73,7 @@ def test_an_optimised_job_trains_stops_at_a_stop_file_and_resumes_through_the_de
     assert all("jaccard" in line["metrics"] for line in progress.read(folder) if line["kind"] == "epoch")
 
 
-def test_a_folder_being_trained_is_refused(movie, tmp_path):  # noqa: F811
+def test_a_folder_being_trained_is_refused(movie, tmp_path):
     import os
     import socket
 

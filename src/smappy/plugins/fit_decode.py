@@ -43,8 +43,15 @@ from typing import Optional
 import numpy as np
 
 from . import Context, FormState, Notice, Plot, Result, param, register
-from .fit import (CameraMetadata, CameraSettings, FinishSettings, OutputSettings, SourceSettings,
-                  _FitPlugin, _open)
+from .fit import (
+    CameraMetadata,
+    CameraSettings,
+    FinishSettings,
+    OutputSettings,
+    SourceSettings,
+    _FitPlugin,
+    _open,
+)
 
 MODEL_FILTER = "DECODE models (*.safetensors);;All files (*)"
 DEVICES = (("auto", "auto"), ("cpu", "CPU"), ("cuda", "CUDA"), ("mps", "Apple GPU"))
@@ -128,7 +135,7 @@ def read_model(path) -> dict:
         raise ValueError("choose a trained model (.safetensors)")
     if not Path(path).is_file():
         raise ValueError(f"{Path(path).name}: no such model file")
-    from ..training.predictors import METHODS, two_channel
+    from ..training.predictors import METHODS
     meta = model_file.read_metadata(path)
     if meta.get("method") not in METHODS:
         raise ValueError(f"{Path(path).name} is not a DECODE model"

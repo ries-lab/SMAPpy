@@ -16,12 +16,11 @@ import json
 import sys
 
 import numpy as np
+import run_c2 as RC
+import sets_c2 as S
 import tifffile
 from scipy.ndimage import gaussian_filter
 from scipy.spatial import cKDTree
-
-import run_c2 as RC
-import sets_c2 as S
 
 WIDTH_PX = 16.0
 
@@ -111,7 +110,6 @@ def background_maps(model, context, frames_adu):
     import torch
 
     from smappy.netfit.channels import TwoChannels
-    from smappy.netfit.network import Scaling
     from smappy.netfit.predict import Predictor
     cal = S.calibration(context)
     p = Predictor(model, threshold=0.5)

@@ -27,7 +27,6 @@ from ..training import model_file
 from . import extract, network
 from .settings import ChannelSettings, Part, Parts
 
-
 #: inference memory a pixel of a batch, the default network (48 features, 3 frames): 4 700 bytes on
 #: Apple's GPU, the driver's pools included (8 frames of 256 x 224: 2.2 GB, 2026-11-22); DECODE's
 #: SigmaMUNet takes 2 100 (`decode_smlm.predict.BYTES_PER_PIXEL`)
