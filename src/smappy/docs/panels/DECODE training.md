@@ -247,8 +247,9 @@ same shape and of the same *model* (the window says so when it is not).  The DEC
 a model...* fills in the fitter's own model.
 
 *LD*, *HD* and *UHD*
-are SMAP's: 15, 25 and 50 molecules in a frame of 40 x 40 pixels.  *UHD* is
-the default: the optimised networks were studied and chosen at 50.  A model
+are SMAP's: 15, 25 and 50 molecules in a frame of 40 x 40 pixels.  The density
+is the sample's and the acquisition's: choose it for the data, the same
+for either model.  A model
 trained dense also localizes sparse data well: the example package's, trained
 at 50, found 96 % of the molecules at one in 40 x 40 pixels.
 

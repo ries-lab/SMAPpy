@@ -1351,6 +1351,6 @@ bounds (`standard_c2` has 1 and 3).
 **The window's defaults checked against the winners** (2026-11-22): one channel is GMN7C -- the ConvGRU
 with norm over 7 frames, on-times 1 -- 3, streamed, 48 features; two channels the `L_*` runs -- early
 fusion with the bright channel the grid, 64 features, the ConvGRU over 3 frames, on-time 1, spots over
-the whole grid, not streamed; both at density 50 (the window's default now UHD), targets from 100
+the whole grid, not streamed; the density the data's (LD, HD or UHD, chosen for the sample -- Jonas: settings, not models), targets from 100
 photons, the rate decaying every 327 680 samples, 6 M samples.  Still not the winners': GMN7C's
 fine-tune to the prefit's on-time.

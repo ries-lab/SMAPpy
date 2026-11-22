@@ -165,11 +165,9 @@ class PrepareSettings:
     sample: SampleSettings = param(default_factory=SampleSettings, label="in the sample",
                                    help="where in the sample the pupil calibration is drawn for: the network "
                                         "learns that PSF, and its z is the height above the coverslip")
-    # UHD by default (2026-11-22): netfit's studies trained at 50 (2.1 per um^2), its winners too, and a
-    # network trained dense localizes sparse data well (DECODE's example model, at 50: 96 % at 1)
-    density: str = param("UHD", label="density", choices=DENSITIES,
-                         help="how many molecules a training frame holds: LD, HD or UHD, as SMAP's; UHD the "
-                              "studies' and the default")
+    # the sample's and the acquisition's, chosen for the data, not the model's (Jonas, 2026-11-22)
+    density: str = param("LD", label="density", choices=DENSITIES,
+                         help="how many molecules a training frame holds: LD, HD or UHD, as SMAP's")
     two_channels: TwoChannelPrepare = param(default_factory=TwoChannelPrepare, label="two channels",
                                             collapsed=True)
     model: str = param("optimised", label="model", choices=MODELS, advanced=True,
