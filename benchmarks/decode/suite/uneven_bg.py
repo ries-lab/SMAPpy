@@ -40,7 +40,7 @@ def add_field(adu, camera, peak, seed=7, flat=False):
     lam = field(adu.shape[1:], peak, seed, flat)
     n = rng.poisson(np.broadcast_to(lam, adu.shape))
     electrons = rng.gamma(np.maximum(n, 1e-9), camera["emgain"]) * (n > 0) if camera["em_on"] else n
-    return adu + electrons / camera["conversion"], lam
+    return (adu + electrons / camera["conversion"]).astype(np.float32), lam
 
 
 def fit(context, frames_adu, model):
@@ -103,3 +103,74 @@ if __name__ == "__main__":
                     f"{np.median(got / true):.3f}, robust width {1.4826 * np.median(np.abs(got / true - np.median(got / true))):.3f}; "
                     f"correlation of the field with the network's excess {r:.3f}")
     print(name, f"peak {peak:.0f}:", "; ".join(rows), flush=True)
+
+
+def background_maps(model, context, frames_adu):
+    """The network's background map (n, 2, h, w) in photons a pixel, in the calibration's channel order, on
+    the grid of its channel 0 -- every pixel, not only where it found molecules -- and the `TwoChannels`."""
+    import torch
+
+    from smappy.netfit.channels import TwoChannels
+    from smappy.netfit.network import Scaling
+    from smappy.netfit.predict import Predictor
+    cal = S.calibration(context)
+    p = Predictor(model, threshold=0.5)
+    two = TwoChannels.from_calibration(cal, cal.geometry["sources"][0]["roi"][:2], main=p.channels.main)
+    c = S.camera_of(context)
+    photons = (frames_adu - c["offset"]) * (c["conversion"] / c["emgain"] if c["em_on"] else c["conversion"])
+    k = p.window
+    stack = two.cut(photons)
+    stack = np.concatenate([np.repeat(stack[:1], k, 0), stack, np.repeat(stack[-1:], k, 0)])
+    r0, c0, hh, ww = p.crop(*stack.shape[-2:])
+    x = torch.as_tensor(stack[..., r0:r0 + hh, c0:c0 + ww])
+    x = ((x - p.scaling.input_offset) / p.scaling.input_scale).transpose(0, 1)
+    maps = torch.as_tensor(two.offsets()[:, r0:r0 + hh, c0:c0 + ww])
+    lay, n, out = p.model.layout, len(stack) - 2 * k, []
+    with torch.no_grad():
+        for a in range(0, n, 8):
+            b = min(a + 8, n)
+            y = p.model(x[:, a:b + 2 * k][None].to(p.device), b - a, maps[None].to(p.device))
+            out.append(y[:, lay.bg:lay.bg + lay.backgrounds].cpu().numpy() * p.scaling.bg_max)
+    bg = np.concatenate(out)
+    if bg.shape[1] == 1:
+        bg = np.repeat(bg, 2, 1)
+    return two.in_order(np.moveaxis(bg, 1, -1)).transpose(0, 3, 1, 2), two, (r0, c0, hh, ww), p.scale
+
+
+def true_background(context, n_frames, lam, frame_levels):
+    """The truth's background (n, H, W) on the frame: each channel's level a frame (``frame_levels`` (n, 2))
+    over its half, the field added."""
+    from smappy.calibrate.dual import geometry_layout
+    cal = S.calibration(context)
+    x0, y0 = cal.geometry["sources"][0]["roi"][:2]
+    img = np.repeat(lam[None], n_frames, 0).astype(np.float64)
+    for ch, (x, y, w, h) in enumerate(geometry_layout(cal.geometry).regions):
+        img[:, y - y0:y - y0 + h, x - x0:x - x0 + w] += frame_levels[:, ch, None, None]
+    return img
+
+
+def map_errors(context, model, peak, flat=False):
+    """The network's background map against the truth's, pixel by pixel, per channel (calibration order)."""
+    name = f"{context}_blink_density_15"
+    adu = tifffile.imread(S.SETS_DIR / name / "frames.tif").astype(np.float32)
+    lam = field(adu.shape[1:], peak, flat=flat) if peak else np.zeros(adu.shape[1:])
+    noisy, _ = add_field(adu, S.camera_of(context), peak, flat=flat) if peak else (adu, lam)
+    t = dict(np.load(S.SETS_DIR / name / "truth.npz"))
+    levels = np.c_[t["frame_background_0"], t["frame_background_1"]]
+    pred, two, (r0, c0, hh, ww), scale = background_maps(model, context, noisy)
+    truth = two.cut(true_background(context, len(adu), lam, levels))[..., r0:r0 + hh, c0:c0 + ww]
+    truth = two.in_order(np.moveaxis(truth, 1, -1)).transpose(0, 3, 1, 2)
+    if scale > 1:
+        pred = pred.reshape(*pred.shape[:2], hh, scale, ww, scale).mean((3, 5))
+    rows = []
+    patterned = np.ptp(lam) > 0
+    for ch in range(2):
+        p, q = pred[:, ch], truth[:, ch]
+        dp, dq = p - p.mean((1, 2), keepdims=True), q - q.mean((1, 2), keepdims=True)
+        err = p - q
+        rows.append({"channel": ch, "true_median": float(np.median(q)), "ratio_median": float(np.median(p / q)),
+                     "rms_error": float(np.sqrt(np.mean(err ** 2))), "rms_error_rel": float(np.sqrt(np.mean(err ** 2)) / np.median(q)),
+                     "pattern_corr": float(np.corrcoef(dp.ravel(), dq.ravel())[0, 1]) if patterned else float("nan"),
+                     "pattern_gain": float(np.sum(dp * dq) / np.sum(dq * dq)) if patterned else float("nan"),
+                     "pixel_noise": float(np.std(p - gaussian_filter(p, (0, 3, 3))))})
+    return rows

@@ -29,6 +29,7 @@ from .settings import CameraModel, SimulationSettings, TrainingSettings
 
 SETTINGS, STOP, LOCK = "settings.json", "STOP", "lock.json"
 DENSITIES = {"LD": 15.0, "HD": 25.0, "UHD": 50.0}       # emitters in a 40 x 40 frame, as DECODE's jobs
+GMN7C_WINDOW = 7                                          # one channel's frames read (poc-plan, step 4)
 
 
 class JobError(Exception):
@@ -86,12 +87,22 @@ def settings_from_estimates(est, camera_section: dict, density: str, calibration
     s.seed = int(seed)
     # no snapshots in a job: the model file of the last epoch is the one kept, as DECODE's jobs keep it
     s.parts.schedule.settings["snapshots"] = []
+    from .settings import Part
+    if channels is None:
+        # one channel: step 4's time model, GMN7C (docs/decode/poc-plan.md, "Step 4: the time model"):
+        # a ConvGRU with its input normalised over 7 frames, the mean on-time drawn per sample over 1 -- 3
+        # frames (one network for brief and long blinks, within 2 % of either specialist), streamed.
+        # `settings.Parts` keeps version 1's frame stack, so a model saved before is built as it was.
+        # Not yet here: its fine-tune to the on-time the prefit measured (1 -- 2 M samples at lr 1e-4)
+        s.parts.time_model = Part("convgru", {"frames": GMN7C_WINDOW, "norm": True})
+        s.simulation = SimulationSettings(**{**s.simulation.__dict__, "window": GMN7C_WINDOW,
+                                             "lifetime_frames": 1.0, "lifetime_max_frames": 3.0,
+                                             "movie_windows": 8})
     if channels is not None:
         # the C = 2 study's settings, the ones its comparisons were made with (plex-plan §16;
         # `benchmarks/decode/netfit_c2/study/L_*.json`): 64 features, the ConvGRU joining the frames,
         # spots over the spline's whole grid, targets from 100 photons; streamed, windows cut from one
         # movie, which halves the drawing ("Cheaper checks")
-        from .settings import Part
         s.channels = channels
         s.parts.backbone.settings.update(two_fuse=fuse, features=64)
         s.parts.time_model = Part("convgru", {"frames": int(window), "norm": True})

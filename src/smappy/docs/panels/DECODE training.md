@@ -221,7 +221,11 @@ The movie, its PSF calibration, the density to train at, the *model* to train
 and a model to *start from*.
 
 *model* (under *more*): *DECODE, optimised* trains SMAPpy's own network,
-*DECODE* the original's.  The optimised one's job holds `settings.json` in
+*DECODE* the original's.  For one channel the optimised network reads 7
+frames through a ConvGRU and is trained on blinks lasting 1 to 3 frames on
+average.  That one network served brief and long blinks within 2 % of a
+network trained for either.  The prefit's *on-time* is therefore not used
+for it yet; a short fine-tune to the measured on-time is to come.  The optimised one's job holds `settings.json` in
 place of DECODE's `method.yaml`: the same photons, background, z range,
 on-time, density and camera, SMAPpy's settings for the rest.  Its *Follow*
 draws two more curves: the share of the test set's molecules more than 5

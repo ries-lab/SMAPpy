@@ -1320,3 +1320,21 @@ correlation of its excess with the field 0.06 -- 0.44 per channel.  So the local
 and the 16-pixel structure is not mapped -- less than DECODE's maps were remembered to be.  A training
 with an uneven background is worth one run (a field per sample, smooth at a few widths), judged by this
 script's uneven sets against the flat-trained model and on Fig. 2c.
+
+**The background maps themselves** (`uneven_bg.map_errors`: the network's background output at every pixel
+against the truth's, the set's level a frame and channel plus the field, on the grid; *gain* the slope of
+the map's pattern on the field's, 1 following it, 0 flat):
+
+| | channel | network / truth | rms error | pattern gain (corr) |
+|---|---|---|---|---|
+| the sets as drawn (flat) | all | 0.98 -- 1.03 | 2 -- 3 % | |
+| + even, inside the training's range | biplane, colour 1 | 0.98 -- 1.03 | 1 -- 3 % | |
+| + field 0 -- 100 | colour 0 / 1 | 0.85 / 0.97 | 20 / 8 % | 0.06 / 0.05 (0.25) |
+| + field 0 -- 100 | biplane 0 / 1 | 0.97 / 1.01 | 13 / 4 % | 0.02 / 0.24 (0.07 / 0.53) |
+| + field 0 -- 300 | colour, biplane | 0.52 -- 0.92 | 17 -- 52 % | -0.05 -- 0.08 |
+
+A flat background is predicted to 2 -- 3 %, its pixel noise 1 -- 2 photons; a field barely: the map keeps the
+area's level and follows 2 -- 24 % of its pattern.  The colour model's dimmer channel, trained to 100
+photons a pixel, saturates above it (0.85 at an even 120).  The training crops are 40 pixels, each one
+level: the network never had to map a background inside a crop.  An uneven background in training is
+the experiment; these maps are its measure, beside the localizations' scores.
