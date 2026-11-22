@@ -130,7 +130,7 @@ class _Lock:
     def __enter__(self):
         if self.path.exists():
             try:
-                info = json.loads(self.path.read_text())
+                info = json.loads(self.path.read_text(encoding="utf-8"))
             except (ValueError, OSError):
                 info = {}
             host, pid = info.get("host"), info.get("pid")
@@ -140,7 +140,7 @@ class _Lock:
                 raise JobError(f"{self.path.parent} is locked by a training on {host}; if that is gone, "
                                f"delete {self.path.name}")
         self.path.write_text(json.dumps({"host": socket.gethostname(), "pid": os.getpid(),
-                                         "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
+                                         "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}), encoding="utf-8")
         return self
 
     def __exit__(self, *exc):
