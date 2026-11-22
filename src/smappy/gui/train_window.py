@@ -39,7 +39,10 @@ from ..plugins.fit_decode import MODEL_FILTER
 METHOD = "decode-v0.10.2"
 NETFIT = "netfit-v1"
 #: the network a job trains (docs/decode/gui-plan.md §1): SMAPpy's own by default, DECODE's port beside it
-MODELS = (("optimised", "DECODE, optimised"), ("decode", "DECODE"))
+MODELS = (("optimised", "DECODE, optimised"), ("decode", "DECODE"), ("plexlike", "DECODE-Plex-like"))
+#: a two-channel calibration's models: *DECODE, optimised* is its *aligned channels* (the channels read
+#: together from the network's first layer), *DECODE-Plex-like* reads them apart and joins them later
+TWO_CHANNEL_MODELS = ("optimised", "plexlike")
 CALIBRATION_FILTER = "Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat);;All files (*)"
 DENSITIES = (("LD", "LD, 15 in 40 x 40 px"), ("HD", "HD, 25 in 40 x 40 px"), ("UHD", "UHD, 50 in 40 x 40 px"))
 REFRESH_MS = 5000
@@ -121,6 +124,37 @@ def _where_choices():
 
 
 @dataclass
+class TwoChannelPrepare:
+    """A two-channel calibration's training (docs/decode/gui-plan.md, step 4): shown for one alone."""
+    kind: str = param("auto", label="channels are", choices=(("auto", "auto"), ("colour", "two colours"),
+                                                              ("biplane", "two focal planes")),
+                      help="two colours or two focal planes (biplane); auto: from the calibration, a biplane's "
+                           "planes coming into focus 200 nm or more apart")
+    main: str = param("auto", label="read as the grid", choices=(("auto", "auto"), ("0", "the main half"),
+                                                                 ("1", "the other half")),
+                      help="the half the network reads on its own pixels, the other resampled onto them; "
+                           "auto: the brighter, from the prefit")
+    dyes: str = param("independent", label="dyes", choices=lambda: _dye_choices(),
+                      help="colour: how each molecule's share in the second channel is drawn -- each channel "
+                           "its own count, any dyes; or around the dyes the prefit found, or typed")
+    typed: str = param("", label="shares", beside=True,
+                       help="the dyes' shares of their photons in the calibration's second channel, as "
+                            "0.78, 0.92")
+    spread: float = param(0.03, label="spread", min=0.0, max=0.5,
+                          help="how far a molecule's share may lie from its dye's: 0.03 narrow, 0.06 broad "
+                               "(fewer outliers in crowding, the dimmest found less)")
+    moved_rows: float = param(0.0, label="moved since the beads", unit="rows",
+                              help="how far the second channel lies from where the beads put it, for the "
+                                   "prefit: the DECODE fitter's measure the move finds it")
+    moved_columns: float = param(0.0, label="and", unit="columns", beside=True, help="the same along the columns")
+
+
+def _dye_choices():
+    from ..netfit.job import DYES
+    return DYES
+
+
+@dataclass
 class PrepareSettings:
     """What a job is prepared from: the movie, its camera, the calibration, the density to train at."""
     movie: str = param("", label="movie", kind="open_file", file_filter=TIFF_FILTER,
@@ -133,6 +167,8 @@ class PrepareSettings:
                                         "learns that PSF, and its z is the height above the coverslip")
     density: str = param("LD", label="density", choices=DENSITIES,
                          help="how many molecules a training frame holds: LD, HD or UHD, as SMAP's")
+    two_channels: TwoChannelPrepare = param(default_factory=TwoChannelPrepare, label="two channels",
+                                            collapsed=True)
     model: str = param("optimised", label="model", choices=MODELS, advanced=True,
                        help="the network trained: DECODE, optimised (SMAPpy's, the default) or the original "
                             "DECODE's; both fit with the DECODE fitter")
@@ -200,6 +236,7 @@ class Prepared:
     sample: np.ndarray = field(repr=False, default=None)   # a few frames, counts, for the figure
     calibration: object = field(repr=False, default=None)  # the spline the network learns: drawn in the sample, or the beads'
     focus: object = None                                     # calibrate.depth.AutoDepth: how *auto* or *in situ* found it
+    two: object = None                                       # netfit.prefit_two.TwoChannels: a two-channel calibration's
 
 
 def _source(path):
@@ -249,14 +286,65 @@ def z_limits(cal):
     return z_bounds(cal) if (cal.parameters or {}).get("sample_depth") else estimates_of.z_limit(cal)
 
 
-def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared:
-    """Spline 3D on blocks of the movie (`training.prefit`) and DECODE's estimates of them, with the
-    calibration drawn for the focus in the sample first where it carries a pupil model (`in_the_sample`)."""
+def two_channel_problem(settings: PrepareSettings) -> str:
+    """Why these settings cannot train on their calibration's channels, or "": a two-channel calibration
+    trains SMAPpy's network alone, and *DECODE-Plex-like* needs one."""
+    from ..netfit.prefit_two import is_dual
+    dual = bool(settings.calibration) and is_dual(settings.calibration)
+    if dual and settings.model not in TWO_CHANNEL_MODELS:
+        return "a two-channel calibration trains DECODE, optimised or DECODE-Plex-like: choose one as model"
+    if not dual and settings.model == "plexlike":
+        return "DECODE-Plex-like reads two channels: choose a two-channel calibration, or another model"
+    return ""
+
+
+def typed_shares(text: str) -> list:
+    """``"0.78, 0.92"`` as shares."""
+    import re
+    return [float(v) for v in re.split(r"[\s,;]+", text.strip()) if v]
+
+
+def run_prefit_two(settings: PrepareSettings, report=lambda entry: None) -> Prepared:
+    """Spline 3D 2C on blocks of the movie and DECODE's estimates of its molecules' total photons, with
+    the two channels' own: their kind, backgrounds, brighter half and dyes (`netfit.prefit_two`)."""
     from decode_smlm import prefit as estimates_of
 
+    from ..calibrate.dual import load_dual_color_calibration
+    from ..netfit.prefit_two import prefit_two
+    source = _source(settings.movie)
+    camera = settings.camera.resolve(source)
+    t = settings.two_channels
+    report({"message": f"fitting {settings.blocks} blocks of {settings.block_frames} frames with Spline 3D 2C"})
+    found, two = prefit_two(settings.movie, settings.camera, settings.calibration, t.kind,
+                            (t.moved_columns, t.moved_rows), n_blocks=settings.blocks,
+                            block_frames=settings.block_frames, n_frames=source.n_frames,
+                            report=lambda text: report({"message": text}))
+    blinks, locs = found.columns()
+    cal = load_dual_color_calibration(settings.calibration)
+    est = estimates_of.estimates(blinks, locs, area_px=found.area_px, n_frames=found.n_frames,
+                                 z_limit_nm=estimates_of.z_limit(cal.main), max_iterations=found.max_iterations)
+
+    def read(a, b):
+        return np.concatenate([block for _, block in source.frames(chunk=b - a, start=a, stop=b)])
+    return Prepared(settings, camera, est, blinks, locs, source.n_frames, sample=read(0, min(4, source.n_frames)),
+                    calibration=str(settings.calibration), two=two)
+
+
+def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared:
+    """Spline 3D on blocks of the movie (`training.prefit`) and DECODE's estimates of them, with the
+    calibration drawn for the focus in the sample first where it carries a pupil model (`in_the_sample`);
+    Spline 3D 2C for a two-channel calibration (`run_prefit_two`)."""
+    from decode_smlm import prefit as estimates_of
+
+    from ..netfit.prefit_two import is_dual
     from ..training.prefit import prefit
     if not settings.movie or not settings.calibration:
         raise ValueError("choose the movie and its bead calibration")
+    problem = two_channel_problem(settings)
+    if problem:
+        raise ValueError(problem)
+    if is_dual(settings.calibration):
+        return run_prefit_two(settings, report)
     source = _source(settings.movie)
     camera = settings.camera.resolve(source)
     cal, focus = in_the_sample(settings, source, camera, report)
@@ -291,9 +379,22 @@ def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared
     from decode_smlm.prefit import Estimates, lifetime
     if not settings.movie or not settings.calibration:
         raise ValueError("choose the movie and its bead calibration")
+    from ..netfit.prefit_two import TwoChannels, is_dual, kind_of
     source = _source(settings.movie)
     camera = settings.camera.resolve(source)
-    cal, focus = in_the_sample(settings, source, camera)
+    two = None
+    if is_dual(settings.calibration):
+        problem = two_channel_problem(settings)
+        if problem:
+            raise ValueError(problem)
+        from ..calibrate.dual import load_dual_color_calibration
+        kind = settings.two_channels.kind
+        kind = kind_of(load_dual_color_calibration(settings.calibration)) if kind == "auto" else kind
+        # typed by hand: both channels the background typed; the grid the main half where auto
+        two = TwoChannels(kind, [(s.background_min, s.background_max)] * 2, 0)
+        cal, focus = str(settings.calibration), None
+    else:
+        cal, focus = in_the_sample(settings, source, camera)
     est = Estimates(on_time_frames=s.on_time_frames, lifetime_frames=lifetime(s.on_time_frames),
                     intensity_mu_sig=(s.photons, s.photons_sd), intensity_from="by hand", n_fully_on=0,
                     background=(s.background_min, s.background_max), z_nm=(s.z_min_nm, s.z_max_nm),
@@ -302,7 +403,7 @@ def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared
     sample = np.concatenate([block for _, block in source.frames(chunk=n, start=0, stop=n)])
     empty = {"photons": np.zeros(0), "background": np.zeros(0)}
     return Prepared(settings, camera, est, empty, empty, source.n_frames, sample=sample, calibration=cal,
-                    focus=focus)
+                    focus=focus, two=two)
 
 
 def by_hand(prepared: Optional[Prepared]) -> bool:
@@ -339,10 +440,17 @@ def method_params(prepared: Prepared, est) -> dict:
 
 def netfit_params(prepared: Prepared, est, seed: int = 0) -> dict:
     """An optimised model's ``settings.json`` (`smappy.netfit.job.settings_from_estimates`): the
-    estimates' ranges, the movie's camera, netfit's defaults for the rest."""
-    from ..netfit.job import settings_from_estimates
-    return settings_from_estimates(est, camera_section(prepared.camera), prepared.settings.density,
-                                   seed=seed).to_dict()
+    estimates' ranges, the movie's camera, netfit's defaults for the rest; for a two-channel
+    calibration its channels as the prefit found them and the form chose (`two_channel_settings`)."""
+    from ..netfit.job import settings_from_estimates, two_channel_settings
+    s = prepared.settings
+    channels, fuse = None, "early"
+    if prepared.two is not None:
+        t = s.two_channels
+        channels, fuse = two_channel_settings(prepared.two, main=t.main, dyes=t.dyes, typed=typed_shares(t.typed),
+                                              spread=t.spread, fuse="late" if s.model == "plexlike" else "early")
+    return settings_from_estimates(est, camera_section(prepared.camera), s.density, seed=seed,
+                                   channels=channels, fuse=fuse).to_dict()
 
 
 def method_of(settings: PrepareSettings) -> str:
@@ -389,7 +497,10 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
         if problem:
             raise ValueError(problem)
         job.base_model = BASE_MODEL
-    cal = prepared.calibration if prepared.calibration is not None else load_spline_calibration(s.calibration)
+    if prepared.two is not None:              # a two-channel calibration, copied as it is
+        cal = s.calibration
+    else:
+        cal = prepared.calibration if prepared.calibration is not None else load_spline_calibration(s.calibration)
     out = jobfile.write(folder, job, params, cal)
     if s.start_from:
         shutil.copyfile(s.start_from, out / BASE_MODEL)
@@ -433,8 +544,12 @@ def start_problem(path, params: dict) -> str:
         return f"{Path(path).name}: no such model file"
     meta = model_file.read_metadata(path)
     if "simulation" in params:              # an optimised model's job: its own network, the same frames
-        if meta.get("method") != NETFIT or meta.get("channels"):
-            return f"{Path(path).name} is not an optimised one-channel DECODE model: start from scratch, or from one"
+        two = bool((params.get("channels") or {}).get("kind"))
+        if meta.get("method") != NETFIT or bool(meta.get("channels")) != two:
+            what = "two-channel" if two else "one-channel"
+            return f"{Path(path).name} is not an optimised {what} DECODE model: start from scratch, or from one"
+        if two and (meta.get("settings") or {}).get("channels", {}).get("kind") != params["channels"]["kind"]:
+            return f"{Path(path).name} was trained for other channels: start from scratch, or from a model of these"
         theirs, ours = meta.get("settings") or {}, params
         for part in ("backbone", "time_model", "output"):
             if (theirs.get("parts") or {}).get(part) != ours["parts"].get(part):
@@ -1188,6 +1303,8 @@ class TrainWindow(QWidget):
             s = self.prepare_form.value()
             shown, active, hints = sample_state(self._calibration(s.calibration), s.sample)
             shown["sample"] = shown.pop("sample.focus")
+            from ..netfit.prefit_two import is_dual
+            shown["two_channels"] = bool(s.calibration) and is_dual(s.calibration)
             self.prepare_form.set_shown(shown)
             self.prepare_form.set_active(active)
             self.prepare_form.set_hints(hints)
@@ -1226,10 +1343,15 @@ class TrainWindow(QWidget):
         self.draw_prepared()
         self.simulate()
         from ..calibrate.depth import describe_sample
-        where = describe_sample(prepared.calibration)
+        where = describe_sample(prepared.calibration) if prepared.two is None else ""
+        two = prepared.two
+        said = "" if two is None else (
+            f"; {'two colours' if two.kind == 'colour' else 'two focal planes'}, the brighter half "
+            f"{'the main' if two.brighter == 0 else 'the other'}"
+            + (f", dyes at {', '.join(f'{v:.2f}' for v in two.dyes)}" if two.dyes else ""))
         self.status_bar.showMessage(f"prefit: {est.n_blinks} blinks, {est.n_localizations} localizations; "
                                     f"photons from {est.intensity_from} ({est.n_fully_on} fully-on frames)"
-                                    + (f"; {where}" if where else ""))
+                                    + (f"; {where}" if where else "") + said)
 
     def draw_prepared(self) -> None:
         from decode_smlm.figures import draw_frames, draw_ranges, photons
@@ -1252,7 +1374,8 @@ class TrainWindow(QWidget):
         """Frames as the training would draw them with the estimates as they stand, beside the data:
         with torch here only (DECODE's own simulation); on a timer, so never raising."""
         try:
-            if self.prepared is None or not torch_here():
+            # DECODE's simulation draws one channel: a two-channel job's frames are not previewed
+            if self.prepared is None or not torch_here() or self.prepared.two is not None:
                 return
             if self.busy:
                 self._simulate_later.start()

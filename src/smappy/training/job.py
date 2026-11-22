@@ -62,6 +62,19 @@ class Job:
         return cls(**fields)
 
 
+def two_channel(method: str, params: dict) -> bool:
+    """Whether a job trains on a split camera's two channels: a netfit job whose channels have a kind."""
+    return method == NETFIT and bool((params.get("channels") or {}).get("kind"))
+
+
+def file_sha256(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 def coefficients_sha256(cal) -> str:
     """The sha256 of a calibration's coefficients as the fitter uses them: (64, nz, ny, nx), float32."""
     return hashlib.sha256(np.ascontiguousarray(cal.coeff, dtype=np.float32).tobytes()).hexdigest()
@@ -89,6 +102,20 @@ def write(folder, job: Job, method_params: dict, calibration) -> Path:
     if own and Path(own).is_absolute():
         raise ValueError(f"{params_file(job.method)}'s calibration file must be relative to the job folder")
     target = folder / CALIBRATION
+    if two_channel(job.method, method_params):
+        # a two-channel calibration (netfit's C = 2): copied as it is, its file's sha256 the model's
+        # check (`train._sha256`, `fit_decode.two_channel_calibration`)
+        source = Path(calibration)
+        if source.resolve() != target.resolve():
+            shutil.copyfile(source, target)
+        sha = file_sha256(target)
+        if job.calibration.get("sha256") not in (None, sha):
+            raise ValueError("the job's calibration is not the one being written beside it")
+        job.calibration = {**job.calibration, "file": CALIBRATION, "sha256": sha}
+        text = json.dumps(method_params, indent=1) + "\n"
+        (folder / params_file(job.method)).write_text(text, encoding="utf-8")
+        (folder / JOB).write_text(_json(job), encoding="utf-8")
+        return folder
     if isinstance(calibration, (str, Path)):
         source = Path(calibration)
         if source.resolve() != target.resolve():
@@ -142,7 +169,8 @@ def check(folder) -> list[str]:
     if not cal_file.exists():
         return [f"the calibration {cal_file.name} is missing"]
     from ..io.calibration import load_spline_calibration
-    if coefficients_sha256(load_spline_calibration(cal_file)) != job.calibration.get("sha256"):
+    sha = file_sha256(cal_file) if two_channel(job.method, params) else coefficients_sha256(load_spline_calibration(cal_file))
+    if sha != job.calibration.get("sha256"):
         problems.append(f"{cal_file.name} is not the calibration the job was prepared with")
     if job.method == NETFIT:
         value = params.get("calibration")

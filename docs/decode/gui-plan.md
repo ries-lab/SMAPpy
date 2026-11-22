@@ -137,7 +137,12 @@ that architecture here: what the study compared it as.
    *auto* is *measure the move*: the fewest localizations, which found Fig. 2a's 5.5 rows (the
    frames' deviance did not find it).  Remote runs take one-channel models only, for now.  The model file carries the registration; the move
    since the beads and the checks are options.
-4. **T3, T4**: two-channel jobs: Spline 3D 2C's prefit, the kind, the main channel, the dyes.
+4. **T3, T4** (done 2026-11-22: `netfit/prefit_two.py`, the window's *two channels* part): two-channel
+   jobs: Spline 3D 2C's prefit, the kind (from the calibration: planes in focus 200 nm apart), the main
+   channel (the brighter), the dyes (independent counts by default; from the prefit or typed, with a
+   spread), the study's C = 2 settings.  Spline 3D 2C's linked biplane photons are twice netfit's
+   (measured 2.00), halved for the estimates.  Not yet: two-channel *Try*, the preview's simulated
+   frames, and T6's bounds for a two-channel test set.
 5. **T6** with step 2 (one channel: done, outliers and the inliers' RMSE / CRLB in *Follow*) and step 4 (two).
 6. **I5**: DECODE-Plex's published models, exported, as a baseline in the GUI.
 7. **T5** alongside each step, not after: each step's page, tests (a simulated two-channel movie

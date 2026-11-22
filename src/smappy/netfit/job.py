@@ -35,10 +35,39 @@ class JobError(Exception):
     """A folder that cannot be trained, said in a sentence."""
 
 
+#: how a two-colour training draws each molecule's share in channel 1 (Jonas, 2026-11-21): free -- each
+#: channel its own count, any dyes --, or around the dyes, from the prefit or typed, by a spread
+DYES = (("independent", "independent counts"), ("prefit", "from the prefit"), ("typed", "typed"))
+BROAD_SD, NARROW_SD = 0.06, 0.03         # plex-plan §16: the broad prior, and the narrow one
+
+
+def two_channel_settings(two, *, main="auto", dyes="independent", typed=(), spread: float = NARROW_SD,
+                         fuse: str = "early"):
+    """The training's `ChannelSettings` from the two-channel prefit (`prefit_two.TwoChannels`), in the
+    grid's order: ``main`` the calibration's channel the network reads as its grid ("auto": the
+    brighter, Jonas 2026-11-21: the bright one main), each channel's background, and for colour the dyes
+    as shares in the grid's channel 1 (the calibration's, turned when its main half is not the grid's)."""
+    from .settings import ChannelSettings
+    m = two.brighter if main == "auto" else int(main)
+    shares = list(two.dyes if dyes == "prefit" else typed if dyes == "typed" else [])
+    if dyes in ("prefit", "typed") and not shares:
+        raise ValueError("no dyes to train around: the prefit found none, or none were typed; "
+                         "choose independent counts")
+    grid = [round(1.0 - v, 4) if m == 1 else float(v) for v in shares]
+    bg = [list(two.background[m]), list(two.background[1 - m])]
+    out = ChannelSettings(kind=two.kind, background=bg, main=m)
+    if two.kind == "colour" and grid:
+        out.dyes, out.share_sd = sorted(grid), float(spread)
+    return out, fuse
+
+
 def settings_from_estimates(est, camera_section: dict, density: str, calibration: str = "calibration.h5",
-                            window: int = 3, seed: int = 0) -> TrainingSettings:
+                            window: int = 3, seed: int = 0, channels=None, fuse: str = "early") -> TrainingSettings:
     """A training's settings from the prefit's estimates (`decode_smlm.prefit.Estimates`) and the
-    movie's camera (`decode_smlm.prefit.camera`'s section); everything else netfit's defaults."""
+    movie's camera (`decode_smlm.prefit.camera`'s section); everything else netfit's defaults.  With
+    ``channels`` (`two_channel_settings`) a two-channel training: the calibration a two-channel one, the
+    channels read together from the first layer (``fuse`` "early", *aligned channels*) or apart and
+    joined later ("late", *DECODE-Plex-like*)."""
     if density not in DENSITIES:
         raise ValueError(f"density {density!r}: one of {', '.join(DENSITIES)}")
     s = TrainingSettings()
@@ -57,6 +86,17 @@ def settings_from_estimates(est, camera_section: dict, density: str, calibration
     s.seed = int(seed)
     # no snapshots in a job: the model file of the last epoch is the one kept, as DECODE's jobs keep it
     s.parts.schedule.settings["snapshots"] = []
+    if channels is not None:
+        # the C = 2 study's settings, the ones its comparisons were made with (plex-plan §16;
+        # `benchmarks/decode/netfit_c2/study/L_*.json`): 64 features, the ConvGRU joining the frames,
+        # spots over the spline's whole grid, targets from 100 photons; streamed, windows cut from one
+        # movie, which halves the drawing ("Cheaper checks")
+        from .settings import Part
+        s.channels = channels
+        s.parts.backbone.settings.update(two_fuse=fuse, features=64)
+        s.parts.time_model = Part("convgru", {"frames": int(window), "norm": True})
+        s.simulation = SimulationSettings(**{**s.simulation.__dict__, "movie_windows": 8, "spots": "whole",
+                                             "target_photons_min": 100.0})
     return s
 
 

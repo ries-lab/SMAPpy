@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.run_prefit_two, smappy.netfit.prefit_two.prefit_two, smappy.netfit.prefit_two.dye_shares, smappy.netfit.prefit_two.kind_of, smappy.netfit.job.two_channel_settings, smappy.gui.train_window.two_channel_problem, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
 ---
 
 ## What it does
@@ -259,6 +259,47 @@ damping of the light beyond the critical angle: those belonged to the
 calibration, not to a molecule.  One network serves one focus: data taken
 at another depth want a network of their own.  The DECODE fitter's
 *Model info...* says which focus a model was trained for.
+
+### two channels
+A two-channel calibration (a `_2ct.h5`, from the PSF calibration window's
+dual mode or converted from SMAP's) trains a network that reads a split
+camera's two halves as one molecule.  This part appears for such a
+calibration only.  *model* is then *DECODE, optimised* (its *aligned
+channels*: the second channel resampled onto the first's pixels and read
+together from the network's first layer) or *DECODE-Plex-like* (each
+channel read apart and joined later); DECODE's original reads one channel.
+
+*Prefit* fits the blocks with [Spline 3D 2C](plugin:Localize/Spline 3D 2C)
+instead.  The estimates are of each molecule's total photons, as one
+channel's are.  Beside them it finds what only two channels have:
+
+- *channels are*, on *auto*: two focal planes when the calibration's two
+  PSFs come into focus 200 nm or more apart, else two colours.
+- each channel's background range, which the training draws apart;
+- *read as the grid*, on *auto*: the brighter half.  On the C = 2 study's
+  sets that half as the grid gave fewer outliers.
+- for two colours, the dyes: where the molecules' shares of their photons
+  in the second channel gather.  On simulated data drawn at 0.78 and 0.92
+  they were found at 0.775 and 0.925.
+
+*dyes* says what the training does with them:
+
+- *independent counts*, the default: each channel's photons drawn on their
+  own, for any dyes or several.
+- *from the prefit* or *typed* (*shares*): each molecule one of those
+  dyes, its share drawn around it by *spread*.  0.03 is narrow, 0.06 broad.
+  On the study's crowded sets the broad prior had a quarter fewer outliers
+  and named the dye right more often, but found fewer of the dimmest
+  molecules.
+
+*moved since the beads* moves the registration for the prefit, as the
+DECODE fitter's own does for the fit.  A splitter that moved since the
+beads (Fig. 2a's 5.8 rows) leaves Spline 3D 2C pairing the wrong spots.
+The fitter's *measure the move* finds it.  The job draws the two channels
+with the beads' registration either way: the network learns all of it.
+
+A two-channel job's frames are not previewed beside the data: DECODE's
+simulation, which draws the preview, draws one channel.
 
 ### Prefit
 Fits the blocks and fills *Estimates*, with the calibration drawn in the
