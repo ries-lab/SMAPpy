@@ -1429,8 +1429,11 @@ P streamed and U unstreamed on today's): biplane Jaccard at 1 000 photons S 0.56
 U 0.545; outliers at density 15 1.5 / 1.7 / 1.7 %; colour Jaccard at 1 000 photons S 0.590 (0.032), P 0.590
 (0.041), right dye at 1 000 photons S 95.0 (0.9), P 91.6 (2.0), U 83.9 %; every other number within 0.01.
 On the same code, streamed and unstreamed agree (biplane 0.541 against 0.545); the gap to S is the code's
-or one seed's, not streaming's.  The two-channel job stays streamed, as one channel's.  Open: why today's
-unstreamed seed is below S in both contexts (one seed each; the settings are identical).
+or one seed's, not streaming's.  The two-channel job stays streamed, as one channel's.  U's two more seeds
+settle the gap as one seed's: U over three seeds is S's -- biplane Jaccard at 1 000 photons 0.560 (0.014)
+against 0.564 (0.013), colour 0.590 (0.040) against 0.590 (0.032), right dye at 1 000 photons 90.3 (4.6)
+against 95.0 (0.9) %, every other number within 0.01 -- so today's code has not regressed, and P's 0.541
+against U's 0.560 (biplane, 1 000 photons) is streaming's cost there at most, within two sd.
 
 **Uneven backgrounds in training, built** (2026-11-22; `SimulationSettings.background_uneven`,
 `simulate.background_modulation`): a share of the movies has its background multiplied by
@@ -1460,3 +1463,27 @@ to be fitted on the first and the last 300 frames (`last300.tif`).
 biplane / colour at densities 1, 5, 15, 25, 50: 0.837 / 0.874, 0.822 / 0.882, 0.822 / 0.863, 0.799 / 0.832,
 0.757 / 0.723 -- the model at 50 within 0.007 everywhere (0.832 / 0.877 ... 0.758 / 0.725), outliers and
 RMSE / CRLB alike (outliers at 50: 11.1 / 26.5 % against 12.2 / 26.9 %).  UHD stays 2.5.
+
+**Uneven backgrounds in training, judged** (`B_*_uneven_s0` against `P_*_s0`, one seed, 3 M samples):
+
+| | biplane P | biplane B | colour P | colour B |
+|---|---|---|---|---|
+| map's pattern gain, channel 0 / 1 (field 0 -- 300) | 0.06 / 0.10 | 0.92 / 0.45 | 0.05 / 0.17 | 0.56 / 0.85 |
+| map's pattern correlation, 0 / 1 | 0.23 / 0.44 | 0.99 / 0.88 | 0.41 / 0.76 | 0.94 / 0.98 |
+| uneven density 15: Jaccard | 0.683 | 0.766 | 0.614 | 0.820 |
+| uneven density 15: outliers % | 5.8 | 3.6 | 17.3 | 11.6 |
+| uneven density 15: RMSE / CRLB lat, ax | 1.45, 1.65 | 1.41, 1.50 | 1.63, 1.77 | 1.56, 1.59 |
+| uneven density 15: right dye % | | | 91.6 | 94.9 |
+| flat density 15: Jaccard | 0.824 | 0.822 | 0.864 | 0.860 |
+| flat 1 000 photons: Jaccard | 0.541 (P's 3 seeds) | 0.595 | 0.590 (3 seeds) | 0.554 |
+| flat 1 000 photons: RMSE / CRLB lat, ax | 1.19, 1.37 | 1.22, 1.48 | 1.24, 1.31 | 1.31, 1.34 |
+
+The uneven sets' bounds are the flat truth's, so their ratios hold the added light's cost for both.  The
+network trained on uneven backgrounds maps them (it learnt the field, where the flat-trained one returns
+nearly a constant) and finds what the flat-trained one loses on them: Jaccard + 0.08 biplane, + 0.21
+colour, outliers a third fewer.  On flat data it costs a few per cent of precision at 1 000 photons
+(3 -- 8 %, axial worst) and nothing at density 15; biplane's Jaccard at 1 000 photons rose, colour's fell,
+each within the seeds' spread.  Colour's channel 0 is mapped at 0.71 of the truth with the field or with
+as much light spread flat (0.68) -- the background beyond the training's range, a range matter and not
+the pattern's.  Uneven backgrounds are worth having in the window's training (a share of the movies, as
+here), with a seed or two more before the default changes; Fig. 2c's F models are the real-data check.
