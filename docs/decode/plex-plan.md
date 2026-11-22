@@ -1391,3 +1391,20 @@ ROI 150-0-226-512, 200 000 frames) and the beads of the next day (Zenodo 2134870
   spot-pair vote (each channel's spots, the differences' histogram) finds a move with none, a candidate
   for the prefit; the training's test set has no bound at C = 2, so the outliers and inliers' numbers are
   missing from a two-channel *Follow*.
+
+**Which density to train at** (2026-11-22; `D_*_d15_s0`, `D_*_d25_s0` against the default `P_*` at 50 --
+three seeds for colour, one for biplane -- on the blink sets at 1, 5, 15, 25 and 50 per 40 x 40 px).
+Jaccard, biplane / colour:
+
+| trained at | 1 | 5 | 15 | 25 | 50 |
+|---|---|---|---|---|---|
+| 50 | 0.832 / 0.877 | 0.821 / 0.889 | 0.824 / 0.865 | 0.801 / 0.834 | 0.758 / 0.725 |
+| 25 | 0.861 / 0.898 | 0.846 / 0.903 | 0.836 / 0.866 | 0.810 / 0.833 | 0.745 / 0.701 |
+| 15 | 0.873 / 0.908 | 0.852 / 0.905 | 0.835 / 0.865 | 0.802 / 0.823 | 0.719 / 0.676 |
+
+Below the training density's neighbourhood a sparser training finds 3-4 % more and is closer to the bound
+(colour lateral RMSE/CRLB 1.16 against 1.26 at density 1); at 15 they tie; above, the dense training wins,
+and the sparse one's outliers grow fastest (colour at 50: 38 % trained at 15, 32 % at 25, 27 % at 50;
+at density 5 already 1.4 against 1.0 %).  The loss from training too sparse is larger than the gain from
+training to match, so **if in doubt, train at the higher density** (Jonas).  No model trained at 1 or 5 yet:
+whether one matched to sparse data gains more than the 15-trained one's 3-4 % is open.
