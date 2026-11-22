@@ -1211,4 +1211,5 @@ not separated.  tjoin gains from the mixed on-times on the on-time 3 set (outlie
 (colour 95.8 % at 1 000 photons, DECODE-Plex 97.5 %).  So the model is early, trained on on-time 1:
 its three frames already pool a molecule that stays.  Streaming makes a run 1 h 05 instead of 1 h 30
 on one GPU.  Next: 5 and 7 frames on early with on-time 1 (and one 3 M run with streaming and on-time
-1, which separates the streaming); then real data and the SMAPpy fitter.
+1, which separates the streaming); when a GPU is idle, one run trained on on-time 3 alone, tested
+on both on-times (Jonas); then real data and the SMAPpy fitter.
