@@ -262,10 +262,15 @@ def warm_start(model, path) -> None:
 
 
 def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int | None = None, log=print,
-          early_stop: bool = True):
+          early_stop: bool = True, rule: dict | None = None, stop=None) -> str:
+    """Train into ``folder`` (the module's docstring); ``"finished"`` or ``"stopped"``.  ``rule`` changes
+    the stop rule's values over netfit's (`stop_rule`); ``stop`` is asked after every epoch and
+    returns why to stop there, or None (a job's STOP file or SIGTERM, `job.train_folder`)."""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "settings.json").write_text(json.dumps(settings.to_dict(), indent=1), encoding="utf-8")
+    # a job folder's own settings.json (`job.py`) has its paths relative to the folder: kept as written
+    if not (folder / "settings.json").exists():
+        (folder / "settings.json").write_text(json.dumps(settings.to_dict(), indent=1), encoding="utf-8")
     sim, cam, parts = settings.simulation, settings.camera, settings.parts
     sch = parts.schedule.settings
     epochs = epochs or sch["epochs"]
@@ -300,7 +305,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     if sch.get("ema"):
         from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
         ema = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(float(sch["ema"])))
-    rule = stop_rule(sch["samples_per_epoch"])
+    rule = {**stop_rule(sch["samples_per_epoch"]), **(rule or {})}
     if settings.test_set:
         # the context's fixed test set: the same samples for every variant (`testset.py`)
         from . import testset
@@ -336,7 +341,8 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         torch.set_rng_state(state["rng"].cpu())       # map_location moved it with the rest
         progress.append(folder, "start", start, resumed=True, device=device)
     else:
-        progress.append(folder, "start", 0, device=device, method=METHOD, parameters=network.parameters(model),
+        progress.append(folder, "start", 0, device=device, method=METHOD, seed=settings.seed,
+                        parameters=network.parameters(model),
                         settings=settings.to_dict(), stop_rule=rule, epochs=epochs, batch=batch_size, lr=lr,
                         precision="bf16" if bf16 else "fp32", compile=use_compile, channels_last=channels_last)
     g = torch.Generator(device).manual_seed(settings.seed + 1000 + start)
@@ -349,9 +355,9 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     feed = _Prefetch(lambda: drawer(batch_size, g), device) \
         if sch.get("prefetch", True) and str(device).startswith("cuda") else None
     try:
-        _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, truth, scaling, start, epochs,
-                     steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log,
-                     forward, channels_last, ema)
+        return _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, truth, scaling, start, epochs,
+                            steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop,
+                            log, forward, channels_last, ema, stop)
     finally:
         if feed is not None:
             feed.close()
@@ -380,7 +386,7 @@ def _smappy_version() -> str:
 
 def _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, truth, scaling, start, epochs,
                  steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log,
-                 forward=None, channels_last=False, ema=None):
+                 forward=None, channels_last=False, ema=None, stop=None) -> str:
     forward = model if forward is None else forward
     judged = model if ema is None else ema.module       # what is scored and saved
     cam, parts = settings.camera, settings.parts
@@ -458,12 +464,19 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, tru
         seen = (epoch + 1) * per_epoch
         for at in (a for a in snapshots if seen - per_epoch < a <= seen):
             _snapshot(folder, settings, epoch, at, seen, tensors, meta_base, seconds, device, log)
+        asked = stop() if stop is not None else None
+        if asked:
+            progress.append(folder, "stopped", epoch, why=asked)
+            log(f"stopped: {asked}")
+            return "stopped"
         why = progress.converged(progress.read(folder), rule) if early_stop else None
         if why:
-            progress.append(folder, "finished", epoch, reason=why)
+            # ``converged`` and ``why`` as DECODE's jobs write them, for the window (`rule_line`)
+            progress.append(folder, "finished", epoch, reason=why, converged=True, why=why)
             log(f"stopped: {why}")
-            return
+            return "finished"
     progress.append(folder, "finished", epochs - 1, reason="epochs")
+    return "finished"
 
 
 def _snapshot(folder, settings, epoch, at, seen, tensors, meta_base, seconds, device, log):

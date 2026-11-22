@@ -253,7 +253,7 @@ def adopt(found: Found, root=None, runner=None) -> Entry:
     root = Path(root) if root is not None else config.config_dir() / "training_jobs"
     local = root / h.name / found.name
     local.mkdir(parents=True, exist_ok=True)
-    data = ssh(h, f"cd {_quote_dir(found.remote)} && tar -czf - $(ls | grep -v -e ckpt.pt -e {MODEL} -e {STOP})",
+    data = ssh(h, f"cd {_quote_dir(found.remote)} && tar -czf - $(ls | grep -v -e ckpt.pt -e checkpoint.pt -e {MODEL} -e {STOP})",
                timeout=300, runner=runner)
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         tar.extractall(local, filter="data")

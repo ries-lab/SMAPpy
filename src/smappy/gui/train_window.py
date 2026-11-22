@@ -37,6 +37,9 @@ from ..plugins.fit import TIFF_FILTER, CameraSettings
 from ..plugins.fit_decode import MODEL_FILTER
 
 METHOD = "decode-v0.10.2"
+NETFIT = "netfit-v1"
+#: the network a job trains (docs/decode/gui-plan.md §1): SMAPpy's own by default, DECODE's port beside it
+MODELS = (("optimised", "DECODE, optimised"), ("decode", "DECODE"))
 CALIBRATION_FILTER = "Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat);;All files (*)"
 DENSITIES = (("LD", "LD, 15 in 40 x 40 px"), ("HD", "HD, 25 in 40 x 40 px"), ("UHD", "UHD, 50 in 40 x 40 px"))
 REFRESH_MS = 5000
@@ -130,6 +133,9 @@ class PrepareSettings:
                                         "learns that PSF, and its z is the height above the coverslip")
     density: str = param("LD", label="density", choices=DENSITIES,
                          help="how many molecules a training frame holds: LD, HD or UHD, as SMAP's")
+    model: str = param("optimised", label="model", choices=MODELS, advanced=True,
+                       help="the network trained: DECODE, optimised (SMAPpy's, the default) or the original "
+                            "DECODE's; both fit with the DECODE fitter")
     start_from: str = param("", label="start from", kind="open_file", file_filter=MODEL_FILTER,
                             help="a trained model the training starts from (a warm start), even one for "
                                  "other data: it trains faster than from scratch; empty: from scratch")
@@ -325,8 +331,22 @@ def camera_section(camera) -> dict:
 
 
 def method_params(prepared: Prepared, est) -> dict:
+    """DECODE's parameter file of the job: what the figure draws its ranges from, and the job's own for
+    a DECODE model (`netfit_params` for an optimised one: the same ranges)."""
     from decode_smlm.prefit import method_params as params
     return params(est, camera_section(prepared.camera), prepared.settings.density)
+
+
+def netfit_params(prepared: Prepared, est, seed: int = 0) -> dict:
+    """An optimised model's ``settings.json`` (`smappy.netfit.job.settings_from_estimates`): the
+    estimates' ranges, the movie's camera, netfit's defaults for the rest."""
+    from ..netfit.job import settings_from_estimates
+    return settings_from_estimates(est, camera_section(prepared.camera), prepared.settings.density,
+                                   seed=seed).to_dict()
+
+
+def method_of(settings: PrepareSettings) -> str:
+    return NETFIT if settings.model == "optimised" else METHOD
 
 
 def default_folder(movie, calibration) -> Path:
@@ -350,9 +370,13 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
     from ..training import job as jobfile
     from ..training import jobs
     s = prepared.settings
-    params = params or method_params(prepared, est)
+    method = method_of(s)
+    if method == NETFIT:
+        params = params or netfit_params(prepared, est, seed)
+    else:
+        params = params or method_params(prepared, est)
     cam = prepared.camera
-    job = jobfile.Job.new(method=METHOD, seed=seed, device="auto", ranges=simulation(est, s.density),
+    job = jobfile.Job.new(method=method, seed=seed, device="auto", ranges=simulation(est, s.density),
                           camera={**camera_section(cam), "name": cam.camera_name},
                           calibration={"source": str(Path(s.calibration).resolve()),
                                        **calibration_conditions(s.calibration),
@@ -408,6 +432,17 @@ def start_problem(path, params: dict) -> str:
     if not Path(path).is_file():
         return f"{Path(path).name}: no such model file"
     meta = model_file.read_metadata(path)
+    if "simulation" in params:              # an optimised model's job: its own network, the same frames
+        if meta.get("method") != NETFIT or meta.get("channels"):
+            return f"{Path(path).name} is not an optimised one-channel DECODE model: start from scratch, or from one"
+        theirs, ours = meta.get("settings") or {}, params
+        for part in ("backbone", "time_model", "output"):
+            if (theirs.get("parts") or {}).get(part) != ours["parts"].get(part):
+                return (f"{Path(path).name} has another network ({part}): start from scratch, or from a "
+                        f"model of the same network")
+        if int(meta.get("window", 0)) != int(ours["simulation"]["window"]):
+            return f"{Path(path).name} reads {meta.get('window')} frames, the job {ours['simulation']['window']}"
+        return ""
     if meta.get("method") != METHOD:
         return f"{Path(path).name} is not a DECODE model"
     # DECODE's defaults under the method's own (its reference file, read here: decode_smlm's
@@ -590,6 +625,15 @@ def draw_progress(figure, lines: list) -> str:
     axes[0, 1].plot(e, jac)
     _window(axes[0, 1], e, jac, window)
     axes[0, 1].set(title="Jaccard (test set)", xlabel="epoch")
+    # how often it fails: matched molecules beyond 5 times their bound (an optimised model's, plex-plan §16)
+    out_share = series("outliers", True)
+    if np.isfinite(out_share).any():
+        twin = axes[0, 1].twinx()
+        twin.plot(e, 100 * out_share, color="C3", lw=0.9, label="outliers")
+        twin.set_ylabel("outliers (%)", fontsize=7, color="C3")
+        twin.tick_params(labelsize=7, colors="C3")
+        found_from = np.nan_to_num(jac) >= 0.25 * np.nanmax(np.r_[jac, 0.0])
+        _fit_range(twin, np.where(found_from, 100 * out_share, np.nan))
     # pixelation: where in their pixel this epoch's localizations fall, uniform where unbiased
     last = (epochs[-1].get("metrics") or {})
     rows, cols = last.get("pixel_hist_rows"), last.get("pixel_hist_cols")
@@ -636,6 +680,12 @@ def draw_progress(figure, lines: list) -> str:
             if np.isfinite(cl).any():
                 axes[1, 1].plot(e, cl, "--", label="lateral, joint", color="C0", alpha=0.7)
                 axes[1, 1].plot(e, ca, "--", label="axial, joint", color="C1", alpha=0.7)
+            # the inliers' RMSE over the bound, a bias included (an optimised model's): how good the rest is
+            il, ia = series("inlier_rmse_crlb_lat", True), series("inlier_rmse_crlb_ax", True)
+            if np.isfinite(il).any():
+                axes[1, 1].plot(e, il, ":", label="lateral, inliers' RMSE", color="C0")
+                axes[1, 1].plot(e, ia, ":", label="axial, inliers' RMSE", color="C1")
+                cl, ca = np.fmax(cl, il), np.fmax(ca, ia)
             axes[1, 1].axhline(1.0, color="k", lw=0.8, ls=":")
             axes[1, 1].set(title="error / CRLB, width (test set)", xlabel="epoch")
             _fit_range(axes[1, 1], later(wl), later(wa), later(cl), later(ca), include=(1.0,))
@@ -804,7 +854,9 @@ class TrainWindow(QWidget):
         self.prefit_button.setToolTip("fit blocks of the movie with Spline 3D and estimate the training's "
                                       "ranges from them; or type the estimates by hand and write the job")
         self.write_button.setToolTip("write the job folder beside the movie, with the estimates as they stand")
-        self.yaml_button.setToolTip("DECODE's parameters as the job will have them, to edit by hand")
+        self.yaml_button.setToolTip("DECODE's parameters as the job will have them, to edit by hand "
+                                    "(model DECODE, under the form's more)")
+        self._model_changed()
         self.prepare_figure = Figure(constrained_layout=True)
         self.prepare_canvas = canvas_class()(self.prepare_figure)
         prepare = QWidget()
@@ -1104,7 +1156,10 @@ class TrainWindow(QWidget):
 
     def _prepare_field(self, name: str) -> None:
         """The sample's index left *typed*: its number dropped; a number typed over: *typed*
-        (`calibrate.medium.cleared`)."""
+        (`calibrate.medium.cleared`).  *model*: method.yaml is DECODE's, for its model only."""
+        if name == "model":
+            self._model_changed()
+            return
         if name not in ("sample.medium", "sample.sample_index"):
             return
         from ..calibrate.medium import cleared
@@ -1115,6 +1170,15 @@ class TrainWindow(QWidget):
         drop = cleared(name, sample.medium, sample.sample_index, "sample.medium", "sample.sample_index")
         if drop:
             self.prepare_form.set_values(drop)
+
+    def _model_changed(self) -> None:
+        try:
+            decode = self.prepare_form.value().model == "decode"
+        except ValueError:
+            return
+        if not decode:
+            self.yaml_button.setChecked(False)
+        self.yaml_button.setEnabled(decode)
 
     def _prepare_changed(self) -> None:
         """*in the sample* only for a pupil (Zernike) calibration (`calibrate.depth.sample_state`), its rows as
@@ -1211,7 +1275,9 @@ class TrainWindow(QWidget):
                 return
         est = with_settings(self.prepared.estimates, self.estimate_form.value())
         params = method_params(self.prepared, est)
-        if self.yaml_button.isChecked():
+        if method_of(self.prepared.settings) == NETFIT:
+            params = None                       # the optimised model's settings (`write_job`); no method.yaml
+        elif self.yaml_button.isChecked():
             try:
                 params = yaml.safe_load(self.yaml_edit.toPlainText()) or params
             except yaml.YAMLError as error:
@@ -1385,8 +1451,8 @@ def try_on_data(folder, frames: int = TRY_FRAMES):
     from ..plugins.fit_decode import _mirrored
     from ..training import job as jobfile
     from ..training import model_file
+    from ..training.predictors import load
     from ..window_engine import WindowEngine
-    from decode_smlm.predict import load_predictor
     job, _ = jobfile.read(folder)
     model = Path(folder) / "model.safetensors"
     meta = model_file.read_metadata(model)
@@ -1396,7 +1462,7 @@ def try_on_data(folder, frames: int = TRY_FRAMES):
     source = _source(job.data["path"])
     n = min(frames, source.n_frames)
     stack = np.concatenate([b for _, b in source.frames(chunk=n, start=0, stop=n)])
-    predictor = load_predictor(model, None, frames_mirrored=_mirrored(meta, camera))
+    predictor = load(model, None, frames_mirrored=_mirrored(meta, camera))
     engine = WindowEngine(camera, predictor)
     parts = [engine.push(stack, 0), engine.end()]
     xs, ys = [], []

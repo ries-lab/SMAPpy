@@ -145,6 +145,26 @@ def _below_limit(truth, ti, fi, photons_min):
 PHOTONS_MIN = 100.0
 
 
+#: an outlier's error is beyond this many times its own bound, on any axis (plex-plan §16, the standard report)
+OUTLIER = 5.0
+
+
+def outliers_and_inliers(dx, dy, dz, bound) -> dict:
+    """The standard report's numbers (plex-plan §16): how often the network fails -- the share of matched
+    molecules beyond `OUTLIER` times their single-emitter bound ``bound`` (m, 3) on any axis -- and how
+    good the rest is, their RMSE over the bound's, lateral and axial (an RMSE: a bias counts).  Cheap
+    every epoch: the bounds are the test set's, computed once."""
+    r = np.abs(np.c_[dx, dy, dz]) / bound
+    inlier = ~(r > OUTLIER).any(1)
+    out = {"outliers": float(1 - inlier.mean())}
+    if inlier.sum() >= 10:
+        i = inlier
+        out["inlier_rmse_crlb_lat"] = float(np.sqrt(np.mean(dx[i] ** 2 + dy[i] ** 2)
+                                                    / np.mean(bound[i, 0] ** 2 + bound[i, 1] ** 2)))
+        out["inlier_rmse_crlb_ax"] = float(np.sqrt(np.mean(dz[i] ** 2) / np.mean(bound[i, 2] ** 2)))
+    return out
+
+
 def evaluate(truth: dict, found: dict, pixel_nm, photons_min: float | None = PHOTONS_MIN) -> dict:
     """``truth``: frame, xyz (n, 3), photons (in the frame), crlb (n, 3) or None; ``found``: frame,
     xyz, err (m, 3) in nm.  Truth below ``photons_min`` photons counts neither way (`_below_limit`)."""
@@ -163,7 +183,9 @@ def evaluate(truth: dict, found: dict, pixel_nm, photons_min: float | None = PHO
     eff = lambda rmse, a: float((100 - np.sqrt((100 * (1 - jac)) ** 2 + (a * rmse) ** 2)) / 100)
     out.update(rmse_lat_nm=lat, rmse_ax_nm=ax, eff_lat=eff(lat, 1.0), eff_ax=eff(ax, 0.5),
                pixel_hist_cols=subpixel_histogram(f[:, 0]), pixel_hist_rows=subpixel_histogram(f[:, 1]),
-               pixel_ks=ks_uniform(np.r_[f[:, 0], f[:, 1]]), pixel_mod=pixel_modulation(np.r_[f[:, 0], f[:, 1]]))
+               pixel_ks=ks_uniform(np.r_[f[:, 0], f[:, 1]]), pixel_mod=pixel_modulation(np.r_[f[:, 0], f[:, 1]]),
+               # the standard report's pixelation: less the truth's own KS at the same molecules, 0 its noise
+               pixel_ks_excess=ks_uniform(np.r_[f[:, 0], f[:, 1]]) - ks_uniform(np.r_[t[:, 0], t[:, 1]]))
     err = found["err"][fi]
     out["claim_width_lat"] = robust_width(np.r_[dx / err[:, 0], dy / err[:, 1]])
     out["claim_width_ax"] = robust_width(dz / err[:, 2])
@@ -171,6 +193,7 @@ def evaluate(truth: dict, found: dict, pixel_nm, photons_min: float | None = PHO
         b = truth["crlb"][ti]
         out["crlb_width_lat"] = robust_width(np.r_[dx / b[:, 0], dy / b[:, 1]])
         out["crlb_width_ax"] = robust_width(dz / b[:, 2])
+        out.update(outliers_and_inliers(dx, dy, dz, b))
     # the whole range in 200 nm bins of |z|: near the focus decides, but no bin may fail
     az_all, az = np.abs(truth["xyz"][:, 2]), np.abs(t[:, 2])
     by_z = []

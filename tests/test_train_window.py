@@ -45,10 +45,13 @@ def movie(tmp_path):
     return path, cal_path
 
 
-def _prepare_settings(movie, cal_path):
+def _prepare_settings(movie, cal_path, model="decode"):
+    """The DECODE model's by default: these tests are of its job; the optimised model's are
+    tests/test_netfit_job.py."""
     from smappy.gui.train_window import PrepareSettings
     from smappy.plugins.fit import CameraSettings
     return PrepareSettings(movie=str(movie), calibration=str(cal_path), density="LD", blocks=3, block_frames=50,
+                           model=model,
                            camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1, em_on=False))
 
 

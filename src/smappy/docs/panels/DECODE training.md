@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
 ---
 
 ## What it does
@@ -13,6 +13,12 @@ learns that from frames it simulates: molecules drawn with the bead
 calibration's [PSF](plugin:Panels/Glossary), as bright, as dense and over the
 same background and z range as in the data, with the camera's noise.  This
 window sets that up from a movie, trains it, and lets you watch it learn.
+
+Two networks can be trained, chosen as *model* under the form's *more*:
+*DECODE, optimised*, SMAPpy's own, by default, and *DECODE*, the
+original's.  Both are trained from the same estimates, in the same job
+folder, and fitted by the same [DECODE](plugin:Localize/DECODE) fitter; what
+differs is the network and how it learns (the fitter's page compares them).
 
 A training takes hours, on a GPU; a computer without one trains on a
 workstation, over ssh.  Nothing is copied there but a folder of a few files:
@@ -147,7 +153,10 @@ and a network that has learnt where molecules lie can do better there.  The
 joint bounds take 6 s at every start of a training at the HD density, 17 s
 at UHD; *joint CRLB* under the Train tab's *more* turned off leaves them out,
 and the panels then show the single-emitter bound alone.  A
-training from before these numbers existed shows the panels empty.
+training from before these numbers existed shows the panels empty, and so
+does an optimised model's: its test set has the single-emitter bound and the
+bound pooled over the frames read, not the joint ones, and *joint CRLB* does
+not apply to it.
 
 
 **Try.**  *Try on my data* runs the chosen job's newest model -- written
@@ -208,8 +217,18 @@ Takes the job off the list; its folder stays where it is, and a training
 running goes on.
 
 ### Prepare
-The movie, its PSF calibration, the density to train at, and a model to
-*start from*.
+The movie, its PSF calibration, the density to train at, the *model* to train
+and a model to *start from*.
+
+*model* (under *more*): *DECODE, optimised* trains SMAPpy's own network,
+*DECODE* the original's.  The optimised one's job holds `settings.json` in
+place of DECODE's `method.yaml`: the same photons, background, z range,
+on-time, density and camera, SMAPpy's settings for the rest.  Its *Follow*
+draws two more curves: the share of the test set's molecules more than 5
+times their [CRLB](plugin:Panels/Glossary) off (*outliers*, on the Jaccard's
+panel), and the RMSE of the rest over their CRLB (dotted, on the error /
+CRLB panel).  Together they say how often it fails and how good it is
+otherwise, at no cost: the bounds are the test set's, computed once.
 
 *start from* is a warm start: the training begins with that model's
 network instead of a random one, and learns the new data from there.  A
@@ -217,7 +236,7 @@ model trained for other data -- another sample, another density, a
 calibration of another day -- is still a better start than a random
 network: it already knows what a spot is, and in earlier tests with DECODE
 it trained faster (not yet measured in SMAPpy).  It must be a network of the
-same shape (the window says so when it is not).  The DECODE fitter's *Train
+same shape and of the same *model* (the window says so when it is not).  The DECODE fitter's *Train
 a model...* fills in the fitter's own model.
 
 *LD*, *HD* and *UHD*
@@ -257,7 +276,8 @@ blink.
 
 ### Advanced: method.yaml
 DECODE's whole parameter file, as it will be written, to edit by hand.  Used
-as written when shown.
+as written when shown.  For *model* *DECODE* only: the optimised model has no
+such file, and the button is off.
 
 ### Write job
 Writes the job folder and selects it: from the prefit's estimates as edited,
