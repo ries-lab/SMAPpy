@@ -142,9 +142,9 @@ that architecture here: what the study compared it as.
    jobs: Spline 3D 2C's prefit, the kind (from the calibration: planes in focus 200 nm apart), the main
    channel (the brighter), the dyes (independent counts by default; from the prefit or typed, with a
    spread), the study's C = 2 settings.  Spline 3D 2C's linked biplane photons are twice netfit's
-   (measured 2.00), halved for the estimates.  Not yet: two-channel *Try*, the preview's simulated
-   frames, and T6's bounds for a two-channel test set.
-5. **T6** with step 2 (one channel: done, outliers and the inliers' RMSE / CRLB in *Follow*) and step 4 (two).
+   (measured 2.00), halved for the estimates.  Two-channel *Try*, the preview's simulated frames and T6's
+   bounds for a two-channel test set (`netfit.bounds.drawn_crlb`) done 2026-11-22.
+5. **T6** (done): outliers and the inliers' RMSE / CRLB in *Follow*, one channel and two.
 6. **I5**: DECODE-Plex's published models, exported, as a baseline in the GUI.
 7. **T5** alongside each step, not after: each step's page, tests (a simulated two-channel movie
    trained a few epochs and fitted, as the one-channel tests do) and the slow tier.

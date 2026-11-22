@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.run_prefit_two, smappy.netfit.prefit_two.prefit_two, smappy.netfit.prefit_two.dye_shares, smappy.netfit.prefit_two.kind_of, smappy.netfit.job.two_channel_settings, smappy.gui.train_window.two_channel_problem, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.run_prefit_two, smappy.netfit.prefit_two.prefit_two, smappy.netfit.prefit_two.dye_shares, smappy.netfit.prefit_two.kind_of, smappy.netfit.job.two_channel_settings, smappy.gui.train_window.two_channel_problem, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.gui.train_window.simulated_frames_two, smappy.gui.train_window.channels_side_by_side, smappy.netfit.bounds.drawn_crlb, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
 ---
 
 ## What it does
@@ -163,7 +163,9 @@ not apply to it.
 after every epoch, so a training still running can be tried -- on the first
 20 frames of its movie, and draws the first frame with what the network
 found there at a probability of at least 0.5.  It is a look, not a fit:
-nothing is saved.
+nothing is saved.  A two-channel model reads the frames cut into its
+channels by the job's calibration at the movie's camera ROI, as the DECODE
+fitter cuts them, and its localizations are drawn where channel 0 saw them.
 
 **Use.**  *Use this model*, beside the jobs, puts the chosen job's newest
 model into the DECODE fitter's *trained model*.
@@ -235,7 +237,10 @@ draws two more curves: the share of the test set's molecules more than 5
 times their [CRLB](plugin:Panels/Glossary) off (*outliers*, on the Jaccard's
 panel), and the RMSE of the rest over their CRLB (dotted, on the error /
 CRLB panel).  Together they say how often it fails and how good it is
-otherwise, at no cost: the bounds are the test set's, computed once.
+otherwise, at no cost: the bounds are the test set's, computed once.  A
+two-channel job's bound is both channels' together, from the spots as the
+training drew them: the molecule's x, y and z shared, its photons one count
+(biplane) or one per channel (colour), each channel's own background.
 
 *start from* is a warm start: the training begins with that model's
 network instead of a random one, and learns the new data from there.  A
@@ -322,8 +327,9 @@ beads (Fig. 2a's 5.8 rows) leaves Spline 3D 2C pairing the wrong spots.
 The fitter's *measure the move* finds it.  The job draws the two channels
 with the beads' registration either way: the network learns all of it.
 
-A two-channel job's frames are not previewed beside the data: DECODE's
-simulation, which draws the preview, draws one channel.
+A two-channel job's preview shows each channel's corner of the data, cut as
+the network reads them (the main half on the left), beside the same two as
+the training draws them.
 
 ### Prefit
 Fits the blocks and fills *Estimates*, with the calibration drawn in the

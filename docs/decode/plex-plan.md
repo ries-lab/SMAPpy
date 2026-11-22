@@ -1431,3 +1431,27 @@ U 0.545; outliers at density 15 1.5 / 1.7 / 1.7 %; colour Jaccard at 1 000 photo
 On the same code, streamed and unstreamed agree (biplane 0.541 against 0.545); the gap to S is the code's
 or one seed's, not streaming's.  The two-channel job stays streamed, as one channel's.  Open: why today's
 unstreamed seed is below S in both contexts (one seed each; the settings are identical).
+
+**Uneven backgrounds in training, built** (2026-11-22; `SimulationSettings.background_uneven`,
+`simulate.background_modulation`): a share of the movies has its background multiplied by
+1 + c (2 f - 1), f a smooth field (bicubic from 2 -- 6 knots a side, so 7 -- 40 pixels of a 40-pixel frame)
+fixed over the movie, c uniform up to ``background_contrast`` (0.8: a pixel up to 9 times another, Fig.
+2c's halves 10).  The mean is kept; two channels share the choice and most of the shape (correlation
+0.87 in the median), each its own contrast.  The background term then takes the map as its target, and
+the in-memory test set's bound each molecule's own background.  Off by default.  `B_*_uneven_s0` (half
+the movies uneven, otherwise P's) train on gpuvm; judged by the background maps' pattern gain
+(`uneven_bg.map_errors`, 2 -- 24 % for a flat-trained model) and the flat sets' standard report.
+
+**Fig. 2c's prefit over the movie** (`suite/fig2c_prefit.py`, the window's own prefit with its blocks
+placed; the whole movie fetched, 10 000 frames, camera ROI 175-0-248-512):
+
+| frames | background, photons a pixel | photons, mean / sd | per 40 x 40 (SMAP's measure) |
+|---|---|---|---|
+| 0 -- 1 000 | 0 -- 1 517 | 6 500 / 9 300 | 1.0 |
+| 9 000 -- 10 000 | 0 -- 195 | 2 200 / 2 700 | 2.1 |
+| across the movie | 0 -- 1 249 | 2 800 / 4 200 | 1.7 |
+
+The cell bleaches: the late frames' background is an eighth of the early ones', their photons typical
+of a dye; the early photons look inflated by overlapping molecules.  Two models from the last frames'
+estimates (`F_fig2c_last_s0`, flat; `F_fig2c_last_uneven_s0`, half the movies uneven) train on decodebox,
+to be fitted on the first and the last 300 frames (`last300.tif`).
