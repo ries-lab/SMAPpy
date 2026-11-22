@@ -76,6 +76,27 @@ def main(argv=None) -> int:
         from .training import request_stop
         print(f"asked to stop: {request_stop(a.folder)}")
         return 0
+    import json
+    try:
+        method = json.loads((a.folder / "job.json").read_text(encoding="utf-8")).get("method")
+    except (OSError, ValueError):
+        method = None
+    if method == "netfit-v1":
+        # SMAPpy's own network (*DECODE, optimised*): its job trains in smappy.netfit, the same folder,
+        # lock, STOP file and progress (docs/decode/gui-plan.md, step 2); the joint bounds are DECODE's
+        from smappy.netfit.job import JobError as NetfitJobError
+        from smappy.netfit.job import train_folder
+        try:
+            result = train_folder(a.folder, device=a.device, epochs=a.epochs, all_epochs=a.all_epochs,
+                                  stop_rule=_stop_rule(a.stop_rule), allow_other_version=a.allow_other_version)
+        except NetfitJobError as e:
+            print(f"smappy-decode: {e}", file=sys.stderr)
+            return 2
+        except KeyboardInterrupt:
+            print("interrupted: run train again to resume from the last epoch", file=sys.stderr)
+            return 130
+        print(result)
+        return 0
     from .training import JobError, train
     try:
         result = train(a.folder, device=a.device, epochs=a.epochs, num_workers=a.workers,
