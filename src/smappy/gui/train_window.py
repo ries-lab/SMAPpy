@@ -1383,7 +1383,11 @@ class TrainWindow(QWidget):
         frames = self.simulated is not None and self.prepared.sample is not None
         axes = self.prepare_figure.subplots(2 if frames else 1, 3, squeeze=False)
         draw_ranges(axes[0], self.prepared.localizations, params)
-        if frames:
+        if frames and self.prepared.two is not None:
+            # each channel's corner of the data, cut as the network reads it, beside the simulated pair
+            real = channels_side_by_side(self.prepared, photons(self.prepared.sample[:1], params["Camera"])[0])
+            draw_frames(axes[1], real[None], self.simulated[:1], size=2 * PREVIEW_PX)
+        elif frames:
             draw_frames(axes[1], photons(self.prepared.sample[:1], params["Camera"]), self.simulated[:1])
         self.prepare_canvas.draw_idle()
 
@@ -1396,13 +1400,18 @@ class TrainWindow(QWidget):
         """Frames as the training would draw them with the estimates as they stand, beside the data:
         with torch here only (DECODE's own simulation); on a timer, so never raising."""
         try:
-            # DECODE's simulation draws one channel: a two-channel job's frames are not previewed
-            if self.prepared is None or not torch_here() or self.prepared.two is not None:
+            if self.prepared is None or not torch_here():
                 return
             if self.busy:
                 self._simulate_later.start()
                 return
             est = with_settings(self.prepared.estimates, self.estimate_form.value())
+            if self.prepared.two is not None:
+                # DECODE's simulation draws one channel: a two-channel job's frames drawn as netfit draws them
+                params = netfit_params(self.prepared, est)
+                calibration = self.prepared.settings.calibration
+                self._work("simulated", lambda report: simulated_frames_two(params, calibration))
+                return
             params = method_params(self.prepared, est)
             calibration = self.prepared.calibration or self.prepared.settings.calibration
             self._work("simulated", lambda report: simulated_frames(params, calibration))
@@ -1517,6 +1526,46 @@ class TrainWindow(QWidget):
         self.status_bar.showMessage(f"the DECODE fitter now uses {model}")
 
 
+PREVIEW_PX = 40                     # a two-channel preview's channels, side by side, this many pixels each
+
+
+def simulated_frames_two(params: dict, calibration, n_frames: int = 2, seed: int = 0) -> np.ndarray:
+    """(n, PREVIEW_PX, 2 PREVIEW_PX): a two-channel job's middle frames as its training draws them
+    (`netfit.simulate.draw_batch_2c`), channel 0 (the grid's, the main half) left of channel 1, in
+    photons (needs torch)."""
+    import torch
+
+    from ..netfit.train import Drawer, settings_from_dict
+    d = {**params, "calibration": str(calibration),
+         "simulation": {**params["simulation"], "frame_px": PREVIEW_PX, "movie_windows": 1}}
+    s = settings_from_dict(d)
+    b = Drawer(s, "cpu")(n_frames, torch.Generator().manual_seed(seed))
+    f = b.frames[:, :, b.frames.shape[2] // 2].numpy()                  # (n, 2, s, s)
+    return np.concatenate([f[:, 0], f[:, 1]], axis=-1)
+
+
+def channels_side_by_side(prepared, frame_photons) -> np.ndarray:
+    """A frame of the movie cut into the two channels as the network reads them (the calibration's
+    registration at the movie's camera ROI, the main half first), each channel's corner of PREVIEW_PX,
+    side by side: what `simulated_frames_two` draws, from the data."""
+    from ..calibrate.dual import load_dual_color_calibration
+    from ..netfit.channels import TwoChannels
+    cal = load_dual_color_calibration(prepared.settings.calibration)
+    main = netfit_main(prepared)
+    frame = np.asarray(frame_photons, float)
+    two = TwoChannels.from_calibration(cal, prepared.camera.roi_offset, main=main, shape=frame.shape)
+    cut = two.cut(frame[None])[0]                                        # (2, h, w)
+    return np.concatenate([cut[0, :PREVIEW_PX, :PREVIEW_PX], cut[1, :PREVIEW_PX, :PREVIEW_PX]], axis=-1)
+
+
+def netfit_main(prepared) -> int:
+    """The calibration's half the network reads as its grid, as the job will have it."""
+    from ..netfit.job import two_channel_settings
+    t = prepared.settings.two_channels
+    ch, _ = two_channel_settings(prepared.two, main=t.main, dyes="independent")
+    return int(ch.main)
+
+
 def simulated_frames(params: dict, calibration, n_frames: int = 2) -> np.ndarray:
     """Frames as the training simulates them with these settings, in photons (needs torch)."""
     from decode_smlm.figures import simulate_frames
@@ -1591,12 +1640,12 @@ class HostFollower:
 
 def try_on_data(folder, frames: int = TRY_FRAMES):
     """The job's newest model on the first frames of its movie: (first frame in photons, its
-    localizations' (x, y) in pixels at prob >= 0.5)."""
+    localizations' (x, y) in pixels at prob >= 0.5); a two-channel model's at channel 0's spots."""
     from ..metadata import CameraMetadata
     from ..plugins.fit_decode import _mirrored
     from ..training import job as jobfile
     from ..training import model_file
-    from ..training.predictors import load
+    from ..training.predictors import load, two_channel
     from ..window_engine import WindowEngine
     job, _ = jobfile.read(folder)
     model = Path(folder) / "model.safetensors"
@@ -1607,7 +1656,18 @@ def try_on_data(folder, frames: int = TRY_FRAMES):
     source = _source(job.data["path"])
     n = min(frames, source.n_frames)
     stack = np.concatenate([b for _, b in source.frames(chunk=n, start=0, stop=n)])
-    predictor = load(model, None, frames_mirrored=_mirrored(meta, camera))
+    if two_channel(meta):
+        # cut into its channels by the job's calibration at the movie's camera ROI, as the fitter cuts them
+        # (`fit_decode.two_channel_model`): positions on the frame, channel 0's
+        from ..calibrate.dual import load_dual_color_calibration
+        from ..netfit.fit_two import TwoChannelPredictor
+        from ..netfit.predict import Predictor
+        cal = load_dual_color_calibration(Path(folder) / job.calibration.get("file", jobfile.CALIBRATION))
+        roi = job.data.get("camera_roi")
+        predictor = TwoChannelPredictor(Predictor(model, None), cal, (roi[0], roi[1]) if roi else (0, 0),
+                                        em=bool(cam.get("em_gain")))
+    else:
+        predictor = load(model, None, frames_mirrored=_mirrored(meta, camera))
     engine = WindowEngine(camera, predictor)
     parts = [engine.push(stack, 0), engine.end()]
     xs, ys = [], []

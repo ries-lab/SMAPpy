@@ -177,7 +177,11 @@ class _Prefetch:
 
 
 def load_settings(path) -> TrainingSettings:
-    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    return settings_from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def settings_from_dict(d: dict) -> TrainingSettings:
+    """`TrainingSettings` from a ``settings.json``'s dict (`TrainingSettings.to_dict`)."""
     parts = Parts(**{k: Part(**v) for k, v in d.get("parts", {}).items()})
     raw = dict(d.get("simulation", {}))
     if "emitters_per_frame" in raw:          # before the density (2026-11-12): per frame of frame_px

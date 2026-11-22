@@ -103,6 +103,15 @@ def test_a_two_channel_job_without_a_prefit_trains_through_the_decode_command(mo
     from smappy.training import model_file
     meta = model_file.read_metadata(folder / "model.safetensors")
     assert meta["channels"]["main"] == 1 and meta["calibration_sha256"] == jobfile.file_sha256(cal)
+    # *Try*: the model on the movie's first frames, cut into its channels as the fitter cuts them
+    from smappy.gui.train_window import channels_side_by_side, simulated_frames_two, try_on_data
+    frame, locs = try_on_data(folder, frames=6)
+    assert frame.shape == SHAPE and locs.ndim == 2 and locs.shape[1] == 2
+    # the preview: the training's frames, the two channels side by side, beside the data's cut alike
+    pair = simulated_frames_two(params, cal, n_frames=1)
+    assert pair.shape == (1, 40, 80) and np.isfinite(pair).all()
+    real = channels_side_by_side(prepared, np.full(SHAPE, 100.0))
+    assert real.shape == (40, 80)
     del torch
 
 
