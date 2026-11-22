@@ -38,3 +38,19 @@ def test_a_spot_put_off_or_a_neighbour_missed_shows():
     g_all = G.goodness(splines, data, frame, xy0, xy1, z, ph, bg)
     g_kept = G.goodness(splines, data, frame[keep], xy0[keep], xy1[keep], z[keep], ph[keep], bg[keep])
     assert np.median(g_kept) > np.median(g_all[keep]) + 2
+
+
+def test_an_uneven_background_is_explained_by_the_map_and_not_by_a_level():
+    """A network that maps its background is judged with its map (plex-plan §16, Fig. 2c): a level a
+    frame counts a slope as the spots' misfit."""
+    rng = np.random.default_rng(3)
+    splines, _, frame, xy0, xy1, z, ph, bg = _scene(rng)
+    ramp = np.linspace(0.2, 1.8, 64)[None, None, None, :] * np.array([10.0, 20.0])[None, :, None, None]
+    stack = np.zeros((1, 2, 64, 64)) + ramp
+    for c, xy in enumerate((xy0, xy1)):
+        p, corner = G._spots(splines[c], xy[:, 0], xy[:, 1], z, ph)
+        G._paint(stack[0, c], p, corner)
+    data = rng.poisson(stack).astype(float)
+    g_map = G.goodness(splines, data, frame, xy0, xy1, z, ph, None, background_map=ramp.repeat(64, 2))
+    g_level = G.goodness(splines, data, frame, xy0, xy1, z, ph, bg)
+    assert abs(np.median(g_map)) < 1.0 and np.median(g_level) > np.median(g_map) + 2

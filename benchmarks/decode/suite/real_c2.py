@@ -65,9 +65,41 @@ def fit(movie, model, shift=0.0, n=200, goodness=True):
         keep["goodness"] = fit_goodness(two, cal, p.channels.kind, stack[k:len(stack) - k], np.asarray(r["frame"], int),
                                         np.c_[r["x_pix"], r["y_pix"]], r["z_nm"], ph, None, bool(c["em_on"]))
         keep["goodness_seconds"] = np.array(time.time() - t1)
+        # the same with the network's own background, pixel by pixel (plex-plan §16)
+        keep["goodness_map"] = fit_goodness(two, cal, p.channels.kind, stack[k:len(stack) - k], np.asarray(r["frame"], int),
+                                            np.c_[r["x_pix"], r["y_pix"]], r["z_nm"], ph, None, bool(c["em_on"]),
+                                            background_map=background_map(p, two, stack))
     keep["seconds"] = np.array(seconds)
     keep["box"] = np.array(two.box)
     return keep
+
+
+def background_map(p, two, stack):
+    """The network's background output (T, 2, H, W), photons a pixel, on the stack's grid in the grid's
+    order (as `goodness` takes it); outside the predictor's crop each frame's median of the map.
+    ``stack`` as the predictor read it, the window's ``k`` frames repeated at each end."""
+    import torch
+    k = p.window
+    T = len(stack) - 2 * k
+    H, W = stack.shape[-2:]
+    r0, c0, hh, ww = p.crop(H, W)
+    x = torch.as_tensor(stack[..., r0:r0 + hh, c0:c0 + ww])
+    x = ((x - p.scaling.input_offset) / p.scaling.input_scale).transpose(0, 1)
+    maps = torch.as_tensor(two.offsets()[:, r0:r0 + hh, c0:c0 + ww])
+    lay, out = p.model.layout, []
+    with torch.no_grad():
+        for a in range(0, T, 8):
+            b = min(a + 8, T)
+            y = p.model(x[:, a:b + 2 * k][None].to(p.device), b - a, maps[None].to(p.device))
+            out.append(y[:, lay.bg:lay.bg + lay.backgrounds].cpu().numpy() * p.scaling.bg_max)
+    bg = np.concatenate(out)
+    if p.scale > 1:
+        bg = bg.reshape(*bg.shape[:2], hh, p.scale, ww, p.scale).mean((3, 5))
+    if bg.shape[1] == 1:
+        bg = np.repeat(bg, 2, 1)
+    full = np.repeat(np.median(bg.reshape(T, 2, -1), 2)[:, :, None, None], H, 2).repeat(W, 3)
+    full[..., r0:r0 + hh, c0:c0 + ww] = bg
+    return full.astype(np.float32)
 
 
 def plex(movie, n=200):
@@ -124,6 +156,8 @@ def summary(movie, L, P, prob=0.6, n_frames=None):
         g = L["goodness"]
         out["goodness_pct"] = np.nanpercentile(g, [50, 90, 99]).round(2).tolist()
         out["goodness_seconds"] = float(L["goodness_seconds"])
+    if "goodness_map" in L:
+        out["goodness_map_pct"] = np.nanpercentile(L["goodness_map"], [50, 90, 99]).round(2).tolist()
     if "photons_c" in L:
         pc = L["photons_c"]
         out["share_pct"] = np.percentile(pc[:, 1] / np.maximum(pc.sum(1), 1e-9), [5, 25, 50, 75, 95]).round(3).tolist()

@@ -1514,6 +1514,20 @@ backgrounds, every model pixelates half as much on the real movie (0.016 against
 0.023) and puts z narrower, B's nearest DECODE-Plex's (-647 -- 691 against -601 -- 691); molecules found and
 matched as many.  Their goodness is worse, but the statistic draws a flat background per frame
 (`goodness`), and these models put more of the light into their background map and less into the spots
-(photons 3 344 against 3 754): it penalises the very thing they learnt.  Judging them on real data needs
-the goodness with the network's own background map -- the next step before uneven backgrounds go into
-the window's default.
+(photons 3 344 against 3 754): it penalises the very thing they learnt.  Judged with the network's own
+background map instead (`goodness(background_map=)`, `real_c2.background_map`), goodness median / 90 %:
+
+| | F flat | F uneven | R bg 1 000 | P (flat) | B (uneven) |
+|---|---|---|---|---|---|
+| first frames, a level a frame | 112 / 1160 | 204 / 1343 | 55 / 298 | 57 / 321 | 100 / 594 |
+| first frames, the network's map | 66 / 1325 | 48 / 1385 | 84 / 362 | 87 / 443 | 58 / 241 |
+| last frames, a level a frame | 17 / 131 | 35 / 318 | 23 / 101 | 24 / 115 | 30 / 213 |
+| last frames, the network's map | 15 / 101 | **2.3 / 11** | 36 / 114 | 19 / 119 | 12 / 53 |
+
+With their own maps the models trained on uneven backgrounds explain the movie best, and the flat-trained
+ones get no better (their maps are near a constant, and where they differ they are wrong): on the early
+frames B's 90th percentile is half P's; on the late frames the model trained for them with uneven
+backgrounds leaves noise alone around its molecules (0 is noise; P 19, B 12, F flat 15).  Fig. 2c's
+background is uneven, and a network that has learnt such backgrounds puts the light where it is.  For
+the window: uneven backgrounds in training (half the movies, contrast up to 0.8) once the seeds confirm
+the flat sets' small cost; and the goodness a network is judged by draws its own map.

@@ -60,7 +60,8 @@ def deviance(data, model, excess: float = 1.0):
 
 
 def goodness(splines, stack, frame, xy0, xy1, z_nm, photons, background, excess: float = 1.0,
-             radius: int = 4, levels: np.ndarray | None = None, device=None, chunk: int = 32) -> np.ndarray:
+             radius: int = 4, levels: np.ndarray | None = None, device=None, chunk: int = 32,
+             background_map: np.ndarray | None = None) -> np.ndarray:
     """(n,) ``g`` of each localization (the module's docstring).  ``splines`` the two channels' as the
     network draws them (`channels.splines`); ``stack`` (T, 2, H, W) the frames read, in photons, on
     the grid (`TwoChannels.cut`); ``frame`` (n,) the stack's frame of each; ``xy0`` / ``xy1`` (n, 2)
@@ -72,7 +73,10 @@ def goodness(splines, stack, frame, xy0, xy1, z_nm, photons, background, excess:
     of the data less the drawn spots, from the fit itself and the same rule for any fitter (the frame's
     plain median counts the spots twice where they crowd: at density 50 it put the median ``g`` at
     200).  The levels go into ``levels`` (n, 2) when given, for a bound drawn with the same background
-    (`bounds.plugin_crlb`).
+    (`bounds.plugin_crlb`).  ``background_map`` (T, 2, H, W), photons a pixel on the stack's grid, is
+    the background drawn pixel by pixel instead -- a network's own background output: a model trained on
+    uneven backgrounds puts light into its map that a level a frame would count against its spots
+    (plex-plan §16, Fig. 2c).
 
     In torch, ``chunk`` frames at a time on ``device`` (CUDA where there is one): every spot drawn with
     `render.SplineRenderer`, the deviance an image, each localization's square summed by a box
@@ -112,7 +116,8 @@ def goodness(splines, stack, frame, xy0, xy1, z_nm, photons, background, excess:
             levels[rows] = level.cpu().numpy()[frame[rows] - f0]
         if not len(rows):
             continue
-        mu = (model + level[..., None, None]).clamp_min(1e-6)
+        under = t(background_map[f0:f1]) if background_map is not None else level[..., None, None]
+        mu = (model + under).clamp_min(1e-6)
         pos = data > 0
         dv = torch.where(pos, mu - data + data * torch.log(torch.where(pos, data, torch.ones_like(data)) / mu), mu)
         dv = 2 * dv / float(excess)
@@ -137,7 +142,8 @@ def goodness(splines, stack, frame, xy0, xy1, z_nm, photons, background, excess:
 
 
 def fit_goodness(two, cal, kind: str, stack, frame, xy_box, z_nm, photons, background, em: bool,
-                 radius: int = 4, levels: np.ndarray | None = None, device=None) -> np.ndarray:
+                 radius: int = 4, levels: np.ndarray | None = None, device=None,
+                 background_map: np.ndarray | None = None) -> np.ndarray:
     """`goodness` of a network's output on its grid: ``xy_box`` (n, 2) channel 0's positions in the
     stack's pixels (the predictor's ``x_pix``, ``y_pix``), channel 1's where the registration puts
     them (`TwoChannels.remainder`); the rest in the grid's order, as the predictor reports it."""
@@ -146,4 +152,4 @@ def fit_goodness(two, cal, kind: str, stack, frame, xy_box, z_nm, photons, backg
     xy_box = np.asarray(xy_box, float)
     xy1 = xy_box + two.remainder(xy_box + [c0, r0])
     return goodness(splines(cal, kind, two.main), stack, frame, xy_box, xy1, z_nm, photons, background,
-                    2.0 if em else 1.0, radius, levels, device)
+                    2.0 if em else 1.0, radius, levels, device, background_map=background_map)
