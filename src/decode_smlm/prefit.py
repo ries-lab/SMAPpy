@@ -29,7 +29,7 @@ molecule's appearance) and the localizations themselves.
   each side, its lower end at least 0.9 times the 0.05th percentile.
 * **z**: the 2nd to 98th percentile of the localizations whose fits pass the likelihood cut of
   the fully-on frames, widened by 15 % of that range on each side and clamped to the calibration's
-  range; +-750 nm without z.  Not SMAP's blinks' 1st to 99th widened by 20 %, which on a live cell
+  range, and at least -500 -- 500 nm; +-750 nm without z.  Not SMAP's blinks' 1st to 99th widened by 20 %, which on a live cell
   reached the calibration's limits (`z_range`).
 * **Camera**: the file's, with SMAP's read noise of 74.4 e- with EM gain and 1.5 e- without
   where the camera does not give its own, quantum efficiency 1 (photons here are detected
@@ -61,6 +61,7 @@ Z_EDGE = 0.9                                   # a fit this close to the calibra
 SHORT_ON_TIME, BRIGHTER = 0.8, 1.3              # below this on-time, 1.3 times brighter
 BG_QUANTILES, BG_WIDEN, BG_FLOOR_Q, BG_FLOOR = (0.01, 0.98), 0.3, 0.0005, 0.9
 Z_QUANTILES, Z_WIDEN = (0.02, 0.98), 0.15
+Z_AT_LEAST_NM = 500.0                           # the z range covers -500 -- 500 nm at least
 PHOTON_QUANTILES, PHOTON_WIDEN = (0.01, 0.99), (0.5, 1.5)   # the uniform draw: half the 1st, 1.5 times the 99th
 PHOTON_RANGE_BLINKS = (0.2, 5.0)                            # times the mean, without fully-on frames to measure it on
 
@@ -222,13 +223,17 @@ def z_range(z_nm, limit_nm=None) -> tuple:
     calibration's limits (-1 860 -- 1 940 nm), where a network trained at +-1 µm found more and
     matched DECODE-Plex better (plex-plan §16, 2026-11-23); this rule gives -1 340 -- 1 120 there.
     The 5th to 95th (+-1 µm there) was tried and cut off the shoulders of a simulated sample's z.
-    On z drawn uniformly it reaches 25 % beyond the true range on either side."""
+    On z drawn uniformly it reaches 25 % beyond the true range on either side.  It is never narrower
+    than -500 -- 500 nm (Jonas, 2026-11-23): a model is often used again on a sample focused
+    elsewhere, which a range fitted to one movie's molecules would leave out."""
     if z_nm is None or len(z_nm) == 0:
         lo, hi = -Z_WITHOUT_Z_NM, Z_WITHOUT_Z_NM
     else:
         lo, hi = _quantile(z_nm, Z_QUANTILES)
         width = hi - lo
         lo, hi = lo - Z_WIDEN * width, hi + Z_WIDEN * width
+        # a model is often used again, on a sample focused elsewhere: never narrower than +-500 nm
+        lo, hi = min(lo, -Z_AT_LEAST_NM), max(hi, Z_AT_LEAST_NM)
     if limit_nm is not None:
         low, high = bounds(limit_nm)
         lo, hi = max(lo, low), min(hi, high)

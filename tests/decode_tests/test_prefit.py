@@ -49,7 +49,8 @@ def test_a_simulations_lifetime_brightness_background_and_z_come_back(on_time):
     assert est.background[1] - est.background[0] == pytest.approx(1.6 * (hi - lo), rel=0.1)
     z = np.asarray(blinks["z_nm"])
     zlo, zhi = np.quantile(z, [0.02, 0.98])
-    assert est.z_nm == pytest.approx((zlo - 0.15 * (zhi - zlo), zhi + 0.15 * (zhi - zlo)), rel=0.05)
+    expected = (min(zlo - 0.15 * (zhi - zlo), -500.0), max(zhi + 0.15 * (zhi - zlo), 500.0))
+    assert est.z_nm == pytest.approx(expected, rel=0.05)
     # the uniform photons reach well past the molecules' own
     lo, hi = est.photons_range
     assert lo < 0.5 * rate and hi > rate + 3 * spread
@@ -146,6 +147,14 @@ def test_the_background_never_goes_below_nine_tenths_of_its_lowest_values():
 def test_z_is_clamped_to_the_calibration_and_without_z_is_750():
     assert prefit.z_range(np.linspace(-900, 900, 1001), 800.0) == (-800.0, 800.0)
     assert prefit.z_range(None) == (-750.0, 750.0)
+
+
+def test_z_covers_minus_500_to_500_nm_whatever_the_molecules_and_the_calibration_still_limits_it():
+    """A model is used again on samples focused elsewhere (Jonas, 2026-11-23)."""
+    assert prefit.z_range(np.linspace(-100, 300, 1001)) == (-500.0, pytest.approx(500.0))
+    lo, hi = prefit.z_range(np.linspace(0, 900, 1001))
+    assert lo == -500.0 and hi > 900
+    assert prefit.z_range(np.linspace(-100, 100, 101), 400.0) == (-400.0, 400.0)
 
 
 def test_the_calibrations_z_limit_is_smaps_fminmax_or_the_splines_grid():
