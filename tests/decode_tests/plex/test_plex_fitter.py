@@ -59,4 +59,10 @@ def test_a_published_model_in_the_fitter_gives_the_papers_localizations(run, tmp
         assert abs(mine - ref) <= max(1, ref // 10_000) and share > 0.999, found
     if run == "fig2a":
         assert "photons_ch0" in locs and "photons_ch1" in locs
+    # the run's checkpoint chosen as it is: converted once, its registration found near it, the same fit
+    ckpt = next((DATA / RUNS[run][0]).glob("*.ckpt"))
+    values["model.path"] = str(ckpt)
+    direct = plugins.get("Localize/DECODE")().run(Context(), fit_settings("Localize/DECODE", values)).locs
+    assert len(direct) == len(locs)
+    np.testing.assert_allclose(np.asarray(direct["x_nm"]), np.asarray(locs["x_nm"]))
     assert glob.glob(str(tmp_path / "*.safetensors"))

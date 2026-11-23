@@ -33,15 +33,18 @@ METHOD = "decode-plex"
 
 
 def export(run_folder, trafo, out) -> Path:
-    """A DECODE-Plex run (its ``param_run.yaml`` and ``*.ckpt``) and its registration (``*_trafo.mat``)
-    as one model file for SMAPpy's DECODE fitter."""
+    """A DECODE-Plex run (its folder, with its ``param_run.yaml`` and one ``*.ckpt``, or the checkpoint
+    itself) and its registration (``*_trafo.mat``) as one model file for SMAPpy's DECODE fitter."""
     from smappy import __version__
     from smappy.training import model_file
 
     from .io import param
     from .io.model import load_state_dict
     run_folder = Path(run_folder)
-    ckpts = sorted(run_folder.glob("*.ckpt"))
+    if run_folder.suffix == ".ckpt":                # a checkpoint named: its run is its folder
+        ckpts, run_folder = [run_folder], run_folder.parent
+    else:
+        ckpts = sorted(run_folder.glob("*.ckpt"))
     if len(ckpts) != 1:
         raise ValueError(f"{run_folder}: one checkpoint (*.ckpt) expected, found {len(ckpts)}")
     cfg = param.load(run_folder / "param_run.yaml")
