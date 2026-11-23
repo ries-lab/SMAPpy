@@ -134,3 +134,28 @@ def test_a_move_measured_on_the_first_frames_is_what_the_run_s_record_says(files
     moved = json.loads(h5py.File(out, "r").attrs["metadata"])["decode"]["moved_since_beads"]
     assert moved == {"rows": -1.25, "columns": 0.5, "measured": True}
     assert any("-1.25 rows and 0.50 columns" in w for w in r.locs.metadata.get("warnings", []))
+
+
+def test_the_goodness_draws_each_molecule_over_the_network_s_own_background_map(files):
+    """Over a level a frame, an uneven background's light under a spot counts against it (plex-plan §16)."""
+    from smappy.netfit.fit_two import TwoChannelPredictor
+    from smappy.netfit.goodness import fit_goodness
+    from smappy.netfit.predict import Predictor
+    frames = tifffile.imread(files["tif"]).astype(np.float32)
+    stack = np.concatenate([frames[:1], frames, frames[-1:]])
+    predictor = Predictor(files["model"], "cpu", threshold=0.0, batch=4)
+    wrapped = TwoChannelPredictor(predictor, files["cal"], goodness=True)
+    assert predictor.keep_background
+    out = wrapped(stack, 0)
+    # the map the goodness used: the predictor's, on the channels as cut, one per frame read
+    two = wrapped.channels(stack.shape[1:])
+    raw = predictor(two.cut(stack), 0, two.offsets())
+    bg = raw["background_map"]
+    assert bg.shape == (8, 2, *two.cut(stack).shape[-2:]) and np.isfinite(bg).all()
+    expected = fit_goodness(two, wrapped.cal, wrapped.kind, two.cut(stack)[1:-1], np.asarray(raw["frame"], int),
+                            np.c_[raw["x_pix"], raw["y_pix"]], raw["z_nm"], raw["photons_c"], None, False,
+                            background_map=bg)
+    np.testing.assert_allclose(out["goodness"], expected, rtol=1e-5)
+    # without the goodness nothing is kept
+    plain = Predictor(files["model"], "cpu", threshold=0.0, batch=4)
+    assert "background_map" not in TwoChannelPredictor(plain, files["cal"])(stack, 0)

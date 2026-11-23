@@ -69,6 +69,9 @@ class Predictor:
         self.extraction = extraction or parts.extraction.name
         self.frames_mirrored = frames_mirrored
         self.batch = batch                 # 0: `auto_batch`
+        # the network's background output kept beside the localizations, ``background_map`` (n, C, H, W):
+        # the goodness of fit draws each molecule over it, not over a level a frame (`fit_two`)
+        self.keep_background = False
         self.fold = self.model.fold
         self.scale = getattr(self.model, "out_scale", 1)
 
@@ -81,6 +84,29 @@ class Predictor:
         """The rows and columns kept: (row0, col0, rows, columns)."""
         hh, ww = h - h % self.fold, w - w % self.fold
         return (h - hh) // 2, (w - ww) // 2, hh, ww
+
+    def _background(self, out, layout) -> np.ndarray:
+        """The background output of a batch, photons a pixel on the network's input pixels (b, C, h, w)."""
+        bg = (out[:, layout.bg:layout.bg + layout.backgrounds] * self.scaling.bg_max).detach().cpu().numpy()
+        if self.scale > 1:
+            bg = bg.reshape(*bg.shape[:2], bg.shape[2] // self.scale, self.scale,
+                            bg.shape[3] // self.scale, self.scale).mean((3, 5))
+        return bg
+
+    def _full_frame(self, parts, n: int, shape, crop) -> np.ndarray:
+        """The batches' maps as (n, C, H, W) on the frames read, two channels however many the network
+        reports; outside its crop each frame's median."""
+        r0, c0, hh, ww = crop
+        H, W = shape
+        bg = np.concatenate(parts) if parts else np.zeros((n, 1, hh, ww), np.float32)
+        if self.frames_mirrored:
+            bg = bg[..., ::-1]
+        if bg.shape[1] == 1:
+            bg = np.repeat(bg, 2 if self.channels.kind else 1, 1)
+        full = np.broadcast_to(np.median(bg.reshape(n, bg.shape[1], -1), 2)[:, :, None, None],
+                               (n, bg.shape[1], H, W)).copy()
+        full[..., r0:r0 + hh, c0:c0 + ww] = bg
+        return full.astype(np.float32)
 
     def __call__(self, photons, first_frame: int = 0, aux=None) -> dict:
         photons = np.asarray(photons, np.float32)
@@ -100,7 +126,7 @@ class Predictor:
             x = x.transpose(0, 1)                                            # (2, n, h, w)
             maps = torch.as_tensor(np.asarray(aux, np.float32)[:, r0:r0 + hh, c0:c0 + ww]).to(self.device)
         layout = self.model.layout
-        parts = []
+        parts, maps_bg = [], []
         size = self.batch or auto_batch(self.device, hh * self.scale, ww * self.scale) // (2 if two else 1)
         size = max(1, size)
         with torch.no_grad():
@@ -111,6 +137,8 @@ class Predictor:
                     out = self.model(x[:, a:b + 2 * k][None].to(self.device), b - a, maps[None])
                 else:
                     out = self.model(x[a:b + 2 * k][None].to(self.device), b - a)
+                if self.keep_background:
+                    maps_bg.append(self._background(out, layout))
                 e = extract.extract(out, self.scaling, self.threshold, self.extraction, self.scale, layout=layout)
                 e = {name: v.detach().cpu().numpy() for name, v in e.items()}
                 e["frame"] = e["frame"] + a
@@ -121,7 +149,10 @@ class Predictor:
         mix = ("x_err_mix", "y_err_mix", "z_err_mix_nm") if parts and "x_err_mix" in parts[0] else ()
         cols = {name: np.concatenate([p[name] for p in parts]) if parts else np.zeros(0) for name in names + mix}
         x_pix = (ww - 1) - cols["x"] if self.frames_mirrored else cols["x"]
-        return {"frame": cols["frame"].astype(np.int64) + int(first_frame), "x_pix": x_pix + c0, "y_pix": cols["y"] + r0,
+        extra = {}
+        if self.keep_background:
+            extra["background_map"] = self._full_frame(maps_bg, n, photons.shape[-2:], (r0, c0, hh, ww))
+        return {**extra, "frame": cols["frame"].astype(np.int64) + int(first_frame), "x_pix": x_pix + c0, "y_pix": cols["y"] + r0,
                 "z_nm": cols["z_nm"], "photons": cols["photons"], "background": cols["background"], "prob": cols["prob"],
                 "x_err_pix": cols["x_err"], "y_err_pix": cols["y_err"], "z_err_nm": cols["z_err_nm"],
                 "photons_err": cols["photons_err"],

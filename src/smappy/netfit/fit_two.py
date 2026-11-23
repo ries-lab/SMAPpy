@@ -105,6 +105,9 @@ class TwoChannelPredictor:
         self.total = biplane_total(self.cal) if self.kind == "biplane" else 1.0
         self.two = None
         self.check_seconds = 0.0
+        # the goodness draws each molecule over the network's own background, pixel by pixel: over a level
+        # a frame, the light an uneven background puts under a spot counted against it (plex-plan §16)
+        predictor.keep_background = self.goodness
 
     # what the engine and the run's record read, the predictor's
     window = property(lambda self: self.predictor.window)
@@ -157,7 +160,8 @@ class TwoChannelPredictor:
             if self.goodness:
                 from .goodness import fit_goodness
                 out["goodness"] = fit_goodness(two, self.cal, self.kind, stack[k:len(stack) - k], frame,
-                                               np.c_[r["x_pix"], r["y_pix"]], r["z_nm"], ph, None, self.em)
+                                               np.c_[r["x_pix"], r["y_pix"]], r["z_nm"], ph, None, self.em,
+                                               background_map=r.get("background_map"))
             if self.bound:
                 from .bounds import plugin_crlb
                 b = plugin_crlb(two, self.cal, self.kind, frame, grid, r["z_nm"], ph, bg_grid, self.pixel_nm,

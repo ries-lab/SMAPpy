@@ -321,7 +321,9 @@ the result: it takes about half a minute.
 
 `goodness` is each localization's neighbourhood -- 9 x 9 pixels in each
 channel -- against every localization of the frame drawn back with the
-calibration.  It is the [Poisson](plugin:Panels/Glossary) deviance, scaled
+calibration, over the background the network itself estimated, pixel by
+pixel.  A level for the whole frame would count an uneven background's light
+under a spot -- a cell, an out-of-focus nucleus -- against that spot.  It is the [Poisson](plugin:Panels/Glossary) deviance, scaled
 so that 0 is noise alone.  Values of a few and more mark a neighbour the
 network missed or merged, or a false molecule.  On simulated data it
 removed false positives better than the reported sigma did.  Filter on it
