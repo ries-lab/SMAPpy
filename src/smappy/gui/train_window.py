@@ -266,8 +266,6 @@ class Prepared:
     calibration: object = field(repr=False, default=None)  # the spline the network learns: drawn in the sample, or the beads'
     focus: object = None                                     # calibrate.depth.AutoDepth: how *auto* or *in situ* found it
     two: object = None                                       # netfit.prefit_two.TwoChannels: a two-channel calibration's
-
-
 def _source(path):
     from ..plugins.fit import SourceSettings, _open
     return _open(SourceSettings(path=str(path)), watch=False)
@@ -1518,7 +1516,7 @@ class TrainWindow(QWidget):
             return try_on_data(folder)
         self._work("try", run)
 
-    def show_try(self, photons, locs) -> None:
+    def show_try(self, photons, locs, found_per_um2=float("nan"), trained_per_um2=float("nan")) -> None:
         self.try_figure.clear()
         ax = self.try_figure.subplots()
         ax.imshow(photons, cmap="gray", vmax=np.percentile(photons, 99.8) or None)
@@ -1526,6 +1524,9 @@ class TrainWindow(QWidget):
             ax.scatter(locs[:, 0], locs[:, 1], marker="+", s=30, c="gold")
         ax.set(title=f"first frame: {len(locs)} localizations at prob >= 0.5")
         self.try_canvas.draw_idle()
+        warning = crowding_warning(found_per_um2, trained_per_um2)
+        self.status_bar.showMessage(warning or f"{found_per_um2:.2f} molecules per µm² a frame in the first "
+                                               f"{TRY_FRAMES} frames, trained at {trained_per_um2:.2f}")
 
     def use_model(self) -> None:
         entry = self.selected_entry()
@@ -1657,9 +1658,31 @@ class HostFollower:
             self.others, self.host_problems = remote.others(jobs.entries())
 
 
+def crowding_warning(found_per_um2: float, trained_per_um2: float) -> str:
+    """A line when a model finds more molecules a frame than it was trained at; "" else.
+
+    The prefit cannot say so: on DECODE-Plex's Fig. 2c, a live cell crowded in its first frames,
+    Spline 3D separated 0.16 molecules per µm² where DECODE-Plex found 1.3, and a model trained at
+    HD (1 per µm²) found half what one trained at 2 did (plex-plan §16).  A network trained too
+    sparse still finds more than it was trained at, so this is the sign; training too dense costs
+    less than training too sparse, so it only ever advises a higher density."""
+    if not (np.isfinite(found_per_um2) and np.isfinite(trained_per_um2)) or found_per_um2 <= trained_per_um2:
+        return ""
+    better = "UHD" if found_per_um2 <= PER_UM2["UHD"] else f"at least {found_per_um2:.1f} typed"
+    return (f"It finds {found_per_um2:.1f} molecules per µm² a frame, more than the {trained_per_um2:.1f} it "
+            f"was trained at: a model trained at {better} will find more and place them better.")
+
+
+def per_um2_of(per_40px: float, px_size_nm) -> float:
+    """Molecules per µm² from a job's molecules in 40 x 40 pixels and its camera's pixel (DECODE's px_size)."""
+    py, px = (float(v) for v in px_size_nm)
+    return float(per_40px) / (40 * px / 1000) / (40 * py / 1000)
+
+
 def try_on_data(folder, frames: int = TRY_FRAMES):
     """The job's newest model on the first frames of its movie: (first frame in photons, its
-    localizations' (x, y) in pixels at prob >= 0.5); a two-channel model's at channel 0's spots."""
+    localizations' (x, y) in pixels at prob >= 0.5, molecules per µm² a frame over the frames read,
+    molecules per µm² it was trained at); a two-channel model's at channel 0's spots, over a half's area."""
     from ..metadata import CameraMetadata
     from ..plugins.fit_decode import _mirrored
     from ..training import job as jobfile
@@ -1690,12 +1713,18 @@ def try_on_data(folder, frames: int = TRY_FRAMES):
     engine = WindowEngine(camera, predictor)
     parts = [engine.push(stack, 0), engine.end()]
     xs, ys = [], []
+    found = 0
     for p in parts:
         if p is None:
             continue
+        found += int((np.asarray(p["prob"]) >= 0.5).sum())
         sel = (np.asarray(p["frame"]) == 0) & (np.asarray(p["prob"]) >= 0.5)
         xs.append(np.asarray(p["x_nm"])[sel] / 1000.0)
         ys.append(np.asarray(p["y_nm"])[sel] / 1000.0)
     from ..camera import to_photons
     locs = np.stack([np.concatenate(xs), np.concatenate(ys)], 1) if xs else np.zeros((0, 2))
-    return to_photons(stack[0], camera), locs
+    py, px = (float(v) for v in cam["px_size"])
+    area = stack.shape[-2] * stack.shape[-1] * (0.5 if two_channel(meta) else 1.0) * px * py * 1e-6
+    trained = job.ranges.get("emitter_av")
+    return (to_photons(stack[0], camera), locs, found / n / area,
+            float("nan") if trained is None else per_um2_of(trained, cam["px_size"]))

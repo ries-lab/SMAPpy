@@ -369,7 +369,9 @@ precise again.
 
 The z range is the 2nd to 98th percentile of the localizations' z, of the
 fits that pass the same likelihood cut as the fully-on frames, widened by
-15 % of that range on either side and kept inside the calibration's.  Poor
+15 % of that range on either side, never narrower than -500 to 500 nm --
+a model is often used again on a sample focused elsewhere -- and kept inside
+the calibration's.  Type a wider range for a model to serve other samples.  Poor
 fits are mostly molecules far out of focus.  With them included, a live
 cell's range reached the calibration's limits, and the network was
 trained for z where there were hardly any molecules.
@@ -404,4 +406,12 @@ The chosen job's newest model on the movie it was prepared on.
 
 ### Try on my data
 The first frames of the movie through the newest model, drawn with what it
-found at a probability of at least 0.5.
+found at a probability of at least 0.5.  The status line says how many
+molecules per µm² it found a frame, and the density it was trained at.  When
+it finds more, it says so: a model trained at a higher density (*UHD*, or the
+number typed under *manual*) will find more and place them better.  This is
+the check on the density the prefit cannot make.  In a crowded frame the
+prefit's fit separates only a fraction of the molecules: on a live cell
+crowded in its first frames it saw 0.16 per µm², where the network found
+more than 1.  A model trained too sparse still finds more than it was trained
+at, so a first short training, tried, tells you which density to train at.

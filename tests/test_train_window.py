@@ -437,3 +437,13 @@ def test_a_typed_density_reaches_both_kinds_of_job_and_hd_is_the_default(movie):
                                                         background_max=60.0, z_min_nm=-300.0, z_max_nm=300.0))
     assert method_params(prepared, prepared.estimates)["Simulation"]["emitter_av"] == pytest.approx(8.0)
     assert netfit_params(prepared, prepared.estimates)["simulation"]["density_per_40px"] == pytest.approx(8.0)
+
+
+def test_trying_a_model_that_finds_more_molecules_than_it_was_trained_at_advises_a_higher_density():
+    """Fig. 2c's live cell: trained at HD the network found half what it did at 2 per µm² (plex-plan §16)."""
+    from smappy.gui.train_window import crowding_warning, per_um2_of
+    # 16 in 40 x 40 pixels of 100 nm: 1 per µm²
+    assert per_um2_of(16.0, [100.0, 100.0]) == pytest.approx(1.0)
+    assert crowding_warning(0.8, 1.0) == "" and crowding_warning(float("nan"), 1.0) == ""
+    assert "UHD" in crowding_warning(1.9, 1.0)
+    assert "at least 4.0" in crowding_warning(4.0, 2.5)
