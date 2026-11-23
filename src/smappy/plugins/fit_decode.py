@@ -316,32 +316,36 @@ class DecodeFit(_FitPlugin):
         from ..training.predictors import two_channel
         meta = read_model(settings.model.path)
         device = settings.model.device
-        if settings.model.run_on != "here" and two_channel(meta):
-            raise ValueError("a two-channel model runs on this computer for now: set run on to this computer")
+        if two_channel(meta):
+            return self.two_channel_model(settings, meta, camera)
         if settings.model.run_on != "here":
             return remote_predictor(settings, meta, camera)
         if not torch_here():
             raise ValueError(NO_TORCH)
-        from ..training.predictors import load, two_channel
-        if not two_channel(meta):
-            return load(settings.model.path, None if device == "auto" else device,
-                        frames_mirrored=_mirrored(meta, camera), threshold=settings.model.threshold,
-                        batch=settings.model.batch)
-        return self.two_channel_model(settings, meta, camera)
+        from ..training.predictors import load
+        return load(settings.model.path, None if device == "auto" else device,
+                    frames_mirrored=_mirrored(meta, camera), threshold=settings.model.threshold,
+                    batch=settings.model.batch)
 
     def two_channel_model(self, settings, meta: dict, camera: CameraMetadata):
-        """A two-channel model with its registration, moved as typed (`netfit.fit_two`)."""
+        """A two-channel model with its registration, moved as typed (`netfit.fit_two`); its network here
+        or on the training host *run on* names, the channels cut and the checks drawn here alike."""
         if _mirrored(meta, camera):
             raise ValueError("the data were taken with the EM register set otherwise than the beads: a "
                              "two-channel model takes frames as its calibration has them")
         from ..calibrate.dual import load_dual_color_calibration
         from ..netfit.fit_two import TwoChannelPredictor
-        from ..netfit.predict import Predictor
         c = settings.two_channels
         cal = load_dual_color_calibration(two_channel_calibration(settings, meta))
         device = settings.model.device
-        predictor = Predictor(settings.model.path, None if device == "auto" else device,
-                              threshold=settings.model.threshold, batch=settings.model.batch)
+        if settings.model.run_on != "here":
+            predictor = remote_predictor(settings, meta, camera)
+        else:
+            if not torch_here():
+                raise ValueError(NO_TORCH)
+            from ..netfit.predict import Predictor
+            predictor = Predictor(settings.model.path, None if device == "auto" else device,
+                                  threshold=settings.model.threshold, batch=settings.model.batch)
         sizes, _ = camera.pixelsize_nm_or_default
         ox, oy = camera.roi_offset
         corner = (ox if c.roi_column is None else c.roi_column, oy if c.roi_row is None else c.roi_row)

@@ -17,6 +17,13 @@ time, and answers each with the block's localizations in the predictor's columns
 and the frames as ``.npy``, float32 photons) and ``COLS`` (the columns as ``.npz``) back, or ``ERRR``
 (the worker's error, as text); ``QUIT``, or the pipe closed, ends the worker.  Frames go as float32:
 512 x 512 is 1 MB a frame, 50 MB a second at a GPU's pace, which a gigabit network carries.
+
+**Two channels** (`netfit.fit_two.TwoChannelPredictor`): the frames are cut into the network's two
+channels here, by the registration and the channels' move, and only the network runs there, as for
+one channel.  ``FRM2`` carries the first frame's number and an ``.npz`` of the channels (n, 2, rows,
+columns), their offset maps and whether to send the network's background map back (the goodness of
+fit draws over it); the answer is ``COLS`` as before.  The checks -- the goodness, the bound -- run here,
+on the columns.
 """
 from __future__ import annotations
 
@@ -77,6 +84,23 @@ def unpack_frames(payload: bytes):
     return np.load(io.BytesIO(payload[8:]), allow_pickle=False), first
 
 
+def pack_two(photons: np.ndarray, aux, first_frame: int, keep_background: bool = False) -> bytes:
+    """``FRM2``'s payload: the first frame's number, then the two channels, their offset maps and the
+    background map's flag as an ``.npz``."""
+    buffer = io.BytesIO()
+    buffer.write(struct.pack("<q", int(first_frame)))
+    np.savez(buffer, photons=np.ascontiguousarray(photons, np.float32), aux=np.asarray(aux, np.float32),
+             keep_background=np.array(bool(keep_background)))
+    return buffer.getvalue()
+
+
+def unpack_two(payload: bytes):
+    """(photons, aux, first frame, keep_background) of an ``FRM2``."""
+    first = struct.unpack("<q", payload[:8])[0]
+    with np.load(io.BytesIO(payload[8:]), allow_pickle=False) as found:
+        return found["photons"], found["aux"], first, bool(found["keep_background"])
+
+
 def pack_columns(cols: dict) -> bytes:
     buffer = io.BytesIO()
     np.savez(buffer, **{k: np.asarray(v) for k, v in cols.items()})
@@ -111,6 +135,12 @@ class RemotePredictor:
         info = self._ask([(b"HELO", json.dumps(hello).encode()), (b"MODL", Path(model_path).read_bytes())], b"INFO")
         told = json.loads(info)
         self.window, self.metadata, self.device = int(told["window"]), told["metadata"], f"{host.name}: {told['device']}"
+        # a two-channel model's channels, as `netfit.predict.Predictor` has them (`fit_two` reads its kind and main)
+        ch = (self.metadata.get("settings") or {}).get("channels")
+        if ch:
+            from .netfit.settings import ChannelSettings
+            self.channels = ChannelSettings(**{k: tuple(v) if k == "share" else v for k, v in ch.items()})
+        self.keep_background = False            # the network's background map sent back (`fit_two`)
 
     def _collect(self, stream) -> None:
         for line in iter(stream.readline, b""):
@@ -134,8 +164,13 @@ class RemotePredictor:
         said = [line for line in self._said if line.strip()]
         return f"{self.host.name}: " + (said[-1] if said else what)
 
-    def __call__(self, photons, first_frame: int = 0) -> dict:
+    def __call__(self, photons, first_frame: int = 0, aux=None) -> dict:
         photons = np.asarray(photons, np.float32)
+        if aux is not None:
+            if photons.ndim != 4 or len(photons) <= 2 * self.window:
+                raise ValueError(f"two channels (n + {2 * self.window}, 2, rows, columns), not {photons.shape}")
+            payload = pack_two(photons, aux, first_frame, self.keep_background)
+            return unpack_columns(self._ask([(b"FRM2", payload)], b"COLS"))
         if photons.ndim != 3 or len(photons) <= 2 * self.window:
             raise ValueError(f"frames (n + {2 * self.window}, rows, columns), not {photons.shape}")
         return unpack_columns(self._ask([(b"FRMS", pack_frames(photons, first_frame))], b"COLS"))

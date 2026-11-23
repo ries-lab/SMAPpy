@@ -136,7 +136,7 @@ that architecture here: what the study compared it as.
    the registration is read from the model's calibration file, checked against the model's sha256
    of it, not carried in the header: the goodness and the bound need its splines too.  The move's
    *auto* is *measure the move*: the fewest localizations, which found Fig. 2a's 5.5 rows (the
-   frames' deviance did not find it).  Remote runs take one-channel models only, for now.  The model file carries the registration; the move
+   frames' deviance did not find it).  Remote runs take two-channel models too since 2026-11-23 (the channels cut here, the network there, `decode_remote`'s ``FRM2``).  The model file carries the registration; the move
    since the beads and the checks are options.
 4. **T3, T4** (done 2026-11-22: `netfit/prefit_two.py`, the window's *two channels* part): two-channel
    jobs: Spline 3D 2C's prefit, the kind (from the calibration: planes in focus 200 nm apart), the main

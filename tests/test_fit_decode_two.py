@@ -32,6 +32,11 @@ def _sha(path):
 
 @pytest.fixture
 def files(tmp_path):
+    return make_files(tmp_path)
+
+
+def make_files(tmp_path):
+    """An untrained two-channel model, its calibration and a movie in ``tmp_path``."""
     cal = dual()
     save_dual_color_calibration(tmp_path / "beads_2ct.h5", cal)
     s = TrainingSettings()

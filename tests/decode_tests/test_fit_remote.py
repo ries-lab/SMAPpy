@@ -58,3 +58,20 @@ def test_a_live_fit_and_an_unknown_host_are_refused_before_anything_is_sent(tiny
     with pytest.raises(ValueError, match="live fit"):
         fit(tiny["tif"], tiny["model"], **{"model.run_on": "box", "source.live": True})
     assert host == []
+
+
+def test_a_two_channel_fit_with_its_network_on_a_host_is_the_fit_here(host, tmp_path):
+    """The channels cut here, the network there, the goodness drawn here over the map sent back."""
+    pytest.importorskip("torch")
+    import test_fit_decode_two as two
+
+    from smappy import plugins
+    from smappy.plugins import Context
+    files = two.make_files(tmp_path)
+    run = plugins.get("Localize/DECODE")()
+    here = run.run(Context(), two._settings(files, **{"two_channels.goodness": True})).locs
+    there = run.run(Context(), two._settings(files, **{"two_channels.goodness": True, "model.run_on": "box"})).locs
+    assert len(host) == 1 and len(there) == len(here) > 0
+    for name in ("x_nm", "y_nm", "z_nm", "photons_ch0", "photons_ch1", "goodness"):
+        np.testing.assert_allclose(np.sort(np.asarray(there[name])), np.sort(np.asarray(here[name])),
+                                   rtol=1e-4, atol=1e-3, err_msg=name)

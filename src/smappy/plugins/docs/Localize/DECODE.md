@@ -157,7 +157,11 @@ trains on), everything but the network still happens here -- the movie is
 read, cut to the camera ROI, turned into photons and cut into blocks -- and
 each block is sent there over ssh, through the network, and its
 localizations sent back.  The model file goes there at the start; it need
-not be there before.  The table is the same as here, but for the last digits
+not be there before.  A two-channel model's frames are cut into its two
+channels here, by the registration and the move, and only the network runs
+there; the goodness and the bound are drawn here, the goodness over the
+background map the network sends back.  The host needs a SMAPpy of this
+version or later.  The table is the same as here, but for the last digits
 where two GPUs round differently.  A live fit always runs here.
 
 ## In detail
