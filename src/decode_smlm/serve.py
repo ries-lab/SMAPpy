@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 def serve(stdin=None, stdout=None) -> int:
-    from smappy.decode_remote import pack_columns, read_message, unpack_frames, write_message
+    from smappy.decode_remote import pack_columns, read_message, unpack_frames, unpack_two, write_message
 
     if stdout is None:                      # the real stdout for the messages; print() to stderr
         stdout = os.fdopen(os.dup(sys.stdout.fileno()), "wb")
@@ -41,6 +41,12 @@ def serve(stdin=None, stdout=None) -> int:
                     raise ValueError("frames before a model")
                 photons, first = unpack_frames(payload)
                 write_message(stdout, b"COLS", pack_columns(predictor(photons, first)))
+            elif tag == b"FRM2":                # two channels, cut by the registration on the fitter's side
+                if predictor is None:
+                    raise ValueError("frames before a model")
+                photons, aux, first, keep = unpack_two(payload)
+                predictor.keep_background = keep
+                write_message(stdout, b"COLS", pack_columns(predictor(photons, first, aux)))
             else:
                 raise ValueError(f"unknown message {tag!r}")
         except Exception as error:          # said to the fitter, which stops; the worker ends with it
@@ -49,11 +55,17 @@ def serve(stdin=None, stdout=None) -> int:
 
 def _load(model: bytes, hello: dict):
     # every method the DECODE fitter runs, as it loads them here (`smappy.training.predictors`)
-    from smappy.training.predictors import load
+    from smappy.training import model_file
+    from smappy.training.predictors import load, two_channel
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / "model.safetensors"
         path.write_bytes(model)
         device = hello.get("device", "auto")
+        if two_channel(model_file.read_metadata(path)):
+            # the network alone: the fitter cuts the channels and draws the checks (`netfit.fit_two`)
+            from smappy.netfit.predict import Predictor
+            return Predictor(path, None if device == "auto" else device,
+                             threshold=float(hello.get("raw_th", 0.1)), batch=int(hello.get("batch_size", 0)))
         return load(path, None if device == "auto" else device,
                     frames_mirrored=bool(hello.get("frames_mirrored", False)),
                     threshold=float(hello.get("raw_th", 0.1)), batch=int(hello.get("batch_size", 0)))
