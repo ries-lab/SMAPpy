@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.plugins.fit_decode.DecodeFit, smappy.netfit.fit_two.TwoChannelPredictor, smappy.plugins.fit_decode.DecodeFit.channel_move, smappy.channel_move.ChannelMove, smappy.plugins.fit._TwoChannelFit.measure_move, smappy.netfit.fit_two.moved_calibration, smappy.plugins.fit_decode.two_channel_calibration, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
+covers: [smappy.plugins.fit_decode.field_warnings, smappy.netfit.field.FieldRecord, smappy.plugins.fit_decode.DecodeFit, smappy.netfit.fit_two.TwoChannelPredictor, smappy.plugins.fit_decode.DecodeFit.channel_move, smappy.channel_move.ChannelMove, smappy.plugins.fit._TwoChannelFit.measure_move, smappy.netfit.fit_two.moved_calibration, smappy.plugins.fit_decode.two_channel_calibration, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
 ## What it does
@@ -198,6 +198,22 @@ taken the other way round -- beads without EM gain, data with it, as in
 DECODE's example data -- are flipped before the network sees them, and the
 positions flipped back.  Where either side does not say, nothing is flipped,
 as Spline 3D does not flip.
+
+**A PSF that varies over the chip.**  A calibration learnt with *field
+dependence* holds a spline per node of a grid over the chip, and Spline 3D
+fits each spot with the four nodes around it blended.  A network trained on
+such a calibration with the field on (*DECODE, optimised*; the job's default
+for one) was trained on spots drawn with that blend wherever they were on the
+chip, and reads two more maps beside the frames: where each pixel is on the
+chip, from the field's centre in units of 50 µm, as Fu et al.'s FD-DeepLoc
+does ([Fu 2023](https://doi.org/10.1038/s41592-023-01775-5)).  The fitter
+makes those maps from the camera ROI's corner, so one model serves any ROI;
+when the ROI is not known it says that it takes the frames to start at the
+chip's corner, and where the frames reach beyond the beads the field was
+learnt on, that the network saw the edge's PSF there.  Such a model never
+takes mirrored frames.  A model trained with the field's centre everywhere on
+a calibration that varies says so too: away from the centre its z may be
+biased.
 
 **The check before a run.**  The network needs no calibration to
 localize: the PSF it knows is the one it was trained on.  What matters is
@@ -411,3 +427,8 @@ model's own metadata.
 * Sha H, et al. Multi-channel high-density single-molecule localization.
   bioRxiv (2026) -- DECODE-Plex, whose published models this fitter runs.
   [doi:10.64898/2026.07.24.740199](https://doi.org/10.64898/2026.07.24.740199)
+* Fu S, Shi W, Luo T, et al. Field-dependent deep learning enables
+  high-throughput whole-cell 3D super-resolution imaging. *Nat Methods* 20,
+  459 (2023) -- FD-DeepLoc: the place on the chip as input maps, for a PSF
+  that varies over the field.
+  [doi:10.1038/s41592-023-01775-5](https://doi.org/10.1038/s41592-023-01775-5)

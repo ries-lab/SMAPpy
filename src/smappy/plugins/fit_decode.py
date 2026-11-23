@@ -341,6 +341,31 @@ def model_summary(meta: dict, data: Optional[dict] = None) -> list:
     return [(k, v) for k, v in rows if v not in ("", None)]
 
 
+def field_warnings(meta: dict, camera) -> list:
+    """What to say about the field over the chip (`netfit.field`, `docs/decode/fd-plan.md`): a model trained
+    on a field-dependent PSF needs to know where the frames are on the chip, and beyond the beads' span it
+    sees the edge's PSF; a model trained with the field's centre everywhere on a calibration that has a
+    field does not know the field at all."""
+    said = []
+    field = meta.get("field")
+    if field:
+        from ..netfit.field import FieldRecord
+        record = FieldRecord.from_dict(field)
+        roi = getattr(camera, "roi", None)
+        if roi is None:
+            said.append("the model was trained on a PSF that varies over the chip, and the camera ROI is not "
+                        "known: the frames are taken to start at the chip's corner (set it in the camera)")
+        else:
+            far = record.beyond(roi[:2], int(roi[3]), int(roi[2]))
+            if far > 0:
+                said.append(f"the frames reach {far:.0f} px beyond the beads the field was calibrated on: "
+                            f"there the network was trained on the PSF of the calibration's edge")
+    elif meta.get("calibration_field"):
+        said.append("the model was trained with the field's centre PSF everywhere, though its calibration "
+                    "varies over the chip: away from the centre z may be biased (train with the field on)")
+    return said
+
+
 def range_warnings(locs, meta: dict) -> list:
     """The fit's photons and background against what the training drew, as sentences."""
     drew = meta.get("trained_on") or {}
@@ -424,14 +449,16 @@ class DecodeFit(_FitPlugin):
         if two_channel(meta):
             return self.two_channel_model(settings, meta, camera)
         path = model_file(settings.model.path)
+        self._field_said = field_warnings(meta, camera)
         if settings.model.run_on != "here":
             return remote_predictor(settings, meta, camera)
         if not torch_here():
             raise ValueError(NO_TORCH)
         from ..training.predictors import load
+        # a field-dependent model's maps from where the frames are on the chip (`netfit.field`)
         return load(path, None if device == "auto" else device,
                     frames_mirrored=_mirrored(meta, camera), threshold=settings.model.threshold,
-                    batch=settings.model.batch)
+                    batch=settings.model.batch, corner=camera.roi_offset)
 
     def two_channel_model(self, settings, meta: dict, camera: CameraMetadata):
         """A two-channel model with its registration, moved as typed (`netfit.fit_two`); its network here
@@ -490,6 +517,7 @@ class DecodeFit(_FitPlugin):
         two = getattr(self, "_two", None)
         if two is not None and settings.two_channels.move.move == "measured":
             said.append(two.move.line())
+        said += getattr(self, "_field_said", [])
         return said + self.condition_warnings(settings, meta) + range_warnings(locs, meta)
 
     # ---------------------------------------------------------- the form
@@ -608,7 +636,8 @@ def remote_predictor(settings, meta: dict, camera: CameraMetadata):
     if getattr(settings.source, "live", False):
         raise ValueError("a live fit runs its network on this computer: set run on to this computer")
     return RemotePredictor(host, model_file(m.path), None if m.device == "auto" else m.device,
-                           frames_mirrored=_mirrored(meta, camera), raw_th=m.threshold, batch_size=m.batch)
+                           frames_mirrored=_mirrored(meta, camera), raw_th=m.threshold, batch_size=m.batch,
+                           corner=camera.roi_offset)
 
 
 def _mirrored(meta: dict, camera: CameraMetadata) -> bool:

@@ -116,7 +116,7 @@ class RemotePredictor:
     """`decode_smlm.predict.Predictor`'s interface, run by a worker on a training host."""
 
     def __init__(self, host, model_path, device: str | None = None, *, frames_mirrored: bool = False,
-                 raw_th: float = 0.1, batch_size: int = 32, popen=None):
+                 raw_th: float = 0.1, batch_size: int = 32, corner=(0, 0), popen=None):
         from .training.remote import SSH_OPTIONS
         self.host = host
         self.frames_mirrored, self.raw_th, self.batch_size = bool(frames_mirrored), float(raw_th), int(batch_size)
@@ -130,8 +130,9 @@ class RemotePredictor:
         self._reader = threading.Thread(target=self._collect, args=(self.process.stderr,), daemon=True)
         self._reader.start()
         self._closer = weakref.finalize(self, _close, self.process)
+        # ``corner``: the frames' corner on the chip, for a field-dependent model's u, v maps (`netfit.field`)
         hello = {"device": device or "auto", "frames_mirrored": self.frames_mirrored, "raw_th": self.raw_th,
-                 "batch_size": self.batch_size}
+                 "batch_size": self.batch_size, "corner": [float(v) for v in corner]}
         info = self._ask([(b"HELO", json.dumps(hello).encode()), (b"MODL", Path(model_path).read_bytes())], b"INFO")
         told = json.loads(info)
         self.window, self.metadata, self.device = int(told["window"]), told["metadata"], f"{host.name}: {told['device']}"

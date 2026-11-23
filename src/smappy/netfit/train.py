@@ -33,6 +33,8 @@ import torch
 
 from ..training import model_file, progress
 from . import extract, loss, metrics, network
+from .field import FieldRecord
+from .field import resolve as resolve_field
 from .render import SplineRenderer
 from .settings import (
     CameraModel,
@@ -223,7 +225,11 @@ class Drawer:
         sim, cam, ch = settings.simulation, settings.camera, settings.channels
         self.sim, self.cam, self.channels = sim, cam, ch
         whole = sim.spots == "whole"
+        self.field = None                 # a field-dependent drawing's `field.FieldRecord`
+        self.calibration_field = False
         if ch.kind:
+            if sim.field == "on":
+                raise ValueError("a field-dependent PSF is drawn for one channel only")
             from ..calibrate.dual import load_dual_color_calibration
             from . import channels
             cal = load_dual_color_calibration(settings.calibration)
@@ -234,14 +240,28 @@ class Drawer:
                               for s in channels.splines(cal, ch.kind, ch.main)]
             self.renderer = None
         else:
-            _, drawn = _calibration(settings.calibration, bool(cam.em_gain))
-            self.renderer = SplineRenderer(drawn, device, whole=whole)
+            cal, drawn = _calibration(settings.calibration, bool(cam.em_gain))
             self.two = None
+            self.calibration_field = getattr(cal, "field_splines", None) is not None
+            if resolve_field(sim.field, cal):
+                # the node splines drawn where each spot is on the chip (`field.py`); refused where the
+                # beads were mirrored against the camera: a field is mirrored only with the chip's width,
+                # which a calibration does not know (`io.calibration.matched_to_em`)
+                if cal.em_on is not None and bool(cal.em_on) != bool(cam.em_gain):
+                    raise ValueError("a field-dependent calibration taken with the EM register set otherwise "
+                                     "than the camera the model is for: its node splines cannot be mirrored")
+                if settings.test_set:
+                    raise ValueError("a fixed test set keeps no chip positions: a field-dependent training "
+                                     "draws its own (no test_set)")
+                self.field = FieldRecord.from_splines(cal.field_splines, cam.pixel_nm)
+                self.renderer = SplineRenderer(cal, device, whole=whole, field=True)
+            else:
+                self.renderer = SplineRenderer(drawn, device, whole=whole)
 
     def __call__(self, batch: int, g):
         if self.channels.kind:
             return draw_batch_2c(self.renderers, self.grid, self.sim, self.cam, self.channels, batch, g)
-        return draw_batch(self.renderer, self.sim, self.cam, batch, g)
+        return draw_batch(self.renderer, self.sim, self.cam, batch, g, field=self.field)
 
 
 def run(model, x, batch, windows: int = 1):
@@ -283,7 +303,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     drawer = Drawer(settings, device)
     renderer = drawer.renderer
     scaling = network.Scaling.for_simulation(sim, settings.channels if settings.channels.kind else None)
-    model = network.build(parts, sim.window, settings.channels).to(device)
+    model = network.build(parts, sim.window, settings.channels, field=drawer.field is not None).to(device)
     # ``init``: a trained model's file to start from -- its weights, with a fresh optimizer and schedule --
     # to fine-tune a network trained on a broad range (on-times, say) to what was measured on the data.
     # Loaded before the EMA copies the model, and only on a fresh start: a resumed run has its own weights.
@@ -331,8 +351,10 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         # the bound of the PSF as drawn (a mirror changes no bound), in torch: no compiled SMAPpy needed;
         # two channels' from both spots as drawn, x, y and z shared (`bounds.drawn_crlb`)
         if renderer is not None:
+            # a field-dependent drawing's bound with each molecule's own PSF, where it is on the chip
+            chip = None if test.origin is None else xyz[:, :2] + test.origin.cpu().numpy()[frame]
             bound = metrics.crlbs_torch(renderer, ph, local_background(test, frame, xyz), xyz[:, 2], cam.pixel_nm,
-                                        bool(cam.em_gain))
+                                        bool(cam.em_gain), chip=chip)
         elif drawer.two is not None and test.shift is not None:
             from .bounds import drawn_crlb
             bound = drawn_crlb(drawer.cal, drawer.channels, xyz[:, :2], test.shift.cpu().numpy()[m],
@@ -365,7 +387,11 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
                  "calibration_em_on": bool(cam.em_gain), "calibration_source": str(settings.calibration),
                  "trained_on": trained_on(sim, settings.channels, _biplane_total(drawer)),
                  "smappy_version": _smappy_version(),
-                 **({"channels": drawer.two.to_dict()} if drawer.two is not None else {})}
+                 **({"channels": drawer.two.to_dict()} if drawer.two is not None else {}),
+                 **({"field": drawer.field.to_dict()} if drawer.field is not None else {}),
+                 # the calibration varies over the chip, whether or not the training drew it so
+                 # (`fit_decode.field_warnings`)
+                 **({"calibration_field": True} if drawer.calibration_field else {})}
     # on a CPU the thread would only take cores from the network
     feed = _Prefetch(lambda: drawer(batch_size, g), device) \
         if sch.get("prefetch", True) and str(device).startswith("cuda") else None
@@ -537,6 +563,7 @@ def _slice(batch, a, b):
     from .simulate import Batch
     return Batch(batch.frames[a:b], batch.xyz[a:b], batch.photons[a:b], batch.mask[a:b], batch.background[a:b],
                  aux=None if batch.aux is None else batch.aux[a:b],
+                 origin=None if batch.origin is None else batch.origin[a:b],
                  background_map=None if batch.background_map is None else batch.background_map[a:b],
                  shift=None if batch.shift is None else batch.shift[a:b])
 

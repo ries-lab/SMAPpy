@@ -351,8 +351,10 @@ class TwoStageUNet(nn.Module):
                  "block": block}
         self.offset_range = float(offset_range)
         self.channels, self.aux = int(channels), int(aux)
-        if self.channels < 1 or (self.channels == 1 and self.aux):
-            raise ValueError(f"channels {channels}, aux {aux}: at least one channel, offset maps only with two")
+        # ``aux`` maps beside the frames: two channels' offset maps, or one channel's u, v (a
+        # field-dependent PSF, `field.FieldRecord`), into the per-frame U-Nets (``two_aux`` "every") and the union
+        if self.channels < 1 or self.aux < 0:
+            raise ValueError(f"channels {channels}, aux {aux}: at least one channel, no negative maps")
         self.two_time, self.two_fuse, self.two_aux = two_time, two_fuse, two_aux
         if two_time not in ("channel", "joined", "both") or two_fuse not in ("late", "early") \
                 or two_aux not in ("every", "union"):
@@ -446,7 +448,8 @@ class TwoStageUNet(nn.Module):
         the ``out_scale``, K the ``slots`` (13 channels with ``sigma_rep``; `Layout`).
 
         With ``channels`` C > 1, ``x`` is (b, C, window, rows, columns) and ``aux`` the offset maps,
-        (b, A, rows, columns) or (A, rows, columns) for every sample alike.
+        (b, A, rows, columns) or (A, rows, columns) for every sample alike; with one channel and ``aux``
+        maps (a field-dependent PSF's u, v), ``x`` as one channel's and ``aux`` alike.
 
         ``windows`` > 1: ``x`` is (n, window + windows - 1, rows, columns), n movies each read as
         ``windows`` windows shifted by a frame, and the output (n windows, ...), a movie's windows
@@ -455,8 +458,15 @@ class TwoStageUNet(nn.Module):
         one -- nothing in the per-frame U-Net mixes samples -- for about 1 + (windows - 1) / window
         frames a window instead of window frames (training on cut movies, `simulate.draw_batch`'s
         ``movie_windows``, and the predictor's sliding window)."""
-        if self.channels == 1:
+        if self.channels == 1 and not self.aux:
             joined = self._channel(self.frame, self.time, x, None, windows)
+        elif self.channels == 1:
+            n, _, h, w = x.shape
+            if aux is None or aux.shape[-3] != self.aux:
+                raise ValueError(f"{self.aux} input maps expected, got {None if aux is None else aux.shape[-3]}")
+            aux = aux.to(x.dtype).expand(n, self.aux, h, w)
+            own = self._channel(self.frame, self.time, x, aux if self.two_aux == "every" else None, windows)
+            joined = torch.cat([own, aux.repeat_interleave(windows, 0)], 1)
         else:
             n, C, _, h, w = x.shape
             if C != self.channels or aux is None or aux.shape[-3] != self.aux:
@@ -614,15 +624,19 @@ BACKBONES = {"unet2": TwoStageUNet}
 TIME_MODELS = {"attention": TimeAttention, "convgru": TimeGRU}
 
 
-def build(parts, window: int, channels=None) -> nn.Module:
+def build(parts, window: int, channels=None, field: bool = False) -> nn.Module:
     """The network the parts name: a backbone (``unet2``) with a time model (``frame_stack``, DECODE's,
     or one of `TIME_MODELS`).  The time model's ``frames`` setting is a record only: the window is the
     simulation's.  ``channels`` (`settings.ChannelSettings`) with a ``kind``: two channels, their offset
-    maps and its photon counts."""
+    maps and its photon counts.  ``field``: one channel with its u, v maps (a field-dependent PSF)."""
     tm = parts.time_model
     extra = {k: v for k, v in (tm.settings or {}).items() if k != "frames"}
     two = ({"channels": 2, "photons": channels.photons, "aux": 2, "photon_share": channels.photon_out == "share"}
            if channels is not None and channels.kind else {})
+    if field:
+        if two:
+            raise ValueError("a field-dependent PSF is drawn for one channel only")
+        two = {"aux": 2}
     return BACKBONES[parts.backbone.name](window=window, time_model=tm.name, time_settings=extra or None,
                                           **parts.backbone.settings, **two)
 

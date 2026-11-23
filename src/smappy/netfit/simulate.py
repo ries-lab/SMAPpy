@@ -22,6 +22,10 @@ a smooth field, fixed over the movie (`background_modulation`); their target is 
 as padded tensors with a mask: columns, rows (pixels), z (nm), photons in that frame; and that
 frame's background.
 
+**A field-dependent PSF** (`draw_batch`'s ``field``, `field.FieldRecord`, `docs/decode/fd-plan.md`): each
+movie is a crop of the chip at a corner drawn over the field (`FieldRecord.corners`), each spot drawn
+with the PSF blended where it is on the chip, and the crop's u, v maps beside the frames (``aux``).
+
 **Two channels** (`draw_batch_2c`, `docs/decode/plex-plan.md` §16): crops of the halves' overlap at
 random places (`channels.Grid`), so that the network sees every part of the registration; channel 0's
 spot at the molecule's position, channel 1's at that plus the registration's remainder ``d``, each
@@ -60,6 +64,9 @@ class Batch:
     # two channels: each target's channel-1 spot relative to its channel-0 one (the registration's
     # remainder), pixels, (b, k, 2) -- what the test set's bound needs (`bounds.drawn_crlb`)
     shift: torch.Tensor | None = None
+    # a field-dependent drawing: each sample's corner on the chip, (b, 2) x, y pixels -- a target's chip
+    # position is its column and row plus it
+    origin: torch.Tensor | None = None
 
 
 def _uniform(lo, hi, n, g, device):
@@ -154,10 +161,11 @@ def camera(photons: torch.Tensor, cam: CameraModel, g: torch.Generator) -> torch
 
 
 def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraModel, batch: int,
-               g: torch.Generator) -> Batch:
+               g: torch.Generator, field=None) -> Batch:
     """One batch of fresh samples on the renderer's device: movies of ``window + movie_windows - 1``
     frames, each cut into ``movie_windows`` windows shifted by a frame (one window a movie by default,
-    every sample its own)."""
+    every sample its own).  ``field`` (`field.FieldRecord`, with a field-dependent renderer): each movie a
+    crop of the chip, its spots drawn with their local PSF and its u, v maps in ``aux``."""
     device = renderer.device
     T, s = sim.window, sim.frame_px
     W = max(1, int(sim.movie_windows))
@@ -174,7 +182,14 @@ def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraMod
         image = image * mod
     on = per_frame > 0
     m, f = on.nonzero(as_tuple=True)
-    renderer.draw(image.view(n * L, s, s), sample[m] * L + f, x[m], y[m], z[m], per_frame[m, f])
+    chip = corner = None
+    if field is not None:
+        if not renderer.field:
+            raise ValueError("a field-dependent batch needs a field-dependent renderer")
+        # drawn after everything above, so a seed draws the same molecules with the field as without
+        corner = field.corners(n, s, g, device)                                     # (n, 2) x, y
+        chip = corner[sample[m]] + torch.stack([x[m], y[m]], 1)
+    renderer.draw(image.view(n * L, s, s), sample[m] * L + f, x[m], y[m], z[m], per_frame[m, f], chip=chip)
     movie = camera(image, cam, g)
     idx = torch.arange(W, device=device)[:, None] + torch.arange(T, device=device)[None]     # (W, T)
     frames = movie[:, idx].reshape(n * W, T, s, s)[:batch]
@@ -202,8 +217,12 @@ def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraMod
     window[ks, rank] = per_frame[i[:, None], idx[w]]
     mask[ks, rank] = True
     bg_map = None if mod is None else mod.repeat_interleave(W, 0)[:batch] * bgw[:, mid, None, None, None]
+    aux = origin = None
+    if corner is not None:
+        origin = corner.repeat_interleave(W, 0)[:batch]
+        aux = field.maps_torch(origin, s)
     return Batch(frames, xyz, photons, mask, bgw[:, mid], window, bgw, movie if W > 1 else None, W,
-                 background_map=bg_map)
+                 background_map=bg_map, aux=aux, origin=origin)
 
 
 def draw_batch_2c(renderers, grid, sim: SimulationSettings, cam: CameraModel, channels, batch: int,

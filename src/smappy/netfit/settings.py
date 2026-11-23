@@ -52,6 +52,10 @@ class SimulationSettings:
     # "box": each spot in the spline's square less 3 pixels, as SMAPpy's simulation draws it (version 1);
     # "whole": over the spline's whole grid, as DECODE-Plex and the C = 2 sets draw it (`render`)
     spots: str = "box"
+    # a field-dependent calibration (`smappy.field_splines`): "on" draws each spot with the PSF where it is
+    # on the chip and gives the network u, v maps (`field.FieldRecord`, `docs/decode/fd-plan.md`), "auto"
+    # does so when the calibration has node splines, "off" draws the field's centre everywhere (version 1)
+    field: str = "off"
 
 
 @dataclass

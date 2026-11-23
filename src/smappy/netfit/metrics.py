@@ -21,11 +21,12 @@ CORE_Z_NM = 300.0
 CRLB_ROI = 13
 
 
-def position_covariance(renderer, photons, background, z_nm, offsets, roi: int = CRLB_ROI):
+def position_covariance(renderer, photons, background, z_nm, offsets, roi: int = CRLB_ROI, chip=None):
     """(n, 3, 3): each spot's covariance bound of x, y (pixels) and z (nm), the photons and the
     background eliminated, from the Fisher information of its spot alone in the central ``roi`` x
     ``roi`` pixels of the renderer's square -- Spline 3D's fit box; derivatives by central
-    differences.  ``offsets`` (n, 2): its place within its pixel."""
+    differences.  ``offsets`` (n, 2): its place within its pixel; ``chip`` (n, 2): where it is on the
+    chip, for a field-dependent renderer (its local PSF, held while x moves)."""
     import torch
     dev = renderer.device
     n = len(z_nm)
@@ -40,9 +41,10 @@ def position_covariance(renderer, photons, background, z_nm, offsets, roi: int =
         z = torch.as_tensor(np.asarray(z_nm[s], np.float32), device=dev)
         N = torch.as_tensor(np.asarray(photons[s], np.float32), device=dev)[:, None, None]
         bg = torch.as_tensor(np.asarray(background[s], np.float32), device=dev)[:, None, None]
+        c = None if chip is None else torch.as_tensor(np.asarray(chip[s], np.float32), device=dev)
 
-        def spot(dx=0.0, dy=0.0, dz=0.0, x=x, y=y, z=z):
-            sp = renderer.spots(x + dx, y + dy, z + dz)[0]
+        def spot(dx=0.0, dy=0.0, dz=0.0, x=x, y=y, z=z, c=c):
+            sp = renderer.spots(x + dx, y + dy, z + dz, chip=c)[0]
             return sp[:, lo:lo + roi, lo:lo + roi]
         h, hz = 1e-2, 1.0
         s0 = spot()
@@ -59,11 +61,12 @@ def _offsets(n, seed=0):
     return np.random.default_rng(seed).uniform(-0.5, 0.5, (n, 2))
 
 
-def crlbs_torch(renderer, photons, background, z_nm, pixel_nm, em: bool, roi: int = CRLB_ROI) -> np.ndarray:
+def crlbs_torch(renderer, photons, background, z_nm, pixel_nm, em: bool, roi: int = CRLB_ROI,
+                chip=None) -> np.ndarray:
     """(n, 3): each molecule's Poisson bound in x, y, z (nm) (`position_covariance`), doubled in
     variance for an EM register.  The same bound as `crlbs` (SMAPpy's C++ fitter) without needing it
     built: the training host has only Python."""
-    cov = position_covariance(renderer, photons, background, z_nm, _offsets(len(z_nm)), roi)
+    cov = position_covariance(renderer, photons, background, z_nm, _offsets(len(z_nm)), roi, chip)
     var = np.clip(np.diagonal(cov, axis1=1, axis2=2), 0, None)
     return np.sqrt(var) * np.array([pixel_nm[0], pixel_nm[1], 1.0]) * (np.sqrt(2.0) if em else 1.0)
 

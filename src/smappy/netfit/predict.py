@@ -11,6 +11,10 @@ rows, columns)``, and their offset maps ``aux`` ``(2, rows, columns)`` -- `chann
 ``offsets`` -- and gives positions on channel 0's grid, with each channel's photons (colour) and
 background beside them.
 
+A model trained on a field-dependent PSF (its header's ``field``, `field.FieldRecord`) reads u, v maps
+beside the frames: made here from ``corner``, the frames' corner on the chip (the camera ROI's offset),
+and the crop.  Its frames are never mirrored: the field was learnt on the chip as the beads saw it.
+
 The DECODE fitter runs it (`smappy.training.predictors.load`, `plugins.fit_decode`) as it runs the
 port's predictor: the same columns, ``window``, ``device``, ``raw_th`` and ``frames_mirrored``.  The
 photons need no correction for the camera's ``qe``: the training drew frames with it and converted
@@ -25,6 +29,7 @@ import torch
 
 from ..training import model_file
 from . import extract, network
+from .field import FieldRecord
 from .settings import ChannelSettings, Part, Parts
 
 #: inference memory a pixel of a batch, the default network (48 features, 3 frames): 4 700 bytes on
@@ -52,7 +57,7 @@ def auto_batch(device: str, rows: int, columns: int) -> int:
 
 class Predictor:
     def __init__(self, path, device=None, *, frames_mirrored: bool = False, threshold: float | None = None,
-                 extraction: str | None = None, batch: int = 32):
+                 extraction: str | None = None, batch: int = 32, corner=(0, 0)):
         tensors, meta = model_file.read(Path(path))
         self.metadata = meta
         s = meta["settings"]
@@ -61,7 +66,14 @@ class Predictor:
             "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         ch = dict(s.get("channels") or {})
         self.channels = ChannelSettings(**{k: tuple(v) if k == "share" else v for k, v in ch.items()})
-        self.model = network.build(parts, int(meta["window"]), self.channels).to(self.device).eval()
+        # a field-dependent model: its u, v maps from the record and the frames' corner on the chip
+        self.field = FieldRecord.from_dict(meta["field"]) if meta.get("field") else None
+        self.corner = tuple(float(v) for v in corner)
+        if self.field is not None and frames_mirrored:
+            raise ValueError("a model trained on a field-dependent PSF takes the frames as the beads' chip had "
+                             "them: the data were taken with the EM register set otherwise")
+        self.model = network.build(parts, int(meta["window"]), self.channels,
+                                   field=self.field is not None).to(self.device).eval()
         self.model.load_state_dict({k: torch.as_tensor(np.asarray(v)) for k, v in tensors.items()})
         self.scaling = network.Scaling(**meta["scaling"])
         self.window = (int(meta["window"]) - 1) // 2
@@ -125,6 +137,9 @@ class Predictor:
         if two:
             x = x.transpose(0, 1)                                            # (2, n, h, w)
             maps = torch.as_tensor(np.asarray(aux, np.float32)[:, r0:r0 + hh, c0:c0 + ww]).to(self.device)
+        elif self.field is not None:
+            corner = (self.corner[0] + c0, self.corner[1] + r0)
+            maps = torch.as_tensor(self.field.maps(corner, hh, ww)).to(self.device)
         layout = self.model.layout
         parts, maps_bg = [], []
         size = self.batch or auto_batch(self.device, hh * self.scale, ww * self.scale) // (2 if two else 1)
@@ -133,8 +148,9 @@ class Predictor:
             for a in range(0, n, size):
                 b = min(a + size, n)
                 # the windows a..b-1 as one movie: each frame through the per-frame U-Net once
-                if two:
-                    out = self.model(x[:, a:b + 2 * k][None].to(self.device), b - a, maps[None])
+                if two or self.field is not None:
+                    xa = x[:, a:b + 2 * k] if two else x[a:b + 2 * k]
+                    out = self.model(xa[None].to(self.device), b - a, maps[None])
                 else:
                     out = self.model(x[a:b + 2 * k][None].to(self.device), b - a)
                 if self.keep_background:

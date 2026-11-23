@@ -37,10 +37,18 @@ def two_channel(meta: dict) -> bool:
     return bool(meta.get("channels"))
 
 
-def load(path, device=None, *, frames_mirrored: bool = False, threshold: float | None = None, batch: int = 0):
+def field_dependent(meta: dict) -> bool:
+    """Whether a model was trained on a field-dependent PSF and reads u, v maps (`netfit.field`)."""
+    return bool(meta.get("field"))
+
+
+def load(path, device=None, *, frames_mirrored: bool = False, threshold: float | None = None, batch: int = 0,
+         corner=(0, 0)):
     """The model file at ``path`` as a predictor on ``device`` (None or "auto": the fastest there is).
     ``threshold``: the detection probability a localization starts from (DECODE's ``raw_th``; None:
-    the model's own); ``batch``: frames through the network at once, 0 as many as memory allows."""
+    the model's own); ``batch``: frames through the network at once, 0 as many as memory allows;
+    ``corner`` (x, y): the frames' corner on the chip, the camera ROI's offset, which a field-dependent
+    model's maps are made from (`netfit.field`)."""
     from . import model_file
     meta = model_file.read_metadata(Path(path))
     method = meta.get("method")
@@ -54,7 +62,7 @@ def load(path, device=None, *, frames_mirrored: bool = False, threshold: float |
                              f"(the DECODE fitter's two channels, `netfit.fit_two`); this loads one-channel models")
         from ..netfit.predict import Predictor
         return Predictor(path, None if device in (None, "auto") else device, frames_mirrored=frames_mirrored,
-                         threshold=threshold, batch=batch)
+                         threshold=threshold, batch=batch, corner=corner)
     if method == PLEX:
         from decode_smlm.plex.fitter import PlexPredictor
         return PlexPredictor(path, None if device in (None, "auto") else device, threshold=threshold, batch=batch)

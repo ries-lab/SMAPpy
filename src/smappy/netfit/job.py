@@ -103,6 +103,10 @@ def settings_from_estimates(est, camera_section: dict, density, calibration: str
     # whatever the batch, molecules from 100 photons a frame the targets
     s.parts.schedule.settings["decay_samples"] = DECAY_SAMPLES
     s.simulation = SimulationSettings(**{**s.simulation.__dict__, "target_photons_min": TARGET_PHOTONS_MIN})
+    if channels is None:
+        # a calibration that varies over the chip is drawn so, and the network told where it is
+        # (`netfit.field`, docs/decode/fd-plan.md): "auto" turns it on for one with node splines
+        s.simulation = SimulationSettings(**{**s.simulation.__dict__, "field": "auto"})
     from .settings import Part
     if channels is None:
         # one channel: step 4's time model, GMN7C (docs/decode/poc-plan.md, "Step 4: the time model"):
