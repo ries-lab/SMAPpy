@@ -153,6 +153,14 @@ class TwoChannelPrepare:
     move: ChannelMoveSettings = param(default_factory=ChannelMoveSettings, label="channel move", collapsed=True)
 
 
+#: *uneven backgrounds*: auto is on for a two-channel job and off for a one-channel one
+UNEVEN = (("auto", "auto"), ("on", "on"), ("off", "off"))
+
+
+def uneven_on(choice: str, two_channels: bool) -> bool:
+    return choice == "on" or (choice == "auto" and two_channels)
+
+
 def _dye_choices():
     from ..netfit.job import DYES
     return DYES
@@ -176,9 +184,11 @@ class PrepareSettings:
     density_manual: float = param(1.0, label="molecules", unit="per µm²", min=0.02, max=10.0, beside=True,
                                   help="the density typed: molecules on in a frame, per µm² of the sample")
     # SMAPpy's networks only: DECODE's simulator draws a flat background (plex-plan §16, Jonas 2026-11-23)
-    uneven_background: bool = param(True, label="uneven backgrounds",
-                                    help="half the training's movies drawn with a background that varies over "
-                                         "the field, as a cell's does; off: every frame's background flat")
+    # on for two channels, off for one (Jonas, 2026-11-23): at C = 2 it halved the pixelation and was worth a quarter
+    # of the error on a live cell; at C = 1 it cost 0.005 in Jaccard and doubled the pixelation (plex-plan §16)
+    uneven_background: str = param("auto", label="uneven backgrounds", choices=UNEVEN,
+                                   help="half the training's movies drawn with a background that varies over the "
+                                        "field, as a cell's does; auto: on for two channels, off for one")
     two_channels: TwoChannelPrepare = param(default_factory=TwoChannelPrepare, label="two channels",
                                             collapsed=True)
     model: str = param("optimised", label="model", choices=MODELS, advanced=True,
@@ -499,7 +509,8 @@ def netfit_params(prepared: Prepared, est, seed: int = 0) -> dict:
         channels, fuse = two_channel_settings(prepared.two, main=t.main, dyes=t.dyes, typed=typed_shares(t.typed),
                                               spread=t.spread, fuse="late" if s.model == "plexlike" else "early")
     return settings_from_estimates(est, camera_section(prepared.camera), training_density(s, prepared.camera), seed=seed,
-                                   channels=channels, fuse=fuse, uneven=s.uneven_background).to_dict()
+                                   channels=channels, fuse=fuse,
+                                   uneven=uneven_on(s.uneven_background, prepared.two is not None)).to_dict()
 
 
 def method_of(settings: PrepareSettings) -> str:

@@ -37,9 +37,9 @@ def test_the_window_writes_an_optimised_job_from_the_prefits_ranges_with_its_pat
     assert job.method == NETFIT and not (folder / "method.yaml").exists()
     sim = params["simulation"]
     assert sim["photons_mean"] == pytest.approx(est.intensity_mu_sig[0])
-    # the photons drawn uniformly over the prefit's range, half the movies with an uneven background
+    # the photons drawn uniformly over the prefit's range; one channel: flat backgrounds (uneven on auto)
     assert sim["photons_range"] == pytest.approx(list(est.photons_range))
-    assert sim["background_uneven"] == 0.5
+    assert sim["background_uneven"] == 0.0
     assert sim["background"] == pytest.approx(list(est.background)) and sim["z_nm"] == pytest.approx(list(est.z_nm))
     assert sim["density_per_40px"] == pytest.approx(16.0)   # HD, 1 per um^2, on 40 x 40 pixels of 100 nm
     # step 4's time model (GMN7C): the ConvGRU over 7 frames, on-times drawn over 1 - 3, streamed
@@ -52,14 +52,17 @@ def test_the_window_writes_an_optimised_job_from_the_prefits_ranges_with_its_pat
     assert jobfile.check(folder) == []
 
 
-def test_uneven_backgrounds_off_draws_every_movie_flat_and_plex_like_is_an_optimised_job(movie):
+def test_uneven_backgrounds_are_on_for_two_channels_off_for_one_and_plex_like_is_an_optimised_job(movie):
     from dataclasses import replace
 
     from smappy.gui.train_window import METHOD, NETFIT, method_of, netfit_params, run_prefit
     path, cal_path = movie
     prepared = run_prefit(_prepare_settings(path, cal_path, model="optimised"))
-    flat = replace(prepared, settings=replace(prepared.settings, uneven_background=False))
-    assert netfit_params(flat, prepared.estimates)["simulation"]["background_uneven"] == 0.0
+    on = replace(prepared, settings=replace(prepared.settings, uneven_background="on"))
+    assert netfit_params(on, prepared.estimates)["simulation"]["background_uneven"] == 0.5
+    from smappy.gui.train_window import uneven_on
+    assert [uneven_on(c, two) for c in ("auto", "on", "off") for two in (False, True)] == [
+        False, True, True, True, False, False]
     s = prepared.settings
     assert [method_of(replace(s, model=m)) for m in ("optimised", "plexlike", "decode")] == [NETFIT, NETFIT, METHOD]
 

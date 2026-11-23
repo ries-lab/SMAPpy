@@ -273,7 +273,7 @@ molecules it found against 27 % for a model trained at 2.  One trained at 0.2
 per µm² gained only on the sparsest data and had twice the outliers even at its
 own density.
 
-*uneven backgrounds* (on by default; SMAPpy's networks only, not *DECODE*,
+*uneven backgrounds* (*auto*: on for two channels, off for one; SMAPpy's networks only, not *DECODE*,
 whose simulator draws a flat background): half the training's movies have a
 background that varies smoothly over the field, up to about ten times
 between its brightest and darkest parts, as a cell's autofluorescence or an
@@ -281,7 +281,10 @@ out-of-focus nucleus makes it; the network learns to fit that background
 under each molecule.  On the two-channel studies' test sets it lost nothing
 to a model trained on flat backgrounds and halved the pixelation (the pull
 of positions towards pixel centres).  On a live cell it found half as many
-molecules again.  Switch it off only for a background you know to be flat.
+molecules again.  For one channel it is off on *auto*: on the one-channel
+test sets it cost 0.005 in Jaccard and doubled the pixelation, and no
+one-channel live-cell movie with a truth has shown its gain there yet;
+choose *on* for a cell with a strongly uneven background.
 
 *in the sample* appears for a calibration made with the pupil (Zernike)
 method, and is [Spline 3D](plugin:Localize/Spline 3D)'s *focus*: the

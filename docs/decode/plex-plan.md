@@ -1647,4 +1647,5 @@ range 0.005 -- 0.010, with the inliers' RMSE over the bound 0.66 to 0.69 axially
 on for 3 frames; the pixelation within the seeds' wide scatter or above it.  These sets' photons are drawn
 as the baseline was trained, normal 7 000 +- 3 000, and their backgrounds flat or smooth: they cannot show
 what either default is for -- the bright tail and the uneven light of a live cell, where at C = 2 on Fig. 2c
-they were worth half the matches and a quarter of the error.
+they were worth half the matches and a quarter of the error.  So *uneven backgrounds* is *auto*: on for two channels, off for one
+(Jonas, 2026-11-23); the photon range stays for both, as it follows each movie's own prefit.
