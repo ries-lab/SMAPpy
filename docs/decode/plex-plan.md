@@ -1488,6 +1488,30 @@ as much light spread flat (0.68) -- the background beyond the training's range, 
 the pattern's.  Uneven backgrounds are worth having in the window's training (a share of the movies, as
 here), with a seed or two more before the default changes; Fig. 2c's F models are the real-data check.
 
+Colour's channel 0 short of its field: the training draws channel 0's background from [0, 100] photons
+a pixel (its prefit's range), and the uneven set puts the level, 71, under a field of 61 -- 212 -- most
+pixels beyond anything the network saw.  Biplane's ranges reach higher and its channel 0 is mapped at
+0.99.  A prefit over a movie with such a background would have the range to match.
+
+**The seeds** (`B_*_uneven_s{0,1,2}` against `P_*_s{0,1,2}`, mean (sd)):
+
+| | biplane P | biplane B | colour P | colour B |
+|---|---|---|---|---|
+| flat 10 000 photons: Jaccard | 0.789 (0.028) | 0.830 (0.008) | 0.853 (0.009) | 0.854 (0.005) |
+| flat 1 000 photons: Jaccard | 0.541 (0.008) | 0.550 (0.033) | 0.590 (0.041) | 0.596 (0.030) |
+| flat density 15: Jaccard | 0.824 (0.002) | 0.822 (0.000) | 0.865 (0.001) | 0.862 (0.001) |
+| flat density 15: outliers % | 1.7 | 1.8 | 5.3 | 5.7 |
+| flat 1 000 photons: RMSE / CRLB lat, ax | 1.19, 1.37 | 1.21, 1.42 | 1.24, 1.31 | 1.27, 1.31 |
+| flat density 15: RMSE / CRLB lat, ax | 1.13, 1.17 | 1.15, 1.20 | 1.25, 1.26 | 1.27, 1.29 |
+| flat 1 000 photons: pixelation KS | 0.038 | 0.017 | 0.009 | 0.011 |
+| flat 1 000 photons: right dye % | | | 91.6 (2.0) | 94.2 (1.0) |
+| uneven density 15: Jaccard, seeds 0 / 1 / 2 | 0.683 (s0) | 0.766 / 0.767 / 0.768 | 0.614 (s0) | 0.820 / 0.819 / 0.819 |
+| map's pattern gain 0 / 1, seeds 0 / 1 / 2 | | 0.92 / 0.45, 1.03 / 0.37, 0.95 / 0.40 | | 0.56 / 0.85, 0.40 / 0.88, 0.56 / 0.98 |
+
+Over three seeds the flat sets' cost is 1 -- 4 % of precision (axial at 1 000 photons worst, 4 %) and none in
+Jaccard or the dye; seed 0's colour Jaccard at 1 000 photons (0.554) was the seed.  The gain on the uneven
+set is the same in every seed.  Biplane's pixelation halves on the simulation too.  The default can change.
+
 **Fig. 2c, the models from the last frames' estimates** (`real_c2.py fig2c|fig2c_last`, 300 frames each,
 prob > 0.6; F trained on the last 1 000 frames' prefit, bleached -- background 0 -- 195; P and B on the suite's
 biplane ranges, R on backgrounds up to 1 000; no DECODE-Plex localizations for the last frames):
@@ -1531,3 +1555,40 @@ backgrounds leaves noise alone around its molecules (0 is noise; P 19, B 12, F f
 background is uneven, and a network that has learnt such backgrounds puts the light where it is.  For
 the window: uneven backgrounds in training (half the movies, contrast up to 0.8) once the seeds confirm
 the flat sets' small cost; and the goodness a network is judged by draws its own map.
+
+**Fig. 2c, the window's job over the whole movie** (`fig2c_prefit.py MOVIE 0 10000 8 50`: 8 blocks of 50
+frames spread over it, the window's prefit and job; one seed each, 6 M samples; first frames scored
+against DECODE-Plex, 300 frames each):
+
+| | per frame | of Plex's matched | offset x, y nm | sigma lat / ax nm | z 5 -- 95 % | pixelation | last frames: per frame |
+|---|---|---|---|---|---|---|---|
+| P (suite's ranges) | 3 047 | 0.77 | 26, 19 | 39 / 102 | -889 -- 616 | 0.033 | 641 |
+| B (suite's, uneven) | 2 937 | 0.77 | 26, 20 | 36 / 99 | -647 -- 691 | 0.016 | 636 |
+| the window's job, flat | 1 241 | 0.41 | 43, 32 | 49 / 190 | -721 -- 540 | 0.014 | 400 |
+| the window's job, uneven | 1 828 | 0.62 | 34, 25 | 33 / 110 | -352 -- 449 | 0.014 | 479 |
+| + robust photons | 1 714 | 0.51 | 35, 24 | 59 / 247 | -543 -- 563 | 0.017 | 503 |
+| + robust photons, uneven | 1 981 | 0.62 | 33, 22 | 34 / 122 | -270 -- 378 | 0.044 | 547 |
+| + robust photons, density 50 | 2 972 | 0.68 | 22, 20 | 57 / 198 | -670 -- 584 | 0.017 | 719 |
+| + robust photons, density 50, z +-1 um | 3 455 | 0.73 | 24, 20 | 58 / 175 | -671 -- 718 | 0.026 | 807 |
+
+The window's job trained from this movie lost to the suite's hand-set ranges.  Its estimates
+(`job.json`): photons 2 836 +- 4 163, background 0 -- 1 249, z -1 862 -- 1 940 (the calibration's
+limits), density HD (1 per µm², 24 in 40 x 40).  What each cost:
+
+* **The photons' spread** was a prefit bug.  2 % of the fully-on fits -- overlaps in the crowded first
+  frames, up to 50 times the median, past the logl cut -- set the sd alone; the training draws the flux
+  normal and cut at 0, so a quarter of its molecules had next to no photons, targets it cannot find.
+  Fixed (`prefit.intensity_fully_on`: the fits 3 robust sd above the median in log photons left
+  out, 2 480 +- 1 300).  It recovers part of what was lost (0.41 to 0.51 flat), not most.
+* **The density** is most of it: at 50 in 40 x 40 the job finds as many as P and matches 0.68, and its
+  offset to DECODE-Plex is P's again (the sparse models' extra 10 -- 15 nm is their missing near
+  neighbours, matched to the wrong molecule).  The live cell's first frames hold 1 300 -- 2 300
+  molecules a frame (the prefit's measured density, 1.7 in 40 x 40, counts only what Spline 3D 2C
+  separates, over the whole movie).  The window's choice for such a movie is UHD; the density study had found as much
+  ("training too sparse costs more than too dense").
+* **The z range**: the blinks' 1st -- 99th percentile, widened by 20 %, reaches the calibration's
+  limits; DECODE-Plex's 5 -- 95 % is -601 -- 691 and the prefit's -921 -- 784.  The tails are
+  molecules out of focus in a live cell (the logl cut leaves them: -1 695 -- 1 593 at 1 MAD).  At
+  +-1 µm the job matches 0.73 and its z is the nearest to DECODE-Plex's.
+* Still left: the sigma, half again P's at every density.  The background range (0 -- 1 249, against P's
+  0 -- 300) and the photons' distribution (normal, against P's uniform 500 -- 30 000) are being trained.

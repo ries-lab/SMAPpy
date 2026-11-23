@@ -1,0 +1,141 @@
+{
+ "simulation": {
+  "frame_px": 40,
+  "window": 3,
+  "margin_px": 0.0,
+  "density_per_40px": 50.0,
+  "lifetime_frames": 1.0,
+  "lifetime_max_frames": 0.0,
+  "movie_windows": 8,
+  "photons_mean": 2483.0,
+  "photons_sd": 1299.0,
+  "photons_min": 0.0,
+  "photons_range": null,
+  "background": [
+   0.01799999959766865,
+   1249.4988511104527
+  ],
+  "background_jitter": -1.0,
+  "background_uneven": 0.0,
+  "background_contrast": 0.8,
+  "z_nm": [
+   -1862.4916303710936,
+   1940.0
+  ],
+  "target_photons_min": 100.0,
+  "spots": "whole"
+ },
+ "camera": {
+  "conversion": 5.0,
+  "offset": 398.6,
+  "em_gain": 100.0,
+  "read_noise_e": 74.4,
+  "qe": 1.0,
+  "pixel_nm": [
+   117.0,
+   127.0
+  ]
+ },
+ "parts": {
+  "backbone": {
+   "name": "unet2",
+   "settings": {
+    "features": 64,
+    "depth_frame": 2,
+    "depth_union": 2,
+    "upsample_kernel": 1,
+    "pool_act": false,
+    "out_conv": true,
+    "init": "kaiming",
+    "p_clamp": 8.0,
+    "offset_range": 2.0,
+    "sigma_rep": true,
+    "two_fuse": "early"
+   }
+  },
+  "time_model": {
+   "name": "convgru",
+   "settings": {
+    "frames": 3,
+    "norm": true
+   }
+  },
+  "output": {
+   "name": "offsets",
+   "settings": {}
+  },
+  "extraction": {
+   "name": "mixture_peak",
+   "settings": {}
+  },
+  "loss": {
+   "name": "mixture",
+   "settings": {
+    "terms": [
+     "count",
+     "mixture",
+     "background"
+    ],
+    "reported": [
+     {
+      "head": "mixture",
+      "weight": 0.1,
+      "from_epoch": 5
+     },
+     {
+      "head": "rep",
+      "weight": 1.0,
+      "from_epoch": 5
+     }
+    ]
+   }
+  },
+  "schedule": {
+   "name": "adamw_step",
+   "settings": {
+    "lr": 0.0006,
+    "weight_decay": 0.1,
+    "step_epochs": 10,
+    "gamma": 0.9,
+    "clip_norm": null,
+    "batch": 64,
+    "samples_per_epoch": 32768,
+    "epochs": 1000,
+    "test_samples": 512,
+    "threshold": 0.5,
+    "max_samples": 6000000.0,
+    "precision": "auto",
+    "compile": "auto",
+    "channels_last": "auto",
+    "ema": 0.999,
+    "snapshots": [],
+    "decay_samples": 327680
+   }
+  }
+ },
+ "channels": {
+  "kind": "biplane",
+  "share": [
+   0.0,
+   1.0
+  ],
+  "dyes": null,
+  "share_sd": 0.03,
+  "background": [
+   [
+    0.01799999959766865,
+    1249.4988511104527
+   ],
+   [
+    0.01799999959766865,
+    1293.6891981048584
+   ]
+  ],
+  "photon_out": "counts",
+  "main": 0,
+  "unlinked": false
+ },
+ "calibration": "fig2c_2ct.h5",
+ "test_set": null,
+ "seed": 0
+}
