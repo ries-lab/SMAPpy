@@ -791,9 +791,11 @@ def test_dragging_inside_a_polygon_moves_it_and_a_click_inside_only_centres(tmp_
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtTest import QTest
     pane = window.roi_pane
-    at = pane.graphics.mapFromScene(pane.content.mapToScene(QPointF(2010.0, 1990.0)))
+    # 40 nm off the line: within RIM_PIXELS of it the click chooses the line, and a pixel is 2.4 nm
+    # when an earlier test in the worker left the window smaller
+    at = pane.graphics.mapFromScene(pane.content.mapToScene(QPointF(2010.0, 1960.0)))
     QTest.mouseClick(pane.graphics.viewport(), Qt.LeftButton, Qt.NoModifier, at)
     clicked = roi_now(session, roi)
     assert clicked.polygon == square                        # the outline stays
-    assert np.allclose(clicked.center, [2010, 1990], atol=p)
+    assert np.allclose(clicked.center, [2010, 1960], atol=p)
     window.close()
