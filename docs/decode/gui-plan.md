@@ -199,7 +199,16 @@ typed move or none, and after a move pair nothing.
   -0.23 and -0.27 px per um in columns, +0.28 and +0.10 in rows -- 15 -- 18 nm between z -500 and +500.
   So on these two an affine buys nothing a user would see; a z-dependent channel offset (the two channels'
   PSF models disagreeing with the beads' map off focus: beads on the coverslip, molecules in the sample)
-  is the bigger term.  Not built; the analysis is `affine_check.py`'s, in the session's scratchpad.  Spline 4Pi's channel drift (`multichannel.ChannelDrift`,
+  is the bigger term.  The analysis is `affine_check.py`'s, in the session's scratchpad.
+- **Rotation and scale, built** (Jonas: an option, off by default; `1d5bea9e`), and *measured* the default
+  everywhere, a fit going on unmoved where the move cannot be measured.  Learning the registration
+  with the register plugins instead: an unlinked fit's pairs as two rows each (`camera_channel` 0 and 1,
+  their fitted chip positions) do go through *Calibrate transform* (`register_table`).  On a simulated
+  64 x 64 splitter turned 10 mrad, scaled 0.5 % and moved (1.5, -1.0) px, its map was off the truth by
+  0.13 px median, 0.61 at most (308 pairs); the channel move's shift with rotation and scale, on the
+  beads' map, by 0.03 and 0.06 (101 pairs): six numbers on a map that holds, against a new projective
+  map.  So the register plugins are for a map gone beyond an affine, with many pairs; no converter
+  built (`register_unlinked.py`, scratchpad).  Spline 4Pi's channel drift (`multichannel.ChannelDrift`,
   linear between blocks) moves onto the same machinery later, not now.
 
 ## 5. Decided (Jonas, 2026-11-22), and open
