@@ -1572,6 +1572,8 @@ against DECODE-Plex, 300 frames each):
 | + robust photons, density 50, z +-1 um | 3 455 | 0.73 | 24, 20 | 58 / 175 | -671 -- 718 | 0.026 | 807 |
 | ... + background 0 -- 300 | 3 566 | 0.70 | 19, 21 | 66 / 216 | -788 -- 652 | 0.072 | 893 |
 | ... + photons uniform 500 -- 30 000 | 2 888 | 0.75 | 26, 20 | 39 / 93 | -890 -- 605 | 0.028 | 584 |
+| **the window's job now** (photons 370 -- 18 400, z -1 340 -- 1 120, uneven) | 2 878 | 0.75 | 26, 20 | 35 / 96 | -527 -- 582 | 0.026 | 542 |
+| the same, flat backgrounds | 3 085 | 0.75 | 26, 20 | 44 / 123 | -960 -- 621 | 0.022 | 618 |
 
 The window's job trained from this movie lost to the suite's hand-set ranges.  Its estimates
 (`job.json`): photons 2 836 +- 4 163, background 0 -- 1 249, z -1 862 -- 1 940 (the calibration's
@@ -1603,3 +1605,11 @@ limits), density HD (1 per µm², 24 in 40 x 40).  What each cost:
   finds more (3 566 a frame) but matches fewer (0.70), its sigma worse (66 / 216) and its goodness
   map far off in the first frames (the median pixel 14 times the noise), where the background
   reaches 1 300.  The prefit's range, to its 98th percentile widened, is right.
+* **The window's job as it is now** (`eb7b4cdc`, `73b0edb2`: the photons drawn uniformly from half the
+  fully-on fits' 1st percentile to 1.5 times their 99th, 370 -- 18 400 here; z from the well-fitted
+  localizations' 2nd -- 98th percentile widened by 15 %, -1 340 -- 1 120; half the movies uneven;
+  density 50 typed) matches DECODE-Plex as P does (0.75) at the best precision of any model here, 35 / 31
+  / 96 nm.  The same job with flat backgrounds matches as many but at 44 / 40 / 123: on this movie the
+  uneven backgrounds are worth a quarter of the error.  Its z offset to DECODE-Plex is 45 nm, P's 26
+  (one seed).  Left for the user: the density -- *Try on my data* says when a model finds more than it
+  was trained at (`15d7478a`).
