@@ -198,6 +198,7 @@ def test_spline_3d_2c_on_auto_finds_the_focus_from_the_main_channel_and_fits_hei
     from smappy.plugins import Context
     from smappy.plugins.fit import (
         CameraSettings,
+        ChannelMoveSettings,
         DetectionSettings,
         DualModelSettings,
         DualSplineFit,
@@ -241,8 +242,9 @@ def test_spline_3d_2c_on_auto_finds_the_focus_from_the_main_channel_and_fits_hei
         source=SourceSettings(path=str(stack)),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=PIXEL / 1000),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=10.0),
-        model=DualModelSettings(calibration=str(path)), fit=FitSettings(roisize=13),
-        output=OutputSettings(save=False))
+        # the focus alone: no channel move (measured, it takes up 0.08 px of the drawn PSFs' own offset)
+        model=DualModelSettings(calibration=str(path), move=ChannelMoveSettings(move="none")),
+        fit=FitSettings(roisize=13), output=OutputSettings(save=False))
     plugin = DualSplineFit()
     assert plugin.describe(None, settings).shown["model.sample"]               # auto, the default
     result = plugin.run(Context(), settings)
