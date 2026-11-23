@@ -1570,6 +1570,8 @@ against DECODE-Plex, 300 frames each):
 | + robust photons, uneven | 1 981 | 0.62 | 33, 22 | 34 / 122 | -270 -- 378 | 0.044 | 547 |
 | + robust photons, density 50 | 2 972 | 0.68 | 22, 20 | 57 / 198 | -670 -- 584 | 0.017 | 719 |
 | + robust photons, density 50, z +-1 um | 3 455 | 0.73 | 24, 20 | 58 / 175 | -671 -- 718 | 0.026 | 807 |
+| ... + background 0 -- 300 | 3 566 | 0.70 | 19, 21 | 66 / 216 | -788 -- 652 | 0.072 | 893 |
+| ... + photons uniform 500 -- 30 000 | 2 888 | 0.75 | 26, 20 | 39 / 93 | -890 -- 605 | 0.028 | 584 |
 
 The window's job trained from this movie lost to the suite's hand-set ranges.  Its estimates
 (`job.json`): photons 2 836 +- 4 163, background 0 -- 1 249, z -1 862 -- 1 940 (the calibration's
@@ -1590,5 +1592,14 @@ limits), density HD (1 per µm², 24 in 40 x 40).  What each cost:
   limits; DECODE-Plex's 5 -- 95 % is -601 -- 691 and the prefit's -921 -- 784.  The tails are
   molecules out of focus in a live cell (the logl cut leaves them: -1 695 -- 1 593 at 1 MAD).  At
   +-1 µm the job matches 0.73 and its z is the nearest to DECODE-Plex's.
-* Still left: the sigma, half again P's at every density.  The background range (0 -- 1 249, against P's
-  0 -- 300) and the photons' distribution (normal, against P's uniform 500 -- 30 000) are being trained.
+* **The photons' distribution** is the sigma.  Drawn normal (2 480 +- 1 300) the job's sigma is half
+  again P's at every density; drawn uniform from 500 to 30 000, as P's, it is P's (39 / 93 nm against
+  39 / 102) and the job matches 0.75 of DECODE-Plex's, P's 0.77.  The prefit's fully-on fits reach
+  16 600 at their 99th percentile: a normal draw at the median's mean and spread almost never trains
+  the bright molecules the first frames hold, and the network fits them as it learnt to, worse.  The
+  window's draw should reach the brightest fits (a uniform range to the 99th percentile, or a
+  log-normal), not the mean +- sd -- the next change to the prefit.
+* **The background range** is not: trained 0 -- 300 instead of the prefit's 0 -- 1 249, the job
+  finds more (3 566 a frame) but matches fewer (0.70), its sigma worse (66 / 216) and its goodness
+  map far off in the first frames (the median pixel 14 times the noise), where the background
+  reaches 1 300.  The prefit's range, to its 98th percentile widened, is right.
