@@ -116,7 +116,7 @@ def test_spline_2c_measures_a_move_beyond_the_pairing_and_fits_with_it(tmp_path,
     # typed, the same; none, the pairs fall apart
     typed = plugin.run(Context(), _settings(movie, calibration, move="typed", columns=3.0, rows=-2.5)).locs
     assert np.median(typed["ratio"]) == pytest.approx(0.4, abs=0.05)
-    none = plugin.run(Context(), _settings(movie, calibration)).locs
+    none = plugin.run(Context(), _settings(movie, calibration, move="none")).locs
     assert abs(np.median(none["ratio"]) - 0.4) > 0.1 or len(none) < 0.7 * len(measured)
 
 
@@ -132,3 +132,41 @@ def test_a_preview_measures_the_move_and_draws_it(tmp_path):
     matplotlib.use("Agg")
     from matplotlib.figure import Figure
     result.plots["channel move"].draw(Figure())
+
+
+def test_rotation_and_scale_are_learnt_from_the_pairs_beside_the_shift(tmp_path):
+    """The splitter turned 10 mrad and scaled by half a percent about the second channel's centre, and
+    moved: *rotation and scale* recovers both, and the shift is still the shift."""
+    from smappy.plugins.fit import DualSplineFit
+    cal = dual_calibration()
+    rot, scale = 0.01, 0.005
+    L = (1 + scale) * np.array([[np.cos(rot), -np.sin(rot)], [np.sin(rot), np.cos(rot)]]) - np.eye(2)
+    turned = cm.ChannelMove(np.zeros((1, 2)), None, {}, L, np.array([32.0, 48.0]))
+    truth = _moved(cm.with_linear(cal, turned), 1.5, -1.0)
+    movie, calibration = _movie(tmp_path, cal, truth, n=40, per_frame=6)
+    move, _ = DualSplineFit().measure_move(_settings(movie, calibration, move="measured", affine=True,
+                                                     blocks=4))
+    got_rot, got_scale = cm.rotation_scale(move.linear)
+    assert got_rot == pytest.approx(rot, abs=0.003) and got_scale == pytest.approx(scale, abs=0.003)
+    # the shift at the centre the linear part turns about
+    shift_at = move.mean + move.linear @ (np.array([32.0, 48.0]) - move.centre)
+    np.testing.assert_allclose(shift_at, [1.5, -1.0], atol=0.15)
+    assert "turned" in move.line()
+
+
+def test_a_move_that_cannot_be_measured_leaves_the_fit_to_go_on_and_says_why(tmp_path):
+    from smappy.plugins.fit import DualSplineFit
+    cal = dual_calibration()
+    movie, calibration = _movie(tmp_path, cal, cal, n=3, per_frame=1)
+    said = []
+    DualSplineFit._moves.clear()
+    move, data = DualSplineFit().channel_move(_settings(movie, calibration, move="measured", blocks=2,
+                                                        block_frames=2), said.append)
+    assert move is None and "failed" in data
+    assert any("not measured" in s for s in said)
+    assert not cm.cache_path(movie).exists()
+
+
+def test_a_constant_move_that_changes_between_blocks_says_so():
+    move = cm.ChannelMove(np.array([[0.2, 1.0]]), None, {"how": "measured", "drift_px": 0.4})
+    assert "changes by 0.40 px between the blocks: tick over time" in move.line()

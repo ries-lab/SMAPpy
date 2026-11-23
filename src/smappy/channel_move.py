@@ -17,6 +17,14 @@ positions measure the move plus a smeared bias.  Hence two steps:
   error-weighted robust mean (`constant`), or on request a robust weighted smoothing spline over the
   frames (`over_time`, `beads.fit_offsets_and_spline` as *Fiducials* fits beads).
 
+**An affine on request** (*rotation and scale*, off by default): the pairs' shifts regressed on where
+the second channel's partner lies on the chip, ``shift = t + L (s - c)`` with z a term of its own (a
+z-dependent offset is the PSF models' disagreement with the map, not the map's), robust and weighted
+(`fit_affine`).  ``L`` -- rotation, scale, shear -- is constant over the movie and goes into the
+registration (`with_linear`); ``t`` is the move as before, constant or over time.  On DECODE-Plex's Fig.
+2a and our M2 movie it was measurable but moved no position more than 6 nm at the field's corners
+(gui-plan §4b), so it is off unless a splitter turned or scaled.
+
 `ChannelMove` holds the result in chip pixels and hands it to each fitter in its own terms: the channel
 layer's drift for Spline 3D 2C and Gaussian 2D 2C (`layer_drift`, `multichannel.MultiChannelEngine`), a
 move per block for the DECODE fitter (`at`).  It is kept beside the movie (`cache_path`), keyed by what
@@ -39,6 +47,7 @@ ROBUST_SIGMAS = 3.0           # pairs this many robust sds off the move are left
 ROBUST_ROUNDS = 5
 MIN_PAIRS = 20                # fewer well-fitted pairs: no measurement
 CURVE_SAMPLES = 200           # a move over time is kept as its curve at this many frames
+DRIFT_WARN_PX = 0.25          # a constant move whose blocks spread more than this is said to change
 
 
 @dataclass
@@ -48,6 +57,8 @@ class ChannelMove:
     offsets: np.ndarray                               # (m, 2) columns, rows
     frames: Optional[np.ndarray] = None               # (m,) for a move over time
     record: dict = field(default_factory=dict)
+    linear: Optional[np.ndarray] = None               # (2, 2): rotation, scale, shear about ``centre``
+    centre: Optional[np.ndarray] = None               # (2,) the second channel's chip pixels it turns about
 
     @classmethod
     def typed(cls, columns: float = 0.0, rows: float = 0.0) -> "ChannelMove":
@@ -94,20 +105,107 @@ class ChannelMove:
         err = self.record.get("error_px")
         if err is not None:
             text += f" (+-{err:.2f})"
+        if self.linear is not None:
+            rot, scale = rotation_scale(self.linear)
+            text += f"; turned {rot * 1e3:+.2f} mrad, scaled {scale * 1e6:+.0f} ppm"
         if self.record.get("pairs"):
             text += f", from {self.record['pairs']} pairs"
-        return text + (f"; {how}" if how and how != "typed" else "")
+        text += f"; {how}" if how and how != "typed" else ""
+        drift = self.record.get("drift_px")
+        if drift is not None and not self.over_time:
+            text += f"; it changes by {drift:.2f} px between the blocks: tick over time"
+        return text
 
     def to_dict(self) -> dict:
-        return {"offsets_px": np.asarray(self.offsets, float).tolist(),
-                "frames": None if self.frames is None else np.asarray(self.frames, float).tolist(),
-                "record": self.record}
+        out = {"offsets_px": np.asarray(self.offsets, float).tolist(),
+               "frames": None if self.frames is None else np.asarray(self.frames, float).tolist(),
+               "record": self.record}
+        if self.linear is not None:
+            out.update(linear=np.asarray(self.linear, float).tolist(), centre_px=np.asarray(self.centre, float).tolist())
+        return out
 
     @classmethod
     def from_dict(cls, d: dict) -> "ChannelMove":
         frames = d.get("frames")
+        linear = d.get("linear")
         return cls(np.asarray(d["offsets_px"], float), None if frames is None else np.asarray(frames, float),
-                   dict(d.get("record") or {}))
+                   dict(d.get("record") or {}), None if linear is None else np.asarray(linear, float),
+                   None if linear is None else np.asarray(d["centre_px"], float))
+
+
+# ------------------------------------------------------------------------------------- the affine
+def rotation_scale(linear) -> tuple:
+    """(rotation rad, scale - 1) of a small linear map ``I + L``: its antisymmetric and isotropic parts."""
+    m = np.eye(2) + np.asarray(linear, float)
+    return float(np.arctan2(m[1, 0] - m[0, 1], m[0, 0] + m[1, 1])), float(np.sqrt(abs(np.linalg.det(m))) - 1)
+
+
+def affine_matrix(move: ChannelMove) -> np.ndarray:
+    """The move's linear part as a 3 x 3 on the second channel's chip pixels: ``s -> s + L (s - c)``."""
+    out = np.eye(3)
+    if move.linear is None:
+        return out
+    L = np.asarray(move.linear, float)
+    out[:2, :2] += L
+    out[:2, 2] = -L @ np.asarray(move.centre, float)
+    return out
+
+
+def with_linear(registration, move: ChannelMove):
+    """A registration (a `DualColorCalibration` or `ChannelTransform`, its ``transformation`` the second
+    channel's chip pixels onto the main's) with the move's linear part: the partner of a main position is
+    where the beads put it, turned and scaled about ``centre``."""
+    if move is None or move.linear is None:
+        return registration
+    from dataclasses import replace
+    t = np.asarray(registration.transformation, float) @ np.linalg.inv(affine_matrix(move))
+    return replace(registration, transformation=t)
+
+
+def fit_affine(position, shift, err, z=None, sigmas: float = ROBUST_SIGMAS, rounds: int = ROBUST_ROUNDS):
+    """``shift = t + L (position - c) + k z``, robust and error-weighted: ``(L (2, 2), c (2,), t (2,), k (2,)
+    per nm or zeros, standard errors of L (2, 2), pairs kept)``; ``c`` the pairs' median position."""
+    pos = np.asarray(position, float)
+    s = np.asarray(shift, float)
+    w = 1.0 / np.asarray(err, float) ** 2
+    c = np.median(pos, 0)
+    cols = [np.ones(len(pos)), pos[:, 0] - c[0], pos[:, 1] - c[1]]
+    if z is not None:
+        cols.append(np.asarray(z, float))
+    A = np.stack(cols, 1)
+    keep = np.ones(len(pos), bool)
+    coef = np.zeros((A.shape[1], 2))
+    for _ in range(rounds):
+        sw = np.sqrt(w[keep])[:, None]
+        coef = np.linalg.lstsq(A[keep] * sw, s[keep] * sw, rcond=None)[0]
+        r = s - A @ coef
+        sd = 1.4826 * np.median(np.abs(r[keep]), 0)
+        new = np.all(np.abs(r) <= sigmas * np.maximum(sd, 1e-6), 1)
+        if new.sum() < MIN_PAIRS or np.array_equal(new, keep):
+            break
+        keep = new
+    r = s[keep] - A[keep] @ coef
+    cov = np.linalg.pinv(A[keep].T @ A[keep])
+    se = np.sqrt(np.outer(np.diag(cov), r.var(0)))
+    L = coef[1:3].T                                              # rows: d columns, d rows
+    k = coef[3] if z is not None else np.zeros(2)
+    return L, c, coef[0], k, se[1:3].T, int(keep.sum())
+
+
+def partner_positions(locs, layout, pixel_nm, roi=(0.0, 0.0)) -> np.ndarray:
+    """Where each pair's second channel lies on the chip, (columns, rows): the main channel's position
+    (on the chip, `multichannel.MultiChannelEngine.flush`) taken into its own pixels, mapped by the
+    registration and put on the chip as the second channel's."""
+    px, py = (pixel_nm, pixel_nm) if np.isscalar(pixel_nm) else pixel_nm
+    chip = np.c_[np.asarray(locs["x_nm"], float) / px, np.asarray(locs["y_nm"], float) / py] - np.asarray(roi, float)
+    x0, y0, w, h = layout.regions[0]
+    fx, fy = (layout.flips or [(False, False)])[0]
+    own = chip - (x0, y0)
+    if fx:
+        own[:, 0] = w - 1 - own[:, 0]
+    if fy:
+        own[:, 1] = h - 1 - own[:, 1]
+    return layout.on_frame(1, layout.to_channel(1, own)) + np.asarray(roi, float)
 
 
 # ------------------------------------------------------------------------------------- the vote
@@ -155,6 +253,13 @@ def to_chip(layer_shift, layout) -> np.ndarray:
 
 
 # ------------------------------------------------------------------------------- from the fit
+def usable(locs) -> np.ndarray:
+    """The pairs with both channels' positions and an error: those `pair_shifts` returns, in its order."""
+    d = np.c_[np.asarray(locs["dx_nm_ch1"], float), np.asarray(locs["dy_nm_ch1"], float)]
+    err = np.asarray(locs["xy_err_nm"] if "xy_err_nm" in locs else locs["x_err_nm"], float)
+    return np.all(np.isfinite(d), 1) & np.isfinite(err) & (err > 0)
+
+
 def pair_shifts(locs, layout, pixel_nm, base: Optional[ChannelMove] = None):
     """Each unlinked pair's second channel against the link, as (columns, rows) on the chip, with
     ``(frame, shift (n, 2), error px (n,))``: ``dx_nm_ch1`` / ``dy_nm_ch1`` are in channel 0's pixels
@@ -164,7 +269,7 @@ def pair_shifts(locs, layout, pixel_nm, base: Optional[ChannelMove] = None):
     d_ref = np.c_[np.asarray(locs["dx_nm_ch1"], float) / px, np.asarray(locs["dy_nm_ch1"], float) / py]
     frame = np.asarray(locs["frame"], float)
     err = np.asarray(locs["xy_err_nm"] if "xy_err_nm" in locs else locs["x_err_nm"], float) / px
-    ok = np.all(np.isfinite(d_ref), 1) & np.isfinite(err) & (err > 0)
+    ok = usable(locs)
     # the registration's local map at the channel's centre: an affine map's own, a warp's near enough
     w, h = layout.sizes[0]
     c = np.array([[w / 2, h / 2], [w / 2 + 1, h / 2], [w / 2, h / 2 + 1]], float)

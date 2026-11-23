@@ -276,7 +276,7 @@ def range_warnings(locs, meta: dict) -> list:
 class DecodeFit(_FitPlugin):
     description = "Deep-learning fitter for high densities (DECODE)."
     Settings = DecodeFitSettings
-    version = "1"
+    version = "2"
     channel_part = "none"
     # a model is trained for these data in the Train window (`plugins/train_decode.py`), handed
     # the movie, microscope, PSF calibration and *run on*; the hosts are Preferences' (`HostsPage`)

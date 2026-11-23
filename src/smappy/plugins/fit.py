@@ -1846,7 +1846,9 @@ MOVES = (("none", "none"), ("typed", "typed"), ("measured", "measured"))
 class ChannelMoveSettings:
     """How far a split camera's second channel moved on the chip since the beads, on top of their
     registration: the same part in every two-channel fitter and the DECODE training's prefit."""
-    move: str = param("none", label="move", choices=MOVES,
+    # measured by default (Jonas, 2026-11-23): a splitter moves between days, and a move left out pairs nothing;
+    # where it cannot be measured the fit goes on with the registration as it is, and says so
+    move: str = param("measured", label="move", choices=MOVES,
                       help="none: the registration as it is; typed: moved by the rows and columns below; "
                            "measured: from this movie, by the fit with x and y free per channel "
                            "(Preview shows it; kept beside the movie)")
@@ -1857,6 +1859,9 @@ class ChannelMoveSettings:
     over_time: bool = param(False, label="over time",
                             help="a smooth curve over the frames instead of one move: for a splitter that "
                                  "drifts during the acquisition (the figure shows the drift either way)")
+    affine: bool = param(False, label="rotation and scale", beside=True,
+                         help="also learn a rotation, scale and shear of the beads' map from the pairs, constant "
+                              "over the movie: for a splitter turned since the beads")
     blocks: int = param(20, label="blocks", min=2, advanced=True,
                         help="blocks of frames spread over the movie the move is measured on")
     block_frames: int = param(50, label="frames a block", min=5, advanced=True, beside=True,
@@ -1866,7 +1871,8 @@ class ChannelMoveSettings:
 def move_shown(prefix: str, s: ChannelMoveSettings) -> Dict[str, bool]:
     """Which of the part's rows the form shows: the move typed or how it is measured."""
     return {f"{prefix}.rows": s.move == "typed", f"{prefix}.columns": s.move == "typed",
-            f"{prefix}.over_time": s.move == "measured", f"{prefix}.blocks": s.move == "measured",
+            f"{prefix}.over_time": s.move == "measured", f"{prefix}.affine": s.move == "measured",
+            f"{prefix}.blocks": s.move == "measured",
             f"{prefix}.block_frames": s.move == "measured"}
 
 
@@ -2330,7 +2336,13 @@ class _TwoChannelFit(_FitPlugin):
         if found is not None:
             self._moves[key] = (found, None)
             return found, None
-        move, data = self.measure_move(settings, report)
+        try:
+            move, data = self.measure_move(settings, report)
+        except ValueError as error:
+            # too few pairs, nothing fitted: the fit goes on with the registration as it is, and says so
+            report(f"the channel move was not measured -- {error}; fitting with the registration as it is")
+            self._moves[key] = (None, {"failed": str(error)})
+            return None, {"failed": str(error)}
         cm.keep(settings.source.path, key, move)
         self._moves[key] = (move, data)
         return move, data
@@ -2406,30 +2418,51 @@ class _TwoChannelFit(_FitPlugin):
                              f"type the move, or fit more frames (blocks)")
         record = {"how": "measured", "vote_px": coarse.tolist(), "vote_strength": round(strength, 1),
                   "blocks": len(starts), "block_frames": length}
+        z_all = np.asarray(locs["z_nm"], float)[good][cm.usable(locs[good])] if "z_nm" in locs else None
+        linear = centre = None
+        if m.affine:
+            # where each pair's partner lies, its shift regressed on that, z a term of its own
+            pos = cm.partner_positions(locs[good], layout, sizes, camera.roi_offset)[cm.usable(locs[good])]
+            linear, centre, _, k, se_l, _ = cm.fit_affine(pos, shift, perr, z_all)
+            shift = shift - (pos - centre) @ linear.T
+            rot, scale = cm.rotation_scale(linear)
+            record.update(rotation_mrad=round(rot * 1e3, 4), scale_ppm=round(scale * 1e6, 1),
+                          linear_se=np.round(se_l, 6).tolist(), z_slope_px_per_um=np.round(k * 1e3, 4).tolist())
+        if not m.over_time:
+            # a constant move hides one that changes over the movie: each block's own, said when they spread more than
+            # a quarter pixel.  Only the channels' move against each other: the sample's drift is the same in both
+            block = np.searchsorted(starts, frame, side="right") - 1
+            means = [np.median(shift[block == b], 0) for b in np.unique(block) if (block == b).sum() >= cm.MIN_PAIRS]
+            if len(means) > 1:
+                spread = float(np.max(np.ptp(np.asarray(means), 0)))
+                if spread > cm.DRIFT_WARN_PX:
+                    record["drift_px"] = round(spread, 3)
         if m.over_time:
             grid, curve, kept = cm.over_time(frame, shift, perr, float(starts[0]), float(min(starts[-1] + length, stop)))
             _, se, _ = cm.constant(shift, perr)
-            move = cm.ChannelMove(curve, grid, {**record, "pairs": kept, "error_px": float(np.nanmax(se))})
+            move = cm.ChannelMove(curve, grid, {**record, "pairs": kept, "error_px": float(np.nanmax(se))},
+                                  linear, centre)
         else:
             mean, se, kept = cm.constant(shift, perr)
-            move = cm.ChannelMove(mean[None], None, {**record, "pairs": kept, "error_px": float(np.nanmax(se))})
-        z = np.asarray(locs["z_nm"], float)[good] if "z_nm" in locs else None
-        if z is not None:
-            ok = np.all(np.isfinite(np.c_[np.asarray(locs["dx_nm_ch1"], float), np.asarray(locs["dy_nm_ch1"], float)]),
-                        1)[good]
-            ok &= np.isfinite(err[good]) & (err[good] > 0)
-            z = z[ok]
+            move = cm.ChannelMove(mean[None], None, {**record, "pairs": kept, "error_px": float(np.nanmax(se))},
+                                  linear, centre)
         report(f"channel move: {move.line()}")
-        return move, {"frame": frame, "shift": shift, "z_nm": z}
+        return move, {"frame": frame, "shift": shift, "z_nm": z_all}
 
     def _with_move(self, settings, call, report=lambda text: None):
         """``call()`` with the channel move the part asks for in force; ``(result, move, data)``."""
         move, data = self.channel_move(settings, report)
         self._active_move = move
+        loaded = self._loaded
+        if move is not None and move.linear is not None and loaded is not None:
+            # the rotation and scale go into the registration, the shift stays the layer's drift
+            from ..channel_move import with_linear
+            self._loaded = (loaded[0], with_linear(loaded[1], move))
         try:
             return call(), move, data
         finally:
             self._active_move = None
+            self._loaded = loaded
 
     def read_registration(self, settings):
         raise NotImplementedError
@@ -2970,7 +3003,7 @@ class DualSplineFit(_TwoChannelFit):
     #     the main channel's lowest localizations, z the height above the coverslip (`calibrate.depth`)
     # 16: a SMAP two-channel calibration's photons as photons: each half's own light at focus its share
     #     (`psf.signal_integral`), a linked N the total over both halves (Jonas, 2026-11-22)
-    version = "16"
+    version = "17"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -3315,7 +3348,7 @@ class DualGaussianFit(_TwoChannelFit):
     # 9: positions on the camera chip, as Spline 3D 2C's 11
     # 10: the calibration pass a two-channel fit, its pairs one per channel, no seam measured
     # 11: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`), drawn on either
-    version = "12"
+    version = "13"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):

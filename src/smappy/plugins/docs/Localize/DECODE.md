@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.fit_decode.DecodeFit, smappy.netfit.fit_two.TwoChannelPredictor, smappy.plugins.fit_decode.DecodeFit.channel_move, smappy.channel_move.ChannelMove, smappy.plugins.fit._TwoChannelFit.measure_move, smappy.netfit.fit_two.moved_calibration, smappy.plugins.fit_decode.two_channel_calibration, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
@@ -334,6 +334,10 @@ is kept beside the movie, and *Preview* draws it before a long inference.
 With *over time*, the network reads each block of frames with the move at
 the block's middle frame.  The move used, and how it was found, is in the
 run's text and in its file.
+*measured* is the default; where the move cannot be measured, the fit goes
+on with the registration as it is and says so.  *rotation and scale* adds
+a rotation and scale of the map learnt from the same pairs (Spline 3D 2C's
+page says how); the network reads the turned map through its offset maps.
 
 ### two_channels.goodness
 

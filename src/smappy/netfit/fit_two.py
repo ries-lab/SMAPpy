@@ -57,7 +57,10 @@ class TwoChannelPredictor:
         # the channel move: a `ChannelMove`, or (columns, rows) typed
         self.move = moved if isinstance(moved, ChannelMove) else ChannelMove.typed(*moved)
         self.moved = tuple(float(v) for v in self.move.at([0])[0])
-        self.cal = moved_calibration(cal, self.moved)
+        # a rotation and scale learnt with the move go into the registration once; the shift is moved per block
+        from ..channel_move import with_linear
+        self.beads = with_linear(cal, self.move)
+        self.cal = moved_calibration(self.beads, self.moved)
         self.corner = tuple(round(v) for v in corner)
         # what the run's record says of the move (`fit_decode.provenance`)
         self.moved_record = {"rows": self.moved[1], "columns": self.moved[0], **self.move.to_dict()}

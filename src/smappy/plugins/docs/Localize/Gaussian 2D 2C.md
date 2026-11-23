@@ -1,5 +1,5 @@
 ---
-version: "12"
+version: "13"
 covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.geometry_layout, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.pipeline.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.multichannel.SplitEngine, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
 ---
 
@@ -521,6 +521,19 @@ which a move cannot mend.  The measurement is kept beside the movie
 line under *move* says what was found.  Unlike *registration* > *from this
 movie*, which measures a new map with a plain Gaussian, this keeps the
 beads' map and measures with the model that made it.
+*measured* is the default.  Where too few pairs are found to measure it,
+the fit goes on with the registration as it is and says so.  A constant
+move whose blocks differ by more than a quarter pixel is said to change:
+tick *over time*.  This is the two channels moving against each other; the
+sample's own drift is the same in both channels and plays no part.
+*rotation and scale* (off by default) also learns a rotation, scale and
+shear of the beads' map from the pairs, constant over the movie: each
+pair's shift regressed on where its partner lies on the chip, with z as a
+term of its own so that a z-dependent offset is not taken for a turn.  It
+goes into the registration; the shift stays the move.  On two of our movies
+it was measurable but moved no position more than 6 nm at the field's
+corners, so it is for a splitter turned since the beads.
+
 
 ### fit.roisize
 Both fit boxes of a pair have this size, and both must lie inside the frame, each

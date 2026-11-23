@@ -1,5 +1,5 @@
 ---
-version: "16"
+version: "17"
 covers: [smappy.psf.GlobalSplinePSF, smappy.psf.signal_integral, smappy.psf.light_at_focus, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.pipeline.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus]
 ---
 
@@ -504,6 +504,19 @@ which a move cannot mend.  The measurement is kept beside the movie
 line under *move* says what was found.  Unlike *registration* > *from this
 movie*, which measures a new map with a plain Gaussian, this keeps the
 beads' map and measures with the model that made it.
+*measured* is the default.  Where too few pairs are found to measure it,
+the fit goes on with the registration as it is and says so.  A constant
+move whose blocks differ by more than a quarter pixel is said to change:
+tick *over time*.  This is the two channels moving against each other; the
+sample's own drift is the same in both channels and plays no part.
+*rotation and scale* (off by default) also learns a rotation, scale and
+shear of the beads' map from the pairs, constant over the movie: each
+pair's shift regressed on where its partner lies on the chip, with z as a
+term of its own so that a z-dependent offset is not taken for a turn.  It
+goes into the registration; the shift stays the move.  On two of our movies
+it was measurable but moved no position more than 6 nm at the field's
+corners, so it is for a splitter turned since the beads.
+
 
 ### model.link_xy
 Unlinked, each half fits its own position.  The table's position is the
