@@ -343,7 +343,10 @@ from whole blinks, can be several times off.
 ### Estimates
 The training's ranges, editable, and typed by hand where no prefit was run.
 The photons are those of a frame a molecule is fully on in, not of a whole
-blink.
+blink.  Fits far brighter than the rest (more than three robust standard
+deviations above the median, in log photons) are left out: they are
+overlapping molecules, and in a crowded movie they alone would set the
+spread, which the training would then fill with molecules too dim to find.
 
 ### Advanced: method.yaml
 DECODE's whole parameter file, as it will be written, to edit by hand.  Used
