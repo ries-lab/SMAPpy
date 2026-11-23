@@ -66,7 +66,31 @@ def main(argv=None) -> int:
                        ("status", "where the job in FOLDER stands")):
         sub.add_parser(name, help=text).add_argument("folder", type=Path)
     sub.add_parser("serve", help="localize frames sent on stdin with a model sent first (SMAPpy's DECODE fitter)")
+    e = sub.add_parser("export-original", help="a model the original DECODE trained, as a model file for "
+                                               "SMAPpy's DECODE fitter")
+    e.add_argument("param", type=Path, help="its param_run.yaml")
+    e.add_argument("model", type=Path, help="its model.pt")
+    e.add_argument("-o", "--out", type=Path, required=True, help="the .safetensors to write")
+    e.add_argument("--calibration", type=Path, default=None,
+                   help="the PSF calibration it was trained on: the fitter then checks data against it")
+    x = sub.add_parser("export-plex", help="a DECODE-Plex run and its registration, as a model file for "
+                                           "SMAPpy's DECODE fitter")
+    x.add_argument("run", type=Path, help="the run's folder: its param_run.yaml and *.ckpt")
+    x.add_argument("trafo", type=Path, help="the registration it was trained with, *_trafo.mat")
+    x.add_argument("-o", "--out", type=Path, required=True, help="the .safetensors to write")
     a = ap.parse_args(argv)
+    if a.command == "export-original":
+        from .predict import export_original
+        cal = None
+        if a.calibration is not None:
+            from smappy.io.calibration import load_spline_calibration
+            cal = load_spline_calibration(a.calibration)
+        print(export_original(a.param, a.model, a.out, calibration=cal))
+        return 0
+    if a.command == "export-plex":
+        from .plex.fitter import export
+        print(export(a.run, a.trafo, a.out))
+        return 0
     if a.command == "serve":
         from .serve import serve
         return serve()
