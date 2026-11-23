@@ -35,7 +35,7 @@ has it.
 There is no peak finding and no fit box: the form has none of the other
 fitters' detection and fit parts.
 
-**Two kinds of model.**  A model is one of two networks, and the fitter
+**Three kinds of model.**  A model is one of three networks, and the fitter
 reads which from the file; there is nothing to choose here.
 
 * **DECODE, optimised** -- SMAPpy's own network, the default for a new
@@ -45,10 +45,24 @@ reads which from the file; there is nothing to choose here.
   centres or edges) and report an uncertainty of their own, trained against
   the errors (docs/decode/poc-plan.md, netfit's steps 3 and 4).
 * **DECODE** -- the original's network, ported: models trained before, and
-  models the original DECODE trained, exported.
+  models the original DECODE trained, exported
+  (`smappy-decode export-original param_run.yaml model.pt -o model.safetensors`,
+  with `--calibration` its PSF calibration, so that the fitter can check the
+  data against it).
+* **DECODE-Plex** -- a two-channel model published with DECODE-Plex
+  (Sha et al. 2026, [doi:10.64898/2026.07.24.740199](https://doi.org/10.64898/2026.07.24.740199)), as a baseline
+  beside SMAPpy's own.  A run's folder and the registration it was trained
+  with become one model file:
+  `smappy-decode export-plex RUN_FOLDER REGISTRATION_trafo.mat -o model.safetensors`.
+  Its frames are cut into the two channels and converted by DECODE-Plex's own
+  steps, with its own registration, as the paper's notebooks do, and it gives
+  the paper's localizations.  The channels must be the frame's halves, top and
+  bottom, as the paper's movies were; none of the checks or the channels'
+  move apply to it.
 
-The form's line and *Model info...* name the kind.  Both fit the same way:
-the same columns, the same checks, *run on* and *frames per batch*.
+The form's line and *Model info...* name the kind.  DECODE and the optimised
+models fit the same way: the same columns, the same checks, *run on* and
+*frames per batch*.
 
 **Two channels.**  An optimised model can read a split camera's two
 channels as one molecule: two colours, or two focal planes (biplane).  It
@@ -382,3 +396,6 @@ model's own metadata.
   dense single-molecule localization with high accuracy. *Nat Methods* 18,
   1082 (2021).
   [doi:10.1038/s41592-021-01236-x](https://doi.org/10.1038/s41592-021-01236-x)
+* Sha H, et al. Multi-channel high-density single-molecule localization.
+  bioRxiv (2026) -- DECODE-Plex, whose published models this fitter runs.
+  [doi:10.64898/2026.07.24.740199](https://doi.org/10.64898/2026.07.24.740199)

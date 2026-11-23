@@ -1,7 +1,9 @@
 """The network a model file holds, ready to localize: one loader for every method the DECODE fitter runs.
 
 A model file names its method (``method`` in its header, `model_file`): ``decode-v0.10.2``, the port
-of DECODE (`decode_smlm.predict`), or ``netfit-v1``, SMAPpy's own (`smappy.netfit.predict`).  The
+of DECODE (`decode_smlm.predict`), ``netfit-v1``, SMAPpy's own (`smappy.netfit.predict`), or
+``decode-plex``, a published DECODE-Plex model exported (`decode_smlm.plex.fitter`: the baseline,
+its frames cut and converted by DECODE-Plex's own steps).  The
 fitter (`plugins.fit_decode`) and the server on a training host (`decode_smlm.serve`) both load
 through `load`, so a model fits the same wherever it runs.  Both predictors give the
 `window_engine.WindowEngine` one interface: ``window``, a call on frames in photons with their
@@ -16,7 +18,8 @@ from pathlib import Path
 
 DECODE = "decode-v0.10.2"
 NETFIT = "netfit-v1"
-METHODS = (DECODE, NETFIT)
+PLEX = "decode-plex"
+METHODS = (DECODE, NETFIT, PLEX)
 
 
 def describe(meta: dict) -> str:
@@ -24,6 +27,8 @@ def describe(meta: dict) -> str:
     method = meta.get("method")
     if method == NETFIT:
         return "DECODE, aligned channels" if (meta.get("channels") or {}) else "DECODE, optimised"
+    if method == PLEX:
+        return "DECODE-Plex"
     return "DECODE"
 
 
@@ -50,4 +55,7 @@ def load(path, device=None, *, frames_mirrored: bool = False, threshold: float |
         from ..netfit.predict import Predictor
         return Predictor(path, None if device in (None, "auto") else device, frames_mirrored=frames_mirrored,
                          threshold=threshold, batch=batch)
+    if method == PLEX:
+        from decode_smlm.plex.fitter import PlexPredictor
+        return PlexPredictor(path, None if device in (None, "auto") else device, threshold=threshold, batch=batch)
     raise ValueError(f"{Path(path).name} is not a DECODE model" + (f" (it is {method})" if method else ""))

@@ -145,7 +145,7 @@ that architecture here: what the study compared it as.
    (measured 2.00), halved for the estimates.  Two-channel *Try*, the preview's simulated frames and T6's
    bounds for a two-channel test set (`netfit.bounds.drawn_crlb`) done 2026-11-22.
 5. **T6** (done): outliers and the inliers' RMSE / CRLB in *Follow*, one channel and two.
-6. **I5**: DECODE-Plex's published models, exported, as a baseline in the GUI.
+6. **I5** (done 2026-11-23: `decode_smlm/plex/fitter.py`, method ``decode-plex``): DECODE-Plex's published models, exported (`smappy-decode export-plex RUN TRAFO -o FILE`; the original DECODE's with `export-original`), in the DECODE fitter as a baseline; they give the paper's localizations.
 7. **T5** alongside each step, not after: each step's page, tests (a simulated two-channel movie
    trained a few epochs and fitted, as the one-channel tests do) and the slow tier.
 
