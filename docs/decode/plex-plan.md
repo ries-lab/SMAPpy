@@ -1628,3 +1628,23 @@ backgrounds (`B_biplane_early_uneven`, z +-1 000 nm, three seeds) against the sa
 Half as much range again costs 0.026 in Jaccard on the density set (the seeds agree to 0.001), half as
 many outliers again and twice the pixelation.  So the prefit's range stays fitted to the data, at least
 +-500 nm (`a6238a91`), and a model for other samples is a wider range typed, at that cost.
+
+**The window's two new defaults at C = 1** (2026-11-23): GMN7C_s0, the one-channel job's network, trained
+again with half its movies uneven (`GMN7C_U_s0`) or its photons uniform over 500 -- 21 000 (`GMN7C_R_s0`, the
+prefit's rule on the sets' normal 7 000 +- 3 000), scored on the C = 1 sets beside a second seed of the
+baseline (GMN7C_s2, for the scatter):
+
+| set | Jaccard s0 / s2 | uneven | photon range | pixel_mod s0 / s2 | uneven | photon range |
+|---|---|---|---|---|---|---|
+| B7 | 0.568 / 0.567 | 0.564 | 0.561 | 0.014 / 0.024 | 0.028 | 0.027 |
+| B7_d15 | 0.706 / 0.704 | 0.700 | 0.700 | 0.011 / 0.011 | 0.027 | 0.035 |
+| B7_d25 | 0.659 / 0.657 | 0.654 | 0.654 | 0.000 / 0.015 | 0.015 | 0.025 |
+| B7_sbg | 0.568 / 0.567 | 0.564 | 0.560 | 0.013 / 0.019 | 0.026 | 0.028 |
+| B7_l3_sbg | 0.697 / 0.698 | 0.691 | 0.688 | 0.000 / 0.007 | 0.014 | 0.015 |
+
+Both cost a little, beyond the seeds' scatter in the Jaccard (0.002): uneven 0.004 -- 0.006, the photon
+range 0.005 -- 0.010, with the inliers' RMSE over the bound 0.66 to 0.69 axially and 1 nm more on molecules
+on for 3 frames; the pixelation within the seeds' wide scatter or above it.  These sets' photons are drawn
+as the baseline was trained, normal 7 000 +- 3 000, and their backgrounds flat or smooth: they cannot show
+what either default is for -- the bright tail and the uneven light of a live cell, where at C = 2 on Fig. 2c
+they were worth half the matches and a quarter of the error.
