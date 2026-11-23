@@ -46,11 +46,13 @@ from . import Context, FormState, Notice, Plot, Result, param, register
 from .fit import (
     CameraMetadata,
     CameraSettings,
+    ChannelMoveSettings,
     FinishSettings,
     OutputSettings,
     SourceSettings,
     _FitPlugin,
     _open,
+    move_shown,
 )
 
 MODEL_FILTER = "DECODE models (*.safetensors);;All files (*)"
@@ -94,15 +96,9 @@ class DecodeChannelSettings:
                                            "file's camera ROI (a file that names none: 0)")
     roi_row: Optional[int] = param(None, label="row", min=0, advanced=True, beside=True,
                                    help="where the frames' first row lies on the chip; empty: the file's")
-    moved_rows: float = param(0.0, label="moved since the beads", unit="rows",
-                              help="how far channel 1 lies from where the beads' registration puts it, along "
-                                   "the rows: a splitter moved between calibration and measurement")
-    moved_columns: float = param(0.0, label="and", unit="columns", beside=True,
-                                 help="the same along the columns")
-    measure_move: bool = param(False, label="measure the move",
-                               help="find how far the channels moved since the beads on the first 20 frames -- "
-                                    "where the network finds the fewest molecules -- starting from the move "
-                                    "typed; about a minute; the move found is in the run's text and file")
+    # how far the second channel moved on the chip since the beads, the two-channel fitters' own part
+    # (gui-plan §4b): measured by Spline 3D 2C, x and y free per channel, on the model's calibration
+    move: ChannelMoveSettings = param(default_factory=ChannelMoveSettings, label="channel move", collapsed=True)
     goodness: bool = param(False, label="goodness of fit",
                            help="each localization's neighbourhood against the fit drawn back, a column "
                                 "goodness (about 0 explained, a few and more not): finds false positives; "
@@ -349,9 +345,9 @@ class DecodeFit(_FitPlugin):
         sizes, _ = camera.pixelsize_nm_or_default
         ox, oy = camera.roi_offset
         corner = (ox if c.roi_column is None else c.roi_column, oy if c.roi_row is None else c.roi_row)
-        model = TwoChannelPredictor(predictor, cal, corner, (c.moved_columns, c.moved_rows),
-                                    em=bool(camera.em_on), goodness=c.goodness, bound=c.bound, pixel_nm=sizes,
-                                    measure=c.measure_move)
+        move, self._move_data = self.channel_move(settings, meta)
+        model = TwoChannelPredictor(predictor, cal, corner, move if move is not None else (0.0, 0.0),
+                                    em=bool(camera.em_on), goodness=c.goodness, bound=c.bound, pixel_nm=sizes)
         model.cal_path = two_channel_calibration(settings, meta)
         self._two = model                  # for the run's text: the move used (`checks`)
         return model
@@ -381,9 +377,8 @@ class DecodeFit(_FitPlugin):
             return []
         said = []
         two = getattr(self, "_two", None)
-        if two is not None and two.measure:
-            said.append(f"the channels moved since the beads by {two.moved[1]:.2f} rows and {two.moved[0]:.2f} "
-                        f"columns (measured); type them under two channels to fit this microscope's data so")
+        if two is not None and settings.two_channels.move.move == "measured":
+            said.append(two.move.line())
         return said + self.condition_warnings(settings, meta) + range_warnings(locs, meta)
 
     # ---------------------------------------------------------- the form
@@ -391,6 +386,7 @@ class DecodeFit(_FitPlugin):
         state = super().describe(ctx, settings)
         # the two channels' part for a model that reads them, nothing for one that does not
         state.shown["two_channels"] = self._two_channel(settings)
+        state.shown.update(move_shown("two_channels.move", settings.two_channels.move))
         if settings.model.run_on == "here" and not torch_here():
             state.notice = Notice(NO_TORCH)        # said before the run, not after it
             return state
@@ -408,6 +404,20 @@ class DecodeFit(_FitPlugin):
             except Exception as error:      # a path still being typed, a file that is not a model
                 state.notice = Notice(str(error))
         return state
+
+    def channel_move(self, settings, meta: dict, report=lambda text: None):
+        """``(ChannelMove or None, the measurement's data or None)``: the part's move, typed or measured.  A
+        measurement is Spline 3D 2C's, x and y free per channel, on the model's own two-channel calibration
+        (`fit._TwoChannelFit.channel_move`, cached beside the movie alike): the move of the spline model
+        that made the registration the network was trained on, not of the network."""
+        m = settings.two_channels.move
+        if m.move == "none":
+            return None, None
+        from .fit import DualModelSettings, DualSplineFit, DualSplineFitSettings
+        spline = DualSplineFitSettings(source=settings.source, camera=settings.camera,
+                                       model=DualModelSettings(calibration=str(two_channel_calibration(settings, meta)),
+                                                               move=m))
+        return DualSplineFit().channel_move(spline, report)
 
     @staticmethod
     def _two_channel(settings) -> bool:
@@ -455,8 +465,17 @@ class DecodeFit(_FitPlugin):
                 ax.figure.colorbar(points, ax=ax, fraction=0.046, label="prob")
             ax.set(title=f"frame {index}: {len(x)} localized")
 
-        return Result(text=f"frame {index}: {len(x)} localizations", settings=settings,
-                      plot=Plot(draw=plot, size=(7, 6)), data={"frame": index, "localizations": int(len(x))})
+        result = Result(text=f"frame {index}: {len(x)} localizations", settings=settings,
+                        plot=Plot(draw=plot, size=(7, 6)), data={"frame": index, "localizations": int(len(x))})
+        move = getattr(predictor, "move", None)
+        if move is not None and settings.two_channels.move.move != "none":
+            # the move the fit will use, and on *measured* how it was found: the preview before a long inference
+            result.text += f"\n{move.line()}"
+            result.data["channel_move"] = move
+            if settings.two_channels.move.move == "measured":
+                from ..channel_move import draw
+                result.plots = {**result.plots, "channel move": draw(move, getattr(self, "_move_data", None))}
+        return result
 
 
 def _where_choices():

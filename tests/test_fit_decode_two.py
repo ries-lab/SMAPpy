@@ -70,7 +70,8 @@ def _settings(files, **more):
 def test_a_two_channel_model_is_fitted_on_the_main_half_with_each_channel_s_photons(files):
     from smappy.netfit.fit_two import TwoChannelPredictor
     from smappy.netfit.predict import Predictor
-    locs = plugins.get("Localize/DECODE")().run(Context(), _settings(files, **{"two_channels.moved_rows": 1.5})).locs
+    locs = plugins.get("Localize/DECODE")().run(Context(), _settings(files, **{"two_channels.move.move": "typed",
+                                                                                 "two_channels.move.rows": 1.5})).locs
     for name in ("photons_ch0", "photons_ch1", "background_ch0", "background_ch1", "x_nm", "z_nm", "prob"):
         assert name in locs, name
     assert len(np.unique(locs["frame"])) == 8
@@ -98,14 +99,6 @@ def test_the_move_since_the_beads_moves_where_channel_one_is_read():
     np.testing.assert_allclose(np.abs(d1 - d0), [[0.5, 2.0], [0.5, 2.0]], atol=1e-9)
 
 
-def test_the_move_measured_is_where_the_network_finds_the_fewest_molecules(monkeypatch):
-    from smappy.netfit import fit_two
-    truth = (-1.25, 3.5)
-    monkeypatch.setattr(fit_two, "count_at", lambda p, cal, corner, photons, m:
-                        500 + 40 * (m[0] - truth[0]) ** 2 + 60 * (m[1] - truth[1]) ** 2)
-    assert fit_two.measure_move(None, None, (0, 0), None) == pytest.approx(truth)
-
-
 def test_the_form_shows_the_two_channels_part_for_a_two_channel_model_alone(files):
     from test_fit_decode_netfit import _write
     plugin = plugins.get("Localize/DECODE")()
@@ -126,19 +119,43 @@ def test_another_calibration_than_the_model_s_is_refused(files):
             files, **{"two_channels.calibration": str(files["root"] / "other_2ct.h5")}))
 
 
-def test_a_move_measured_on_the_first_frames_is_what_the_run_s_record_says(files, monkeypatch):
+def test_a_move_measured_is_spline_3d_2c_s_on_the_model_s_calibration_and_what_the_run_s_record_says(
+        files, monkeypatch):
+    """Measured by the spline fitter, x and y free (gui-plan §4b), never by the network; over time, the
+    move at each block's middle frame."""
     import json
 
     import h5py
 
-    from smappy.netfit import fit_two
-    monkeypatch.setattr(fit_two, "measure_move", lambda predictor, cal, corner, photons, start: (0.5, -1.25))
+    from smappy.channel_move import ChannelMove
+    from smappy.plugins.fit import DualSplineFit
+    asked = []
+
+    def measured(self, settings, report=lambda text: None):
+        asked.append((settings.model.calibration, settings.model.move.move))
+        return ChannelMove(np.array([[0.5, -1.25]]), None, {"how": "measured", "pairs": 99}), None
+    monkeypatch.setattr(DualSplineFit, "measure_move", measured)
+    DualSplineFit._moves.clear()
     out = files["root"] / "fit_locs.hdf5"
-    r = plugins.get("Localize/DECODE")().run(Context(), _settings(files, **{"two_channels.measure_move": True,
+    r = plugins.get("Localize/DECODE")().run(Context(), _settings(files, **{"two_channels.move.move": "measured",
                                                                              "output.path": str(out)}))
+    assert asked == [(str(files["root"] / "beads_2ct.h5"), "measured")]
     moved = json.loads(h5py.File(out, "r").attrs["metadata"])["decode"]["moved_since_beads"]
-    assert moved == {"rows": -1.25, "columns": 0.5, "measured": True}
-    assert any("-1.25 rows and 0.50 columns" in w for w in r.locs.metadata.get("warnings", []))
+    assert (moved["rows"], moved["columns"], moved["record"]["how"]) == (-1.25, 0.5, "measured")
+    assert "channel 2 moved -1.25 rows, +0.50 columns" in r.text
+
+
+def test_a_move_over_time_is_applied_at_each_block_s_middle_frame(files):
+    from smappy.channel_move import ChannelMove
+    from smappy.netfit.fit_two import TwoChannelPredictor
+    from smappy.netfit.predict import Predictor
+    move = ChannelMove(np.array([[0.0, 0.0], [0.0, 4.0]]), np.array([0.0, 8.0]))
+    wrapped = TwoChannelPredictor(Predictor(files["model"], "cpu", threshold=0.0, batch=4), files["cal"], moved=move)
+    frames = tifffile.imread(files["tif"]).astype(np.float32)
+    wrapped(np.concatenate([frames[:1], frames[:4], frames[3:4]]), 0)          # frames 0 - 3: middle 2
+    assert wrapped.moved == pytest.approx((0.0, 1.0))
+    wrapped(np.concatenate([frames[3:4], frames[4:8], frames[7:8]]), 4)        # frames 4 - 7: middle 6
+    assert wrapped.moved == pytest.approx((0.0, 3.0))
 
 
 def test_the_goodness_draws_each_molecule_over_the_network_s_own_background_map(files):

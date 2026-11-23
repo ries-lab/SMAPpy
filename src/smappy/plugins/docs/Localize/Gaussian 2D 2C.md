@@ -496,6 +496,32 @@ It has to cover what the voted offset alone cannot: a 3 degree rotation over
 About seven times the residual of a healthy registration (0.13 px); tighter
 strips the edges of the field.
 
+### model.move.move
+How far the splitter's second channel moved on the chip since the beads, on
+top of the registration: the beads' map with a translation, constant or
+over the frames.  A move of a pixel or more leaves the peaks of the two
+channels unpaired and each molecule fitted twice, once in each half, with
+the other half's box in the wrong place.  *typed* takes the rows and
+columns.  *measured* measures it from this movie, in two steps.  First a
+vote: each channel's peaks, the main channel's mapped into the second by
+the registration, every difference within 10 pixels in one histogram;
+partners pile up at the move.  That finds the move to about a pixel, enough
+to put each partner in its box -- a peak's maximum is not the PSF model's
+centre, so peaks cannot do more.  Then the fit itself, with *link x, y* off
+-- each channel its own x and y -- on *blocks* of *frames a block* spread
+through the movie: each well-fitted pair (the better half by their error)
+says where its second channel lies against the link.  The move is their
+error-weighted mean, pairs more than 3 robust standard deviations off left
+out; with *over time*, a robust smoothing spline of them over the frames.
+*Preview* measures it and draws a tab, *channel move*: each pair's shift
+against the frame with the move, and what is left after the move against
+z -- a slope there means the registration and the PSF models disagree,
+which a move cannot mend.  The measurement is kept beside the movie
+(`<movie>.channel_move.json`), so later previews and runs read it; the
+line under *move* says what was found.  Unlike *registration* > *from this
+movie*, which measures a new map with a plain Gaussian, this keeps the
+beads' map and measures with the model that made it.
+
 ### fit.roisize
 Both fit boxes of a pair have this size, and both must lie inside the frame, each
 on its own half.

@@ -1838,6 +1838,38 @@ class SplineTransformSettings(ChannelTransformSettings):
                                  "from this movie: for a splitter moved since the beads")
 
 
+#: how a two-channel fitter takes the channel move (`smappy.channel_move`, gui-plan §4b)
+MOVES = (("none", "none"), ("typed", "typed"), ("measured", "measured"))
+
+
+@dataclass
+class ChannelMoveSettings:
+    """How far a split camera's second channel moved on the chip since the beads, on top of their
+    registration: the same part in every two-channel fitter and the DECODE training's prefit."""
+    move: str = param("none", label="move", choices=MOVES,
+                      help="none: the registration as it is; typed: moved by the rows and columns below; "
+                           "measured: from this movie, by the fit with x and y free per channel "
+                           "(Preview shows it; kept beside the movie)")
+    rows: float = param(0.0, label="moved by", unit="rows",
+                        help="how far the second channel lies from where the registration puts it, along the "
+                             "chip's rows")
+    columns: float = param(0.0, label="and", unit="columns", beside=True, help="the same along the columns")
+    over_time: bool = param(False, label="over time",
+                            help="a smooth curve over the frames instead of one move: for a splitter that "
+                                 "drifts during the acquisition (the figure shows the drift either way)")
+    blocks: int = param(20, label="blocks", min=2, advanced=True,
+                        help="blocks of frames spread over the movie the move is measured on")
+    block_frames: int = param(50, label="frames a block", min=5, advanced=True, beside=True,
+                              help="frames in each block")
+
+
+def move_shown(prefix: str, s: ChannelMoveSettings) -> Dict[str, bool]:
+    """Which of the part's rows the form shows: the move typed or how it is measured."""
+    return {f"{prefix}.rows": s.move == "typed", f"{prefix}.columns": s.move == "typed",
+            f"{prefix}.over_time": s.move == "measured", f"{prefix}.blocks": s.move == "measured",
+            f"{prefix}.block_frames": s.move == "measured"}
+
+
 # The links two channels can share, declared once for both two-channel
 # models.  Fields made by functions rather than inherited, for the reason the
 # forms are in halves: each model shows its own first field (the calibration,
@@ -1907,6 +1939,8 @@ class DualModelSettings(_LinkedChannels):
     # channels' rectangles are the *channels* part's
     registration: SplineTransformSettings = param(default_factory=SplineTransformSettings,
                                                   label="registration", collapsed=True)
+    # how far the second channel moved on the chip since the beads, on top of the registration (gui-plan §4b)
+    move: ChannelMoveSettings = param(default_factory=ChannelMoveSettings, label="channel move", collapsed=True)
 
     def load(self):
         from ..calibrate.dual import load_dual_color_calibration
@@ -2269,11 +2303,133 @@ class _TwoChannelFit(_FitPlugin):
     """
 
     _loaded = None             # (path, registration) of the run in progress
+    _active_move = None        # the channel move the run or preview in progress fits with (`channel_move`)
+    _moves: dict = {}          # measured moves by their key (`measure_move`), shared by the previews and runs
     two_channel = True
     channel_part = "two"
 
     def registration_path(self, settings) -> str:
         raise NotImplementedError
+
+    # ----------------------------------------------------------- the channel move (gui-plan §4b)
+    def channel_move(self, settings, report=lambda text: None):
+        """``(ChannelMove or None, the measurement's data or None)`` the part asks for: none, typed, or
+        measured -- from this instance's or the movie's cache (`channel_move.cached`), else now."""
+        from ..channel_move import ChannelMove
+        m = settings.model.move
+        if m.move == "typed":
+            move = ChannelMove.typed(m.columns, m.rows)
+            return (None if move.is_zero() else move), None
+        if m.move != "measured":
+            return None, None
+        key = self.move_key(settings)
+        if key in self._moves:
+            return self._moves[key]
+        from .. import channel_move as cm
+        found = cm.cached(settings.source.path, key)
+        if found is not None:
+            self._moves[key] = (found, None)
+            return found, None
+        move, data = self.measure_move(settings, report)
+        cm.keep(settings.source.path, key, move)
+        self._moves[key] = (move, data)
+        return move, data
+
+    def move_key(self, settings) -> str:
+        """What the measurement depends on: the movie, the registration and the settings it runs with."""
+        from ..channel_move import cache_key
+        what = {"fitter": type(self).__name__, "move": asdict(settings.model.move), "model": asdict(settings.model),
+                "detection": asdict(settings.detection) if hasattr(settings, "detection") else None,
+                "frames": [settings.source.start, settings.source.stop], "camera": asdict(settings.camera),
+                "channels": asdict(settings.channels) if hasattr(settings, "channels") else None}
+        return cache_key(settings.source.path, self.registration_path(settings), what)
+
+    def measure_move(self, settings, report=lambda text: None):
+        """The channel move from this movie (`smappy.channel_move`): a vote of the two channels' peaks for
+        the start, then the fit with x and y free per channel on blocks spread over the movie, its pairs'
+        shifts combined -- constant, or over time.  Returns ``(ChannelMove, data for the figure)``."""
+        from .. import channel_move as cm
+        from ..detect import Candidates
+        from ..locs import concat
+        from ..multichannel import MultiChannelEngine
+        from ..pipeline import drive
+        m = settings.model.move
+        source = self.open_source(settings)
+        layout = source.layout
+        camera = self._camera(settings)
+        if camera is None:
+            raise ValueError(f"could not read the camera from {settings.source.path}")
+        camera.require("conversion", "offset")
+        finder = self.finder(settings, camera)
+        src = settings.source
+        n = source.n_frames
+        stop = min(src.stop, n) if src.stop else n
+        length = max(int(m.block_frames), 1)
+        starts = np.unique(np.linspace(src.start, max(stop - length, src.start), max(int(m.blocks), 1)).astype(int))
+        # the start: each channel's peaks, voted on
+        report("channel move: the channels' peaks")
+        found = [[], []]
+        for first in starts:
+            for at, block in source.frames(chunk=length, start=int(first), stop=int(min(first + length, stop))):
+                channels = channel_photons(block, camera, settings, source)
+                for c, (w, h) in enumerate(layout.sizes):
+                    found[c].append(finder(np.ascontiguousarray(channels[:, c, :h, :w]), first_frame=int(at))[0])
+
+        def joined(parts):
+            return Candidates(*(np.concatenate([getattr(p, f) for p in parts]) for f in ("frame", "x", "y", "value")))
+        coarse, strength = cm.vote(joined(found[0]), joined(found[1]), layout)
+        base = cm.ChannelMove(coarse[None], None, {"how": "vote"})
+        # the fit, x and y free per channel, partners where the vote puts them
+        report(f"channel move: about {coarse[1]:+.1f} rows, {coarse[0]:+.1f} columns by the peaks; fitting "
+               f"{len(starts)} blocks with x, y free per channel")
+        free = replace(settings, model=replace(settings.model, link_xy=False))
+        engine = MultiChannelEngine(camera, finder, self.model(free, camera), layout, settings.fit,
+                                    base.layer_drift(layout), detection="pairs",
+                                    photon_factors=self.photon_factors(settings), frame_shape=source.base.shape[-2:])
+        parts = []
+        for first in starts:
+            drive(engine, source.frames(chunk=length, start=int(first), stop=int(min(first + length, stop))),
+                  sink=parts.append)
+        parts = [p for p in parts if p is not None and len(p)]
+        if not parts:
+            raise ValueError("channel move: nothing was fitted in the blocks")
+        locs = concat(parts)
+        if "dx_nm_ch1" not in locs:
+            raise ValueError("channel move: the fit gave no second-channel positions")
+        # the better half by their lateral error, as Spline 4Pi's channel drift takes them
+        err = np.asarray(locs["xy_err_nm"] if "xy_err_nm" in locs else locs["x_err_nm"], float)
+        good = np.isfinite(err) & (err <= np.nanmedian(err))
+        sizes, _ = camera.pixelsize_nm_or_default
+        frame, shift, perr = cm.pair_shifts(locs[good], layout, sizes, base)
+        if len(frame) < cm.MIN_PAIRS:
+            raise ValueError(f"channel move: {len(frame)} well-fitted pairs, too few to measure it by; "
+                             f"type the move, or fit more frames (blocks)")
+        record = {"how": "measured", "vote_px": coarse.tolist(), "vote_strength": round(strength, 1),
+                  "blocks": len(starts), "block_frames": length}
+        if m.over_time:
+            grid, curve, kept = cm.over_time(frame, shift, perr, float(starts[0]), float(min(starts[-1] + length, stop)))
+            _, se, _ = cm.constant(shift, perr)
+            move = cm.ChannelMove(curve, grid, {**record, "pairs": kept, "error_px": float(np.nanmax(se))})
+        else:
+            mean, se, kept = cm.constant(shift, perr)
+            move = cm.ChannelMove(mean[None], None, {**record, "pairs": kept, "error_px": float(np.nanmax(se))})
+        z = np.asarray(locs["z_nm"], float)[good] if "z_nm" in locs else None
+        if z is not None:
+            ok = np.all(np.isfinite(np.c_[np.asarray(locs["dx_nm_ch1"], float), np.asarray(locs["dy_nm_ch1"], float)]),
+                        1)[good]
+            ok &= np.isfinite(err[good]) & (err[good] > 0)
+            z = z[ok]
+        report(f"channel move: {move.line()}")
+        return move, {"frame": frame, "shift": shift, "z_nm": z}
+
+    def _with_move(self, settings, call, report=lambda text: None):
+        """``call()`` with the channel move the part asks for in force; ``(result, move, data)``."""
+        move, data = self.channel_move(settings, report)
+        self._active_move = move
+        try:
+            return call(), move, data
+        finally:
+            self._active_move = None
 
     def read_registration(self, settings):
         raise NotImplementedError
@@ -2375,6 +2531,16 @@ class _TwoChannelFit(_FitPlugin):
 
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
+        state.shown.update(move_shown("model.move", settings.model.move))
+        if settings.model.move.move == "measured" and settings.source.path:
+            # a move measured before says what it found, under the part's own name
+            try:
+                from ..channel_move import cached
+                found = cached(settings.source.path, self.move_key(settings))
+            except Exception:
+                found = None
+            if found is not None:
+                state.hints["model.move.move"] = found.line()
         if state.notice is None:
             try:
                 conflict = self.arrangement_conflict(settings)
@@ -2393,12 +2559,20 @@ class _TwoChannelFit(_FitPlugin):
             conflict = self.arrangement_conflict(settings)
             if conflict:
                 ctx.warn(conflict)
-            return super(_TwoChannelFit, self).run(ctx, settings)
-        result = self._reading_once(settings, fit, measured)
+            return self._with_move(settings, lambda: super(_TwoChannelFit, self).run(ctx, settings), ctx.report)
+        result, move, data = self._reading_once(settings, fit, measured)
         if found is not None:
             # a tab of the result, never a window of its own: a run without a GUI shows nothing
             from .registration import registration_plot
             result.plots = {"channel registration": registration_plot(found), **result.plots}
+        if move is not None:
+            result.text = f"{result.text}\n{move.line()}"
+            result.data["channel_move"] = move.to_dict()
+            if result.locs is not None:
+                result.locs.metadata["channel_move"] = move.to_dict()
+            if data is not None:
+                from ..channel_move import draw
+                result.plots = {"channel move": draw(move, data), **result.plots}
         return result
 
     # ------------------------------------------------------------ calibrate
@@ -2607,7 +2781,9 @@ class _TwoChannelFit(_FitPlugin):
             def select(x, y):
                 on = layout.on_frame(0, np.c_[x, y])
                 return in_region(on[:, 0], on[:, 1], shapes)
-        return MultiChannelEngine(camera, finder, model, source.layout, settings.fit,
+        move = self._active_move
+        drift = None if move is None else move.layer_drift(source.layout)
+        return MultiChannelEngine(camera, finder, model, source.layout, settings.fit, drift,
                                   detection="pairs", photon_factors=self.photon_factors(settings),
                                   select=select, frame_shape=source.base.shape[-2:])
 
@@ -2627,8 +2803,26 @@ class _TwoChannelFit(_FitPlugin):
             except Exception as error:
                 failed = str(error) or type(error).__name__
         measured = None if found is None else self.with_measured(settings, found.transform)
-        result = self._reading_once(settings, lambda: self._layer_preview(ctx, settings, frame),
-                                    measured)
+        move_failed = ""
+
+        def previewed():
+            nonlocal move_failed
+            try:
+                return self._with_move(settings, lambda: self._layer_preview(ctx, settings, frame), ctx.report)
+            except Exception as error:
+                if settings.model.move.move != "measured":
+                    raise
+                move_failed = str(error) or type(error).__name__
+                return self._layer_preview(ctx, settings, frame), None, None
+        result, move, data = self._reading_once(settings, previewed, measured)
+        if move is not None:
+            result.text = f"{result.text}\n{move.line()}"
+            result.data["channel_move"] = move
+            if settings.model.move.move == "measured":
+                from ..channel_move import draw
+                result.plots = {**result.plots, "channel move": draw(move, data)}
+        elif move_failed:
+            result.text = f"{result.text}\nmeasuring the channel move failed -- {move_failed}"
         if found is not None:
             from .registration import CalibrateChannelTransform, registration_plot
             result.text = (f"{result.text}\nmeasured from the movie: "
@@ -3075,6 +3269,7 @@ class DualGaussianModelSettings(_LinkedChannels):
     # the *channels* part's
     registration: ChannelTransformSettings = param(default_factory=ChannelTransformSettings,
                                                    label="registration", collapsed=True)
+    move: ChannelMoveSettings = param(default_factory=ChannelMoveSettings, label="channel move", collapsed=True)
 
     def model(self, channels: int = 2):
         from ..psf import GlobalGaussianPSF

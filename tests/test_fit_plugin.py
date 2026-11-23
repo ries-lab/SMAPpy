@@ -56,9 +56,9 @@ def test_every_fitter_shows_the_shared_parts_in_one_order_and_its_own_in_place()
     assert [list(cls.specs()["model"].children) for cls in
             (DualSplineFit, DualGaussianFit)] == [
         ["calibration", "sample", "link_xy", "link_z", "link_photons", "link_background",
-         "photon_ratio", "registration"],
+         "photon_ratio", "registration", "move"],
         ["sigma", "link_xy", "link_photons", "link_background", "link_sigma",
-         "photon_ratio", "registration"]]
+         "photon_ratio", "registration", "move"]]
 
 
 def test_fit_runs_without_a_gui_and_streams(stack, tmp_path):

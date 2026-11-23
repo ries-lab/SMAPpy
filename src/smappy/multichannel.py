@@ -64,7 +64,8 @@ def detection_image(channels: np.ndarray, layout: ChannelLayout, lookups: Option
 
 
 def paired_candidates(found: List[Candidates], layout: ChannelLayout,
-                      match_px: float = MATCH_PIXELS) -> Tuple[Candidates, int]:
+                      match_px: float = MATCH_PIXELS,
+                      drift: "Optional[ChannelDrift]" = None) -> Tuple[Candidates, int]:
     """Two channels' peaks as one list on channel 0's pixels, and how many were pairs.
 
     SMAP's ``PeakCombiner``'s steps, on the channels' own pixels: the second
@@ -72,7 +73,9 @@ def paired_candidates(found: List[Candidates], layout: ChannelLayout,
     as a mean weighted by the square root of their values, their value the sum; every peak only one
     channel saw kept too -- a lone peak in channel 0, the lone ones of channel 1, then the pairs, per
     frame -- and every position rounded to channel 0's pixel.  Where the box goes in the other channel
-    is then `channel_candidates`'.
+    is then `channel_candidates`'.  ``drift`` (the channel move, `channel_move`) is where channel 1
+    lies beyond the map: its peaks are taken back by it before they are mapped, so a splitter moved
+    since the beads still pairs.
     """
     if len(found) != 2:
         raise ValueError(f"pairing takes two channels, not {len(found)}")
@@ -83,8 +86,10 @@ def paired_candidates(found: List[Candidates], layout: ChannelLayout,
         ref = ref_all[ref_all.frame == frame]
         other = other_all[other_all.frame == frame]
         here = np.c_[ref.x, ref.y].astype(float)
-        mapped = (layout.to_reference(1, np.c_[other.x, other.y].astype(float)) if len(other)
-                  else np.empty((0, 2)))
+        own = np.c_[other.x, other.y].astype(float)
+        if drift is not None and len(other):
+            own = own - drift.at(np.array([frame]))[0, 1]
+        mapped = layout.to_reference(1, own) if len(other) else np.empty((0, 2))
         weight_ref = np.sqrt(np.maximum(ref.value, 0.0))
         weight_other = np.sqrt(np.maximum(other.value, 0.0))
         a, b = _match(here, mapped, match_px)
@@ -354,7 +359,7 @@ class MultiChannelEngine:
             for c, (w, h) in enumerate(self.layout.sizes):
                 own = np.ascontiguousarray(channels[:, c, :h, :w])
                 found.append(self.finder(own, first_frame=first_frame, n_threads=self.settings.n_threads)[0])
-            candidates, matched = paired_candidates(found, self.layout)
+            candidates, matched = paired_candidates(found, self.layout, drift=self.drift)
             self.stats["matched"] += matched
             if self.select is not None:
                 candidates = candidates[self.select(candidates.x, candidates.y)]

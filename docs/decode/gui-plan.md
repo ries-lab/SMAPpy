@@ -149,7 +149,7 @@ that architecture here: what the study compared it as.
 7. **T5** alongside each step, not after: each step's page, tests (a simulated two-channel movie
    trained a few epochs and fitted, as the one-channel tests do) and the slow tier.
 
-## 4b. The channel move, for every two-channel fitter (decided, Jonas 2026-11-23)
+## 4b. The channel move, for every two-channel fitter (decided, Jonas 2026-11-23; done the same day)
 
 The splitter's second channel moves on the chip between the bead calibration and a measurement (Fig.
 2a: 5.8 rows; M2's movie pairs only under the beads of the next day).  Today only *DECODE*'s
@@ -182,7 +182,14 @@ typed move or none, and after a move pair nothing.
 - **Applied through the registration**: a constant move as a translation of the map
   (`fit_two.moved_calibration`), a move over time as the map per block of frames -- for *DECODE* the
   offset maps per block, which a translation keeps within what the network was trained on.
-- **The network's count scan goes** (`measure_move`).  Spline 4Pi's channel drift (`multichannel.ChannelDrift`,
+- **As built**: `smappy/channel_move.py` (the vote, the robust mean and spline, the cache, the figure),
+  `ChannelMoveSettings` under each two-colour model's registration (*channel move*), in the DECODE fitter's
+  *two channels* and in the training window's; *Measure* is the fitter's *Preview*, as *registration from
+  this movie* is.  On Fig. 2a's movie it measured +5.41 rows, -0.03 columns from 22 198 pairs in 7 s
+  (the vote: 5.33), a second pass from there 5.41 again; the rows go from 5.29 at z -450 nm to 5.55 at
+  +450 nm -- a disagreement of the map and the PSF models in z, which no move mends.  The earlier
+  estimates were 5.5 (the network's count) and 5.5 -- 6.0 (the spline's likelihood).
+- **The network's count scan went** (`measure_move`).  Spline 4Pi's channel drift (`multichannel.ChannelDrift`,
   linear between blocks) moves onto the same machinery later, not now.
 
 ## 5. Decided (Jonas, 2026-11-22), and open

@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_decode.DecodeFit, smappy.netfit.fit_two.TwoChannelPredictor, smappy.netfit.fit_two.measure_move, smappy.netfit.fit_two.moved_calibration, smappy.plugins.fit_decode.two_channel_calibration, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
+covers: [smappy.plugins.fit_decode.DecodeFit, smappy.netfit.fit_two.TwoChannelPredictor, smappy.plugins.fit_decode.DecodeFit.channel_move, smappy.channel_move.ChannelMove, smappy.plugins.fit._TwoChannelFit.measure_move, smappy.netfit.fit_two.moved_calibration, smappy.plugins.fit_decode.two_channel_calibration, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
 ## What it does
@@ -315,25 +315,25 @@ empty takes that file where it is.  A copy elsewhere is fine; a different
 calibration is refused, since the registration is part of what the network
 learned.
 
-### two_channels.moved_rows
+### two_channels.move.move
 
 A splitter moves between the bead calibration and the measurement, by a
 pixel or more: DECODE-Plex's Fig. 2a movie lies 5.8 rows from where its
 beads put the second channel.  Left out, the network sees each molecule as
 two spots that do not pair.  It finds many more, and the colour shares
 fall to 0 and 1.  A move is a translation, which the network handles
-without new training.  Type it when you know it, or tick *measure the
-move*.
+without new training.
 
-### two_channels.measure_move
-
-Before the fit, the move is scanned on the first 20 frames: the network is
-run at each trial move, first across whole pixels within 8 of the typed
-move, then in steps of a quarter pixel, rows, then columns, then rows again.
-The move kept is where it finds the fewest molecules.  On Fig. 2a it found
-5.5 rows, where the spline fitters' likelihood put it at 5.5 to 6.0, and
-DECODE-Plex's own offset at 5.95.  Measure once per day or setup, then type
-the result: it takes about half a minute.
+*typed* takes the rows and columns below.  *measured* measures it from the
+movie as [Spline 3D 2C](plugin:Localize/Spline 3D 2C) measures its own
+*channel move*: that fitter, with x and y free in each channel, on the
+model's own two-channel calibration, over blocks spread through the movie.
+The spline model made the registration the network was trained on, so its
+fit says where the second channel is; the network is not asked.  The move
+is kept beside the movie, and *Preview* draws it before a long inference.
+With *over time*, the network reads each block of frames with the move at
+the block's middle frame.  The move used, and how it was found, is in the
+run's text and in its file.
 
 ### two_channels.goodness
 

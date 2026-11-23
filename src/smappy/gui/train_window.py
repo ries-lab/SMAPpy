@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHea
 from ..calibrate.depth import SampleSettings
 from ..plugins import param
 from .widgets import note_style
-from ..plugins.fit import TIFF_FILTER, CameraSettings
+from ..plugins.fit import TIFF_FILTER, CameraSettings, ChannelMoveSettings, move_shown
 from ..plugins.fit_decode import MODEL_FILTER
 
 METHOD = "decode-v0.10.2"
@@ -148,10 +148,9 @@ class TwoChannelPrepare:
     spread: float = param(0.03, label="spread", min=0.0, max=0.5,
                           help="how far a molecule's share may lie from its dye's: 0.03 narrow, 0.06 broad "
                                "(fewer outliers in crowding, the dimmest found less)")
-    moved_rows: float = param(0.0, label="moved since the beads", unit="rows",
-                              help="how far the second channel lies from where the beads put it, for the "
-                                   "prefit: the DECODE fitter's measure the move finds it")
-    moved_columns: float = param(0.0, label="and", unit="columns", beside=True, help="the same along the columns")
+    # how far the second channel moved on the chip since the beads, the two-channel fitters' own part (gui-plan
+    # §4b): the prefit pairs the channels with it; the network learns the beads' map and the fitter moves it
+    move: ChannelMoveSettings = param(default_factory=ChannelMoveSettings, label="channel move", collapsed=True)
 
 
 def _dye_choices():
@@ -342,8 +341,9 @@ def run_prefit_two(settings: PrepareSettings, report=lambda entry: None) -> Prep
     camera = settings.camera.resolve(source)
     t = settings.two_channels
     report({"message": f"fitting {settings.blocks} blocks of {settings.block_frames} frames with Spline 3D 2C"})
+    moved = prefit_move(settings, report)
     found, two = prefit_two(settings.movie, settings.camera, settings.calibration, t.kind,
-                            (t.moved_columns, t.moved_rows), n_blocks=settings.blocks,
+                            moved, n_blocks=settings.blocks,
                             block_frames=settings.block_frames, n_frames=source.n_frames,
                             report=lambda text: report({"message": text}))
     blinks, locs = found.columns()
@@ -355,6 +355,23 @@ def run_prefit_two(settings: PrepareSettings, report=lambda entry: None) -> Prep
         return np.concatenate([block for _, block in source.frames(chunk=b - a, start=a, stop=b)])
     return Prepared(settings, camera, est, blinks, locs, source.n_frames, sample=read(0, min(4, source.n_frames)),
                     calibration=str(settings.calibration), two=two)
+
+
+def prefit_move(settings: PrepareSettings, report=lambda entry: None) -> tuple:
+    """(columns, rows) the prefit moves the registration by: the part's, typed or measured as the
+    two-channel fitters measure it (Spline 3D 2C, x and y free per channel; cached beside the movie), its
+    mean over time -- the prefit pairs the channels, and blocks spread over the movie do not need more."""
+    m = settings.two_channels.move
+    if m.move == "none":
+        return (0.0, 0.0)
+    from ..plugins.fit import DualModelSettings, DualSplineFit, DualSplineFitSettings, SourceSettings
+    spline = DualSplineFitSettings(source=SourceSettings(path=str(settings.movie)), camera=settings.camera,
+                                   model=DualModelSettings(calibration=str(settings.calibration), move=m))
+    move, _ = DualSplineFit().channel_move(spline, lambda text: report({"message": text}))
+    if move is None:
+        return (0.0, 0.0)
+    report({"message": move.line()})
+    return tuple(float(v) for v in move.mean)
 
 
 def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared:
@@ -1344,6 +1361,7 @@ class TrainWindow(QWidget):
             shown["two_channels"] = bool(s.calibration) and is_dual(s.calibration)
             shown["density_manual"] = s.density == "manual"
             shown["uneven_background"] = s.model != "decode"
+            shown.update(move_shown("two_channels.move", s.two_channels.move))
             self.prepare_form.set_shown(shown)
             self.prepare_form.set_active(active)
             self.prepare_form.set_hints(hints)

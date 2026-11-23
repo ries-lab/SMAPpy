@@ -331,11 +331,15 @@ channel's are.  Beside them it finds what only two channels have:
   and named the dye right more often, but found fewer of the dimmest
   molecules.
 
-*moved since the beads* moves the registration for the prefit, as the
-DECODE fitter's own does for the fit.  A splitter that moved since the
-beads (Fig. 2a's 5.8 rows) leaves Spline 3D 2C pairing the wrong spots.
-The fitter's *measure the move* finds it.  The job draws the two channels
-with the beads' registration either way: the network learns all of it.
+*channel move* is the two-channel fitters' own part: *none*, *typed* or
+*measured*.  A splitter that moved since the beads (Fig. 2a's 5.8 rows)
+leaves Spline 3D 2C pairing the wrong spots; the prefit moves the
+registration by it first.  *measured* measures it as
+[Spline 3D 2C](plugin:Localize/Spline 3D 2C) does, with x and y free in
+each channel over the whole movie, and keeps it beside the movie, where the
+fitter finds it again.  Over time, the prefit takes its mean.  The job draws
+the two channels with the beads' registration either way: the network
+learns that, and the fitter moves it.
 
 A two-channel job's preview shows each channel's corner of the data, cut as
 the network reads them (the main half on the left), beside the same two as

@@ -51,8 +51,10 @@ What it needs:
   also called channel alignment), and a PSF model for each.  A
   single-channel calibration or a SMAP `_3dcal.mat` will not do.  Left
   empty, *calibration* is *auto*, as in [Spline 3D](plugin:Localize/Spline 3D).
-  When the splitter has moved since the beads, the PSFs still hold: *measure
-  from this movie* keeps them and measures the registration again.
+  When the splitter has moved since the beads, the PSFs and the map still
+  hold: *channel move* measures how far the second channel moved, with this
+  fit, and fits with the map moved by it.  *measure from this movie* instead
+  measures a new map with a plain Gaussian.
 * **The camera**, as for any fit.
 * **Sparse data**, as for [Spline 3D](plugin:Localize/Spline 3D): a
   neighbour inside the [fit box](plugin:Panels/Glossary) (also called ROI
@@ -476,6 +478,32 @@ setting it depends on changed since.
 
 ### model.registration.calibrate_skip
 Set it to 0 for a movie that does not start with everything on.
+
+### model.move.move
+How far the splitter's second channel moved on the chip since the beads, on
+top of the registration: the beads' map with a translation, constant or
+over the frames.  A move of a pixel or more leaves the peaks of the two
+channels unpaired and each molecule fitted twice, once in each half, with
+the other half's box in the wrong place.  *typed* takes the rows and
+columns.  *measured* measures it from this movie, in two steps.  First a
+vote: each channel's peaks, the main channel's mapped into the second by
+the registration, every difference within 10 pixels in one histogram;
+partners pile up at the move.  That finds the move to about a pixel, enough
+to put each partner in its box -- a peak's maximum is not the PSF model's
+centre, so peaks cannot do more.  Then the fit itself, with *link x, y* off
+-- each channel its own x and y -- on *blocks* of *frames a block* spread
+through the movie: each well-fitted pair (the better half by their error)
+says where its second channel lies against the link.  The move is their
+error-weighted mean, pairs more than 3 robust standard deviations off left
+out; with *over time*, a robust smoothing spline of them over the frames.
+*Preview* measures it and draws a tab, *channel move*: each pair's shift
+against the frame with the move, and what is left after the move against
+z -- a slope there means the registration and the PSF models disagree,
+which a move cannot mend.  The measurement is kept beside the movie
+(`<movie>.channel_move.json`), so later previews and runs read it; the
+line under *move* says what was found.  Unlike *registration* > *from this
+movie*, which measures a new map with a plain Gaussian, this keeps the
+beads' map and measures with the model that made it.
 
 ### model.link_xy
 Unlinked, each half fits its own position.  The table's position is the

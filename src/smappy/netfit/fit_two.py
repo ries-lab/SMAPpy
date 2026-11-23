@@ -10,15 +10,14 @@ each channel's photons and background as ``photons_ch0`` / ``photons_ch1`` (what
 reads) and ``background_ch0`` / ``background_ch1``.
 
 **The move since the beads.**  A splitter moves between the bead calibration and the measurement by
-whole pixels and more (Fig. 2a: 5.8 rows, plex-plan §16, real data).  ``moved`` (columns, rows) is
-added to where the registration puts channel 1's partner: a translation, which leaves the network's
-offset maps within what it was trained on, so no new training.  `measure_move` finds it on the first
-frames: the move at which the network finds the fewest molecules.  A registration that is off shows
-each molecule as two spots that do not pair, and the network reports both: on Fig. 2a 546
-localizations a frame at the move, 5.8 rows, against 720 -- 760 three pixels off either way, and the
-minimum along the columns at 0 (2026-11-22).  The frames' deviance with every localization drawn
-back does not find it: a wrong registration's extra molecules soak up light the model misses
-elsewhere, and the deviance came out lower there.
+whole pixels and more (Fig. 2a: 5.8 rows, plex-plan §16, real data).  The channel move
+(`smappy.channel_move.ChannelMove`, columns and rows on the chip, constant or over the frames) is added
+to where the registration puts channel 1's partner: a translation, which leaves the network's offset
+maps within what it was trained on, so no new training.  Over time, the move at each block's middle
+frame.  It is measured not by the network but by Spline 3D 2C with x and y free per channel on the
+model's calibration (gui-plan §4b; `fit_decode.DecodeFit.channel_move`): the network's own count of
+molecules, the move where it finds the fewest, found Fig. 2a's but was a proxy, slow, and needed a
+trained network, which the prefit has not.
 
 **The checks**, each optional (plex-plan §16): ``goodness``, each localization's neighbourhood against
 the fit drawn back (`goodness.fit_goodness`: false positives); ``bound``, the bound from the fit's own
@@ -39,42 +38,6 @@ def moved_calibration(cal, moved=(0.0, 0.0)):
     return replace(cal, transformation=np.asarray(cal.transformation, float) @ step)
 
 
-MOVE_FRAMES = 20          # frames the move is measured on
-MOVE_REACH = 8.0          # pixels either way the coarse scan looks
-MOVE_STEP = 0.25          # the fine scan's step, about the minimum
-
-
-def count_at(predictor, cal, corner, photons, moved) -> float:
-    """Localizations a frame of ``photons`` (with ``window`` frames of context each side) at ``moved``."""
-    from .channels import TwoChannels
-    two = TwoChannels.from_calibration(moved_calibration(cal, moved), corner, main=predictor.channels.main,
-                                       shape=photons.shape[1:])
-    r = predictor(two.cut(photons), 0, two.offsets())
-    return len(r["frame"]) / max(len(photons) - 2 * predictor.window, 1)
-
-
-def measure_move(predictor, cal, corner, photons, start=(0.0, 0.0), reach: float = MOVE_REACH,
-                 step: float = MOVE_STEP) -> tuple:
-    """(columns, rows) channel 1 moved since the beads, from frames ``photons`` (n + 2 window, H, W): the
-    move with the fewest localizations, rows then columns then rows again, each a scan of whole pixels
-    within ``reach`` of where it stands and then of ``step`` about the best."""
-    moved = [float(start[0]), float(start[1])]
-    for axis in (1, 0, 1):
-        def at(v, axis=axis):
-            m = list(moved)
-            m[axis] = v
-            return count_at(predictor, cal, corner, photons, m)
-        centre = moved[axis]
-        coarse = np.arange(np.round(centre - reach), np.round(centre + reach) + 1)
-        counts = [at(v) for v in coarse]
-        best = float(coarse[int(np.argmin(counts))])
-        fine = best + np.arange(-1.0, 1.0 + step / 2, step)
-        counts = [at(v) for v in fine]
-        moved[axis] = float(fine[int(np.argmin(counts))])
-        reach = 2.0                          # the second pass of rows only refines
-    return tuple(moved)
-
-
 def biplane_total(cal) -> float:
     """The light a biplane molecule of one drawn photon puts in both planes: the two PSFs as the network
     draws them (`channels.splines`), summed at focus.  Fig. 1c's: 0.987 + 0.767."""
@@ -87,16 +50,17 @@ class TwoChannelPredictor:
     """A two-channel `Predictor` as the engine drives a one-channel one (the module's docstring)."""
 
     def __init__(self, predictor, cal, corner=(0, 0), moved=(0.0, 0.0), *, em: bool = False,
-                 goodness: bool = False, bound: bool = False, pixel_nm=(100.0, 100.0), measure: bool = False):
+                 goodness: bool = False, bound: bool = False, pixel_nm=(100.0, 100.0)):
+        from ..channel_move import ChannelMove
         self.predictor = predictor
         self.beads = cal                     # the registration as the beads measured it
-        self.measure = bool(measure)         # the move measured on the first frames (`measure_move`)
-        self.cal = moved_calibration(cal, moved)
+        # the channel move: a `ChannelMove`, or (columns, rows) typed
+        self.move = moved if isinstance(moved, ChannelMove) else ChannelMove.typed(*moved)
+        self.moved = tuple(float(v) for v in self.move.at([0])[0])
+        self.cal = moved_calibration(cal, self.moved)
         self.corner = tuple(round(v) for v in corner)
-        self.moved = tuple(float(v) for v in moved)
-        # what the run's record says of the move (`fit_decode.provenance`): one dict, updated where the move
-        # is measured -- the record is made before the first frames and written after the last
-        self.moved_record = {"rows": self.moved[1], "columns": self.moved[0], "measured": False}
+        # what the run's record says of the move (`fit_decode.provenance`)
+        self.moved_record = {"rows": self.moved[1], "columns": self.moved[0], **self.move.to_dict()}
         self.em, self.goodness, self.bound = bool(em), bool(goodness), bool(bound)
         self.pixel_nm = tuple(float(v) for v in pixel_nm)
         self.kind = predictor.channels.kind
@@ -127,12 +91,14 @@ class TwoChannelPredictor:
     def __call__(self, photons, first_frame: int = 0) -> dict:
         import time
         photons = np.asarray(photons, np.float32)
-        if self.measure and self.two is None:
-            k = self.predictor.window
-            self.moved = measure_move(self.predictor, self.beads, self.corner, photons[:MOVE_FRAMES + 2 * k],
-                                      self.moved)
-            self.cal = moved_calibration(self.beads, self.moved)
-            self.moved_record.update(rows=self.moved[1], columns=self.moved[0], measured=True)
+        if self.move.over_time:
+            # the move at the block's middle frame; the channels cut again where it has gone a hundredth on
+            middle = int(first_frame) + (len(photons) - 2 * self.predictor.window) / 2
+            now = tuple(float(v) for v in self.move.at([middle])[0])
+            if max(abs(a - b) for a, b in zip(now, self.moved)) > 0.01:
+                self.moved = now
+                self.cal = moved_calibration(self.beads, now)
+                self.two = None
         two = self.channels(photons.shape[1:])
         k = self.predictor.window
         stack = two.cut(photons)
