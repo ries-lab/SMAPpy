@@ -17,7 +17,8 @@ molecule's appearance) and the localizations themselves.
   a frame it is on for throughout gets that many, and the frames it switches on or off in get
   less.  So the intensity is the photons of the *fully-on* frames -- the middle frames of blinks
   seen in 3 frames or more -- of the fits whose likelihood is near the bulk (`fully_on`): their
-  mean and standard deviation.  SMAP took the blinks' mean photons over ``lifetime_avg``, as
+  mean and standard deviation, without the fits 3 robust standard deviations above the median in
+  log photons -- overlaps, which set the spread alone in a crowded movie (`intensity_fully_on`).  SMAP took the blinks' mean photons over ``lifetime_avg``, as
   (1, 0.2) times that, which the poor fits' photons pulled to twice the example package's own
   value (docs/decode/poc-plan.md §8, "(e) as done"); with too few fully-on frames, it falls back
   to that (`intensity`).
@@ -50,7 +51,8 @@ INTENSITY_SD = 0.2                              # sd / mean of the photons per f
 FULLY_ON_MIN_FRAMES = 3                         # a blink's middle frames are fully on from 3 frames
 FULLY_ON_ENOUGH = 200                           # fewer fully-on frames: SMAP's rule instead
 LOGL_MADS = 1.0                                 # a fit more MADs below the median logl_rel is left out: strict
-Z_EDGE = 0.9                                    # a fit this close to the calibration's z limit is left out
+PHOTON_MADS = 3.0                               # a fully-on fit this far above the median (log photons) is left out: overlaps
+Z_EDGE = 0.9                                   # a fit this close to the calibration's z limit is left out
 SHORT_ON_TIME, BRIGHTER = 0.8, 1.3              # below this on-time, 1.3 times brighter
 BG_QUANTILES, BG_WIDEN, BG_FLOOR_Q, BG_FLOOR = (0.01, 0.98), 0.3, 0.0005, 0.9
 Z_QUANTILES, Z_WIDEN = (0.01, 0.99), 0.2
@@ -146,9 +148,21 @@ def fully_on(group_id, frame, n_in_group, logl_rel=None, z_nm=None, z_limit_nm=N
     return keep
 
 
-def intensity_fully_on(photons, mask) -> tuple:
-    """Photons a frame while on: the mean and standard deviation over the fully-on frames."""
+def intensity_fully_on(photons, mask, mads: float = PHOTON_MADS) -> tuple:
+    """Photons a frame while on: the mean and standard deviation over the fully-on frames, without
+    those more than ``mads`` robust standard deviations above the median in log photons.
+
+    A fit of two or more overlapping molecules passes the logl cut often enough in a crowded movie
+    to set the standard deviation alone: on the live cell of DECODE-Plex's Fig. 2c, 2 % of the
+    fully-on frames, up to 50 times the median, made it 4 160 photons for a mean of 2 840 -- and the
+    training, which draws the flux normal and cut at 0, then put a quarter of its molecules near 0
+    photons, which it cannot find, and learnt to be unsure (plex-plan §16, 2026-11-23).  Above
+    only: a dim molecule is a molecule, and a cut below would narrow a true spread.  The cut takes
+    nothing from a normal spread up to a third of the mean."""
     v = np.asarray(photons, np.float64)[mask]
+    lv = np.log(np.maximum(v, 1e-9))
+    med = np.median(lv)
+    v = v[lv <= med + mads * 1.4826 * np.median(np.abs(lv - med))]
     return float(v.mean()), float(v.std())
 
 

@@ -52,6 +52,20 @@ def test_a_simulations_lifetime_brightness_background_and_z_come_back(on_time):
     assert est.z_nm == pytest.approx((zlo - 0.2 * (zhi - zlo), zhi + 0.2 * (zhi - zlo)), rel=0.05)
 
 
+def test_overlapping_fits_far_above_the_median_set_neither_the_mean_nor_the_spread():
+    """Fig. 2c's live cell: 2 % of the fully-on fits up to 50 times the median made the sd larger than
+    the mean; without them the molecules' own spread is back, and a normal one is left whole."""
+    rng = np.random.default_rng(0)
+    single = rng.normal(2500.0, 800.0, 9800).clip(100)
+    overlaps = 2500.0 * np.exp(rng.uniform(np.log(5), np.log(50), 200))
+    mask = np.ones(10000, bool)
+    raw = np.r_[single, overlaps]
+    assert raw.std() > raw.mean()
+    mu, sd = prefit.intensity_fully_on(raw, mask)
+    assert mu == pytest.approx(2500.0, rel=0.03) and sd == pytest.approx(800.0, rel=0.05)
+    assert prefit.intensity_fully_on(single, mask[:9800]) == pytest.approx((single.mean(), single.std()))
+
+
 def test_the_on_time_is_the_mean_up_to_smaps_cut():
     """1 to K + 1 frames, K the 95th percentile and at least 13: the long tail is left out."""
     n = np.r_[np.ones(500), np.full(300, 2), np.full(150, 5), np.full(45, 12), np.full(5, 40)]
