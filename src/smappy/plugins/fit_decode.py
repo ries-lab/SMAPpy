@@ -399,6 +399,20 @@ class DecodeFit(_FitPlugin):
         return [f"the model was trained for other conditions than the data's: {d}; train a model for "
                 f"these data (Train a model...)" for d in found]
 
+    def field_dependent(self, settings) -> bool:
+        """A network trained on the centre spline of a field-dependent calibration that is here: *after the
+        fit*'s field correction subtracts the bias it has over the field."""
+        from ..field_correction import has_field
+        try:
+            meta = read_model(settings.model.path)
+        except Exception:
+            return False
+        if meta.get("field"):
+            # a network trained with the field (its ``field`` header, `docs/decode/fd-plan.md` §4) fits it
+            # itself: there is no centre spline's bias to subtract
+            return False
+        return has_field(meta.get("calibration_source"))
+
     # ---------------------------------------------------------- the hooks of `_FitPlugin.run`
     def region_finder(self, settings, camera=None):
         return None                       # the network finds the molecules

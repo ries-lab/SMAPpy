@@ -432,7 +432,14 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
             "dz_nm": calibration.dz, "z0": calibration.z0,
             "grid": list(calibration.shape),
             "em_on": calibration.em_on,
+            # what *Field correction* needs to draw the same spline again and measure its bias there
+            "fit_box_px": settings.roisize,
+            "field": ("node splines" if getattr(calibration, "field_splines", None) is not None
+                      else "centre spline"),
         }
+        depth = (calibration.parameters or {}).get("sample_depth")
+        if depth:
+            info["calibration"]["sample_depth"] = depth
         conversion = calibration.parameters.get("smappy_conversion")
         if conversion:  # a SMAP spline of x-mirrored beads, flipped on load
             info["calibration"]["conversion"] = conversion

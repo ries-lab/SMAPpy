@@ -9,6 +9,11 @@ What a finished fit wants depends on what was fitted, so the steps are fixed
 rather than a chain of anything, each shown only where it applies, its
 settings only while it is chosen:
 
+* *field correction* -- the bias of a fit with the centre spline of a
+  field-dependent calibration subtracted (`field_correction.py`): shown only
+  where the calibration has a field, and first, since it reads the fitted
+  chip position and z before anything moves them.  Ticked in Spline 3D, it
+  makes that fit use the centre spline instead of the node splines.
 * *astigmatic z* -- z from the widths of an elliptical Gaussian fit
   (`astigmatic_z.py`).  First, so that a drift correction after it can
   correct z too.
@@ -49,6 +54,7 @@ from ..locs import Localizations
 from ..rcc import RCCSettings
 from . import Context, FormState, Plugin, Result, param, register
 from .assign_colors import AssignColorSettings
+from .field_correction import FieldCorrectionSettings
 from .astigmatic_z import WIDTHS, AstigmaticZSettings
 from .fourpi_z import NEEDS as PHASE, FourPiZSettings
 from .overlay_channels import OverlaySettings
@@ -59,6 +65,12 @@ CHAIN_FILTER = "Chains (*.chain.yaml);;All files (*)"
 @dataclass
 class AfterFitSettings:
     """The steps in the order they run; each step's settings follow its switch."""
+    field_correction: bool = param(False, label="field correction",
+                                   help="fit with the calibration's centre spline and subtract the "
+                                        "field's bias afterwards, measured from its field at the "
+                                        "table's brightness (Analysis/After fit/Field correction)")
+    correction: FieldCorrectionSettings = param(default_factory=FieldCorrectionSettings,
+                                                label="field correction settings", collapsed=True)
     astigmatic_z: bool = param(False, label="astigmatic z",
                                help="z from the widths of the elliptical Gaussian, before any "
                                     "drift correction so that it can correct z "
@@ -100,6 +112,9 @@ class AfterFitSettings:
         themselves not until somebody runs one.
         """
         out = []
+        if self.field_correction:
+            from .field_correction import CorrectField
+            out.append((CorrectField(), self.correction))
         if self.astigmatic_z:
             from .astigmatic_z import AstigmaticZ
             out.append((AstigmaticZ(), self.astigmatic))
@@ -124,11 +139,12 @@ class AfterFitSettings:
         return out
 
     def summary(self, two_channel: bool = True, widths: bool = True,
-                phase: bool = False, split: bool = False) -> str:
+                phase: bool = False, split: bool = False, field: bool = False) -> str:
         """What the folded part's title says: the steps that are on, of those
         the table can take (`applicable`)."""
-        on = applicable(self, two_channel, widths, phase, split)
-        names = (["astigmatic z"] if on.astigmatic_z else []) + \
+        on = applicable(self, two_channel, widths, phase, split, field)
+        names = (["field"] if on.field_correction else []) + \
+            (["astigmatic z"] if on.astigmatic_z else []) + \
             (["4Pi z"] if on.fourpi_z else []) + \
             (["overlay"] if on.overlay else []) + \
             ([{"rcc": "RCC", "comet": "COMET"}[on.drift]] if on.drift != "none" else []) + \
@@ -157,11 +173,14 @@ def _chain_name(path: str) -> str:
 
 
 def applicable(settings: AfterFitSettings, two_channel: bool,
-               widths: bool, phase: bool = False, split: bool = False) -> AfterFitSettings:
+               widths: bool, phase: bool = False, split: bool = False,
+               field: bool = False) -> AfterFitSettings:
     """``settings`` with the steps the table cannot take turned off: colours
     without two channels' photons, astigmatic z without the widths, 4Pi z
-    without a phase, the overlay without a two-channel fit's halves."""
+    without a phase, the overlay without a two-channel fit's halves, the
+    field correction without a field-dependent calibration."""
     return replace(settings, assign_colors=settings.assign_colors and two_channel,
+                   field_correction=settings.field_correction and field,
                    astigmatic_z=settings.astigmatic_z and widths,
                    fourpi_z=settings.fourpi_z and phase,
                    overlay=settings.overlay and split)
@@ -170,23 +189,27 @@ def applicable(settings: AfterFitSettings, two_channel: bool,
 def table_can(locs: Localizations, colors: AssignColorSettings) -> Dict[str, bool]:
     """What the table has for the steps that need something: two channels'
     photons (as Assign colours finds them), the elliptical widths, a phase,
-    and the halves of a two-channel fit (``camera_channel``)."""
+    the halves of a two-channel fit (``camera_channel``), and a
+    field-dependent calibration it was fitted with."""
     from .assign_colors import channel_columns
+    from .field_correction import can_correct
     try:
         channel_columns(locs, colors.channel1, colors.channel2)
         two = True
     except ValueError:
         two = False
     return {"two_channel": two, "widths": all(c in locs for c in WIDTHS),
-            "phase": all(c in locs for c in PHASE), "split": "camera_channel" in locs}
+            "phase": all(c in locs for c in PHASE), "split": "camera_channel" in locs,
+            "field": can_correct(locs.metadata)}
 
 
 def shown(settings: AfterFitSettings, two_channel: bool, widths: bool,
-          phase: bool = False, split: bool = False) -> Dict[str, bool]:
+          phase: bool = False, split: bool = False, field: bool = False) -> Dict[str, bool]:
     """Which fields the form shows: a step only where it applies, its
     settings only while it is on, and inside them what their own plugin
     shows (the file or the typed curves of Astigmatic z)."""
-    out = {"astigmatic_z": widths,
+    out = {"field_correction": field, "correction": field and settings.field_correction,
+           "astigmatic_z": widths,
            "astigmatic": widths and settings.astigmatic_z,
            "fourpi_z": phase, "fourpi": phase and settings.fourpi_z,
            "overlay": split, "overlay_channels": split and settings.overlay,
@@ -288,7 +311,8 @@ class AfterFit(Plugin):
         """The steps the open table can take, and what *auto* merges by."""
         locs = getattr(ctx, "locs", None) if ctx is not None else None
         can = (table_can(locs, settings.colors) if locs is not None and len(locs)
-               else {"two_channel": True, "widths": True, "phase": True, "split": True})
+               else {"two_channel": True, "widths": True, "phase": True, "split": True,
+                  "field": True})
         state = FormState(shown=shown(settings, **can))
         from ..drift import merge_values
         dx, dt = merge_values(ctx.session if ctx is not None else None)

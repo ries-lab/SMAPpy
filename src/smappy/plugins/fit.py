@@ -993,11 +993,15 @@ class _FitPlugin(Plugin):
                    "widths": bool(getattr(model, "elliptical", False)),
                    "phase": self.phase,
                    # the halves of a 1C fit on two channels, for the overlay
-                   "split": not self.two_channel and bool(getattr(channels, "two", False))}
+                   "split": not self.two_channel and bool(getattr(channels, "two", False)),
+                   # a field-dependent calibration: its centre spline and the bias subtracted
+                   "field": self.field_dependent(settings)}
             state.shown.update({f"finish.{name}": on
                                 for name, on in shown(finish, **can).items()})
             # the overlay's beads are fitted in this fitter's own arrangement (`finish`)
             state.shown["finish.overlay_channels.channels"] = False
+            # the field correction's calibration is this fit's
+            state.shown["finish.correction.calibration"] = False
             state.titles["finish"] = finish.summary(**can)
             from ..drift import merge_values
             dx, dt = merge_values(ctx.session if ctx is not None else None)
@@ -1284,6 +1288,11 @@ class _FitPlugin(Plugin):
             # next file inherited the last one's values.
             return updates or None
         return None
+
+    def field_dependent(self, settings) -> bool:
+        """Whether this fit's calibration has a field (`field_splines`), for *after the fit*'s
+        field correction; never for a fitter without one."""
+        return False
 
     def finish(self, ctx: Context, settings, locs: Localizations) -> Finished:
         """What is run over the finished table before it is saved: the
@@ -1613,8 +1622,10 @@ class _FitPlugin(Plugin):
         # the camera with it, the microscope it was recognised as included: a table fitted here
         # is read as the file it is saved to would be -- a registration of fitted beads spells
         # out *layout: microscope* from it, and without it *after the fit*'s overlay failed
-        # (2026-11)
-        for key in ("camera", "frame_tags", "acquisition", "warnings", "channels"):
+        # (2026-11).  The calibration and DECODE's model too: *Field correction* draws the spline
+        # the fit used again from them
+        for key in ("camera", "frame_tags", "acquisition", "warnings", "channels", "calibration",
+                    "decode"):
             if record.get(key):
                 collected.metadata[key] = record[key]
         seconds = time.perf_counter() - started
@@ -2016,7 +2027,30 @@ class SplineFit(_FitPlugin):
     calibration_kind = "single"
 
     def model(self, settings, camera):
-        return settings.model.model(camera, roisize=settings.fit.roisize)
+        model = settings.model.model(camera, roisize=settings.fit.roisize)
+        if model.field_dependent and self._corrected_afterwards(settings):
+            # *after the fit*'s field correction: the centre spline, its bias subtracted afterwards
+            import copy
+            centre = copy.copy(model.calibration)
+            centre.field_splines = None
+            model = replace(model, calibration=centre)
+        return model
+
+    @staticmethod
+    def _corrected_afterwards(settings) -> bool:
+        finish = getattr(settings, "finish", None)
+        return bool(getattr(finish, "field_correction", False))
+
+    def field_dependent(self, settings) -> bool:
+        from ..calibrate.microscope_psf import MICROSCOPE
+        from ..field_correction import has_field
+        if settings.model.calibration == MICROSCOPE:
+            return False
+        try:
+            path = self.with_calibration(settings).model.calibration
+        except Exception:
+            return False
+        return has_field(path)
 
     def drawable(self, settings):
         """The calibration as it stands (*auto* resolved) if it has a pupil model to draw at depth -- a

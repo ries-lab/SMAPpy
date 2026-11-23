@@ -355,6 +355,15 @@ If it matters, there are two options:
 - make the correction a function of the fitted photons/background too.  Every localisation has these, so
   the correction still reads only fitted values.
 
+**Built** (November 2026) as SMAPpy's *Field correction*, a step of every fitter's *after the fit* where
+the calibration has a field (`smappy/field_correction.py`).  It is the model correction above:
+- measured on the node splines at the fit's depth and the table's median brightness;
+- order 4 in x, y;
+- clamped to the edge values outside, never extrapolated;
+- a warning when the polynomial leaves more than 5 nm rms.
+
+The bead correction is not built.
+
 Not measured here: noise passing through the correction, which is evaluated at a noisy z_fit.  For a smooth
 dz this costs only the curvature term ½ dz″ σ_z².  Also not measured: the learning's error (the bead correction needs no field model; node splines and the
 pupil fit inherit its errors), and lateral distortion (a lateral offset constant in z is a distortion, which

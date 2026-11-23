@@ -31,24 +31,31 @@ and one line of the history, under the name *After the fit*.
 plugin's settings, so a fit that finishes itself and a table finished by
 hand give the same numbers:
 
-1. ***astigmatic z*** -- z from the widths of an elliptical Gaussian
+1. ***field correction*** -- the bias of a fit with the centre spline of a
+   field-dependent calibration subtracted
+   ([Field correction](plugin:Analysis/After fit/Field correction)).  Shown
+   only where the calibration has a field, and first: it reads the chip
+   position and z as fitted, before anything moves them.  In Spline 3D,
+   ticking it makes the fit use the centre spline instead of the node
+   splines.
+2. ***astigmatic z*** -- z from the widths of an elliptical Gaussian
    ([Astigmatic z](plugin:Analysis/After fit/Astigmatic z)).  It comes
    first, so that a drift correction after it can correct z too.
-2. ***4Pi z*** -- z from the interference phase of a 4Pi fit, unwrapped by
+3. ***4Pi z*** -- z from the interference phase of a 4Pi fit, unwrapped by
    its envelope z ([4Pi z](plugin:Analysis/After fit/4Pi z)).  Also before
    the drift correction, for the same reason.
-3. ***overlay channels*** -- for two dyes each seen in one half of a split
+4. ***overlay channels*** -- for two dyes each seen in one half of a split
    camera: the second half's localizations moved onto the first by a
    registration from beads
    ([Overlay channels](plugin:Analysis/After fit/Overlay channels)).
    Before the drift correction, because the drift is the same in both
    halves and is best measured on the overlaid table.
-4. ***drift correction*** -- none, [RCC](plugin:Analysis/Drift/RCC) or
+5. ***drift correction*** -- none, [RCC](plugin:Analysis/Drift/RCC) or
    [COMET](plugin:Analysis/Drift/COMET).
-5. ***assign colours*** -- a colour per localization from how its photons
+6. ***assign colours*** -- a colour per localization from how its photons
    split between the two channels
    ([Assign colours](plugin:Analysis/After fit/Assign colours)).
-6. ***then chain*** -- a saved chain: plugins in order, with their
+7. ***then chain*** -- a saved chain: plugins in order, with their
    settings, that run as one.  It is for whatever else your lab does to
    every fit.  A chain is made with the + of the Analysis tab and its *Save
    chain*, and is what the [batch window](plugin:Panels/Batch window) runs
@@ -99,6 +106,11 @@ chain with a fitting step in it is refused, because it would open the movie
 and fit it again.  The other steps still run.
 
 ## Parameters
+
+### field_correction
+For a DECODE fit with a field-dependent calibration.  In Spline 3D, leave it
+off unless the fit must be fast: the node splines are as accurate and keep
+the precision, which the correction cannot give back.
 
 ### astigmatic_z
 The calibration under *z calibration* is the one Astigmatic z uses: a file
