@@ -68,4 +68,5 @@ def _load(model: bytes, hello: dict):
                              threshold=float(hello.get("raw_th", 0.1)), batch=int(hello.get("batch_size", 0)))
         return load(path, None if device == "auto" else device,
                     frames_mirrored=bool(hello.get("frames_mirrored", False)),
-                    threshold=float(hello.get("raw_th", 0.1)), batch=int(hello.get("batch_size", 0)))
+                    threshold=float(hello.get("raw_th", 0.1)), batch=int(hello.get("batch_size", 0)),
+                    corner=tuple(hello.get("corner", (0, 0))))
