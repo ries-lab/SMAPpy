@@ -55,7 +55,8 @@ from .fit import (
     move_shown,
 )
 
-MODEL_FILTER = "DECODE models (*.safetensors);;All files (*)"
+MODEL_FILTER = ("DECODE models (*.safetensors *.ckpt *.pt);;SMAPpy's models (*.safetensors);;"
+                "DECODE-Plex runs (*.ckpt);;DECODE's own models (*.pt);;All files (*)")
 DEVICES = (("auto", "auto"), ("cpu", "CPU"), ("cuda", "CUDA"), ("mps", "Apple GPU"))
 METHOD = "decode-v0.10.2"           # the port's; `training.predictors.METHODS` are every one the fitter runs
 #: what fraction of the fit may lie outside what the training drew before the run says so
@@ -124,15 +125,109 @@ class DecodeFitSettings:
 
 
 # ---------------------------------------------------------------------- the checks, torch-free
+def model_file(path) -> Path:
+    """The model file the fitter loads for the one chosen: a ``.safetensors`` as it is; a model another
+    program trained, converted once and kept (`converted`) -- a DECODE-Plex run's checkpoint (``*.ckpt``, its
+    ``param_run.yaml`` beside it and the registration it was trained with near it), or the original DECODE's
+    ``model.pt`` (its ``param_run.yaml`` beside it).  So the published models load where any model does."""
+    p = Path(path)
+    if p.suffix.lower() not in (".ckpt", ".pt"):
+        return p
+    return converted(p)
+
+
+def _beside_yaml(model: Path) -> Path:
+    for name in ("param_run.yaml", "param_run_in.yaml"):
+        if (model.parent / name).is_file():
+            return model.parent / name
+    raise ValueError(f"{model.name}: no param_run.yaml beside it -- the run's settings, which DECODE wrote "
+                     f"into its folder, are needed to build its network")
+
+
+def _near(model: Path, name: str) -> Optional[Path]:
+    """A file named ``name`` in the model's folder, the folders above it, or a ``calibration`` folder beside each."""
+    if not name:
+        return None
+    for folder in [model.parent, *list(model.parent.parents)[:3]]:
+        for place in (folder, folder / "calibration"):
+            if (place / name).is_file():
+                return place / name
+    return None
+
+
+def _named(run_yaml: Path, *keys) -> str:
+    """The file name a DECODE run's settings give under ``keys`` (the training machine's path, its name kept)."""
+    import yaml
+    try:
+        v = yaml.safe_load(run_yaml.read_text()) or {}
+        for k in keys:
+            v = v.get(k) or {}
+        return Path(str(v)).name if v else ""
+    except Exception:
+        return ""
+
+
+def plex_registration(ckpt: Path, run_yaml: Path) -> Path:
+    """The registration a DECODE-Plex run was trained with: the ``*_trafo.mat`` its settings name, looked for
+    by that name in the run's folder, the folders above it and a ``calibration`` folder beside each (the
+    paper's layout); else the one ``*_trafo.mat`` in the run's folder."""
+    named = _named(run_yaml, "Paths", "trafo")
+    near = _near(ckpt, named)
+    if near is not None:
+        return near
+    found = sorted(ckpt.parent.glob("*_trafo.mat"))
+    if len(found) == 1:
+        return found[0]
+    raise ValueError(f"{ckpt.name}: the registration this DECODE-Plex run was trained with"
+                     + (f", {named}," if named else "") + " is not beside it: put its *_trafo.mat in the run's folder")
+
+
+def converted(model: Path) -> Path:
+    """A model another program trained, as SMAPpy's model file, converted once and kept in the configuration
+    folder by its path, size and time; `decode_smlm.plex.fitter.export` or `decode_smlm.predict.export_original`."""
+    import hashlib
+
+    from ..config import config_dir
+    if not model.is_file():
+        raise ValueError(f"{model.name}: no such model file")
+    run_yaml = _beside_yaml(model)
+    trafo = plex_registration(model, run_yaml) if model.suffix.lower() == ".ckpt" else None
+    st = model.stat()
+    key = hashlib.sha256(f"{model.resolve()}|{st.st_size}|{st.st_mtime_ns}|{trafo}".encode()).hexdigest()[:16]
+    out = config_dir() / "converted_models" / f"{model.stem}_{key}.safetensors"
+    if out.is_file():
+        return out
+    if not torch_here():
+        raise ValueError(NO_TORCH)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if trafo is not None:
+        from decode_smlm.plex.fitter import export
+        return export(model, trafo, out)
+    # the PSF calibration it was trained on, where it is near: the fitter then checks data against it and
+    # knows whether the beads' frames were mirrored by an EM register (`_mirrored`)
+    from decode_smlm.predict import export_original
+    cal = _near(model, _named(run_yaml, "InOut", "calibration_file"))
+    if cal is None:
+        beside = sorted(model.parent.glob("*3dcal.mat"))
+        cal = beside[0] if len(beside) == 1 else None
+    if cal is not None:
+        from ..io.calibration import load_spline_calibration
+        return export_original(run_yaml, model, out, calibration=load_spline_calibration(cal))
+    return export_original(run_yaml, model, out)
+
+
 def read_model(path) -> dict:
-    """A model file's metadata, from its header alone; refuses a file that is not a DECODE model."""
-    from ..training import model_file
+    """A model file's metadata, from its header alone; refuses a file that is not a DECODE model.  A model
+    another program trained is converted first (`model_file`)."""
+    from ..training import model_file as files
     if not path:
-        raise ValueError("choose a trained model (.safetensors)")
+        raise ValueError("choose a trained model (.safetensors, or a DECODE-Plex run's .ckpt, or DECODE's model.pt)")
     if not Path(path).is_file():
         raise ValueError(f"{Path(path).name}: no such model file")
+    path = model_file(path)
+    model_file_module = files
     from ..training.predictors import METHODS
-    meta = model_file.read_metadata(path)
+    meta = model_file_module.read_metadata(path)
     if meta.get("method") not in METHODS:
         raise ValueError(f"{Path(path).name} is not a DECODE model"
                          + (f" (it is {meta['method']})" if meta.get("method") else ""))
@@ -314,12 +409,13 @@ class DecodeFit(_FitPlugin):
         device = settings.model.device
         if two_channel(meta):
             return self.two_channel_model(settings, meta, camera)
+        path = model_file(settings.model.path)
         if settings.model.run_on != "here":
             return remote_predictor(settings, meta, camera)
         if not torch_here():
             raise ValueError(NO_TORCH)
         from ..training.predictors import load
-        return load(settings.model.path, None if device == "auto" else device,
+        return load(path, None if device == "auto" else device,
                     frames_mirrored=_mirrored(meta, camera), threshold=settings.model.threshold,
                     batch=settings.model.batch)
 
@@ -340,7 +436,7 @@ class DecodeFit(_FitPlugin):
             if not torch_here():
                 raise ValueError(NO_TORCH)
             from ..netfit.predict import Predictor
-            predictor = Predictor(settings.model.path, None if device == "auto" else device,
+            predictor = Predictor(model_file(settings.model.path), None if device == "auto" else device,
                                   threshold=settings.model.threshold, batch=settings.model.batch)
         sizes, _ = camera.pixelsize_nm_or_default
         ox, oy = camera.roi_offset
@@ -497,7 +593,7 @@ def remote_predictor(settings, meta: dict, camera: CameraMetadata):
                          f"or run the network on this computer")
     if getattr(settings.source, "live", False):
         raise ValueError("a live fit runs its network on this computer: set run on to this computer")
-    return RemotePredictor(host, m.path, None if m.device == "auto" else m.device,
+    return RemotePredictor(host, model_file(m.path), None if m.device == "auto" else m.device,
                            frames_mirrored=_mirrored(meta, camera), raw_th=m.threshold, batch_size=m.batch)
 
 

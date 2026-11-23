@@ -45,15 +45,21 @@ reads which from the file; there is nothing to choose here.
   centres or edges) and report an uncertainty of their own, trained against
   the errors (docs/decode/poc-plan.md, netfit's steps 3 and 4).
 * **DECODE** -- the original's network, ported: models trained before, and
-  models the original DECODE trained, exported
-  (`smappy-decode export-original param_run.yaml model.pt -o model.safetensors`,
-  with `--calibration` its PSF calibration, so that the fitter can check the
-  data against it).
+  models the original DECODE trained.  Choose its `model.pt` as the *trained
+  model*: the fitter converts it once, with the `param_run.yaml` beside it
+  and the PSF calibration it names (found beside it, or the one `*3dcal.mat`
+  there), which tells the fitter whether the beads were mirrored by an EM
+  register.  `smappy-decode export-original` does the same on the command
+  line.
 * **DECODE-Plex** -- a two-channel model published with DECODE-Plex
   (Sha et al. 2026, [doi:10.64898/2026.07.24.740199](https://doi.org/10.64898/2026.07.24.740199)), as a baseline
-  beside SMAPpy's own.  A run's folder and the registration it was trained
-  with become one model file:
-  `smappy-decode export-plex RUN_FOLDER REGISTRATION_trafo.mat -o model.safetensors`.
+  beside SMAPpy's own.  Choose the run's checkpoint (`*.ckpt`) as the
+  *trained model*: the fitter converts it once, with the `param_run.yaml`
+  beside it and the registration it was trained with (`*_trafo.mat`, found
+  by the name the run's settings give, in the run's folder, the folders
+  above it or a `calibration` folder beside them).  `smappy-decode
+  export-plex` does the same on the command line.  Converted models are kept
+  in SMAPpy's configuration folder, so the next fit reads them at once.
   Its frames are cut into the two channels and converted by DECODE-Plex's own
   steps, with its own registration, as the paper's notebooks do, and it gives
   the paper's localizations.  The channels must be the frame's halves, top and

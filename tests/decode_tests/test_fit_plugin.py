@@ -324,3 +324,26 @@ def test_on_apples_gpu_the_batch_keeps_to_a_fixed_budget_of_the_shared_memory(mo
     # half of 27 GB would be 98 frames of 257 x 213; the budget allows 21
     assert predict.auto_batch("mps", 257, 213) == int(predict.MPS_BUDGET // (predict.BYTES_PER_PIXEL * 257 * 213))
     assert predict.auto_batch("mps", 257, 213) < 25
+
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not all(p.exists() for p in needed), reason=f"the example package and its oracle are not in {DATA}")
+def test_the_original_decodes_model_pt_loads_in_the_fitter_as_it_is(tmp_path, monkeypatch):
+    """Chosen directly, model.pt is converted once with its param_run.yaml and the calibration beside it (for
+    the mirror), and fits as the exported file does."""
+    from decode_smlm.predict import export_original
+    from smappy.io.calibration import load_spline_calibration
+    from smappy.plugins import fit_decode
+    n = 12
+    frames = tifffile.imread(ORACLE / "frames_500.tif")[:n]
+    tifffile.imwrite(tmp_path / "frames.tif", frames)
+    camera = {"camera.conversion": 5.0, "camera.offset": 398.6, "camera.em_on": True, "camera.emgain": 100.0,
+              "model.device": "cpu", "model.threshold": 0.1}
+    exported = export_original(PACKAGE / "param_run.yaml", PACKAGE / "model.pt", tmp_path / "package.safetensors",
+                               calibration=load_spline_calibration(PACKAGE / "spline_calibration_3dcal.mat"))
+    want = plugins.get(PLUGIN)().run(Context(), settings(tmp_path / "frames.tif", exported, **camera)).locs
+    got = plugins.get(PLUGIN)().run(Context(), settings(tmp_path / "frames.tif", PACKAGE / "model.pt", **camera)).locs
+    assert len(got) == len(want) > 0
+    np.testing.assert_allclose(np.asarray(got["x_nm"]), np.asarray(want["x_nm"]))
+    assert fit_decode.model_file(PACKAGE / "model.pt") == fit_decode.model_file(PACKAGE / "model.pt")   # kept
