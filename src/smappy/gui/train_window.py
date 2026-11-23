@@ -176,6 +176,10 @@ class PrepareSettings:
                          help="how many molecules are on in a training frame, per µm² of the sample: HD, UHD or typed")
     density_manual: float = param(1.0, label="molecules", unit="per µm²", min=0.02, max=10.0, beside=True,
                                   help="the density typed: molecules on in a frame, per µm² of the sample")
+    # SMAPpy's networks only: DECODE's simulator draws a flat background (plex-plan §16, Jonas 2026-11-23)
+    uneven_background: bool = param(True, label="uneven backgrounds",
+                                    help="half the training's movies drawn with a background that varies over "
+                                         "the field, as a cell's does; off: every frame's background flat")
     two_channels: TwoChannelPrepare = param(default_factory=TwoChannelPrepare, label="two channels",
                                             collapsed=True)
     model: str = param("optimised", label="model", choices=MODELS, advanced=True,
@@ -208,6 +212,10 @@ class EstimateSettings:
     photons: float = param(5000.0, label="photons", unit="a frame", min=1.0,
                            help="the mean photons of a molecule in a frame it is on in")
     photons_sd: float = param(1000.0, label="spread", min=0.0, beside=True, help="their standard deviation")
+    # SMAPpy's networks draw the photons uniformly over a range, DECODE's normal from the mean and spread
+    photons_min: float = param(500.0, label="photons", unit="a frame", min=1.0,
+                               help="the fewest photons a molecule is drawn with in a frame it is on in")
+    photons_max: float = param(30000.0, label="to", min=1.0, beside=True, help="the most")
     background_min: float = param(10.0, label="background", unit="photons/px", min=0.0,
                                   help="the least background a frame is drawn with")
     background_max: float = param(100.0, label="to", min=0.0, beside=True, help="the most")
@@ -419,7 +427,8 @@ def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared
     est = Estimates(on_time_frames=s.on_time_frames, lifetime_frames=lifetime(s.on_time_frames),
                     intensity_mu_sig=(s.photons, s.photons_sd), intensity_from="by hand", n_fully_on=0,
                     background=(s.background_min, s.background_max), z_nm=(s.z_min_nm, s.z_max_nm),
-                    emitters_per_frame=float("nan"), n_blinks=0, n_localizations=0)
+                    emitters_per_frame=float("nan"), n_blinks=0, n_localizations=0,
+                    photons_range=(s.photons_min, s.photons_max))
     n = min(4, source.n_frames)
     sample = np.concatenate([block for _, block in source.frames(chunk=n, start=0, stop=n)])
     empty = {"photons": np.zeros(0), "background": np.zeros(0)}
@@ -432,7 +441,10 @@ def by_hand(prepared: Optional[Prepared]) -> bool:
 
 
 def estimate_settings(est) -> EstimateSettings:
+    default = EstimateSettings()
+    drawn = est.photons_range or (default.photons_min, default.photons_max)
     return EstimateSettings(photons=float(est.intensity_mu_sig[0]), photons_sd=float(est.intensity_mu_sig[1]),
+                            photons_min=float(drawn[0]), photons_max=float(drawn[1]),
                             background_min=float(est.background[0]), background_max=float(est.background[1]),
                             z_min_nm=float(est.z_nm[0]), z_max_nm=float(est.z_nm[1]),
                             on_time_frames=float(est.on_time_frames))
@@ -441,7 +453,8 @@ def estimate_settings(est) -> EstimateSettings:
 def with_settings(est, s: EstimateSettings):
     """The estimates as edited in the form."""
     from decode_smlm.prefit import lifetime
-    return replace(est, intensity_mu_sig=(s.photons, s.photons_sd), background=(s.background_min, s.background_max),
+    return replace(est, intensity_mu_sig=(s.photons, s.photons_sd), photons_range=(s.photons_min, s.photons_max),
+                   background=(s.background_min, s.background_max),
                    z_nm=(s.z_min_nm, s.z_max_nm), on_time_frames=s.on_time_frames, lifetime_frames=lifetime(s.on_time_frames))
 
 
@@ -471,11 +484,13 @@ def netfit_params(prepared: Prepared, est, seed: int = 0) -> dict:
         channels, fuse = two_channel_settings(prepared.two, main=t.main, dyes=t.dyes, typed=typed_shares(t.typed),
                                               spread=t.spread, fuse="late" if s.model == "plexlike" else "early")
     return settings_from_estimates(est, camera_section(prepared.camera), training_density(s, prepared.camera), seed=seed,
-                                   channels=channels, fuse=fuse).to_dict()
+                                   channels=channels, fuse=fuse, uneven=s.uneven_background).to_dict()
 
 
 def method_of(settings: PrepareSettings) -> str:
-    return NETFIT if settings.model == "optimised" else METHOD
+    """SMAPpy's network for *DECODE, optimised* and *DECODE-Plex-like* (its channels joined late), DECODE's port
+    for *DECODE*."""
+    return METHOD if settings.model == "decode" else NETFIT
 
 
 def default_folder(movie, calibration) -> Path:
@@ -1315,6 +1330,9 @@ class TrainWindow(QWidget):
         if not decode:
             self.yaml_button.setChecked(False)
         self.yaml_button.setEnabled(decode)
+        # DECODE draws the photons normal (mean, spread), SMAPpy's networks uniformly (a range)
+        self.estimate_form.set_shown({"photons": decode, "photons_sd": decode,
+                                      "photons_min": not decode, "photons_max": not decode})
 
     def _prepare_changed(self) -> None:
         """*in the sample* only for a pupil (Zernike) calibration (`calibrate.depth.sample_state`), its rows as
@@ -1327,6 +1345,7 @@ class TrainWindow(QWidget):
             from ..netfit.prefit_two import is_dual
             shown["two_channels"] = bool(s.calibration) and is_dual(s.calibration)
             shown["density_manual"] = s.density == "manual"
+            shown["uneven_background"] = s.model != "decode"
             self.prepare_form.set_shown(shown)
             self.prepare_form.set_active(active)
             self.prepare_form.set_hints(hints)

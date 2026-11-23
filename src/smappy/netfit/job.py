@@ -12,8 +12,10 @@ calibration is the folder's ``calibration.h5``, so the folder moves.  `train_fol
 * **a base model** (``base_model`` in the job): its weights to start from (`train.warm_start`).
 
 `settings_from_estimates` turns the prefit's estimates into the simulation's settings, as
-`decode_smlm.prefit.method_params` turns them into DECODE's: the same photons a frame (mean and
-spread), background range, z range, on-time and density, the movie's camera.
+`decode_smlm.prefit.method_params` turns them into DECODE's: the same background range, z range,
+on-time and density, the movie's camera; the photons a frame drawn uniformly over the prefit's
+range where it has one (DECODE draws them normal, from the mean and spread), and a share of the
+movies with an uneven background (DECODE's are flat).
 """
 from __future__ import annotations
 
@@ -31,6 +33,10 @@ SETTINGS, STOP, LOCK = "settings.json", "STOP", "lock.json"
 GMN7C_WINDOW = 7                                          # one channel's frames read (poc-plan, step 4)
 DECAY_SAMPLES = 327680                                    # the studies' schedule: 10 epochs of 32 768
 TARGET_PHOTONS_MIN = 100.0                                # the studies' targets
+#: the share of the training's movies drawn with an uneven background, *uneven backgrounds* on: as the
+#: C = 2 study's B models, which over three seeds lost nothing to flat ones and pixelated half as much
+#: (plex-plan §16, 2026-11-23), and on Fig. 2c's live cell matched DECODE-Plex 0.62 against flat's 0.41
+UNEVEN_SHARE = 0.5
 
 
 class JobError(Exception):
@@ -64,12 +70,14 @@ def two_channel_settings(two, *, main="auto", dyes="independent", typed=(), spre
 
 
 def settings_from_estimates(est, camera_section: dict, density, calibration: str = "calibration.h5",
-                            window: int = 3, seed: int = 0, channels=None, fuse: str = "early") -> TrainingSettings:
+                            window: int = 3, seed: int = 0, channels=None, fuse: str = "early",
+                            uneven: bool = True) -> TrainingSettings:
     """A training's settings from the prefit's estimates (`decode_smlm.prefit.Estimates`) and the
     movie's camera (`decode_smlm.prefit.camera`'s section); everything else netfit's defaults.  With
     ``channels`` (`two_channel_settings`) a two-channel training: the calibration a two-channel one, the
     channels read together from the first layer (``fuse`` "early", *aligned channels*) or apart and
-    joined later ("late", *DECODE-Plex-like*)."""
+    joined later ("late", *DECODE-Plex-like*).  ``uneven``: `UNEVEN_SHARE` of the movies with an uneven
+    background (*uneven backgrounds*), else all flat."""
     from decode_smlm.prefit import density_per_frame
     per_40px = density_per_frame(density)          # a name (LD, HD, UHD) or emitters in 40 x 40 typed
     s = TrainingSettings()
@@ -79,7 +87,10 @@ def settings_from_estimates(est, camera_section: dict, density, calibration: str
                                          "photons_sd": sd, "background": tuple(float(v) for v in est.background),
                                          "z_nm": tuple(float(v) for v in est.z_nm),
                                          "lifetime_frames": float(est.lifetime_frames),
-                                         "density_per_40px": per_40px})
+                                         "density_per_40px": per_40px,
+                                         "photons_range": (None if getattr(est, "photons_range", None) is None
+                                                           else tuple(float(v) for v in est.photons_range)),
+                                         "background_uneven": UNEVEN_SHARE if uneven else 0.0})
     s.camera = CameraModel(conversion=float(camera_section["e_per_adu"]), offset=float(camera_section["baseline"]),
                            em_gain=float(camera_section.get("em_gain") or 0.0),
                            read_noise_e=float(camera_section["read_sigma"]), qe=float(camera_section.get("qe", 1.0)),

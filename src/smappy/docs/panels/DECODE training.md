@@ -273,6 +273,16 @@ molecules it found against 27 % for a model trained at 2.  One trained at 0.2
 per µm² gained only on the sparsest data and had twice the outliers even at its
 own density.
 
+*uneven backgrounds* (on by default; SMAPpy's networks only, not *DECODE*,
+whose simulator draws a flat background): half the training's movies have a
+background that varies smoothly over the field, up to about ten times
+between its brightest and darkest parts, as a cell's autofluorescence or an
+out-of-focus nucleus makes it; the network learns to fit that background
+under each molecule.  On the two-channel studies' test sets it lost nothing
+to a model trained on flat backgrounds and halved the pixelation (the pull
+of positions towards pixel centres).  On a live cell it found half as many
+molecules again.  Switch it off only for a background you know to be flat.
+
 *in the sample* appears for a calibration made with the pupil (Zernike)
 method, and is [Spline 3D](plugin:Localize/Spline 3D)'s *focus*: the
 calibration is drawn for a molecule at each height above the coverslip, with
@@ -347,6 +357,22 @@ blink.  Fits far brighter than the rest (more than three robust standard
 deviations above the median, in log photons) are left out: they are
 overlapping molecules, and in a crowded movie they alone would set the
 spread, which the training would then fill with molecules too dim to find.
+
+*DECODE* draws a molecule's photons from a normal distribution, the mean
+and spread shown.  SMAPpy's networks draw them uniformly over a range
+instead, shown as *photons* ... *to*: from half the fully-on fits' 1st
+percentile to 1.5 times their 99th.  A draw about the mean almost never
+trains the brightest molecules a crowded movie holds, and the network then
+fits them worse; on a live cell, a network trained over the range was as
+precise as DECODE-Plex's, one trained from the mean and spread half as
+precise again.
+
+The z range is the 2nd to 98th percentile of the localizations' z, of the
+fits that pass the same likelihood cut as the fully-on frames, widened by
+15 % of that range on either side and kept inside the calibration's.  Poor
+fits are mostly molecules far out of focus.  With them included, a live
+cell's range reached the calibration's limits, and the network was
+trained for z where there were hardly any molecules.
 
 ### Advanced: method.yaml
 DECODE's whole parameter file, as it will be written, to edit by hand.  Used

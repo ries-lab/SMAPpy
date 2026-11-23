@@ -106,8 +106,10 @@ def test_the_window_lists_the_jobs_and_says_why_it_cannot_train_without_torch(tm
     jobs.add(folder)
     w = train_window.TrainWindow()
     try:
-        rows = {w.job_list.item(i, 1).text(): i for i in range(w.job_list.rowCount())}
-        row = rows["job"]
+        # by the folder, not its name: the worker's list holds other tests' jobs, some called "job" too
+        from PySide6.QtCore import Qt
+        rows = {str(w.job_list.item(i, 0).data(Qt.UserRole)): i for i in range(w.job_list.rowCount())}
+        row = rows[str(folder)]
         assert w.job_list.item(row, 0).text() == train_window.SYMBOLS["failed"]      # running, and no lock: died
         assert w.job_list.item(row, 2).text().startswith("died")
         w.job_list.setCurrentCell(row, 0)
