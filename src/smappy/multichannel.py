@@ -194,8 +194,9 @@ def cut_channel_rois(channels: np.ndarray, candidates: Candidates, positions: np
 @dataclass
 class ChannelDrift:
     """How far each channel's molecules are from where the layout's map puts
-    them, over time: (blocks, C, 2) pixel offsets at the blocks' centre
-    frames, interpolated between and held beyond.
+    them, over time: (m, C, 2) pixel offsets at ``frames``, interpolated
+    between and held beyond -- a smooth curve sampled finely, or one row for
+    a constant offset.
 
     Measured by fitting with x and y free in every channel
     (`measure_channel_drift`).  It takes up a slow drift of the channels
@@ -206,6 +207,7 @@ class ChannelDrift:
     """
     frames: np.ndarray
     offsets: np.ndarray
+    data: Optional[dict] = None                # each channel's pairs, for the figure (`measure_channel_drift`)
 
     def at(self, frame) -> np.ndarray:
         frame = np.asarray(frame, float)
@@ -220,34 +222,50 @@ class ChannelDrift:
 
 
 def measure_channel_drift(locs, channels: int, pixelsize_nm, block_of=None,
-                          min_count: int = 20) -> ChannelDrift:
-    """Each channel's offset from channel 0, per block of frames, from a fit
-    with x and y free per channel: the medians of its ``dx_nm_ch<c>`` and
-    ``dy_nm_ch<c>`` (`dualfit.paired_to_localizations`), over the better
-    half of the localizations by their lateral error.  ``block_of`` maps a
-    frame to its block (default: all one block)."""
+                          min_count: int = 20, over_time: bool = True, span=None) -> ChannelDrift:
+    """Each channel's offset from channel 0, from a fit with x and y free per channel: its
+    ``dx_nm_ch<c>`` and ``dy_nm_ch<c>`` (`dualfit.paired_to_localizations`) over the better half of the
+    localizations by their lateral error, combined as the two-channel fitters' channel move is
+    (`channel_move`): over time a robust, error-weighted smoothing spline over the frames
+    (`channel_move.over_time`), else their robust weighted mean (`channel_move.constant`).
+
+    It was the median of each block, interpolated linearly between the blocks' centres; the spline
+    weighs each fit by its error, leaves out the pairs that are no pair, and follows a drift without
+    the steps of a block's noise (2026-11-23).  ``block_of`` maps a frame to its block, which now only
+    counts the blocks with enough fits; ``span`` (first, last) the frames the curve covers (default: the
+    fits')."""
+    from . import channel_move as cm
     frame = np.asarray(locs["frame"], float)
     block = np.zeros(len(frame), int) if block_of is None else np.asarray(block_of(frame), int)
     px, py = (pixelsize_nm, pixelsize_nm) if np.isscalar(pixelsize_nm) else pixelsize_nm
     err = np.asarray(locs["x_err_nm"], float)
     good = np.isfinite(err) & (err <= np.nanmedian(err))
-    frames, offsets = [], []
-    for b in np.unique(block):
-        rows = good & (block == b)
-        if rows.sum() < min_count:
-            continue
-        here = np.zeros((channels, 2))
-        for c in range(1, channels):
-            for axis, (name, scale) in enumerate(((f"dx_nm_ch{c}", px), (f"dy_nm_ch{c}", py))):
-                v = np.asarray(locs[name], float)[rows]
-                here[c, axis] = np.nanmedian(v) / scale
-        frames.append(float(np.median(frame[rows])))
-        offsets.append(here)
-    if not frames:
+    counts = np.bincount(block[good] - block.min(), minlength=1) if good.any() else np.zeros(1)
+    if not good.any() or counts.max() < min_count:
         raise ValueError(f"fewer than {min_count} well-fitted localizations in every block: "
                          "nothing to measure the channels' drift by")
-    order = np.argsort(frames)
-    return ChannelDrift(np.asarray(frames)[order], np.asarray(offsets)[order])
+    blocks_used = int((counts >= min_count).sum())
+    first, last = span if span is not None else (float(frame[good].min()), float(frame[good].max()))
+    timed = over_time and blocks_used > 1 and last > first
+    grid = np.linspace(first, last, cm.CURVE_SAMPLES) if timed else np.array([first])
+    offsets = np.zeros((len(grid), channels, 2))
+    data = {}
+    for c in range(1, channels):
+        d = np.c_[np.asarray(locs[f"dx_nm_ch{c}"], float) / px, np.asarray(locs[f"dy_nm_ch{c}"], float) / py]
+        ok = good & np.all(np.isfinite(d), 1)
+        if ok.sum() < min_count:
+            continue
+        e = err[ok] / px
+        if timed:
+            _, curve, _ = cm.over_time(frame[ok], d[ok], e, first, last)
+            offsets[:, c] = curve
+        else:
+            offsets[:, c] = cm.constant(d[ok], e)[0]
+        data[c] = {"frame": frame[ok], "shift": d[ok],
+                   "z_nm": np.asarray(locs["z_nm"], float)[ok] if "z_nm" in locs else None}
+    drift = ChannelDrift(grid, offsets)
+    drift.data = data
+    return drift
 
 
 @dataclass

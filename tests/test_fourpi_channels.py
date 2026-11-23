@@ -346,8 +346,13 @@ def test_a_drift_of_one_channel_is_measured_and_followed(cal):
 
     free = fit(Global4PiPSF(cal, shared=(False, False, True, False, True, True)))
     drift = measure_channel_drift(free, 4, 100.0, lambda f: f // per_block)
-    assert np.allclose(drift.offsets[:, 2, 0], 0.8 * np.arange(blocks) / (blocks - 1), atol=0.06)
-    assert np.allclose(drift.offsets[:, [1, 3], :], 0, atol=0.06)
+    # a smooth curve through the blocks' steps: at each block's middle, its offset
+    middles = (np.arange(blocks) + 0.5) * per_block
+    assert np.allclose(drift.at(middles)[:, 2, 0], 0.8 * np.arange(blocks) / (blocks - 1), atol=0.08)
+    assert np.allclose(drift.at(middles)[:, [1, 3], :], 0, atol=0.06)
+    # constant: one offset, the acquisition's mean
+    flat = measure_channel_drift(free, 4, 100.0, lambda f: f // per_block, over_time=False)
+    assert len(flat.frames) == 1 and flat.offsets[0, 2, 0] == pytest.approx(0.4, abs=0.08)
 
     followed = fit(Global4PiPSF(cal), drift)
     assert followed.metadata["channel_drift"]["offsets_px"]

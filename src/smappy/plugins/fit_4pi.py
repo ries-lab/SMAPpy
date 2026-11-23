@@ -73,6 +73,10 @@ class FourPiModelSettings:
                                    "the drift is measured in")
     drift_frames: int = param(500, label="frames per block", unit="frames", min=10,
                               advanced=True, help="how many frames each block fits")
+    # as the two-channel fitters' channel move (`channel_move`): over time a robust smoothing spline, or constant
+    drift_over_time: bool = param(True, label="over time",
+                                  help="follow the drift over the acquisition as a smooth curve; off: one "
+                                       "offset per channel for the whole acquisition")
     registration: FourPiRegistrationSettings = param(
         default_factory=FourPiRegistrationSettings, label="registration", collapsed=True)
 
@@ -185,7 +189,7 @@ class FourPiFit(_FitPlugin):
     Settings = FourPiFitSettings
     # 2: positions on the camera chip, where channel 0 saw them, not in its own pixels
     # 3: a fit region's part on any channel copied onto channel 0 (`fit.region_copies`)
-    version = "3"
+    version = "4"
     phase = True
     # its *channels* part is its own (`FourPiChannelsSettings`): four regions, not a two-way split
     channel_part = "own"
@@ -261,6 +265,7 @@ class FourPiFit(_FitPlugin):
         source = self.open_source(settings)
         drift = (self.channel_drift(settings, camera, finder, source)
                  if settings.model.channel_drift else None)
+        self._drift = drift                 # the run's figure (`run`)
         return MultiChannelEngine(camera, finder, model, source.layout, settings.fit, drift,
                                   frame_shape=source.base.shape[-2:])
 
@@ -294,7 +299,25 @@ class FourPiFit(_FitPlugin):
         edges = np.r_[starts, np.inf]
         return measure_channel_drift(locs, source.n_channels,
                                      camera.pixelsize_nm_or_default[0],
-                                     lambda f: np.searchsorted(edges, f, side="right") - 1)
+                                     lambda f: np.searchsorted(edges, f, side="right") - 1,
+                                     over_time=settings.model.drift_over_time,
+                                     span=(float(starts[0]), float(min(starts[-1] + length, stop))))
+
+    _drift = None
+
+    def run(self, ctx: Context, settings) -> Result:
+        """The fit; with *channel drift*, its figure beside the run's, channel by channel, as the two-channel
+        fitters draw their channel move (`channel_move.draw`)."""
+        self._drift = None
+        result = super().run(ctx, settings)
+        drift = self._drift
+        if drift is not None:
+            from ..channel_move import ChannelMove, draw
+            for c in range(1, drift.offsets.shape[1]):
+                curve = ChannelMove(drift.offsets[:, c], drift.frames if len(drift.frames) > 1 else None)
+                result.plots = {**result.plots,
+                                f"channel {c + 1} drift": draw(curve, (drift.data or {}).get(c))}
+        return result
 
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
@@ -306,7 +329,8 @@ class FourPiFit(_FitPlugin):
         state.titles["model.registration"] = "registration: " + dict(REGISTRATIONS).get(
             registration.source, registration.source)
         state.active.update({"model.drift_blocks": settings.model.channel_drift,
-                             "model.drift_frames": settings.model.channel_drift})
+                             "model.drift_frames": settings.model.channel_drift,
+                             "model.drift_over_time": settings.model.channel_drift})
         if not settings.model.link_xy:
             state.notice = Notice("x and y fitted per channel: the table's dx_nm_ch*, "
                                   "dy_nm_ch* are each channel's offset from where the "
