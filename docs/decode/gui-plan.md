@@ -189,7 +189,17 @@ typed move or none, and after a move pair nothing.
   (the vote: 5.33), a second pass from there 5.41 again; the rows go from 5.29 at z -450 nm to 5.55 at
   +450 nm -- a disagreement of the map and the PSF models in z, which no move mends.  The earlier
   estimates were 5.5 (the network's count) and 5.5 -- 6.0 (the spline's likelihood).
-- **The network's count scan went** (`measure_move`).  Spline 4Pi's channel drift (`multichannel.ChannelDrift`,
+- **The network's count scan went** (`measure_move`).
+- **More than a shift?** (2026-11-23, Jonas: an affine learnt from the pairs, as an option off by default.)
+  The pairs of the measurement regressed on their place on the chip, z a term of its own (robust,
+  error-weighted): on Fig. 2a (39 926 pairs over 240 x 211 px) and on M2's movie with the next day's beads
+  (30 568 pairs over 235 x 209 px) the affine terms are measurable -- 1e-4 to 3e-4 per pixel, ten standard
+  errors -- but move a position at most 0.04 -- 0.05 px (5 -- 6 nm) at the field's corners, and the pairs'
+  scatter not at all (0.148 / 0.214 px to 0.147 / 0.213).  The z term is larger, and the same sign in both:
+  -0.23 and -0.27 px per um in columns, +0.28 and +0.10 in rows -- 15 -- 18 nm between z -500 and +500.
+  So on these two an affine buys nothing a user would see; a z-dependent channel offset (the two channels'
+  PSF models disagreeing with the beads' map off focus: beads on the coverslip, molecules in the sample)
+  is the bigger term.  Not built; the analysis is `affine_check.py`'s, in the session's scratchpad.  Spline 4Pi's channel drift (`multichannel.ChannelDrift`,
   linear between blocks) moves onto the same machinery later, not now.
 
 ## 5. Decided (Jonas, 2026-11-22), and open
