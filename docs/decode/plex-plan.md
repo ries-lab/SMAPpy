@@ -1649,3 +1649,18 @@ as the baseline was trained, normal 7 000 +- 3 000, and their backgrounds flat o
 what either default is for -- the bright tail and the uneven light of a live cell, where at C = 2 on Fig. 2c
 they were worth half the matches and a quarter of the error.  So *uneven backgrounds* is *auto*: on for two channels, off for one
 (Jonas, 2026-11-23); the photon range stays for both, as it follows each movie's own prefit.
+
+On real data -- DECODE's example movie, its first 5 000 frames, scored as the time models were
+(`real_time_models.py`: p >= 0.5, >= 1 000 photons, |z| <= 700 nm; KS the larger of x and y, by photons 1 000
+-- 2 000 / 2 000 -- 4 000 / 4 000 -- 8 000 / 8 000 -- 16 000 / above):
+
+| model | a frame | KS | KS by photons | pair check x / z |
+|---|---|---|---|---|
+| GMN7C s0 / s1 / s2 | 252 / 252 / 252 | 0.007 / 0.013 / 0.008 | above 16 000: 0.110 / 0.096 / -- | 1.10 / 1.01, 1.10 / 0.96, 1.09 / 0.96 |
+| uneven | 245 | 0.010 | 0.011 / 0.012 / 0.008 / 0.009 / 0.100 | 1.14 / 0.99 |
+| photon range | 253 | 0.012 | 0.027 / 0.017 / 0.013 / 0.014 / 0.015 | 1.14 / 1.00 |
+
+Overall both lie within the seeds' scatter (0.007 -- 0.013).  The photon range trades a little pixelation of
+the dim and middle molecules for the brightest: above 16 000 photons, which the old training's normal
+7 000 +- 3 000 hardly drew, the baseline's KS is 0.10 and the range's 0.015 -- what it is for.  Uneven
+backgrounds find 3 % fewer and gain nothing on this movie: off for one channel, as decided.
