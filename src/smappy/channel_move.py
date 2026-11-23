@@ -17,11 +17,13 @@ positions measure the move plus a smeared bias.  Hence two steps:
   error-weighted robust mean (`constant`), or on request a robust weighted smoothing spline over the
   frames (`over_time`, `beads.fit_offsets_and_spline` as *Fiducials* fits beads).
 
-**An affine on request** (*rotation and scale*, off by default): the pairs' shifts regressed on where
+**An affine on request** (*learn* > *affine*; *shift* by default): the pairs' shifts regressed on where
 the second channel's partner lies on the chip, ``shift = t + L (s - c)`` with z a term of its own (a
 z-dependent offset is the PSF models' disagreement with the map, not the map's), robust and weighted
-(`fit_affine`).  ``L`` -- rotation, scale, shear -- is constant over the movie and goes into the
-registration (`with_linear`); ``t`` is the move as before, constant or over time.  On DECODE-Plex's Fig.
+(`fit_affine`).  ``L`` -- rotation, scale, shear -- is constant over the movie; ``t`` is the move as
+before, constant or over time.  Both are one correction composed with the registration (`corrected`):
+the fitters cut their channels from that transformation and their tables record it
+(``registration_used``), a move over time keeping only its change about the mean as the layer's drift.  On DECODE-Plex's Fig.
 2a and our M2 movie it was measurable but moved no position more than 6 nm at the field's corners
 (gui-plan §4b), so it is off unless a splitter turned or scaled.
 
@@ -149,6 +151,26 @@ def affine_matrix(move: ChannelMove) -> np.ndarray:
     out[:2, :2] += L
     out[:2, 2] = -L @ np.asarray(move.centre, float)
     return out
+
+
+def correction_matrix(move: ChannelMove, shift=None) -> np.ndarray:
+    """The whole correction to the beads' map as a 3 x 3 on the second channel's chip pixels, ``s -> s + t + L
+    (s - c)``: ``t`` the move (``shift``, default its mean over the movie), ``L`` its linear part where it
+    learnt one."""
+    out = affine_matrix(move)
+    out[:2, 2] += np.asarray(move.mean if shift is None else shift, float)
+    return out
+
+
+def corrected(registration, move: ChannelMove, shift=None):
+    """The registration the fit uses: the beads' (or a file's, or this movie's) map composed with the
+    correction (`correction_matrix`) -- one transformation, which the fit's channel layout is cut from and
+    its table records."""
+    if move is None:
+        return registration
+    from dataclasses import replace
+    t = np.asarray(registration.transformation, float) @ np.linalg.inv(correction_matrix(move, shift))
+    return replace(registration, transformation=t)
 
 
 def with_linear(registration, move: ChannelMove):

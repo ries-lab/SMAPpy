@@ -144,7 +144,7 @@ def test_rotation_and_scale_are_learnt_from_the_pairs_beside_the_shift(tmp_path)
     turned = cm.ChannelMove(np.zeros((1, 2)), None, {}, L, np.array([32.0, 48.0]))
     truth = _moved(cm.with_linear(cal, turned), 1.5, -1.0)
     movie, calibration = _movie(tmp_path, cal, truth, n=40, per_frame=6)
-    move, _ = DualSplineFit().measure_move(_settings(movie, calibration, move="measured", affine=True,
+    move, _ = DualSplineFit().measure_move(_settings(movie, calibration, move="measured", learn="affine",
                                                      blocks=4))
     got_rot, got_scale = cm.rotation_scale(move.linear)
     assert got_rot == pytest.approx(rot, abs=0.003) and got_scale == pytest.approx(scale, abs=0.003)
@@ -170,3 +170,25 @@ def test_a_move_that_cannot_be_measured_leaves_the_fit_to_go_on_and_says_why(tmp
 def test_a_constant_move_that_changes_between_blocks_says_so():
     move = cm.ChannelMove(np.array([[0.2, 1.0]]), None, {"how": "measured", "drift_px": 0.4})
     assert "changes by 0.40 px between the blocks: tick over time" in move.line()
+
+
+def test_the_table_records_the_registration_it_was_fitted_with_the_correction_composed(tmp_path):
+    """The beads' map with the move as one transformation, and the channel layout cut from it: what a file
+    of the fit says it was fitted with is what it was."""
+    from smappy.plugins.fit import DualSplineFit
+    cal = dual_calibration()
+    movie, calibration = _movie(tmp_path, cal, _moved(cal, 3.0, -2.5), n=12)
+    plugin = DualSplineFit()
+    locs = plugin.run(Context(), _settings(movie, calibration, move="typed", columns=3.0, rows=-2.5)).locs
+    used = locs.metadata["registration_used"]
+    np.testing.assert_allclose(used["transformation"], np.asarray(_moved(cal, 3.0, -2.5).transformation), atol=1e-9)
+    assert used["from"] == str(calibration) and used["channel_move"]["offsets_px"] == [[3.0, -2.5]]
+    # the layout the fit recorded is the moved one: channel 1's partner of a main position, where the truth has it
+    from smappy.channels import ChannelLayout
+    layout = ChannelLayout.from_dict(locs.metadata["channel_layout"])
+    truth = _moved(cal, 3.0, -2.5).layout()
+    p = np.array([[20.0, 15.0], [40.0, 18.0]])
+    np.testing.assert_allclose(layout.to_channel(1, p), truth.to_channel(1, p), atol=1e-6)
+    # unmoved: the beads' own
+    none = plugin.run(Context(), _settings(movie, calibration, move="none")).locs
+    np.testing.assert_allclose(none.metadata["registration_used"]["transformation"], np.asarray(cal.transformation))

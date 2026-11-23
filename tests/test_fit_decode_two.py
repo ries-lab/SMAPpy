@@ -142,6 +142,9 @@ def test_a_move_measured_is_spline_3d_2c_s_on_the_model_s_calibration_and_what_t
     assert asked == [(str(files["root"] / "beads_2ct.h5"), "measured")]
     moved = json.loads(h5py.File(out, "r").attrs["metadata"])["decode"]["moved_since_beads"]
     assert (moved["rows"], moved["columns"], moved["record"]["how"]) == (-1.25, 0.5, "measured")
+    from smappy.netfit.fit_two import moved_calibration
+    used = json.loads(h5py.File(out, "r").attrs["metadata"])["decode"]["transformation_used"]
+    np.testing.assert_allclose(used, np.asarray(moved_calibration(files["cal"], (0.5, -1.25)).transformation))
     assert "channel 2 moved -1.25 rows, +0.50 columns" in r.text
 
 

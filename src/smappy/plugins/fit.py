@@ -1859,9 +1859,11 @@ class ChannelMoveSettings:
     over_time: bool = param(False, label="over time",
                             help="a smooth curve over the frames instead of one move: for a splitter that "
                                  "drifts during the acquisition (the figure shows the drift either way)")
-    affine: bool = param(False, label="rotation and scale", beside=True,
-                         help="also learn a rotation, scale and shear of the beads' map from the pairs, constant "
-                              "over the movie: for a splitter turned since the beads")
+    # what the correction to the beads' map learns (Jonas, 2026-11-23): a shift, or an affine -- the shift with a
+    # rotation, scale and shear, constant over the movie; either way one correction composed with the map
+    learn: str = param("shift", label="learn", choices=(("shift", "shift"), ("affine", "affine")), beside=True,
+                       help="shift: how far the second channel moved; affine: also how it turned, scaled and "
+                            "sheared, learnt from the same pairs (for a splitter turned since the beads)")
     blocks: int = param(20, label="blocks", min=2, advanced=True,
                         help="blocks of frames spread over the movie the move is measured on")
     block_frames: int = param(50, label="frames a block", min=5, advanced=True, beside=True,
@@ -1871,7 +1873,7 @@ class ChannelMoveSettings:
 def move_shown(prefix: str, s: ChannelMoveSettings) -> Dict[str, bool]:
     """Which of the part's rows the form shows: the move typed or how it is measured."""
     return {f"{prefix}.rows": s.move == "typed", f"{prefix}.columns": s.move == "typed",
-            f"{prefix}.over_time": s.move == "measured", f"{prefix}.affine": s.move == "measured",
+            f"{prefix}.over_time": s.move == "measured", f"{prefix}.learn": s.move == "measured",
             f"{prefix}.blocks": s.move == "measured",
             f"{prefix}.block_frames": s.move == "measured"}
 
@@ -2309,7 +2311,8 @@ class _TwoChannelFit(_FitPlugin):
     """
 
     _loaded = None             # (path, registration) of the run in progress
-    _active_move = None        # the channel move the run or preview in progress fits with (`channel_move`)
+    _active_move = None        # the channel move's change over time the run in progress follows (`channel_move`)
+    _used = None               # the registration it fits with, the correction composed (`_with_move`)
     _moves: dict = {}          # measured moves by their key (`measure_move`), shared by the previews and runs
     two_channel = True
     channel_part = "two"
@@ -2420,7 +2423,7 @@ class _TwoChannelFit(_FitPlugin):
                   "blocks": len(starts), "block_frames": length}
         z_all = np.asarray(locs["z_nm"], float)[good][cm.usable(locs[good])] if "z_nm" in locs else None
         linear = centre = None
-        if m.affine:
+        if m.learn == "affine":
             # where each pair's partner lies, its shift regressed on that, z a term of its own
             pos = cm.partner_positions(locs[good], layout, sizes, camera.roi_offset)[cm.usable(locs[good])]
             linear, centre, _, k, se_l, _ = cm.fit_affine(pos, shift, perr, z_all)
@@ -2449,15 +2452,39 @@ class _TwoChannelFit(_FitPlugin):
         report(f"channel move: {move.line()}")
         return move, {"frame": frame, "shift": shift, "z_nm": z_all}
 
+    def registration_record(self, settings, move) -> dict:
+        """What the table keeps of the registration it was fitted with: the transformation used (the second
+        channel's chip pixels onto the main's, the correction composed), where it came from, and the move."""
+        used = self._used_last
+        reg = settings.model.registration
+        out = {"from": ("measured from this movie" if reg.calibrate
+                        else reg.path or getattr(settings.model, "calibration", "") or "")}
+        if used is not None:
+            out["transformation"] = np.asarray(used.transformation, float).tolist()
+        if move is not None:
+            out["channel_move"] = move.to_dict()
+            if move.over_time:
+                out["transformation_is"] = "at the move's mean; the channel move's curve about it frame by frame"
+        return out
+
+    _used_last = None
+
     def _with_move(self, settings, call, report=lambda text: None):
         """``call()`` with the channel move the part asks for in force; ``(result, move, data)``."""
+        from .. import channel_move as cm
         move, data = self.channel_move(settings, report)
-        self._active_move = move
         loaded = self._loaded
-        if move is not None and move.linear is not None and loaded is not None:
-            # the rotation and scale go into the registration, the shift stays the layer's drift
-            from ..channel_move import with_linear
-            self._loaded = (loaded[0], with_linear(loaded[1], move))
+        self._active_move, self._used = move, None
+        if move is not None and loaded is not None:
+            # the correction composed with the registration: the channel layout the fit cuts -- and records in
+            # its table -- is the one it used.  A move over time keeps its change about the mean as the layer's
+            # drift, frame by frame
+            used = cm.corrected(loaded[1], move)
+            self._loaded = (loaded[0], used)
+            self._used = used
+            self._active_move = (cm.ChannelMove(np.asarray(move.offsets, float) - move.mean, move.frames)
+                                 if move.over_time else None)
+        self._used_last = self._used if self._used is not None else (loaded[1] if loaded is not None else None)
         try:
             return call(), move, data
         finally:
@@ -2603,6 +2630,8 @@ class _TwoChannelFit(_FitPlugin):
             result.data["channel_move"] = move.to_dict()
             if result.locs is not None:
                 result.locs.metadata["channel_move"] = move.to_dict()
+        if result.locs is not None:
+            result.locs.metadata["registration_used"] = self.registration_record(settings, move)
             if data is not None:
                 from ..channel_move import draw
                 result.plots = {"channel move": draw(move, data), **result.plots}

@@ -200,7 +200,7 @@ typed move or none, and after a move pair nothing.
   So on these two an affine buys nothing a user would see; a z-dependent channel offset (the two channels'
   PSF models disagreeing with the beads' map off focus: beads on the coverslip, molecules in the sample)
   is the bigger term.  The analysis is `affine_check.py`'s, in the session's scratchpad.
-- **Rotation and scale, built** (Jonas: an option, off by default; `1d5bea9e`), and *measured* the default
+- **Rotation and scale, built** (Jonas: an option, off by default; `1d5bea9e`; since then *learn* > *shift* or *affine*, one correction composed with the registration into the transformation the fit uses, recorded in the table as `registration_used` and in DECODE's run record as `transformation_used`), and *measured* the default
   everywhere, a fit going on unmoved where the move cannot be measured.  Learning the registration
   with the register plugins instead: an unlinked fit's pairs as two rows each (`camera_channel` 0 and 1,
   their fitted chip positions) do go through *Calibrate transform* (`register_table`).  On a simulated

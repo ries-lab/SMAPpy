@@ -64,6 +64,10 @@ class TwoChannelPredictor:
         self.corner = tuple(round(v) for v in corner)
         # what the run's record says of the move (`fit_decode.provenance`)
         self.moved_record = {"rows": self.moved[1], "columns": self.moved[0], **self.move.to_dict()}
+        # the transformation the network reads its channels with, the correction composed (at the move's mean over
+        # time): what the run's record keeps, as the two-colour fitters' tables do (`registration_used`)
+        from ..channel_move import corrected
+        self.transformation_used = np.asarray(corrected(cal, self.move).transformation, float)
         self.em, self.goodness, self.bound = bool(em), bool(goodness), bool(bound)
         self.pixel_nm = tuple(float(v) for v in pixel_nm)
         self.kind = predictor.channels.kind

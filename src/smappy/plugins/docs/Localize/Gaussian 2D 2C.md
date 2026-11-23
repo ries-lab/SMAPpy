@@ -526,13 +526,17 @@ the fit goes on with the registration as it is and says so.  A constant
 move whose blocks differ by more than a quarter pixel is said to change:
 tick *over time*.  This is the two channels moving against each other; the
 sample's own drift is the same in both channels and plays no part.
-*rotation and scale* (off by default) also learns a rotation, scale and
-shear of the beads' map from the pairs, constant over the movie: each
-pair's shift regressed on where its partner lies on the chip, with z as a
-term of its own so that a z-dependent offset is not taken for a turn.  It
-goes into the registration; the shift stays the move.  On two of our movies
-it was measurable but moved no position more than 6 nm at the field's
-corners, so it is for a splitter turned since the beads.
+*learn* says what the correction to the beads' map learns: *shift* (the
+default), or *affine* -- the shift with a rotation, scale and shear,
+constant over the movie, from the same pairs: each pair's shift regressed
+on where its partner lies on the chip, with z as a term of its own so that
+a z-dependent offset is not taken for a turn.  Either way the correction is
+composed with the beads' map into the one transformation the fit uses, and
+the table records it (`registration_used` in its metadata: the
+transformation, where the map came from, and the move); over time, the
+transformation at the move's mean, and the curve about it.  On two of our
+movies an affine was measurable but moved no position more than 6 nm at the
+field's corners, so it is for a splitter turned since the beads.
 
 
 ### fit.roisize

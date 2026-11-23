@@ -335,9 +335,11 @@ With *over time*, the network reads each block of frames with the move at
 the block's middle frame.  The move used, and how it was found, is in the
 run's text and in its file.
 *measured* is the default; where the move cannot be measured, the fit goes
-on with the registration as it is and says so.  *rotation and scale* adds
-a rotation and scale of the map learnt from the same pairs (Spline 3D 2C's
-page says how); the network reads the turned map through its offset maps.
+on with the registration as it is and says so.  *learn* > *affine* adds
+a rotation, scale and shear of the map learnt from the same pairs (Spline
+3D 2C's page says how); the network reads the turned map through its
+offset maps.  The run's record keeps the transformation used
+(`transformation_used`), the correction composed with the map.
 
 ### two_channels.goodness
 
