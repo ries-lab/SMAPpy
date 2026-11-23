@@ -43,7 +43,7 @@ that architecture here: what the study compared it as.
     few hundred numbers), so the model is all the fitter needs.  Today the header has only the
     calibration's sha256, so this changes the model file;
   - ***moved since the beads*** (rows, columns): the splitter's move between the bead calibration and
-    the measurement, *auto* or typed.  Fig. 2a lost half its molecules without its 5.8 rows (plex-plan
+    the measurement, *auto* or typed (superseded by §4b, the channel move for every fitter).  Fig. 2a lost half its molecules without its 5.8 rows (plex-plan
     §16, real data).  *auto* measures it on the first frames: the move that makes the network's
     goodness of fit best over a few frames (each try a fraction of a second on a GPU), or the
     two channels' images cross-correlated through the map (colour; biplane's planes differ in focus).
@@ -148,6 +148,42 @@ that architecture here: what the study compared it as.
 6. **I5**: DECODE-Plex's published models, exported, as a baseline in the GUI.
 7. **T5** alongside each step, not after: each step's page, tests (a simulated two-channel movie
    trained a few epochs and fitted, as the one-channel tests do) and the slow tier.
+
+## 4b. The channel move, for every two-channel fitter (decided, Jonas 2026-11-23)
+
+The splitter's second channel moves on the chip between the bead calibration and a measurement (Fig.
+2a: 5.8 rows; M2's movie pairs only under the beads of the next day).  Today only *DECODE*'s
+two-channel models measure it, by the network's count over a scan of moves (`netfit.fit_two.measure_move`:
+about a minute, a trained network needed, a proxy); the prefit and Spline 3D 2C / Gaussian 2D 2C take a
+typed move or none, and after a move pair nothing.
+
+- **Measured with the model that made the registration, not a peak finder.**  A peak's maximum is not
+  the spline's centre; the difference depends on z and differs between the channels (two planes, two
+  dyes), so a vote of peak differences measures the move plus a smeared bias.  The move is measured by
+  Spline 3D 2C with *link x, y* off (each channel its own x and y, the rest as linked), for a spline
+  `_2ct.h5` and for *DECODE*'s two-channel models, trained on the same calibration; with a registration
+  from Gaussian bead fits, by Gaussian 2D 2C.  Each well-fitted pair gives dx, dy and their errors.
+- **Coarse first, only where needed**: when the unlinked fit pairs too few, the move is beyond the
+  pairing's reach; a vote of the two channels' peak differences through the map (a histogram within
+  +-10 pixels, its peak) gives the start, to a pixel.  Never the answer.
+- **Through the whole movie**: blocks spread over it (about 20 of 50 frames), the isolated well-fitted
+  pairs (the likelihood cut, the error below the median).  **Constant by default**: the error-weighted
+  robust mean.  **Over time on request**: a robust, error-weighted smoothing spline of dx(t), dy(t)
+  (`beads.fit_offsets_and_spline`, as *Fiducials* and *MBM* fit beads).  Always drawn: dx, dy against
+  time (the drift is seen even when a constant is used) and against z (a dependence means the
+  registration and the PSF models disagree).
+- **In the fitters, not a plugin of its own to start by hand**: one shared part, *channel move*, in
+  Spline 3D 2C, Gaussian 2D 2C, *DECODE* (two channels) and the training window's prefit -- *none*,
+  *typed* (rows, columns), *measured* (constant, or over time).  On *measured* a cached move is used, and
+  without one it is measured before the fit (1 -- 2 minutes), cached beside the movie (keyed by the movie
+  and the calibration's sha256) and said in the run's text.  The part shows the move found in a line and
+  a *Measure* button (`Plugin.part_runs` / a part window) that measures and draws the figure: the preview
+  before a long inference.  Batches and chains measure by the same setting.
+- **Applied through the registration**: a constant move as a translation of the map
+  (`fit_two.moved_calibration`), a move over time as the map per block of frames -- for *DECODE* the
+  offset maps per block, which a translation keeps within what the network was trained on.
+- **The network's count scan goes** (`measure_move`).  Spline 4Pi's channel drift (`multichannel.ChannelDrift`,
+  linear between blocks) moves onto the same machinery later, not now.
 
 ## 5. Decided (Jonas, 2026-11-22), and open
 
