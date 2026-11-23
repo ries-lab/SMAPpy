@@ -317,6 +317,9 @@ At 1000 photons the pattern is the same.
 - **The node splines match the pupil fit** -- in bias, z scaling and precision -- wherever the grid reaches
   the tolerance: within 1–2 nm in z up to fields 3–4 times ours, at about 100 times the pupil fit's speed (60–300×).  Only
   Zenodo's 177 µm field, where the 9 × 9 cap leaves 3.4 % blend error, leaves 8 nm rms and 49 nm at worst.
+  *(§12: that was not the grid.  The spots were drawn in a 13 px region, which folds the PSF's tails back in;
+  between the nodes 9 × 9 adds 1.7 nm rms to an exact spline, 13 × 13 0.7.  The other rows were drawn the same
+  way, and their sub-nanometre differences may carry some of it too.)*
 - **A correction afterwards works for mild fields.**  On M5's field it takes the z bias from 15 to 2 nm and
   the z scale from 0.95–1.05 to 1.00–1.01, from 40 beads, without a field model.  So a microscope like M5
   needs no field-dependent model for z accuracy.  Order 2 in u, v is what 40 beads support: order 4 ran off
@@ -368,3 +371,77 @@ Not measured here: noise passing through the correction, which is evaluated at a
 dz this costs only the curvature term ½ dz″ σ_z².  Also not measured: the learning's error (the bead correction needs no field model; node splines and the
 pupil fit inherit its errors), and lateral distortion (a lateral offset constant in z is a distortion, which
 neither the bead correction learns nor the bias above includes).
+
+## 12. Finer grids for large fields, in the same memory (November 2026)
+
+The task: give Zenodo-sized fields a finer node grid than 9 × 9 without more memory.  §11 had put the Zenodo
+z bias (7.9 nm rms, 49 nm max) down to the 9 × 9 cap's 3.4 % blend error.
+
+**What a node costs** (27 px bead box = 26 × 26 spline cells, ±1400 nm in 20 nm planes = 140 cells in z):
+24.2 MB of float32 coefficients, 0.09 s to draw the PSF and 0.08 s for the coefficients.  81 nodes take
+1.96 GB.  Before, the export also kept every PSF it tried in the grid search, about 1300 of them for Zenodo,
+and stacked the nodes into a second copy.  Its peak was 6.1 GB.
+
+**What the fitter reads.**  `CSpline::value` reads cell `ix + xstart + off_x`, with
+`off_x = floor((nx + 1 − box) / 2)`.  A spot within a pixel of the box's centre therefore reads the box plus
+one cell either side.  That is the fit's own rule: a fit box at least 2 px smaller than the spline
+(`plugins/fit.py`).  So each node keeps only the middle of its spline.  It is cut alike on both sides, so
+`off_x` drops by as much and the fitter centres it as before.  A spot inside it is fitted exactly as with the
+whole node (`test_a_spot_inside_the_cut_nodes_is_fitted_as_with_the_whole_nodes`).
+
+**The rule** (`field_splines.node_cells`).  All nodes together may hold `CELL_BUDGET` = 81 × 26² lateral
+cells, what 9 × 9 held at the default box.  A grid within it keeps whole nodes, as before.  11 × 11 keeps
+20 cells (fit box up to 18 px), 13 × 13 keeps 18 (up to 16 px).  A grid that would need fewer than
+`MIN_FIT_BOX` + 2 = 17 cells is not offered.  `GRIDS` now runs to 13.  The fitter refuses a larger fit box
+and names the grid (`test_the_fitter_refuses_a_fit_box_wider_than_the_cut_nodes`).  `depth_spline` cuts the
+nodes it redraws to the same cells.
+
+**float16.**  Fits of noise-free spots, at the field's centre and corner, at 1000 and 5000 photons, with the
+coefficients rounded to float16 moved by at most 0.06 nm in z and 0.06 nm in x, y (0.014 nm rms), against
+2.5–5 nm of bias left by other causes.  The coefficients' largest error is 0.04 % of the largest one.  So
+the calibration file keeps the nodes as float16 (`/field/coeff`), read back as float32, and a 13 × 13 file
+halves.  In memory they stay float32: half precision in the fitter's inner loop would cost speed, and the
+crop already keeps the budget.
+
+**The grid search** checks each cell at its centre only from 7 × 7 on, instead of 3 × 3 points.  Once
+cells are small the PSF changes quadratically across them, so a bilinear blend is worst at the centre.
+On Zenodo, 9 × 9 gave 3.36 % either way, in 7 s instead of 32.  The PSFs are no longer kept: the nodes are
+drawn again at the end.
+
+**The export at the GUI's sizes** (27 px box, 141 planes, Zenodo's field, 4 threads):
+
+| | grid | blend error | cells per node | nodes | time | peak memory |
+|---|---|---|---|---|---|---|
+| before | 9 × 9 | 3.36 % | 26 | 1.96 GB | 88 s | 6.1 GB |
+| now | 13 × 13 | 1.68 % | 18 | 1.96 GB | 107 s | 3.5 GB |
+
+13 × 13 does not reach the 0.5 % tolerance on Zenodo's field, so the export still warns.  Since the error
+scales with the spacing squared, about 25 × 25 would be needed.
+
+**The z bias was not the grid.**  §11's 7.9 nm rms on Zenodo was the same with 13 × 13 (7.8) and with a
+spline drawn exactly at each spot (7.8).  The cause was the truth images.  `sample_psf` drawn in a 13 px
+region differs from the same PSF drawn in 41 px and cut, by 17 % of the peak at the field's corner and 3.4 %
+at its centre.  Its sum is larger: the tails fold back in.  21 px and 27 px drawings agree with 41 px within
+0.01 %.  The study now draws in the splines' 21 px box and cuts (`draw`).
+
+With spots drawn that way, the exact spline has no bias at all (0.0 nm, also with 10 nm planes).  The study's
+pupil fit still draws its model in 13 px.  So it now carries the folding instead (10 nm rms, 2.9 nm in x, y),
+and is no longer the reference.  How far the folding reaches into uipsf's own fits and in situ learning is
+left to a uipsf task.
+
+**Between the nodes.**  The 7 × 7 places of §11's bias grid lie on every 13 × 13 node and on a third of
+the 9 × 9 ones.  So the grid is measured instead at 40 random places × 21 z (±500 nm), noise-free at 5000
+photons, against a spline drawn exactly there:
+
+| | z rms | z max | centre (r < 0.5) rms | beyond the beads' square (r > 1) rms |
+|---|---|---|---|---|
+| exact spline at each place | 0.0 | 0.0 | 0.0 | 0.0 |
+| 9 × 9 nodes | 1.7 | 9.8 | 0.5 | 2.8 |
+| 13 × 13 nodes | 0.7 | 3.8 | 0.2 | 1.0 |
+
+(nm; r is the distance from the centre over the half-span.)  Halving the blend error cut the grid's bias by
+2.4 in rms and 2.6 at worst, about the (8/12)² = 0.44 the spacing predicts.  The study's own table,
+re-drawn (`field_correction_study.py --field zenodo`, and `--largest-grid 9`), gives node splines 9.1 / 292
+(13 × 13) and 9.2 / 292 (9 × 9).  Those numbers are dominated by a few spots at the corners and the ends of
+the z range that converge elsewhere (0.8 % lost, the pupil fit's too).  Its x, y wobble drops from 1.1 to
+0.1 nm rms.  Bicubic blending of 16 nodes is not needed.

@@ -402,7 +402,8 @@ four splines around its place on the chip, blended in proportion to how near
 each is (bilinearly).  A spline is linear in its coefficients, so the blend is
 exactly the spline of the blended PSFs.  A spot outside the grid takes its
 edge's splines.  With four splines a fit takes about 1.7 times as long as
-with one.  A *focus* in the sample draws every spline of the grid at that
+with one.  A grid finer than 9 × 9 keeps only the middle of each spline, which
+limits the fit box: the fit says so when it is too large.  A *focus* in the sample draws every spline of the grid at that
 depth.  The study behind it, with the bias it removes,
 is in the repository's `docs/uipsf/field-dependence.md`.
 

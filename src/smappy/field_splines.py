@@ -6,7 +6,8 @@ with the bilinear blend of the four nodes around it.  A spline is linear in its 
 coefficients is exactly the spline of the blended PSFs -- the fitter blends them per voxel
 (`csrc/models.hpp`, `CSplineField`).  On simulated fields a 5 × 5 to 7 × 7 grid reached the exact spline's
 bias where one spline for the field was 40 nm off in z at the corners, and M5's present fields need 3 × 3
-(`docs/uipsf/field-dependence.md`, §5 and §7).
+(`docs/uipsf/field-dependence.md`, §5 and §7).  Grids finer than 9 × 9 (to 13 × 13, for fields like Zenodo's
+177 µm) keep only the middle of each node's spline, so they take no more memory (`node_cells`, §12).
 
 The grid is chosen from the learnt model (`grid_size`): the smallest whose blend is within a tolerance of
 the model between the nodes, so a model with little field dependence costs one spline, as before.
@@ -113,17 +114,55 @@ def blend_error(psf_at, lo_xy, hi_xy, n: int, points: int = 3) -> float:
 #: the largest blend error, relative to the PSF's peak, a grid may leave; 0.5 % is about where M5's
 #: linear astigmatism needed 3 × 3 rather than 2 × 2 (excess χ² 0.007 against 0.11 at 5000 photons)
 TOLERANCE = 0.005
-GRIDS = (1, 2, 3, 5, 7, 9)
+GRIDS = (1, 2, 3, 5, 7, 9, 11, 13)
+
+#: the lateral spline cells all nodes together may hold: 9 × 9 nodes of the default 27 px bead box
+#: (26 × 26 cells), about 2 GB at 141 planes -- what a field cost before larger grids were allowed.  A grid
+#: beyond it keeps each node's cells only around the centre (`node_cells`), since the fitter reads no more
+#: than its fit box plus a pixel either side (`plugins.fit`'s check, `csrc/models.hpp` `CSpline::value`)
+CELL_BUDGET = 81 * 26 * 26
+#: the fit box every grid leaves room for: a grid whose nodes would be cut narrower is not offered
+MIN_FIT_BOX = 15
 
 
-def choose_grid(psf_at, lo_xy, hi_xy, tolerance: float = TOLERANCE) -> tuple:
-    """(n, its blend error): the smallest grid of `GRIDS` whose blend stays within ``tolerance`` of the model
-    over the field, or the largest with its error above it -- which `limit_warning` then says."""
-    for n in GRIDS:
-        error = blend_error(psf_at, lo_xy, hi_xy, n)
+def node_cells(n: int, cells: int) -> int | None:
+    """The lateral cells each node of an n × n grid keeps of a spline ``cells`` across: all of them while
+    the grid fits `CELL_BUDGET`, else the largest central square that does -- cut by as many cells on
+    each side, so the fitter centres it as the whole (its offset is (nx + 1 − box) / 2) -- or None when
+    a cut would leave less than `MIN_FIT_BOX` + 2."""
+    keep = min(cells, int(np.sqrt(CELL_BUDGET) / n))
+    if keep == cells:
+        return cells                    # within the budget whole, however small the box
+    keep -= (cells - keep) % 2
+    return keep if keep >= MIN_FIT_BOX + 2 else None
+
+
+def crop(coeff: np.ndarray, cells: int) -> np.ndarray:
+    """``coeff`` (..., ny, nx) cut to its central ``cells`` × ``cells``: the same spline there, cell for
+    cell, so the fit of a spot inside it is unchanged."""
+    ny, nx = coeff.shape[-2:]
+    if (ny - cells) % 2 or (nx - cells) % 2 or cells > min(ny, nx):
+        raise ValueError(f"a {ny} × {nx} spline cannot be cut evenly to {cells} cells")
+    a, b = (ny - cells) // 2, (nx - cells) // 2
+    return np.ascontiguousarray(coeff[..., a:a + cells, b:b + cells])
+
+
+def grids(cells: int | None = None) -> tuple:
+    """The grids of `GRIDS` a spline ``cells`` across may have (`node_cells`); all without ``cells``."""
+    return tuple(n for n in GRIDS if cells is None or node_cells(n, cells) is not None)
+
+
+def choose_grid(psf_at, lo_xy, hi_xy, tolerance: float = TOLERANCE, cells: int | None = None) -> tuple:
+    """(n, its blend error): the smallest grid of `grids` (``cells``, the spline's lateral cells) whose
+    blend stays within ``tolerance`` of the model over the field, or the largest with its error above
+    it -- which `limit_warning` then says.  From 7 × 7 on the cells are checked at their centres only:
+    there they are locally quadratic, so the centre is where a bilinear blend is worst, and 3 × 3 points
+    a cell would make 13 × 13 cost 1300 PSFs."""
+    for n in grids(cells):
+        error = blend_error(psf_at, lo_xy, hi_xy, n, points=3 if n < 7 else 1)
         if error <= tolerance:
             return n, error
-    return GRIDS[-1], error
+    return n, error
 
 
 def grid_size(psf_at, lo_xy, hi_xy, tolerance: float = TOLERANCE) -> int:
@@ -131,14 +170,36 @@ def grid_size(psf_at, lo_xy, hi_xy, tolerance: float = TOLERANCE) -> int:
     return choose_grid(psf_at, lo_xy, hi_xy, tolerance)[0]
 
 
-def limit_warning(n: int, error: float, tolerance: float = TOLERANCE) -> str | None:
-    """What to say when the largest grid still misses the model by more than ``tolerance``; None otherwise.
+def node_splines(psf_at, lo_xy, hi_xy, tolerance: float = TOLERANCE) -> FieldSplines | None:
+    """The node splines of the field ``psf_at(x, y)`` (a PSF stack, normalised alike everywhere) over
+    [lo, hi]: `choose_grid`'s grid, each node cut by `node_cells`; None when one spline is enough.  The
+    PSFs are drawn again for the nodes rather than kept from the search, which would hold every one it
+    tried (3 GB for 13 × 13)."""
+    from .calibrate.core import spline_coefficients
+    cells = psf_at(*((np.asarray(lo_xy, float) + np.asarray(hi_xy, float)) / 2)).shape[-1] - 1
+    n, error = choose_grid(psf_at, lo_xy, hi_xy, tolerance, cells)
+    if n == 1:
+        return None
+    keep = node_cells(n, cells)
+    xs, ys = grid_nodes(lo_xy[0], hi_xy[0], n), grid_nodes(lo_xy[1], hi_xy[1], n)
+    coeff = None
+    for k, (x, y) in enumerate((x, y) for y in ys for x in xs):
+        c = crop(spline_coefficients(np.asarray(psf_at(x, y), np.float32)), keep)
+        if coeff is None:
+            coeff = np.empty((n * n,) + c.shape, np.float32)    # filled in place: no second copy
+        coeff[k] = c
+    return FieldSplines(coeff, xs, ys, blend_error=error)
 
-    The cap is memory (81 splines of a 27 px box at 20 nm planes are about 2 GB) and the time to make them.
-    Over Zenodo's 177 µm field (about 1.4 rad of astigmatism across it) 9 × 9 left 2.7 % of the peak, yet
-    a spline drawn exactly at each bead fitted no better than the blend (`docs/uipsf/field-dependence.md`,
-    §9): the warning says the grid is coarse for the field, not that the fit is wrong."""
-    if n < GRIDS[-1] or error <= tolerance:
+
+def limit_warning(n: int, error: float, tolerance: float = TOLERANCE, largest: int | None = None) -> str | None:
+    """What to say when the largest grid (``largest``, else `GRIDS`' last) still misses the model by more
+    than ``tolerance``; None otherwise.
+
+    The cap is memory (`CELL_BUDGET`) and the time to make the nodes.  Over Zenodo's 177 µm field (about
+    1.4 rad of astigmatism across it) 9 × 9 left 3.4 % of the peak and 13 × 13 leaves 1.7 %, which adds
+    0.7 nm rms of z bias between the nodes (`docs/uipsf/field-dependence.md`, §9 and §12): the warning says the grid is coarse for the field, not
+    that the fit is wrong."""
+    if n < (GRIDS[-1] if largest is None else largest) or error <= tolerance:
         return None
     return (f"the field changes the PSF faster than a {n} × {n} grid of splines follows: between the nodes the "
             f"blended PSF differs from the model by up to {100 * error:.1f} % of its peak (tolerance "

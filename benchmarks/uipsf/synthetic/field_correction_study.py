@@ -12,7 +12,7 @@ exactly to every method: what is compared is how each represents and uses it, no
 Methods:
 - **pupil**: maximum likelihood with each spot's own pupil at its own position (uipsf's `localise` on the
   single-frame model): the baseline, about 10² fits/s on a CPU.
-- **node splines**: what SMAPpy does (`field_splines.choose_grid`, Spline 3D blending four nodes per spot).
+- **node splines**: what SMAPpy does (`field_splines.node_splines`, Spline 3D blending four nodes per spot).
 - **central**, **average**: one spline for the field -- the model at the field's centre, or the mean of a
   9 × 9 grid's PSFs (roughly what a calibration learnt without field dependence holds).
 - **central + bead correction**: the central spline, and dx, dy, dz as smooth functions of the *fitted*
@@ -42,7 +42,7 @@ import numpy as np
 import torch
 from field_interpolation import OPTICS
 from smappy.calibrate.core import spline_coefficients
-from smappy.field_splines import FieldSplines, choose_grid, grid_nodes
+from smappy.field_splines import grid_nodes, node_splines
 from smappy.io.calibration import SplineCalibration
 from smappy.psf import SplinePSF
 
@@ -136,13 +136,21 @@ def chip(t: Truth, u, v):
 
 
 def draw(model, shared, xyz_nm, field_xy, roi=ROI) -> np.ndarray:
-    """[N, roi, roi] photons per photon, every spot at its own chip position (one model call per position)."""
+    """[N, roi, roi] photons per photon, every spot at its own chip position (one model call per position).
+
+    Drawn in the splines' `BOX` and cut to ``roi``: `sample_psf` drawn in a 13 px region folds the PSF's tails
+    back into it -- over Zenodo's field up to 17 % of the peak against a 41 px drawing, where 21 px is within
+    0.01 % -- and §11's table, drawn so, measured that mismatch as 8 nm of the node splines' z bias
+    (docs/uipsf/field-dependence.md §12).  The pupil fit still draws its model in the spots' region."""
     xyz_nm, field_xy = np.atleast_2d(xyz_nm), np.atleast_2d(field_xy)
     keys, inverse = np.unique(np.round(field_xy, 4), axis=0, return_inverse=True)
+    size = max(roi, BOX)
+    c = (size - roi) // 2
     out = np.empty((len(xyz_nm), roi, roi))
     for k, where in enumerate(keys):
         s = inverse.reshape(-1) == k
-        out[s] = sample_psf(model, shared, xyz_nm[s], roi, field_xy=tuple(where)).double().numpy()
+        out[s] = sample_psf(model, shared, xyz_nm[s], size, field_xy=tuple(where)).double().numpy()[
+            :, c:c + roi, c:c + roi]
     return out
 
 
@@ -173,13 +181,14 @@ def splines(t: Truth) -> dict:
             cache[key] = stack_at(model, shared, key) / norm
         return cache[key]
 
+    def fresh(x, y):                 # as the export draws them: nothing kept
+        return stack_at(model, shared, (float(x), float(y))) / norm
+
     lo, hi = np.array(chip(t, -U, -U)), np.array(chip(t, U, U))
     t0 = time.perf_counter()
-    n, error = choose_grid(psf_at, lo, hi)
-    xs, ys = grid_nodes(lo[0], hi[0], n), grid_nodes(lo[1], hi[1], n)
-    nodes = FieldSplines(np.stack([spline_coefficients(psf_at(x, y).astype(np.float32)) for y in ys for x in xs]),
-                         xs, ys, blend_error=error)
+    nodes = node_splines(fresh, lo, hi)
     export_s = time.perf_counter() - t0
+    n, error = (1, 0.0) if nodes is None else (nodes.shape[0], nodes.blend_error)
     g = grid_nodes(-U, U, 9)
     average = np.mean([psf_at(*chip(t, a, b)) for a in g for b in g], 0)
 
@@ -187,7 +196,10 @@ def splines(t: Truth) -> dict:
         return SplinePSF(SplineCalibration(spline_coefficients(psf.astype(np.float32)), DZ, z0, x0=(BOX - 1) / 2,
                                            field_splines=field))
     return {"central": cal(central / norm), "average": cal(average),
-            "node splines": cal(central / norm, nodes)}, dict(grid=n, blend_error=error, export_s=export_s)
+            "node splines": cal(central / norm, nodes)}, dict(
+        grid=n, blend_error=error, export_s=export_s,
+        node_cells=None if nodes is None else int(nodes.coeff.shape[-1]),
+        node_gb=0.0 if nodes is None else nodes.coeff.nbytes / 1e9)
 
 
 def spline_fit(fitter: SplinePSF, rois, field_xy, pixel) -> np.ndarray:
@@ -197,7 +209,7 @@ def spline_fit(fitter: SplinePSF, rois, field_xy, pixel) -> np.ndarray:
     return np.c_[(out["x_roi"] - c) * pixel, (out["y_roi"] - c) * pixel, out["z_nm"]]
 
 
-def pupil_fit(model, shared, rois, field_xy, start, chunk: int = 2000) -> np.ndarray:
+def pupil_fit(model, shared, rois, field_xy, start, chunk: int = 500) -> np.ndarray:
     """[N, 3] nm, maximum likelihood with each spot's own pupil; started from ``start`` (a spline's fit)."""
     single = _single_frames(model)
     shapes = {s.name for s in single.specs(_frames(rois[:1], field_xy[:1])) if s.scope == "shared"}
@@ -316,7 +328,8 @@ def run(args) -> list[dict]:
     model, shared, pixel, U = tr.model, tr.shared, tr.pixel_nm, tr.extent
     fitters, info = splines(tr)
     print(f"{args.field} field x{args.scale:g}, {args.photons:g} photons: node grid {info['grid']}x{info['grid']} "
-          f"(blend error {100 * info['blend_error']:.2f} % of the peak), export {info['export_s']:.0f} s", flush=True)
+          f"(blend error {100 * info['blend_error']:.2f} % of the peak, {info['node_cells']} cells, "
+          f"{info['node_gb']:.2f} GB), export {info['export_s']:.0f} s", flush=True)
     rng = np.random.default_rng(args.seed)
 
     # the corrections: beads over the field, a stack each, fitted with the central spline
@@ -394,7 +407,8 @@ def run(args) -> list[dict]:
             rows.append(dict(kind="precision", method=name, u=pu / U, v=pv / U, lost=float(1 - good.mean()),
                              sd_x=float(np.nanmean(sd[:, 0])), sd_y=float(np.nanmean(sd[:, 1])),
                              sd_z=float(np.nanmean(sd[:, 2])), bias_z_rms=float(np.sqrt(np.nanmean(med[:, 2] ** 2)))))
-    common = dict(field=args.field, scale=args.scale, photons=args.photons, beads=args.beads, extent=U, **info)
+    common = dict(field=args.field, scale=args.scale, photons=args.photons, beads=args.beads, extent=U,
+                  largest_grid=args.largest_grid, **info)
     return [{**common, **r} for r in rows]
 
 
@@ -425,9 +439,14 @@ def main():
     ap.add_argument("--repeats", type=int, default=500)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--largest-grid", type=int, default=None,
+                    help="the largest node grid offered, e.g. 9 for the cap before 11 x 11 and 13 x 13")
     ap.add_argument("--out", default="benchmarks/uipsf/results/field_correction.jsonl")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
+    if args.largest_grid is not None:
+        import smappy.field_splines as fs
+        fs.GRIDS = tuple(n for n in fs.GRIDS if n <= args.largest_grid)
     rows = run(args)
     report(rows)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)

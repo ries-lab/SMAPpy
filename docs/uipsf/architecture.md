@@ -2989,7 +2989,9 @@ The study and the choices: `docs/uipsf/field-dependence.md`.  What is built:
 - **SMAPpy's splines**: `calibrate.pupil.field_splines` samples the model on the smallest grid of
   `field_splines.GRIDS` over the used beads' span whose bilinear blend stays within 0.5 % of the PSF's peak
   (`field_splines.grid_size`), every node normalised by the centre's scale; one node means no field
-  splines.  The calibration file keeps them in an optional ``/field`` group; ``coeff`` is the centre's.
+  splines.  Grids beyond 9 × 9 (to 13 × 13) keep only each node's middle, within the memory 9 × 9 took
+  (`field_splines.node_cells`, field-dependence §12).  The calibration file keeps them in an optional
+  ``/field`` group, as float16; ``coeff`` is the centre's.
   `depth.depth_spline` redraws every node at a focus in the sample.
 - **The fitter**, `fit_cspline_field` (`csrc/models.hpp`, `CSplineField`): per ROI its four nodes and
   bilinear weights, the coefficients blended before the tricubic evaluation; `SplinePSF.fit(…, chip_xy=)`

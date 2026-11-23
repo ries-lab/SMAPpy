@@ -1004,11 +1004,13 @@ it for a field of view of more than about 50 µm, or when beads at the edges
 fit worse than in the middle.  After the run the summary says whether the
 field is real -- a test of its coefficients against none, in nats beside its
 threshold -- and the largest change of each mode across the beads; when it is
-not significant, calibrate without it.  The grid has at most 9 × 9 splines; when the
+not significant, calibrate without it.  The grid has at most 13 × 13 splines.  Beyond
+9 × 9 each spline keeps only the middle of the bead box, so that the grid
+takes no more memory than 9 × 9 did (about 2 GB): with the default 27 px box
+a fit box of at most 18 px at 11 × 11 and 16 px at 13 × 13.  When the
 field changes faster than that follows (the blend more than 0.5 % of the
 PSF's peak from the model between the nodes) the summary says so: spots far
-from the centre may then be fitted slightly less well.  Over a 177 µm field
-that still cost nothing measurable.  On M5's fields of about 25 µm the
+from the centre may then be fitted slightly less well.  On M5's fields of about 25 µm the
 astigmatism changed by 0.09 rad from the centre to the edge, and a spline
 for the whole field put spots there 4–13 nm off in z
 ([the study](https://github.com/ries-lab/SMAPpy/blob/main/docs/uipsf/field-dependence.md)).

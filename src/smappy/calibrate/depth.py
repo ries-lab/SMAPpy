@@ -222,10 +222,14 @@ def depth_spline(cal, focus_nm: float, n_med: Optional[float] = None, learned=No
     field = getattr(cal, "field_splines", None)
     if field is not None:
         # the same nodes, drawn at this depth and normalised by the centre's scale, so the blend stays one
-        from ..field_splines import FieldSplines
-        nodes = [np.maximum(draw(model, shared, focus_nm, heights, roi, field_xy=(float(x), float(y))), 0) / scale
+        # each cut to the cells the nodes kept (`field_splines.node_cells`)
+        from ..field_splines import FieldSplines, crop
+        cells = field.coeff.shape[-1]
+        nodes = [crop(spline_coefficients((np.maximum(draw(model, shared, focus_nm, heights, roi,
+                                                           field_xy=(float(x), float(y))), 0) / scale)
+                                          .astype(np.float32)), cells)
                  for y in field.ys for x in field.xs]
-        field = FieldSplines(np.stack([spline_coefficients(n.astype(np.float32)) for n in nodes]), field.xs, field.ys)
+        field = FieldSplines(np.stack(nodes), field.xs, field.ys)
     parameters = dict(cal.parameters or {})
     parameters.update({
         "sample_depth": {"focus_nm": float(focus_nm), "n_med": resolved_medium(learned, n_med),

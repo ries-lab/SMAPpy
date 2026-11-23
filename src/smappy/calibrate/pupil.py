@@ -571,8 +571,8 @@ def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int =
         # reader that ignores the field fits with
         parameters["field_grid"] = list(field.shape)
         parameters["field_blend_error"] = float(field.blend_error)
-        from ..field_splines import limit_warning
-        warning = limit_warning(field.shape[0], field.blend_error)
+        from ..field_splines import grids, limit_warning
+        warning = limit_warning(field.shape[0], field.blend_error, largest=grids(roi_size - 1)[-1])
         if warning is not None:
             # kept with the calibration, so the window's summary and a later reader see it too
             parameters["field_warning"] = warning
@@ -602,29 +602,20 @@ def field_extent(learned):
 
 
 def field_splines(learned, dz_nm: float, z_range_nm: float, roi_size: int, upsample, scale: float):
-    """The node splines of a field-dependent model (`smappy.field_splines`), on the smallest grid over the
-    beads' span whose blend keeps to `field_splines.TOLERANCE`, every node normalised by the centre's
-    ``scale`` so that the blend is one; None without a field, or when one spline is enough."""
-    from ..field_splines import FieldSplines, choose_grid, grid_nodes
-    from .core import spline_coefficients
+    """The node splines of a field-dependent model (`smappy.field_splines.node_splines`), on the smallest
+    grid over the beads' span whose blend keeps to `field_splines.TOLERANCE`, every node normalised by the
+    centre's ``scale`` so that the blend is one; None without a field, or when one spline is enough."""
+    from ..field_splines import node_splines
     extent = field_extent(learned)
     if extent is None:
         return None
-    lo, hi = extent
-    cache = {}
 
     def psf_at(x, y):
-        key = (round(float(x), 3), round(float(y), 3))
-        if key not in cache:
-            cache[key] = np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample, field_xy=key), 0) / scale
-        return cache[key]
+        # not cached: the grid search draws each PSF once, and keeping them held 3 GB for 13 × 13
+        return np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample,
+                                 field_xy=(float(x), float(y))), 0) / scale
 
-    n, error = choose_grid(psf_at, lo, hi)
-    if n == 1:
-        return None
-    xs, ys = grid_nodes(lo[0], hi[0], n), grid_nodes(lo[1], hi[1], n)
-    coeff = np.stack([spline_coefficients(psf_at(x, y).astype(np.float32)) for y in ys for x in xs])
-    return FieldSplines(coeff, xs, ys, blend_error=error)
+    return node_splines(psf_at, *extent)
 
 
 def _transform(learned) -> np.ndarray:

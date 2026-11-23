@@ -508,6 +508,17 @@ class SplineModelSettings:
             # starts up to a pixel off centre reaches one further: any larger
             # and the model silently repeats its edge
             lateral = min(calibration.shape[1:])
+            field = getattr(calibration, "field_splines", None)
+            if field is not None and min(field.coeff.shape[-2:]) < lateral:
+                # a grid finer than 9 × 9 keeps only the middle of each node's spline
+                # (`field_splines.node_cells`): a larger bead box would not help
+                lateral = min(field.coeff.shape[-2:])
+                if roisize > lateral - 2:
+                    raise ValueError(
+                        f"the fit box ({roisize} px) must be at least 2 px smaller than "
+                        f"the calibration's field splines ({lateral} px across: a "
+                        f"{field.shape[0]} × {field.shape[1]} grid keeps only their middle): "
+                        f"make the fit box {lateral - 2} px or smaller")
             if roisize > lateral - 2:
                 raise ValueError(
                     f"the fit box ({roisize} px) must be at least 2 px smaller than "

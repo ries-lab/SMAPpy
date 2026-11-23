@@ -436,7 +436,14 @@ def save_spline_calibration(path, cal, diagnostics=None, overwrite=False):
                 # optional, so the version stays: a reader that does not know it fits with ``coeff``,
                 # the grid's centre, as with any calibration of one spline
                 g = f.create_group('field')
-                g.create_dataset('coeff', data=fs.coeff, compression='gzip')
+                # half precision on disk, read back as float32: fits move by at most 0.06 nm in z and xy
+                # (noise-free spots over Zenodo's field, docs/uipsf/field-dependence.md §12), and a 13 × 13
+                # grid's file halves.  Only for coefficients of a normalised PSF, whose largest is ~0.01-1:
+                # far from float16's range at either end
+                big = float(np.abs(fs.coeff).max()) if fs.coeff.size else 0.0
+                half = 1e-3 < big < 1e3
+                g.create_dataset('coeff', data=fs.coeff.astype(np.float16) if half else fs.coeff,
+                                 compression='gzip')
                 g.create_dataset('xs', data=fs.xs)
                 g.create_dataset('ys', data=fs.ys)
             g = f.create_group('diagnostics')
