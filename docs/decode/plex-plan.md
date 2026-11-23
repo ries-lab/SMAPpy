@@ -1613,3 +1613,18 @@ limits), density HD (1 per µm², 24 in 40 x 40).  What each cost:
   uneven backgrounds are worth a quarter of the error.  Its z offset to DECODE-Plex is 45 nm, P's 26
   (one seed).  Left for the user: the density -- *Try on my data* says when a model finds more than it
   was trained at (`15d7478a`).
+
+**A wider z range is not free in focus** (2026-11-23; Jonas: a model may serve samples focused
+elsewhere, so a wider range if it costs nothing in focus).  The suite's biplane model with uneven
+backgrounds (`B_biplane_early_uneven`, z +-1 000 nm, three seeds) against the same at +-1 500 and +-1 900
+(`Z_biplane_wide*`, one seed each; the calibration reaches +-1 940), the standard report at |z| < 500 nm:
+
+| z trained | J 10k | J 1k | J d15 | out d15 % | out on3 % | d15 lat / ax | 1k lat / ax | pix 1k |
+|---|---|---|---|---|---|---|---|---|
+| +-1 000 (3 seeds) | 0.830 | 0.550 | 0.822 (0.000) | 1.8 (0.0) | 4.0 | 1.15 / 1.20 | 1.21 / 1.42 | 0.017 |
+| +-1 500 | 0.807 | 0.555 | 0.796 | 2.7 | 5.5 | 1.20 / 1.28 | 1.25 / 1.47 | 0.035 |
+| +-1 900 | 0.811 | 0.525 | 0.793 | 2.7 | 6.7 | 1.22 / 1.31 | 1.33 / 1.52 | 0.041 |
+
+Half as much range again costs 0.026 in Jaccard on the density set (the seeds agree to 0.001), half as
+many outliers again and twice the pixelation.  So the prefit's range stays fitted to the data, at least
++-500 nm (`a6238a91`), and a model for other samples is a wider range typed, at that cost.
