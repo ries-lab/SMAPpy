@@ -159,7 +159,7 @@ def _named(run_yaml: Path, *keys) -> str:
     """The file name a DECODE run's settings give under ``keys`` (the training machine's path, its name kept)."""
     import yaml
     try:
-        v = yaml.safe_load(run_yaml.read_text()) or {}
+        v = yaml.safe_load(run_yaml.read_text(encoding="utf-8")) or {}
         for k in keys:
             v = v.get(k) or {}
         return Path(str(v)).name if v else ""
