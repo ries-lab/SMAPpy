@@ -18,14 +18,19 @@ molecule's appearance) and the localizations themselves.
   less.  So the intensity is the photons of the *fully-on* frames -- the middle frames of blinks
   seen in 3 frames or more -- of the fits whose likelihood is near the bulk (`fully_on`): their
   mean and standard deviation, without the fits 3 robust standard deviations above the median in
-  log photons -- overlaps, which set the spread alone in a crowded movie (`intensity_fully_on`).  SMAP took the blinks' mean photons over ``lifetime_avg``, as
+  log photons -- overlaps, which set the spread alone in a crowded movie (`intensity_fully_on`).
+  SMAPpy's own network draws the photons uniformly instead, over a **range**: half the fully-on
+  fits' 1st percentile to 1.5 times their 99th (`photon_range`) -- a normal draw about the median
+  almost never trains the brightest molecules a crowded movie holds (plex-plan §16).  SMAP took the blinks' mean photons over ``lifetime_avg``, as
   (1, 0.2) times that, which the poor fits' photons pulled to twice the example package's own
   value (docs/decode/poc-plan.md §8, "(e) as done"); with too few fully-on frames, it falls back
   to that (`intensity`).
 * **Background**: the localizations' 1st to 98th percentile, widened by 30 % of that range on
   each side, its lower end at least 0.9 times the 0.05th percentile.
-* **z**: the blinks' 1st to 99th percentile, widened by 20 % on each side and clamped to the
-  calibration's range; +-750 nm without z.
+* **z**: the 2nd to 98th percentile of the localizations whose fits pass the likelihood cut of
+  the fully-on frames, widened by 15 % of that range on each side and clamped to the calibration's
+  range; +-750 nm without z.  Not SMAP's blinks' 1st to 99th widened by 20 %, which on a live cell
+  reached the calibration's limits (`z_range`).
 * **Camera**: the file's, with SMAP's read noise of 74.4 e- with EM gain and 1.5 e- without
   where the camera does not give its own, quantum efficiency 1 (photons here are detected
   photons), spurious charge 0.0015 with EM gain, 0 without (plan §6, item 8).
@@ -55,7 +60,9 @@ PHOTON_MADS = 3.0                               # a fully-on fit this far above 
 Z_EDGE = 0.9                                   # a fit this close to the calibration's z limit is left out
 SHORT_ON_TIME, BRIGHTER = 0.8, 1.3              # below this on-time, 1.3 times brighter
 BG_QUANTILES, BG_WIDEN, BG_FLOOR_Q, BG_FLOOR = (0.01, 0.98), 0.3, 0.0005, 0.9
-Z_QUANTILES, Z_WIDEN = (0.01, 0.99), 0.2
+Z_QUANTILES, Z_WIDEN = (0.02, 0.98), 0.15
+PHOTON_QUANTILES, PHOTON_WIDEN = (0.01, 0.99), (0.5, 1.5)   # the uniform draw: half the 1st, 1.5 times the 99th
+PHOTON_RANGE_BLINKS = (0.2, 5.0)                            # times the mean, without fully-on frames to measure it on
 
 
 def _quantile(v, q):
@@ -76,6 +83,7 @@ class Estimates:
     emitters_per_frame: float       # measured, in a 40 x 40 frame: shown, not used
     n_blinks: int
     n_localizations: int
+    photons_range: tuple | None = None  # photons a frame while on, drawn uniformly (SMAPpy's network)
 
 
 def on_time(n_in_group) -> float:
@@ -136,9 +144,7 @@ def fully_on(group_id, frame, n_in_group, logl_rel=None, z_nm=None, z_limit_nm=N
     keep[order] = ~first & ~last
     keep &= np.asarray(n_in_group) >= FULLY_ON_MIN_FRAMES
     if logl_rel is not None:
-        ll = np.asarray(logl_rel, np.float64)
-        med = np.median(ll)
-        keep &= ll >= med - logl_mads * 1.4826 * np.median(np.abs(ll - med))
+        keep &= logl_kept(logl_rel, logl_mads)
     if z_nm is not None and z_limit_nm is not None:
         lo, hi = bounds(z_limit_nm)
         centre, half = (lo + hi) / 2, (hi - lo) / 2
@@ -146,6 +152,13 @@ def fully_on(group_id, frame, n_in_group, logl_rel=None, z_nm=None, z_limit_nm=N
     if iterations is not None and max_iterations is not None:
         keep &= np.asarray(iterations) < max_iterations
     return keep
+
+
+def logl_kept(logl_rel, logl_mads: float = LOGL_MADS) -> np.ndarray:
+    """The fits whose ``logl_rel`` is at most ``logl_mads`` robust standard deviations below its median."""
+    ll = np.asarray(logl_rel, np.float64)
+    med = np.median(ll)
+    return ll >= med - logl_mads * 1.4826 * np.median(np.abs(ll - med))
 
 
 def intensity_fully_on(photons, mask, mads: float = PHOTON_MADS) -> tuple:
@@ -164,6 +177,22 @@ def intensity_fully_on(photons, mask, mads: float = PHOTON_MADS) -> tuple:
     med = np.median(lv)
     v = v[lv <= med + mads * 1.4826 * np.median(np.abs(lv - med))]
     return float(v.mean()), float(v.std())
+
+
+def photon_range(photons, mask) -> tuple:
+    """Photons a frame while on, the range a uniform draw covers: half the fully-on fits' 1st
+    percentile to 1.5 times their 99th.
+
+    The mean and spread (`intensity_fully_on`) describe the bulk, and a normal draw from them trains
+    the network on molecules like the median.  On DECODE-Plex's Fig. 2c, a live cell crowded in its
+    first frames, the fully-on fits' median is 2 230 photons and their 99th percentile 16 600: a
+    network trained from the normal draw (2 480 +- 1 300) fitted the bright molecules with half again
+    the error of one trained uniformly from 500 to 30 000, which matched DECODE-Plex (plex-plan §16,
+    2026-11-23).  The overlaps among the brightest fits widen the range a little, which costs
+    nothing; the widening on either side keeps the dimmest and brightest molecules inside it."""
+    v = np.asarray(photons, np.float64)[mask]
+    lo, hi = _quantile(v, PHOTON_QUANTILES)
+    return float(PHOTON_WIDEN[0] * lo), float(PHOTON_WIDEN[1] * hi)
 
 
 def background_range(background) -> tuple:
@@ -185,7 +214,15 @@ def bounds(limit_nm) -> tuple:
 
 def z_range(z_nm, limit_nm=None) -> tuple:
     """The blinks' z, widened; ``limit_nm`` the calibration's half range about its focus, or its
-    (lowest, highest) z (`bounds`)."""
+    (lowest, highest) z (`bounds`).
+
+    The 2nd to 98th percentile widened by 15 %, of the fits `estimates` passes (those the likelihood
+    cut keeps), not SMAP's blinks' 1st to 99th widened by 20 %: in a live cell the tails are
+    molecules out of focus, fitted poorly, and on DECODE-Plex's Fig. 2c SMAP's rule reached the
+    calibration's limits (-1 860 -- 1 940 nm), where a network trained at +-1 µm found more and
+    matched DECODE-Plex better (plex-plan §16, 2026-11-23); this rule gives -1 340 -- 1 120 there.
+    The 5th to 95th (+-1 µm there) was tried and cut off the shoulders of a simulated sample's z.
+    On z drawn uniformly it reaches 25 % beyond the true range on either side."""
     if z_nm is None or len(z_nm) == 0:
         lo, hi = -Z_WITHOUT_Z_NM, Z_WITHOUT_Z_NM
     else:
@@ -231,20 +268,26 @@ def estimates(blinks: dict, localizations: dict, *, area_px: float, n_frames: in
     on = on_time(n_in_group)
     z = blinks.get("z_nm")
     loc = localizations
+    if loc.get("z_nm") is not None and loc.get("logl_rel") is not None:
+        # z from the fits the likelihood cut keeps: the poor ones are mostly molecules out of focus
+        z = np.asarray(loc["z_nm"])[logl_kept(loc["logl_rel"], logl_mads)]
     full = np.zeros(len(loc["background"]), bool)
     if all(k in loc for k in ("group_id", "frame", "n_in_group", "photons")):
         full = fully_on(loc["group_id"], loc["frame"], loc["n_in_group"], loc.get("logl_rel"),
                         loc.get("z_nm"), z_limit_nm, loc.get("iterations"), max_iterations, logl_mads)
     if full.sum() >= FULLY_ON_ENOUGH:
         mu_sig, source = intensity_fully_on(loc["photons"], full), "fully-on frames"
+        drawn = photon_range(loc["photons"], full)
     else:
         mu_sig, source = intensity(blinks["photons"], on), "blinks"
+        drawn = tuple(float(f * mu_sig[0]) for f in PHOTON_RANGE_BLINKS)
     return Estimates(on_time_frames=on, lifetime_frames=lifetime(on), intensity_mu_sig=mu_sig,
                      intensity_from=source, n_fully_on=int(full.sum()),
                      background=background_range(loc["background"]),
                      z_nm=z_range(None if z is None else np.asarray(z), z_limit_nm),
                      emitters_per_frame=measured_density(len(n_in_group), area_px, n_frames),
-                     n_blinks=int(len(n_in_group)), n_localizations=int(len(loc["background"])))
+                     n_blinks=int(len(n_in_group)), n_localizations=int(len(loc["background"])),
+                     photons_range=drawn)
 
 
 def camera(conversion: float, offset: float, pixel_size_nm, em_gain: float | None = None,
@@ -294,4 +337,5 @@ def simulation(est: Estimates, density) -> dict:
     return {"emitter_av": density_per_frame(density), "lifetime_avg": est.lifetime_frames,
             "intensity_mu_sig": [float(v) for v in est.intensity_mu_sig],
             "bg_uniform": [float(v) for v in est.background],
-            "z_extent_nm": [round(est.z_nm[0]), round(est.z_nm[1])]}
+            "z_extent_nm": [round(est.z_nm[0]), round(est.z_nm[1])],
+            **({} if est.photons_range is None else {"photons_range": [float(v) for v in est.photons_range]})}

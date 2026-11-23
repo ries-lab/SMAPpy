@@ -48,8 +48,11 @@ def test_a_simulations_lifetime_brightness_background_and_z_come_back(on_time):
     assert est.background[0] <= lo and est.background[1] >= hi
     assert est.background[1] - est.background[0] == pytest.approx(1.6 * (hi - lo), rel=0.1)
     z = np.asarray(blinks["z_nm"])
-    zlo, zhi = np.quantile(z, [0.01, 0.99])
-    assert est.z_nm == pytest.approx((zlo - 0.2 * (zhi - zlo), zhi + 0.2 * (zhi - zlo)), rel=0.05)
+    zlo, zhi = np.quantile(z, [0.02, 0.98])
+    assert est.z_nm == pytest.approx((zlo - 0.15 * (zhi - zlo), zhi + 0.15 * (zhi - zlo)), rel=0.05)
+    # the uniform photons reach well past the molecules' own
+    lo, hi = est.photons_range
+    assert lo < 0.5 * rate and hi > rate + 3 * spread
 
 
 def test_overlapping_fits_far_above_the_median_set_neither_the_mean_nor_the_spread():
@@ -64,6 +67,34 @@ def test_overlapping_fits_far_above_the_median_set_neither_the_mean_nor_the_spre
     mu, sd = prefit.intensity_fully_on(raw, mask)
     assert mu == pytest.approx(2500.0, rel=0.03) and sd == pytest.approx(800.0, rel=0.05)
     assert prefit.intensity_fully_on(single, mask[:9800]) == pytest.approx((single.mean(), single.std()))
+
+
+def test_the_photons_drawn_reach_past_the_dimmest_and_brightest_fully_on_fits():
+    """Uniform from half the 1st percentile to 1.5 times the 99th: Fig. 2c's live cell trained on its
+    bright molecules only so (plex-plan §16)."""
+    v = np.random.default_rng(1).lognormal(np.log(2200), 0.6, 20000)
+    mask = np.ones(v.size, bool)
+    q01, q99 = np.quantile(v, [0.01, 0.99])
+    lo, hi = prefit.photon_range(v, mask)
+    assert lo == pytest.approx(0.5 * q01, rel=0.01) and hi == pytest.approx(1.5 * q99, rel=0.01)
+    # a prefit with too few fully-on frames: a range about SMAP's mean
+    blinks = {"photons": np.full(50, 2000.0), "n_in_group": np.full(50, 2), "frame": np.arange(50)}
+    locs = {"photons": np.full(100, 1000.0), "background": np.full(100, 30.0), "group_id": np.repeat(np.arange(50), 2),
+            "frame": np.arange(100), "n_in_group": np.full(100, 2)}
+    est = prefit.estimates(blinks, locs, area_px=1600.0, n_frames=100)
+    assert est.photons_range == pytest.approx((400.0, 10000.0))
+    assert prefit.simulation(est, "HD")["photons_range"] == pytest.approx([400.0, 10000.0])
+
+
+def test_z_leaves_out_the_tails_of_molecules_out_of_focus():
+    """The 2nd to 98th percentile widened by 15 %: a tail of 4 % far out of focus moves it little."""
+    rng = np.random.default_rng(3)
+    z = np.r_[rng.uniform(-600, 600, 9600), rng.uniform(-1800, 1800, 400)]
+    lo, hi = prefit.z_range(z, 2000.0)
+    assert -900 < lo < -700 and 700 < hi < 900
+    # the poor fits left out by the likelihood cut, as the fully-on frames' are
+    logl = np.r_[np.zeros(9600), np.full(400, -50.0)] + rng.normal(0, 1, 10000)
+    assert prefit.logl_kept(logl).sum() < 9600 and not prefit.logl_kept(logl)[9600:].any()
 
 
 def test_the_on_time_is_the_mean_up_to_smaps_cut():
