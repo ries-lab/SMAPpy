@@ -2,7 +2,8 @@
 
 A study, November 2026: the literature, the options for uipsf's coefficient field (`plan.md` §3, the slot
 `NodalPolynomial` + `BSplineResidual` + `FocalSurface`) and for SMAPpy's fitter (`plan.md` §7.3), and
-measurements on synthetic data that decide between them.  What v1 built of it is §8, and the first real field §9.
+measurements on synthetic data that decide between them.  What v1 built of it is §8, the first real field §9, and
+node splines against the local pupil and a correction afterwards §11.
 
 **In short.**
 - *Representation in uipsf:* the Zernike coefficients as a nodal-aberration-theory polynomial of the field
@@ -268,3 +269,93 @@ Candidates: second-order terms (Droste's), a field-dependent magnitude
 
 - Whether the residual's prior keeps a bead calibration of 20–50 beads stable (the residual is not built).
 - What limits the edges of a 177 µm field (§9): second-order terms, a field-dependent magnitude.
+
+## 11. Node splines, the local pupil, or one spline corrected afterwards (November 2026)
+
+`benchmarks/uipsf/synthetic/field_correction_study.py`, `results/field_correction.jsonl`.  The question: is the
+node-spline workflow worth it, against the slow baseline -- maximum likelihood with each spot's own pupil
+(uipsf's `localise`) -- and against the simplest alternative: fit with one spline for the field and subtract
+dx, dy, dz(x, y, z_fit) afterwards, calibrated on beads.  Every method knows the true model; the learning's
+error, which the bead correction does not pay, is left for later.
+
+**Setup.**  Three fields, each times a scale:
+- *synthetic*: §4's nodal field over ±50 µm;
+- *M5*: M5's linear astigmatism, 0.09 rad per 12.5 µm (§7), over ±12.5 µm;
+- *Zenodo*: v2's learnt field (§9) over ±80 µm, on v1's pupil at the centre.
+
+Spots of 13 × 13 px, background 20, at 5000 and 1000 photons.  The correction is a polynomial in u, v of
+order 2 or 4 times Legendre polynomials of the fitted z to degree 14.  The z bias wiggles along z: degree 6
+left 21 nm, 14 left 2.7 nm.  It comes in two variants:
+- *from beads*: 40 beads (100 for Zenodo) spread over the field, 20 nm steps, 20 000 photons.  The lateral
+  part is learnt within each bead, since a bead's own x, y are unknown; z is absolute, on a flat coverslip.
+- *from the model*: noise-free spots on an 11 × 11 grid, the best a correction afterwards can do.
+
+Bias is the fit of noise-free images on a 7 × 7 × 21 grid.  Precision is 500 noisy spots each at the
+centre, the edge and the corner.
+
+**z bias, rms / max over the field (nm), and the z scale's range over the field, at 5000 photons.**
+
+| field | node splines | pupil | central spline | + bead correction (order 2) | + model correction (order 4) |
+|---|---|---|---|---|---|
+| M5 ×1 (3 × 3 nodes) | 0.7 / 1.8 | 0 / 0 | 14.5 / 39, 0.95–1.05 | 1.9 / 9.3, 1.00–1.01 | 0.3 / 0.8 |
+| M5 ×2 (5 × 5) | 0.7 / 2.4 | 0 / 0 | 30 / 80, 0.89–1.10 | 3.2 / 15, 0.99–1.02 | 0.6 / 2.3 |
+| M5 ×4 (9 × 9) | 0.9 / 3.7 | 0 / 0 | 69 / 256, 0.73–1.23 | 15 / 167 | 5.8 / 79 |
+| synthetic ×1 (7 × 7) | 0.6 / 2.3 | 0 / 0 | 21 / 74, 0.90–1.09 | 3.2 / 14, 0.99–1.01 | 0.4 / 2.7 |
+| synthetic ×2 (9 × 9) | 1.6 / 6.6 | 0 / 0 | 60 / 246, 0.70–1.18 | 26 / 224 | 15 / 114 |
+| synthetic ×3 (9 × 9) | 2.3 / 7.8 | 0 / 0 | 102 / 299, 4 % lost | 70 / 299 | 44 / 293 |
+| Zenodo ×1 (9 × 9, 3.4 % blend error) | 7.9 / 49 | 0 / 0 | 126 / 300, 8 % lost | 89 / 299 | 64 / 291 |
+
+**z precision (SD, nm) at the field's corner, 5000 photons:**
+- M5 ×1: pupil 13.0, node splines 13.0, central 15.6, corrected 13.1.
+- synthetic ×1: 13.7, 13.7, 16.8, 16.9.
+- synthetic ×2: 16.2, 16.1, 48.5, 50.0.
+- Zenodo: 17.4, 19.1, 91.8, 66.1.
+
+At 1000 photons the pattern is the same.
+
+**What it says.**
+- **The node splines match the pupil fit** -- in bias, z scaling and precision -- wherever the grid reaches
+  the tolerance: within 1–2 nm in z up to fields 3–4 times ours, at about 100 times the pupil fit's speed (60–300×).  Only
+  Zenodo's 177 µm field, where the 9 × 9 cap leaves 3.4 % blend error, leaves 8 nm rms and 49 nm at worst.
+- **A correction afterwards works for mild fields.**  On M5's field it takes the z bias from 15 to 2 nm and
+  the z scale from 0.95–1.05 to 1.00–1.01, from 40 beads, without a field model.  So a microscope like M5
+  needs no field-dependent model for z accuracy.  Order 2 in u, v is what 40 beads support: order 4 ran off
+  at the corners (160 nm), while from the model it is better.
+- **It does not give the precision back.**  The mismatched PSF loses information; the correction only moves
+  the mean.  On mild fields the loss is small (M5: 15.6 vs 13.0 nm at the corner, recovered to 13.1); from
+  about synthetic ×2, it is 3–5 times the CRLB and stays there.
+- **It breaks down from about twice our synthetic field** (≈ 0.35 rad more astigmatism at the edge than at the centre).  Even the
+  model's own correction leaves 15–64 nm rms and maxima above 100 nm.  There the fit with the wrong PSF is no
+  longer a smooth, invertible function of z: z scaling down to 0.3, lost fits, and z precision 3–5 times worse.
+  Zenodo's field is in this regime.
+- **The pupil fit's starts matter at low photons on large fields.**  Zenodo at 1000 photons: a few noise-free
+  spots at the corners and large |z| converged elsewhere (9 nm rms, from node-spline starts).
+
+**The calibration's brightness.**  A correction calibrated noise-free still depends a little on photons and
+background.  With a mismatched PSF the fit converges to the closest model PSF.  The Poisson weights decide
+which one is closest, and with background they shift between the spot's core and its tails as photons fall.
+The uncorrected bias grows too: central spline, synthetic ×1, 21 nm rms at 5000 photons and 24 at 1000.
+
+This was checked once, outside the script.  The setup was the central spline with an order-2 correction from
+noise-free spots.  Each correction was calibrated at one brightness (photons/background) and applied to
+noise-free spots at another.  z bias, rms / max (nm):
+
+| field, test photons | uncorrected | calibrated 20 000/50 (the beads') | 5000/20 | 1000/20 |
+|---|---|---|---|---|
+| M5 ×1, 5000 | 14.5 | 0.9 / 2.5 | 0.3 / 0.9 | 2.3 / 5.9 |
+| M5 ×1, 1000 | 16.4 | 3.1 / 7.1 | 2.3 / 5.2 | 0.2 / 0.6 |
+| M5 ×1, 500 | 16.9 | 3.7 / 8.3 | 2.9 / 6.3 | 0.7 / 1.8 |
+| M5 ×2, 1000 | 33.6 | 6.3 / 16 | 4.7 / 11 | 0.5 / 3.4 |
+| synthetic ×1, 1000 | 23.6 | 5.2 / 16 | 4.1 / 14 | 2.1 / 10 |
+
+A correction from bright beads, applied at 1000 photons, leaves 3–6 nm rms.  Calibrated at the data's
+brightness it leaves 0.2–2 nm.  That difference is about a tenth of σ_z there (≈ 50 nm): real, but small.
+If it matters, there are two options:
+- take the bead stacks at about the data's photons and background;
+- make the correction a function of the fitted photons/background too.  Every localisation has these, so
+  the correction still reads only fitted values.
+
+Not measured here: noise passing through the correction, which is evaluated at a noisy z_fit.  For a smooth
+dz this costs only the curvature term ½ dz″ σ_z².  Also not measured: the learning's error (the bead correction needs no field model; node splines and the
+pupil fit inherit its errors), and lateral distortion (a lateral offset constant in z is a distortion, which
+neither the bead correction learns nor the bias above includes).
