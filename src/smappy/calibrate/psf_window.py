@@ -131,6 +131,14 @@ class _Worker(QObject):
         self.done.emit(self.kind, value)
 
 
+def _with_steps(detected, paths, wanted: bool):
+    """``detected`` with the stacks' own z steps (`psf_methods.file_z_steps`), read in the worker."""
+    if wanted and detected is not None and hasattr(detected, "z_steps_nm"):
+        from .psf_methods import file_z_steps
+        detected.z_steps_nm = file_z_steps(paths)
+    return detected
+
+
 def release_memory() -> None:
     """What torch's allocators kept from a run handed back to the system, where torch is loaded at all
     (`uipsf.device.release_memory`): after a calibration Apple's GPU kept 3-4 GB and the next run swapped."""
@@ -219,7 +227,7 @@ class PSFCalibrationWindow(QMainWindow):
                             "run's own start, and show how far they disagree beside the CRLB: an error bar "
                             "that bead-to-bead differences are in too")
         self.halves_button.setToolTip(self._halves_tip)
-        self.halves_button.clicked.connect(self.halves)
+        self.halves_button.clicked.connect(lambda: self.halves())   # not clicked(bool) as the splits
         row.addWidget(self.toggle_button)
         row.addWidget(self.browse_button)
         row.addWidget(self.halves_button)
@@ -418,7 +426,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.open_button = QPushButton("Open calibration...")
         self.open_button.setToolTip("a saved calibration's pages and bead table again, with its settings, and "
                                     "its bead stacks where they are found")
-        self.open_button.clicked.connect(self.open_calibration)
+        self.open_button.clicked.connect(lambda: self.open_calibration())   # not clicked(bool) as the path
         steps = QHBoxLayout()
         steps.addWidget(self.detect_button)
         steps.addWidget(self.run_button)
@@ -535,6 +543,7 @@ class PSFCalibrationWindow(QMainWindow):
         if self.busy or self.detected is None:
             return
         self.detected = None
+        self._show_z_steps(())
         self.found_label.setText(f"{why}: detect again" if why else "")
         if self.run_result is None:
             self.marks = {}                       # they named beads of that detection
@@ -1142,12 +1151,29 @@ class PSFCalibrationWindow(QMainWindow):
         marks_of = getattr(self.method, "detected_marks", None)
         self.marks = dict(marks_of(detected)) if marks_of else {}
         self.detected = detected
+        self._show_z_steps(getattr(detected, "z_steps_nm", ()))
         self._show_detected_text()
         sources = getattr(detected.found, "sources", None) or []
         self.stack_browser.box_px = self._box_px()
         self.stack_browser.set_marks(detected.positions, sources, self._ring_states())
         self.refresh_table()
         self._update_buttons()
+
+    def _steps_wanted(self) -> bool:
+        """Whether a detection should read the stacks' own z step: *z step* on auto, in a method that
+        shows it."""
+        if self.sections["beads"].isHidden():          # in situ, molecules, 4Pi: no z step field
+            return False
+        try:
+            return self.detection_form.value().dz_nm is None
+        except ValueError:
+            return False
+
+    def _show_z_steps(self, steps) -> None:
+        """*z step* on auto says what the stacks gave once they were detected (several, if they differ)."""
+        text = ", ".join(f"{s:g}" for s in steps) or None
+        for form in self.detection_forms.values():
+            form.set_hints({"dz_nm": text})
 
     def _show_detected_text(self) -> None:
         """The detection's line, with the time calibrating the beads as marked takes where the method knows
@@ -1171,9 +1197,10 @@ class PSFCalibrationWindow(QMainWindow):
         except ValueError as error:
             self.error(error)
             return
-        method, paths, dual = self.method, list(self.paths), self.is_dual
+        method, paths, dual, steps = self.method, list(self.paths), self.is_dual, self._steps_wanted()
         self.status_bar.showMessage("detecting beads...")
-        self._work("detected", lambda progress: method.detect(paths, dual, inputs, progress))
+        self._work("detected", lambda progress: _with_steps(method.detect(paths, dual, inputs, progress),
+                                                             paths, steps))
 
     def run(self) -> None:
         """Calibrate with the settings as they are: from the detected beads, detecting them first if
@@ -1193,6 +1220,7 @@ class PSFCalibrationWindow(QMainWindow):
             self.error(error)
             return
         method, paths, dual, detected = self.method, list(self.paths), self.is_dual, self.detected
+        steps = self._steps_wanted()
         # the marks name beads of this detection; detecting again would number the beads anew
         marks = dict(self.marks) if detected is not None else {}
         last = self.run_result
@@ -1204,7 +1232,7 @@ class PSFCalibrationWindow(QMainWindow):
         def work(progress):
             found = detected
             if found is None:
-                found = method.detect(paths, dual, inputs, progress)
+                found = _with_steps(method.detect(paths, dual, inputs, progress), paths, steps)
                 progress({"message": found.text, "detected": found})
                 progress({"restart": True})        # one bar for the calibration; detection had its own
             run = method.run(paths, dual, inputs, progress, self._cancel, detected=found, marks=marks or None,

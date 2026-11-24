@@ -170,3 +170,50 @@ def test_every_job_of_the_window_hands_back_what_the_allocators_kept(monkeypatch
         worker.done.connect(lambda kind, value: done.append(kind))
         worker.run()
     assert released == [1, 1] and done == ["run", "error"]
+
+
+def test_the_stacks_own_z_steps_are_read_from_each_acquisition_and_files_without_one_add_nothing(monkeypatch):
+    from smappy.calibrate import psf_methods
+    from smappy.calibrate.input import BeadStack
+    stacks = {"a": [BeadStack(np.zeros((4, 2, 2)), np.arange(4) * 50.0)],
+              "b": [BeadStack(np.zeros((4, 2, 2)), np.arange(4) * 50.04),
+                    BeadStack(np.zeros((4, 2, 2)), np.arange(4) * 20.0)]}
+
+    def read(path, dz_nm=None):
+        if path == "c":
+            raise ValueError("c: no usable z spacing; supply dz_nm explicitly")
+        return stacks[path]
+    monkeypatch.setattr(calibrate_input, "discover_acquisitions", lambda paths: list(paths))
+    monkeypatch.setattr(calibrate_input, "read_bead_stacks", read)
+    monkeypatch.setattr(calibrate_input, "is_fourpi_scan", lambda path: False)
+    assert psf_methods.file_z_steps(["a", "b", "c"]) == (20.0, 50.0)
+
+
+def test_z_step_on_auto_says_the_detected_stacks_step_and_forgets_it_with_the_detection(app):
+    from types import SimpleNamespace
+    from smappy.calibrate.psf_methods import Detected
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    window = PSFCalibrationWindow()
+    window.method_box.setCurrentText("bead average")
+    assert window._steps_wanted()
+    field = window.detection_form.fields["dz_nm"]
+    window._show_detected(Detected(found=SimpleNamespace(records=[], sources=[]), text="3 beads", z_steps_nm=(50.0,)))
+    assert field.widget.text() == "50" and window.detection_form.value().dz_nm is None
+    window._undetect("the files changed")
+    assert field.widget.text() == ""
+    window.close()
+
+
+def test_the_buttons_pass_no_clicked_flag_as_an_argument(app, monkeypatch):
+    """*Open calibration...* took clicked's False as its path: "argument should be a str ... not 'bool'"."""
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    window = PSFCalibrationWindow()
+    calls = []
+    monkeypatch.setattr(window, "open_calibration", lambda *a, **k: calls.append(("open", a, k)))
+    monkeypatch.setattr(window, "halves", lambda *a, **k: calls.append(("halves", a, k)))
+    window.open_button.setEnabled(True)
+    window.halves_button.setEnabled(True)
+    window.open_button.click()
+    window.halves_button.click()
+    assert calls == [("open", (), {}), ("halves", (), {})]
+    window.close()

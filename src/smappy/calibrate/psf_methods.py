@@ -80,6 +80,24 @@ class Detected:
     text: str
     positions: list = field(default_factory=list)
     seconds: Optional[float] = None                    # about how long calibrating will take, if known
+    z_steps_nm: tuple = ()                             # the stacks' own z steps, for *z step* on auto
+
+
+def file_z_steps(paths) -> tuple:
+    """The distinct z steps (nm) the bead stacks' metadata give, rounded to 0.1 nm, for the *z step*
+    field's auto to say after a detection: a wrong step in the metadata otherwise went unnoticed until
+    the model's z was off.  Stacks without a usable step, and anything that is not a bead stack, add
+    nothing."""
+    from .input import discover_acquisitions, is_fourpi_scan, read_bead_stacks
+    steps = set()
+    for path in discover_acquisitions(paths):
+        if is_fourpi_scan(path):
+            continue
+        try:
+            steps.update(round(abs(st.dz), 1) for st in read_bead_stacks(path))
+        except Exception:                               # no z step, a movie: nothing to say
+            continue
+    return tuple(sorted(steps))
 
 
 class LearningProgress:
