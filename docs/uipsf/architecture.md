@@ -2936,9 +2936,16 @@ src/uipsf/
 │                          swapped(model, shared): the arms' labels exchanged, the same images
 ├── model/fourpi_start.py  rough_start(batch, model): envelope from the summed channels, channel offsets and the
 │                          mirror steps' direction from each bead's light per step
-└── workflows/fourpi.py    learn_fourpi(model, batch) -> FourPiFit; sample_iab, fringe_slope, calibration(fit) ->
-                           smappy's FourPiCalibration with phase_per_nm measured from the model
-src/smappy/calibrate/fourpi_beads.py   find_beads(paths, conversion, offset) -> FourPiBeads; learn; save
+├── workflows/fourpi.py    learn_fourpi(model, batch) -> FourPiFit; sample_iab, fringe_slope, calibration(fit) ->
+│                          smappy's FourPiCalibration with phase_per_nm measured from the model
+└── workflows/fourpi_insitu.py  learn_insitu(bead_model, bead_shared, batch, start, period_nm) -> FourPiInSitu:
+                           single molecules in single frames (molecule_model, molecule_batch), localised from
+                           three z starts a fringe apart, poor fits out, shared and molecules learnt together;
+                           calibration(fit), the beads' export (docs/4pi.md §26)
+src/smappy/calibrate/fourpi_beads.py   find_beads(paths, conversion, offset) -> FourPiBeads; learn; save (with the
+                           model's recipe and values); build_model, model_from_calibration
+src/smappy/calibrate/fourpi_insitu.py  choose(locs, z_range, settings), cut(source, layout, locs, ...): molecules
+                           from a Spline 4Pi fit, cut per channel as the fitter cuts them
 benchmarks/uipsf/real/zenodo_4pi_beads.py   v1's 18 beads learnt and fitted back with both models
 ```
 

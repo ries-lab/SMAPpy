@@ -203,7 +203,10 @@ multi-channel machinery carry over; the forward model and the data's geometry ch
   and p channels, `docs/4pi.md` §17): it fits better at no more cost and is the window's default.  The
   Jacobian is linearised, 9-12× less per iteration (§19).  The learning's start reaches one optimum (§20):
   the misalignment free from an offset in the first stage, and in the window's vectorial model a
-  rotationally symmetric pupil magnitude.  Next: in situ on `4pi_smlm_nup96` (`docs/4pi.md`, M6, M7).
+  rotationally symmetric pupil magnitude.  In situ from a movie's own molecules (`workflows/fourpi_insitu.py`,
+  `docs/4pi.md` §26, 2026-11-24): works on simulations; on `4pi_smlm_nup96` it fits held-out molecules better
+  than the bead model but measures the pores no better, so it is not in the window yet.  Next: D9's sample
+  geometry, and the tubulin data with few beads (§25).
 - **Lattice light-sheet:** a voxel model as the baseline (Zenodo `1ch_LLS_bead`).
 - **Polarisation:** a Jones pupil (2 × 2) for birefringence and a dichroic's s/p transmission.
 
