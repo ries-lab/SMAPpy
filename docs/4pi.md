@@ -2217,3 +2217,123 @@ typed, n_med from PBS's 1.334:
 Here the index moves by 0.011 for 600 nats and the NA wants to rise to the grid's edge for 975: on M5's objective
 at its own NA there is no effective-NA deficit to explain, and PBS's index holds within 0.01.  (The 676 nm stack
 was not on this machine; M2's 1.40 behind 1.43 is another objective's, not checked here.)
+
+## 26. The 2017-11-28 tubulin data, single colour, end to end (P1, 2026-11-24)
+
+Package P1 of the plan in §25 (on `claude/4pi-gaps` while this is written): Gabin's Bewersdorf-design
+4Pi-SMS data in `~/.cache/uipsf/4pi_tubulin_2017-11-28`, the sCMOS strip only.  The scripts are
+`benchmarks/fourpi/tubulin_*.py`, their outputs in `smappy_p1/` beside the data, the numbers in
+`benchmarks/fourpi/tubulin_results.md`.
+
+**The chip.**  The four images are the 4Pi-SMS design's rectangles (`channels.YALE_4PI`, x 151, 389, 1474, 1713,
+168 px, the last two mirrored): their centres are the authors' (235, 474, 1557, 1797).  The files say nothing
+of the camera.  The strip outside the channels gives an offset of 102 ADU and a read variance of 9.9 ADU²; the
+photon transfer of the movie's background, per pixel against its own median, gives 0.40 e⁻/ADU at the median
+and 0.50 at the 20th percentile -- blinking only raises a pixel's variance, so the conversion is nearer the upper
+-- so the 4Pi-SMS example camera's 0.5 e⁻/ADU and offset 100, with the authors' 128 nm pixels.
+
+**The registration**, from the many-bead fields Cell06 -- 12 (`register_channels`, 86 pairs per channel, 0.06 --
+0.08 px rms), is the authors' (their FMT alignment, from Cell12) to 0.0005 in scale and 1.1 mrad in rotation:
+
+| channel | ours: scale x, y | rotation (mrad) | authors: zoom x, y | angle (mrad) |
+|---|---|---|---|---|
+| 2 | 1.0098, 1.0099 | 19.9 | 1.0102, 1.0098 | 19.3 |
+| 3 | 1.0101, 1.0110 | 13.6 | 1.0102, 1.0106 | 12.5 |
+| 4 | 0.9999, 1.0013 | −7.1 | 0.9999, 1.0013 | −7.0 |
+
+The bead scans cannot give it: Cell03, 04 and 05 hold one bead each, the same place in all three (within 0.8 px;
+most likely one bead scanned three times, at 0.3, 0.5, 0.5 s), and `register_channels` made an exact affine map of
+the three nearly equal points -- any turn at all a few pixels away.  It now gives a shift where the beads reach
+less than 3 px rms in some direction, and the PSF window's 4Pi beads have a *registration* part: from the scans
+(as before), from a field of beads (Spline 4Pi's `registration_from_beads`, kept beside them), or from a file
+(`fourpi_beads.ScanRegistrationSettings`, `given_maps`).  The pupil model then holds the maps as given
+(`fourpi_beads.learn(maps=)`, `FourPiModel(fit_transform=False)`): one place fixes no turn or scale.
+
+**A phase per scan, and a rate per scan.**  Each bead of `iab_from_beads` and of uiPSF's learning already had its
+own phase (`ScanPhases.bead_phases`, `emitter.phase`), so three scans learnt together need nothing new for the
+cavity's offset between them: their phases are 0.95, −1.49 and 2.73 rad, well spread, and the per-voxel solve is
+determined per channel (condition 3.4).  What is new is the cavity's drift *through* a scan: `scan_phases`'s own
+rate per bead was 0.431, 0.425 and 0.453 rad per 20 nm slice, each to about 0.002, against the median the bead
+average took for all.  So `iab_from_beads(scan_of=)` gives each scan its beads' median rate, and holds each bead's
+phase where its fit fixes it, at the middle of the fit's window (`ScanPhases.centre`): a phase at slice 0 taken at
+another rate was off by the difference times 30 slices, 0.6 rad here.  `fourpi_beads.average_model` passes each
+bead's scan.  On simulated scans drifting by 0, +0.03 and −0.03 rad per slice, one rate averaged the interference
+away towards the scan's ends (modulation 0.66 against the truth's 0.80 at ±500 nm), a rate per scan kept it
+(0.80) (`test_scans_whose_cavity_drifted_each_its_own_way_keep_their_interference_at_a_rate_per_scan`).  On the
+real three, which the model fits back to the scale of noise either way, leaving one scan out did not decide
+between them (the third fitted with a model of two scattered 5 -- 33 nm in z either way): with three beads the
+average's ends are poorly fixed whichever rate.  The pupil model, which has the physics to fill them, is the one
+to use.  uiPSF's learning keeps one phase per bead and the optics' rate; a drift rate per emitter was not needed
+(below), so `uipsf` is unchanged.
+
+**The pupil model** (`tubulin_pupil.py`; NA 1.35, silicone 1.406, index-matched, the PSF window's minimal
+vectorial pupil, maps held, 45 -- 95 s on the Mac's GPU).  The emission had to be found: at 620 nm the model's
+fringe period was 265.8 nm against the beads' 291.5 nm (`period_mismatch` warned) and the coherence fell to
+0.52 -- 0.69 to make up for it; at **680 nm** (AF647's emission) it is 294.0 nm and the likelihood 1.6 M nats
+better.  The beads' size then matters: taken as 40 nm, the coherence is 0.74 -- 0.89; as **100 nm**, 0.82 --
+0.99 and 16 000 nats better (851 590 against 867 614) -- coherences near their bound, so the beads are about
+100 nm, and a smaller size hands their own blur of the fringe to the coherence.  Fitted back to the scans, the
+envelope's z follows the stage at a slope of 0.98 -- 0.99 with 2 -- 3 nm scatter, and the phase at 0.95, 0.95
+and 1.02 of the model's rate: the third scan's drift, now in the data and not in the model.  The channels'
+phase offsets, 0, 1.28, 3.05, −1.72 rad, are the bead average's (0, 1.23, 3.04, −1.73) to 0.05 rad.
+
+**The authors' calibration** is of another kind: an astigmatic Gaussian's widths against z
+(`bead_642_Astfit_20200911.mat`) and a linear phase against z with the s and p offsets
+(`bead_642_dphi_cali_20200911.mat`: 0.0208 rad/nm, a period of 302 nm, from Cell04 alone).  Their period is
+3.5 % longer than the beads' rate here (291.5 nm over all three; Cell04's own 0.425 rad per slice, 296 nm), which
+is the 0.965 between their z and ours below.
+
+**The movie** (`tubulin_fit.py`, `tubulin_compare.py`): Spline 4Pi with the defaults, the registration file,
+the model, *4Pi z* after it, on Cell01's first 6000 frames; the authors' raw fits of the same frames
+(`Cell01_642_tmpresult_20200912.mat`, 320 285) and their final table (`Cell01_642v20_60.mat`, filtered,
+unwrapped and drift-corrected, 90 850, tied to the raw fits by `vutarapr`); pairs within a frame closer than
+0.5 px.
+
+| model | one fit per molecule | ours | expected wrong fringes | envelope scatter / error | theirs paired | their final paired | z vs their final: spread | on another fringe | x, y vs theirs (nm) |
+|---|---|---|---|---|---|---|---|---|---|
+| bead average, rate per scan | no | 404 154 | 11.0 % | 1.93 | 89 % | 99 % | 4.6 nm | 0.2 % | −0.6, −6.0 |
+| pupil, 680 nm, 40 nm bead | no | 404 233 | 8.4 % | 2.14 | 89 % | 99 % | 4.6 nm | 0.1 % | −1.8, +0.5 |
+| **pupil, 680 nm, 100 nm bead** | **yes** | **369 582** | **7.2 %** | 2.03 | 89 % | 99 % | **4.4 nm** | **0.1 %** | −1.9, +0.5 |
+
+- **z agrees with theirs where they kept it.**  On the 90 178 localizations of their final table, our z less
+  theirs scatters 4.4 nm about one offset, and 0.1 % are on another fringe; none of those we call 90 % sure (95 %
+  of them).  The fringe is the same molecule's in both.  Two conventions differ: **their z runs the other way**
+  (their final and astigmatic z fall where ours rise, correlation −0.96; the phases agree), and their 302 nm
+  period makes their z 3.5 -- 7 % longer (slope 0.93 -- 0.97 of ours against minus theirs).  Their z is drift-
+  corrected and ours not, which the 4.4 nm includes.
+- **Their final table is a quarter of their fits** (90 850 of 320 285).  Over all of ours *4Pi z* expects 7.2 %
+  wrong fringes (§10's Nup96: 11 -- 14 %), 16 % below 90 % sure; ghosts are P1's limit, as §25 said.
+- **Lateral**: within 2 nm of theirs, 7 -- 8 nm robust spread between the two fits of a molecule; our x error
+  5.7 nm median against their CRLB of 7.1 nm (a Gaussian on a 4Pi spot).  The bead average sat 6 nm off in y:
+  its boxes are moved onto each bead by an interpolation of a three-bead average, the pupil model's are a
+  physical PSF's.
+- **Photons**: ours 1.60 × theirs per molecule.  Their background is the four channels' sum per pixel, 119.7
+  against our 4 × 34.3 = 137, so the camera's scale is nearly the same; the photon difference is the models' --
+  an astigmatic Gaussian on the summed image takes the spot's core, the 4Pi model all of its light.
+- **One fit per molecule.**  With the bead average and the 40 nm model 9 % of our fits (36 715) were a second
+  fit within a pixel of another in the same frame, 30 353 of them ones the authors have once: two candidates on
+  one spot in the channels' sum, both fits ending on it.  The single-channel engine has dropped such a second fit
+  since the DECODE benchmark (`pipeline.one_per_molecule`); the multi-channel engine did so only for the
+  two-colour fitters' paired detection.  It now does for the sum too (Spline 4Pi version 5).  What is left
+  unpaired (85 780, 23 % of ours) is brighter than the paired (5 650 against 4 180 photons), half within 5 px of
+  another of ours with a worse likelihood (`logl_rel` −1.9 against −0.8): overlapping molecules on the dense
+  filaments, which their pipeline fits once or not, and the last 8 rows of the chip (9 % of them), where theirs
+  stop.  Theirs unpaired, 36 483 (11 %), are a median 2.8 px from one of ours.
+- **Speed**: 10 -- 17 frames/s on the Mac (the three runs shared it with other work, not comparable); the whole
+  360 000-frame movie is 6 -- 10 hours at that rate -- P4's.
+
+**What a user of this data hits in the GUI, and what changed.**
+- *Spline 4Pi* on *auto* stopped: no microscope entry gives this chip's rectangles.  *auto* now takes the model's
+  (`fit_4pi.model_geometry`): a model made in the PSF window keeps its scans' layout, the movie's chip, and is
+  used where it fits the frames, unmoved by a camera ROI.  With the camera typed and the model chosen, Cell01 fits
+  with nothing else set.  The camera still has to be typed (the file names none; the notice opens the editor).
+- *4Pi beads* on a scan folder stopped on `Cell03_642_000_000.tif`, a 168 × 168 crop saved beside the DCIMG
+  series: a file the channels do not fit is now left out, and the progress says which.
+- *4Pi beads* registered the channels from the one-bead scans: now a shift, and the *registration* part takes a
+  field of beads or a file (above).
+- The emission has to be right for a pupil model: `period_mismatch` said so at 620 nm, as it should.
+
+**Not done, for later.**  The authors' drift (`Cell01_DCresult.mat`) against ours (P6); ghosts (out of scope);
+the EMCCD and the second colour (out of scope); a drift rate per emitter in uiPSF's learning (not needed: the
+fitted-back phase rates 0.95 -- 1.02 are each scan's drift, held by the beads' own phases); the bead average's
+ends from three beads.
