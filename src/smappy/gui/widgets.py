@@ -201,9 +201,10 @@ class CollapsibleSection(QWidget):
                  major: bool = False, parent=None):
         super().__init__(parent)
         self.content = content
-        # the widgets `put_in_title` moved into the title bar; while there are
-        # any, the section has nothing to unfold
+        # the widgets `put_in_title` moved into the title bar; and whether
+        # that left the section nothing to unfold (all but ``unfold=True``)
         self.title_widgets: List[QWidget] = []
+        self.title_fixed = False
         self.button = QToolButton(text=title, checkable=True, checked=expanded)
         self.button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         # kept, for a title that adds a colour to it (`microscope_form`)
@@ -276,18 +277,28 @@ class CollapsibleSection(QWidget):
         detached = self.button.text().endswith(" (window)")
         self.button.setText(title + (" (window)" if detached else ""))
 
-    def put_in_title(self, widgets: List[QWidget], tip: str = "") -> None:
+    def put_in_title(self, widgets: List[QWidget], tip: str = "",
+                     unfold: bool = False) -> None:
         """Put ``widgets`` beside the title, and stop the section unfolding.
 
-        For a launcher with nothing to set (*Load*, *PSF calibration*): its
+        For a launcher with nothing to set (*PSF calibration*): its
         section held one row of buttons and nothing else, so opening it was a
         click that only showed where the next click went.  The buttons are
         made as tall as the title, so the row is no taller than its
         neighbours, and the title keeps the arrow's room, so it stays in line
         with theirs.  No detach arrow: a window for one row of buttons is
         nothing a person wants.
+
+        ``unfold`` keeps the section unfolding, to settings seldom changed
+        (*Load*'s *columns*, `Plugin.buttons_in_title`): the buttons are in
+        the title either way.
         """
+        if unfold:
+            height = self.button.sizeHint().height()
+            self._title_widgets_at(widgets, height)
+            return
         self.set_expanded(False)
+        self.title_fixed = True
         self.button.setCheckable(False)
         self.button.setToolTip(tip)
         # a blank icon the arrow's size, not a computed indent: the text then
@@ -298,6 +309,11 @@ class CollapsibleSection(QWidget):
         self.button.setArrowType(Qt.NoArrow)
         self.button.setIcon(QIcon(blank))
         height = self.button.sizeHint().height()
+        self._title_widgets_at(widgets, height)
+        if self.detach_button:
+            self.detach_button.hide()
+
+    def _title_widgets_at(self, widgets: List[QWidget], height: int) -> None:
         at = self._header.indexOf(self.button) + 1
         self._header.insertSpacing(at, 6)
         for k, widget in enumerate(widgets):
@@ -309,8 +325,6 @@ class CollapsibleSection(QWidget):
             self._header.insertWidget(at + 1 + k, widget)
             widget.show()
         self.title_widgets = list(widgets)
-        if self.detach_button:
-            self.detach_button.hide()
 
     def add_to_title(self, widgets: List[QWidget]) -> None:
         """Put ``widgets`` in the title bar, before **?** and the detach
@@ -339,9 +353,10 @@ class CollapsibleSection(QWidget):
             self._header.removeWidget(widget)
             widget.setParent(None)
         self.title_widgets = []
+        self.title_fixed = False
 
     def set_expanded(self, on: bool) -> None:
-        if self.title_widgets:               # nothing to unfold, and no arrow
+        if self.title_fixed:                 # nothing to unfold, and no arrow
             self.frame.hide()
             return
         self.button.setChecked(on)

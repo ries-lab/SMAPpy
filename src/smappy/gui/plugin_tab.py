@@ -200,7 +200,8 @@ class PluginTab(QWidget):
                 # nothing to set, stand in the title bar
                 panel = slot.ensure()
                 if isinstance(panel, PluginPanel) and panel.title_buttons:
-                    section.put_in_title(panel.title_buttons, ref.description)
+                    section.put_in_title(panel.title_buttons, ref.description,
+                                         unfold=panel.title_unfolds)
             self._lend_title(section, slot)
             section.toggled.connect(lambda on, s=section, i=instance:
                                     self._toggled(s, i, on))
@@ -245,7 +246,7 @@ class PluginTab(QWidget):
         """Into a window of its own -- the panel made first: one that was
         never opened is an empty slot, and its window came up blank."""
         self.slots[instance.id].ensure()
-        if section.title_widgets:                # a launcher: nothing to move
+        if section.title_fixed:                  # a launcher: nothing to move
             return
         detach_to_window(section, self.window())
 

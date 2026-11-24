@@ -105,6 +105,14 @@ class LoadSettings:
     format: str = param("", label="format", choices=_format_choices, advanced=True,
                         help="auto: from the file's name and, where that is not "
                              "enough, its contents")
+    columns: str = param("standard", label="columns", advanced=True,
+                         choices=(("standard", "standard"), ("all", "all"),
+                                  ("list", "only those listed")),
+                         help="all but those nothing uses; every one; or the "
+                              "columns below")
+    only: str = param("", label="read only", kind="text", advanced=True,
+                      help="column names, separated by commas, as the table "
+                           "calls them; x, y and frame are read anyway")
     csv: CsvSettings = param(default_factory=CsvSettings, label="csv columns",
                              collapsed=True)
     msr: MsrSettings = param(default_factory=MsrSettings, label="Abberior MSR",
@@ -119,6 +127,17 @@ def _reader(path: Path, settings: LoadSettings):
             raise ValueError(f"no reader called {settings.format!r}")
         return reader
     return reader_for(path)          # raises with the known formats listed
+
+
+def columns_of(settings: "LoadSettings"):
+    """The ``columns`` `io.formats.load` takes, from *columns* and *read only*."""
+    if settings.columns != "list":
+        return settings.columns
+    names = [n.strip() for n in settings.only.split(",") if n.strip()]
+    if not names:
+        raise ValueError("read only: name the columns to read, or set columns "
+                         "to standard")
+    return names
 
 
 def csv_args(csv: CsvSettings) -> Dict[str, Any]:
@@ -138,9 +157,21 @@ def csv_args(csv: CsvSettings) -> Dict[str, Any]:
     return args
 
 
+def _columns_choices():
+    from ..import_columns import CHOICES
+    return CHOICES
+
+
 @dataclass
 class OpenSettings:
-    """Nothing to set: replacing or adding is which button is clicked."""
+    """Replacing or adding is which button is clicked; *columns* is how
+    every file is read, by these buttons, File > Open and a drop alike
+    (`import_columns`)."""
+    columns: str = param("standard", label="columns", choices=_columns_choices,
+                         help="which columns of a file to read: all but those "
+                              "nothing uses, asking first when even those would "
+                              "not fit the memory; every one; or a list to tick "
+                              "each time")
 
 
 @register("File/Load/Load")
@@ -153,12 +184,16 @@ class Open(Plugin):
                    "layer can show")
     Settings = OpenSettings
     changes_locs = False          # a launcher: the window loads, not `run`
-    version = "3"
+    # 4: *columns*
+    version = "4"
     # the window's own File > Open, told which: a csv no conversion knows asks
     # for its columns there (`gui.dialogs.CsvMappingDialog`).  Two buttons
     # that say what they do, one row -- the menu's Open asks instead
     window = "open files"
     window_buttons = (("Add", "add files"),)
+    # Open and Add are clicked every day, *columns* almost never: the buttons
+    # in the title bar, the setting in the section beneath
+    buttons_in_title = True
 
     def run(self, ctx: Context, settings: OpenSettings) -> Result:
         raise ValueError("Load opens a file dialog; in a script or a chain, "
@@ -182,8 +217,9 @@ class LoadAuto(Plugin):
     # 7: the pattern size scales with the excitation wavelength, from 642 nm;
     # every iteration on request, and each thread's own sequence; 8: a SMAP
     # file of several files opens as those files, its sites on theirs,
-    # without the rows of none
-    version = "8"
+    # without the rows of none; 9: *columns* and *read only*, and every
+    # format's floats float32 but time and offsets (`io.column_types`)
+    version = "9"
 
     def describe(self, ctx: Optional[Context], settings: LoadSettings) -> FormState:
         """The csv part is shown for a csv only, the MSR part for an `.msr`."""
@@ -194,7 +230,8 @@ class LoadAuto(Plugin):
             except (ValueError, OSError):
                 name = ""
         return FormState(shown={"csv": name == "csv", "msr": name == MSR},
-                         active={"csv.pixelsize_nm": settings.csv.units == "px"})
+                         active={"csv.pixelsize_nm": settings.csv.units == "px",
+                                 "only": settings.columns == "list"})
 
     def reader_args(self, path: Path, reader, settings) -> Dict[str, Any]:
         """Anything the reader needs beyond the path: a csv's columns, a
@@ -219,6 +256,7 @@ class LoadAuto(Plugin):
         if reader.name == MSR:
             return self._run_msr(ctx, path, settings)
         locs, info = read_localizations(path, progress=ctx.report, reader=reader,
+                                        columns=columns_of(settings),
                                         **self.reader_args(path, reader, settings))
         text = f"{len(locs)} localizations from {path.name} ({info.format})"
         # not merged here: the layer merges its blinks when first read, and

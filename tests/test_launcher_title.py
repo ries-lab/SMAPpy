@@ -1,4 +1,5 @@
-"""A launcher with nothing to set has its buttons in its section's title bar."""
+"""A launcher with nothing to set has its buttons in its section's title bar,
+and so does one that says `buttons_in_title`, which still unfolds."""
 import gc
 
 import pytest
@@ -25,17 +26,17 @@ def _tab(*paths):
     return tab, opened
 
 
-def test_load_has_open_and_add_in_its_title_bar_and_does_not_unfold(app):
+def test_load_has_open_and_add_in_its_title_bar_and_unfolds_to_its_columns(app):
     tab, opened = _tab("File/Load/Load", "Localize/Gaussian 2D")
     tab.show()
     load, fitter = tab.sections
     assert [w.text() for w in load.title_widgets] == ["Open", "Add"]
     assert all(w.isVisible() for w in load.title_widgets)
-    assert not load.button.isCheckable()
-    load.button.click()
+    # `Plugin.buttons_in_title`: the buttons in the title, *columns* beneath
+    assert load.button.isCheckable() and not load.frame.isVisible()
     tab.open_section(tab.tab.instances[0].id)
-    assert not load.frame.isVisible() and tab.open_instance() is None
-    assert load.detach_button.isHidden()
+    assert load.frame.isVisible() and tab.open_instance() == tab.tab.instances[0].id
+    assert all(w.isVisible() for w in load.title_widgets)
     load.title_widgets[1].click()
     load.title_widgets[0].click()
     assert opened == ["add files", "open files"]

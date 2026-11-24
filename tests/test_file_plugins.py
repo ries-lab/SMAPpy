@@ -274,18 +274,22 @@ def test_the_file_tab_ships_with_load_first_and_what_the_file_menu_does_not_do(
     assert session.gui_state_provider is not None
 
 
-def test_load_is_one_row_whose_open_replaces_and_add_adds():
+def test_loads_open_replaces_and_add_adds_with_its_columns_choice():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     QApplication.instance() or QApplication([])
     from smappy.gui.plugin_panel import PluginPanel
     session = Session()
     opened = []
-    session.window_openers["open files"] = lambda settings=None: opened.append("open")
-    session.window_openers["add files"] = lambda settings=None: opened.append("add")
+    session.window_openers["open files"] = \
+        lambda settings=None: opened.append(("open", settings.columns))
+    session.window_openers["add files"] = \
+        lambda settings=None: opened.append(("add", settings.columns))
     panel = PluginPanel(plugins.get("File/Load/Load"), session)
-    assert panel.form.isHidden() and panel.about.isHidden()
+    # the buttons stand in the title bar; the panel beneath is *columns*
+    assert panel.title_unfolds
+    assert panel.title_buttons == [panel.run_button] + panel.window_buttons
     assert [b.text() for b in panel.window_buttons] == ["Add"]
     panel.run_button.click()
     panel.window_buttons[0].click()
-    assert opened == ["open", "add"]
+    assert opened == [("open", "standard"), ("add", "standard")]

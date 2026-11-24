@@ -465,10 +465,13 @@ class ControlWindow(QMainWindow):
         # the File tab's Load line (`Plugin.window`): File > Open, or Add
         # *Load*'s two buttons (`plugins.file.Open`): each says what it does,
         # so neither asks, as File > Open does
+        # and their *columns*, how every file of this opening is read
         session.window_openers["open files"] = \
-            lambda settings=None: self.open(append=False)
+            lambda settings=None: self.open(append=False,
+                                            columns=getattr(settings, "columns", None))
         session.window_openers["add files"] = \
-            lambda settings=None: self.open(append=True)
+            lambda settings=None: self.open(append=True,
+                                            columns=getattr(settings, "columns", None))
         # a fitter whose file's camera is not in the database offers this
         # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
@@ -2081,7 +2084,7 @@ class ControlWindow(QMainWindow):
             return one(layers[0])
         return "; ".join(f"{l.name}: {one(l)}" for l in layers)
 
-    def open(self, append: Optional[bool] = None) -> None:
+    def open(self, append: Optional[bool] = None, columns: Optional[str] = None) -> None:
         """*File > Open*: localization tables, images and stacks, sorted by
         `open_dropped` as a drop is -- a table loads, an image is a layer, a
         long stack goes to a fitter.  ``append`` None asks, when a table is
@@ -2092,26 +2095,71 @@ class ControlWindow(QMainWindow):
         would change the session underneath a running task is disabled while it
         runs; everything else -- panning, the filters, the other windows --
         keeps working on the file that is already open.
+
+        ``columns`` is how the tables are read (`import_columns`); None takes
+        the File tab's *Load* line's (`columns_policy`).
         """
         paths, _ = QFileDialog.getOpenFileNames(self, "Add" if append else "Open",
                                                 folders.start(), open_filter())
         if paths:
-            self.open_dropped(paths, append=append)
+            self.open_dropped(paths, append=append, columns=columns)
 
-    def load_paths(self, paths, append: bool = False, reset_view: bool = False) -> None:
+    def columns_policy(self) -> str:
+        """How a localization file is read (`import_columns`): the *columns*
+        of the *Load* line pinned to a tab, as its form shows it now, or the
+        default when none is pinned.  One setting for every way of opening --
+        the line's buttons, File > Open, a drop, the command line."""
+        from ..import_columns import STANDARD
+        found = self._pinned("File/Load/Load")
+        if found is None:
+            return STANDARD
+        _, tab, instance = found
+        slot = tab.slots.get(instance.id)
+        values = slot.values() if slot is not None else instance.values
+        return str((values or {}).get("columns") or STANDARD)
+
+    def _columns_args(self, path, policy: str) -> Optional[dict]:
+        """``{"columns": ...}`` for reading ``path`` under ``policy``, asking
+        in `ColumnsDialog` when the plan says to; None if that was cancelled."""
+        from ..import_columns import plan
+        try:
+            chosen = plan(path, policy)
+        except Exception as e:           # noqa: BLE001 -- the reader will say what is wrong
+            print(f"columns of {Path(path).name}: {e}")
+            return {}
+        if not chosen.ask:
+            return {"columns": chosen.columns}
+        from .columns_dialog import ColumnsDialog
+        dialog = ColumnsDialog(chosen.found, chosen.why, chosen.available, self)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return {"columns": dialog.columns()}
+
+    def load_paths(self, paths, append: bool = False, reset_view: bool = False,
+                   columns: Optional[str] = None, ask: bool = True) -> None:
         """Queue files for the loader.  ``reset_view`` frames the first one,
-        which is what starting with a file on the command line wants."""
+        which is what starting with a file on the command line wants;
+        ``columns`` is how they are read, the *Load* line's if None.  Without
+        ``ask`` -- the assistant, which cannot answer a dialog -- a file too
+        large for its standard columns is read with them, unasked."""
         folders.remember(paths)      # however it came: dialog, drop, command line
         if paths:
             self.load_error.hide()   # the last failure is old news
+        policy = columns or self.columns_policy()
         queued = 0
         for path in paths:
             loads = [{}]
+            if not self._needs_parts(path):
+                chosen = (self._columns_args(path, policy) if ask
+                          else {"columns": "all" if policy == "all" else "standard"})
+                if chosen is None:                   # cancelled: this file only
+                    continue
+                loads = [chosen]
             if self._needs_mapping(path):
                 dialog = CsvMappingDialog(path, self)
                 if dialog.exec() != QDialog.Accepted:
                     continue
-                loads = [dialog.reader_args()]
+                loads = [{**loads[0], **dialog.reader_args()}]
             elif self._needs_parts(path):
                 loads = self._ask_parts(path)
                 if loads is None:
@@ -2278,7 +2326,8 @@ class ControlWindow(QMainWindow):
         _drop(event, self.open_dropped)
 
     def open_dropped(self, paths, append: Optional[bool] = None,
-                     open_as: str = "auto", ask: bool = True) -> List[str]:
+                     open_as: str = "auto", ask: bool = True,
+                     columns: Optional[str] = None) -> List[str]:
         """Files dropped on either main window, sorted by `drops.kind_of`.
 
         Localization files go to `load_paths` together, which is *File >
@@ -2320,7 +2369,8 @@ class ControlWindow(QMainWindow):
                 if append is None:
                     append = self.replace_or_add(tables)
                 if append is not None:
-                    self.load_paths([str(p) for p in tables], append=append)
+                    self.load_paths([str(p) for p in tables], append=append,
+                                    columns=columns, ask=ask)
         # after the tables, which load on a thread: a table opened after the
         # image would replace the session the image was added to
         self._pending_images.extend(images)

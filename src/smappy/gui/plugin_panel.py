@@ -296,8 +296,13 @@ class PluginPanel(QWidget):
             # (a launcher whose settings are its window's, `form_in_window`, as one)
             nothing = (not dataclasses.fields(plugin_cls.Settings)
                        or self.plugin.form_in_window)
+            # `Plugin.buttons_in_title`: there too, with the settings still
+            # in the section, which unfolds to them
+            self.title_unfolds = bool(self.plugin.buttons_in_title and not nothing)
             self.title_buttons = ([self.run_button] + self.window_buttons
-                                  if nothing else [])
+                                  if nothing or self.title_unfolds else [])
+            for button in self.title_buttons if self.title_unfolds else ():
+                button.setToolTip(self.plugin.description)
             if nothing:
                 # nothing to set: the buttons are the panel, one row, and the
                 # summary is their tooltip rather than lines above them

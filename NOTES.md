@@ -1913,30 +1913,40 @@ measurements, four beads each) and checked by
   so the settings file is used with a warning.  Should that be a hard error?
 * RCC's slice width, z bin width and number of time windows are SMAP's values,
   which were set by hand rather than optimized; there is likely room there.
-## Loading only the columns that are used
+## Loading only the columns that are used (2026-11-24)
 
-The next thing to do, and a memory problem before it is a speed one.  Opening
-the 57 M localization `_sml.mat` peaks at **20 GB**: 30 columns are read and 13
-are read by anything downstream, and four of the unused ones (`bg1`, `bg1err`,
-`bg2`, `bg2err`) are float64, 457 MB each.  Microscope PCs have 8-16 GB, so
-that file does not open on one at all.  Keeping only the used columns takes the
-peak to about 8 GB, the read from 31 s to about 13, and `combine` -- one pass
-per column -- down with it.
+Opening the 57 M localization `_sml.mat` peaked at **20 GB**: every column
+was read as MATLAB's double and only converted to float32 once all had been
+read, and 30 columns were read where 13 are used.  Microscope PCs have
+8-16 GB.  Decided with Jonas, and done:
 
-Which columns those are is **per format**, not global: a SMAP `_sml.mat` names
-them `xnm`, `locprecnm`, `LLrel`; a MINFLUX export names them `loc`, `efo`,
-`cfr`; a csv names whatever the operator called them.  `SML_DROP` in
-`io/formats.py` is today's version of this and is the wrong shape -- a
-hard-coded list of eight names to skip, where what is wanted is a keep-list
-that can be seen and changed.
+* **Each column is narrowed as it is read** (`io/column_types.py`), so the
+  peak is about the table, never twice it.  The table was already float32
+  (`locs.py`, the readers); the exceptions are now one rule: **time** by its
+  name (*time* in it, plus `KEEP_FLOAT64`: `tim`, `timestamp`) stays
+  float64, a column whose median magnitude is over 1000 times its 1-99 %
+  range (a clock, stage coordinates) stays float64, and a whole-numbered
+  float id or frame becomes an integer -- never float32, exact only to 2^24.
+  A whole-numbered float with another name stays float.  smappy's own HDF5
+  is read exactly as saved (`Reader.narrows`): region results are signed
+  against its values.  `concat` no longer widens a column that is float32
+  in one table and float64 in another, and `filter._in_range` compares a
+  bound in the column's type (a NumPy float64 bound of 0.1 excluded a
+  float32 0.1).
+* **A per-reader drop list, not a keep-list in a settings file**
+  (`Reader.drop`, SMAP's `SML_DROP`): *standard* reads all but those, and
+  is the default.  The GUI's policy is *Load*'s *columns*
+  (`import_columns`): *standard* asks with the column dialog only when the
+  standard columns would take more than half the memory available; *all*;
+  or *choose on import*.  Only readers with a `catalog` (smappy HDF5, SMAP
+  `-v7.3`) can be asked about; they also `select`, reading no other column.
+  A script says `load(path, columns=[...])`.
+* **Not done: lazy columns** (read when first used).  Kept for later if
+  needed -- every operation that makes a table would have to carry
+  placeholders, and only HDF5-based formats can read one column cheaply.
+  The memory figure the dialog compares with is `undo.memory`'s
+  *available*, which macOS does not report (it is the total there).
 
-So it wants a settings file and a dialog, one section per reader: the columns
-the format offers, which are kept by default, and a tick per column, remembered
-between sessions.  The reader takes the set it is given and reads no more;
-opening a file it has never seen shows the list first.  Worth doing together
-with the readers' `needs` mechanism (`Reader.needs`), which already exists for
-asking the user something before a file can be read -- the csv column mapping
-goes through it.
 * `group()` numbers groups from 1, a leftover from the MATLAB original, so the
   row of the grouped table is `group_index - 1`.  Worth rebasing to 0 at some
   point, together with the C++ `connect`.

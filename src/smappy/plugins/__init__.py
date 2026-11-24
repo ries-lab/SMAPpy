@@ -1047,6 +1047,10 @@ class Plugin:
     # Open adding rather than replacing.  A launcher with nothing to set has
     # these and *Open* in its section's title bar, and no section to unfold.
     window_buttons: Tuple[Tuple[str, str], ...] = ()
+    # A launcher with settings whose buttons stand in the title bar all the
+    # same, its section unfolding to its settings: *Load*, whose *Open* and
+    # *Add* are clicked every day and whose *columns* almost never.
+    buttons_in_title: bool = False
     # Buttons inside a part of the form, each ``(part, label, path)``: the
     # plugin at ``path`` run on the session with that part's settings, as if
     # it had been run from its own panel -- logged and undone under its name.
