@@ -28,7 +28,7 @@ steps:
       remove: false
   - plugin: Analysis/Drift/RCC
     label: coarse drift
-    version: "2"
+    version: "3"
     values: {}
   - plugin: Analysis/Regions/Find clusters
     label: sites
@@ -40,7 +40,7 @@ steps:
       frame_analysis: true
   - plugin: Analysis/Drift/Fiducials
     label: drift from the sites
-    version: "3"
+    version: "5"
     values:
       markers: structures
       source: id column
