@@ -137,14 +137,33 @@ def microscope_layout(resolution):
     return entry.channel_layout(scope.camera)
 
 
+def model_geometry(calibration, base=None):
+    """On *auto* with no microscope entry: the channels' rectangles the model
+    was made on -- the PSF window keeps its bead scans' layout with it -- on
+    this file's frames, where they fit them; None where the model keeps none,
+    it was cut by a camera ROI, or its rectangles do not fit.  Bead scans
+    are taken on the chip the movie is: the 2017 tubulin data's model, with
+    its 4Pi-SMS rectangles, fits Cell01 with nothing typed (docs/4pi.md §26)."""
+    from ..channels import ChannelLayout
+    record = getattr(calibration, "layout", None)
+    if not record or record.get("origins") or record.get("name") == "quadrant files":
+        return None
+    geometry = ChannelLayout.from_dict({**record, "maps": None})
+    shape = getattr(base, "shape", None)
+    if shape is not None and not geometry.fits(tuple(shape)[-2:]):
+        return None
+    return geometry
+
+
 def layout_of(settings: FourPiFitSettings, base=None, calibration=None, camera=None,
               resolution=None):
     """The channel layout on this acquisition's frames, with its maps.
 
     The geometry: the file's own (quadrant files), the microscope's
     (`microscope_db.Microscope.channel_layout`), typed, or 4Pi-SMS -- the
-    last three on the chip, put on the camera ROI's frames.  The maps: the
-    model's, the beads', a registration file's, or none.
+    last three on the chip, put on the camera ROI's frames -- and on *auto*
+    without either of the first two, the model's (`model_geometry`).  The
+    maps: the model's, the beads', a registration file's, or none.
     """
     from ..channels import fourpi_layout, load_registration
     part = settings.channels
@@ -152,7 +171,10 @@ def layout_of(settings: FourPiFitSettings, base=None, calibration=None, camera=N
     own = getattr(base, "layout", None)
     roi = camera.roi_offset if camera is not None else (0, 0)
     entry = microscope_layout(resolution) if part.choice(own) == "microscope" else None
-    layout = fourpi_layout(part, own, roi, entry)
+    geometry = model_geometry(calibration, base) if entry is None and part.layout == "auto" and own is None \
+        else None
+    # the model's rectangles are on its scans' frames, as this file's are: not moved by a camera ROI
+    layout = geometry if geometry is not None else fourpi_layout(part, own, roi, entry)
     maps = None
     if registration.source == "beads":
         maps = registration_from_beads(registration.beads, layout)
@@ -189,7 +211,8 @@ class FourPiFit(_FitPlugin):
     Settings = FourPiFitSettings
     # 2: positions on the camera chip, where channel 0 saw them, not in its own pixels
     # 3: a fit region's part on any channel copied onto channel 0 (`fit.region_copies`)
-    version = "4"
+    # 5: two fits of one frame within a pixel are one molecule's (`pipeline.one_per_molecule`)
+    version = "5"
     phase = True
     # its *channels* part is its own (`FourPiChannelsSettings`): four regions, not a two-way split
     channel_part = "own"

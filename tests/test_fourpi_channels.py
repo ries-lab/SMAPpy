@@ -239,6 +239,40 @@ def test_v1s_in_situ_model_has_its_phase_rising_with_z():
     assert np.mean(1 - found.probability) < 0.05
 
 
+def test_two_candidates_on_one_molecule_found_on_the_sum_are_fitted_once(cal):
+    """Every molecule found twice, a second candidate 2 px beside the first -- what a long astigmatic
+    spot's two ends or a side lobe give the sum: both boxes hold the spot and both fits end on it, and
+    the engine keeps one of them, as the single-channel one does (`pipeline.one_per_molecule`)."""
+    from smappy.detect import Candidates
+    from smappy.metadata import CameraMetadata
+    from smappy.multichannel import MultiChannelEngine
+    from smappy.pipeline import FitSettings
+    from smappy.plugins.fit import DetectionSettings
+    from smappy.psf import Global4PiPSF
+    layout = _shifted_layout()
+    rng = np.random.default_rng(5)
+    n_frames = 60
+    frame = np.arange(n_frames)
+    x, y = rng.uniform(12, 52, (2, n_frames))
+    frames = fourpi.render_frames(cal, layout, frame, x, y, rng.uniform(-300, 300, n_frames), 3000,
+                                  phase0=0.7, n_frames=n_frames, background=10)
+    engine = MultiChannelEngine(CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=0.1),
+                                DetectionSettings().finder(), Global4PiPSF(cal), layout, FitSettings(roisize=13))
+    find = engine.find
+
+    def twice(channels, first_frame=0):
+        c = find(channels, first_frame)
+        return Candidates(np.r_[c.frame, c.frame], np.r_[c.x, c.x + 2].astype(c.x.dtype), np.r_[c.y, c.y],
+                          np.r_[c.value, c.value])
+
+    engine.find = twice
+    engine.push(layout.cut(frames), 0)
+    locs = engine.flush()
+    assert engine.stats["duplicates"] >= 0.9 * n_frames
+    assert np.bincount(np.asarray(locs["frame"]), minlength=n_frames).max() == 1
+    assert len(locs) >= 0.95 * n_frames
+
+
 # ---------------------------------------------------------------- registration
 
 def _bead_projection(cal, layout, xy, seed=0):
@@ -272,6 +306,26 @@ def test_beads_register_every_channel_onto_the_first(cal):
     found = side_by_side(4, 96, 96).with_maps(reg.maps)
     for c in (1, 2, 3):
         assert np.abs(found.to_channel(c, grid) - layout.to_channel(c, grid)).max() < 0.05
+
+
+def test_beads_all_in_one_place_register_as_a_shift_not_a_turn(cal):
+    """Three one-bead scans of one bead, within a pixel of each other -- the 2017 tubulin data's Cell03 --
+    05: they fix where each channel lies there and nothing of a turn or a scale.  The registration is the
+    shift between the channels, right at the beads, where an exact affine map from three nearly equal points
+    would turn the channels by any amount."""
+    from smappy.channels import register_channels
+    truth = np.eye(3)
+    truth[:2, :2] = [[1.003, 0.004], [-0.004, 0.998]]
+    truth[:2, 2] = [1.3, -0.7]
+    layout = side_by_side(4, 96, 96).with_maps([np.eye(3), truth, np.eye(3), truth])
+    at = np.array([[48.0, 47.0]])
+    projections = [_bead_projection(cal, layout, at + [[0.3 * s, -0.2 * s]], seed=s) for s in range(3)]
+    reg = register_channels(projections)
+    assert reg.kind[1:] == ["translation"] * 3
+    found = side_by_side(4, 96, 96).with_maps(reg.maps)
+    for c in (1, 2, 3):
+        assert np.abs(found.to_channel(c, at) - layout.to_channel(c, at)).max() < 0.05
+        assert np.allclose(reg.maps[c][:2, :2], np.eye(2))
 
 
 @pytest.mark.slow
@@ -446,6 +500,32 @@ def test_the_microscope_database_places_the_channels_on_the_chip():
     layout = layout_of(settings, None, None, camera, resolution)
     assert layout.regions[0] == (51, 0, 168, 168)
     assert Microscope.from_dict(scope.to_dict()).channel_layout("orca").regions == chip.regions
+
+
+def test_on_auto_without_a_microscope_entry_the_channels_are_where_the_model_was_made(cal):
+    """The PSF window keeps its bead scans' layout with the model: a movie from the same chip whose
+    microscope has no entry (the 2017 tubulin data's) is cut by it on *auto*, with its maps, unmoved by a
+    camera ROI; a model without one, or whose rectangles do not fit the frames, still asks for the layout,
+    and the microscope's entry or a choice by hand wins over it."""
+    from types import SimpleNamespace
+    from smappy.channels import YALE_4PI
+    from smappy.plugins.fit_4pi import FourPiFitSettings, layout_of, model_geometry
+    turn = np.eye(3)
+    turn[:2, 2] = [0.5, -0.2]
+    made_on = YALE_4PI.with_maps([np.eye(3), turn, turn, turn])
+    model = SimpleNamespace(layout=made_on.to_dict(), maps=lambda: made_on.maps)
+    strip = SimpleNamespace(shape=(168, 2048))
+    settings = FourPiFitSettings()
+    layout = layout_of(settings, strip, model, SimpleNamespace(roi_offset=(100, 0)), None)
+    assert layout.regions == YALE_4PI.regions and layout.flips == YALE_4PI.flips
+    assert np.allclose(layout.maps[1], turn)
+    assert model_geometry(model, SimpleNamespace(shape=(168, 1024))) is None
+    assert model_geometry(SimpleNamespace(layout=None), strip) is None
+    with pytest.raises(ValueError, match="no channel rectangles"):
+        layout_of(settings, strip, SimpleNamespace(layout=None, maps=lambda: None), None, None)
+    settings.channels.layout = "typed"
+    settings.model.registration.source = "none"
+    assert layout_of(settings, strip, model, None, None).regions != YALE_4PI.regions
 
 
 def test_a_bead_registration_is_measured_once_and_kept_beside_the_beads(cal, tmp_path,

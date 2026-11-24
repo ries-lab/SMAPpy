@@ -1,6 +1,6 @@
 ---
-version: "4"
-covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.channels.detection_lookup, smappy.channels.onto_reference, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.microscope_db.Microscope.channel_layout, smappy.io.dcimg.DcimgSource.watch, smappy.plugins.fit_4pi.FourPiFit.watch_blocks]
+version: "5"
+covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.channels.detection_lookup, smappy.channels.onto_reference, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.plugins.fit_4pi.model_geometry, smappy.microscope_db.Microscope.channel_layout, smappy.io.dcimg.DcimgSource.watch, smappy.plugins.fit_4pi.FourPiFit.watch_blocks]
 ---
 
 ## What it does
@@ -205,6 +205,15 @@ beads v1 learned its model from, the two agree within 0.0003 pixels,
 0.02 z slices and 0.001 rad.  On v1's Nup96 molecules the median difference
 is 0.11 slices in z and 0.014 rad in phase.
 
+**Two fits of one molecule.**  The sum can show two peaks for one molecule
+-- the two ends of a long astigmatic spot, or a peak and a side lobe -- and
+each becomes a candidate whose box holds the whole spot, so both fits end
+on the one molecule.  A single-molecule fit cannot put two molecules within
+a pixel of each other, so of two fits in one frame closer than 1 pixel only
+the one nearest its own box's centre is kept, as in the other fitters.  On
+6000 frames of a tubulin movie on a 4Pi-SMS this removed 9 % of the fits,
+nearly all of them ones the authors' own analysis has once.
+
 **The envelope's z at the end of the model.**  A fit that ends on the first
 or last plane of the model was held there.  Its true z could be anywhere
 beyond, and its error, taken at the edge, says nothing.  Such a fit gets
@@ -226,8 +235,11 @@ the bead's envelope.  Its centre is fitted with a Gaussian.  The channels
 are put roughly on top of each other by the cross-correlation of these
 images, the beads are paired within 3 pixels, and each channel's map onto
 the first is the robust projective fit of
-[Spline 3D 2C](plugin:Localize/Spline 3D 2C)'s registration.  With fewer than
-8 pairs it is a shift: their mean offset.  A folder of bead files is pooled.
+[Spline 3D 2C](plugin:Localize/Spline 3D 2C)'s registration.  With 3 to 7
+pairs it is an affine map, with fewer a shift: their mean offset.  Beads
+that all sit in one place -- within 3 pixels rms along some direction --
+also give a shift: they cannot show a turn or a scale.  A folder of bead
+files is pooled.
 On uiPSF's 26 bead scans this gave 111 pairs per channel, 0.03 pixels rms
 about the maps.  Where the beads were, the maps were within 0.06 pixels of
 the ones uiPSF v1 learned with its model.
@@ -273,6 +285,11 @@ camera, is one: the layout of the 4Pi-SMS consortium's example data.  To try a l
 the chip: SMAP's 4Pi settings file gives them as `x4pi`, `y4pi`,
 `width4pi`, `height4pi` and `mirror4pi`.  *4Pi-SMS* is the Bewersdorf-lab
 design: four 168-pixel images on a 2048 x 168 strip, the last two mirrored.
+Where neither the file nor the microscope's entry gives a layout, *auto*
+takes the model's: a model made in the
+[PSF calibration](plugin:Panels/PSF calibration) keeps the rectangles its
+bead scans were cut by, the movie's chip, so its movie is read with nothing
+typed -- as long as they fit the frames.
 
 ### model.registration.source
 Use the model's: the PSF of each channel was learned centred where its map

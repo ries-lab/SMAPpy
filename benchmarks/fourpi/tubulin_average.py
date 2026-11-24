@@ -11,11 +11,11 @@ import sys
 import numpy as np
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from tubulin_common import OUT, REGISTRATION, SCANS, camera  # noqa: E402
+from tubulin_common import OUT, REGISTRATION, SCANS, camera
 
-from smappy import fourpi  # noqa: E402
-from smappy.calibrate import fourpi_beads as fb  # noqa: E402
-from smappy.channels import FourPiChannelsSettings  # noqa: E402
+from smappy import fourpi
+from smappy.calibrate import fourpi_beads as fb
+from smappy.channels import FourPiChannelsSettings
 
 settings = fb.FourPiBeadSettings(channels=FourPiChannelsSettings(layout="yale"), mirror_steps="",
                                  registration=fb.ScanRegistrationSettings(source="file", path=str(REGISTRATION)))

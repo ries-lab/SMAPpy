@@ -53,6 +53,84 @@ def test_a_dcimg_bead_scan_gives_its_beads_its_registration_and_its_z_step(tmp_p
     assert np.allclose(found.to_channel(1, [[22.0, 22.0]]), layout.to_channel(1, [[22.0, 22.0]]), atol=0.1)
 
 
+def test_a_one_bead_scan_takes_its_registration_from_a_file_and_cuts_every_channel_there(tmp_path):
+    """One bead, as each of the 2017 tubulin data's scans has: its own scan fixes no turn, so the maps come
+    from a registration measured on a field of beads (*registration*: from a registration file), kept as the
+    layout's, and every channel's box is cut where they put the bead."""
+    from smappy.calibrate.fourpi_beads import ScanRegistrationSettings, fourpi_shown
+    from smappy.channels import save_registration
+    cal = fourpi.model_calibration()
+    turn = np.eye(3)
+    turn[:2, :2] = [[0.998, 0.02], [-0.02, 0.998]]
+    turn[:2, 2] = [0.6, -0.3]
+    geometry = from_corners([4, 54, 104, 154], [2] * 4, 44, 44, flip_x=[0, 0, 1, 1])
+    layout = geometry.with_maps([np.eye(3), turn, np.eye(3), turn])
+    path, _ = _dcimg_scan(tmp_path / "beads", cal, layout, np.array([[30.0, 13.0]]))
+    saved = tmp_path / "registration.json"
+    save_registration(saved, layout, source="a field of beads")
+    settings = _settings()
+    settings.registration = ScanRegistrationSettings(source="file", path=str(saved))
+    assert fourpi_shown(settings)["registration.path"] and not fourpi_shown(settings)["registration.beads"]
+    beads, found, registration = scan_beads([path], settings, CAMERA)
+    assert registration.kind[1:] == ["file"] * 3
+    assert all(np.allclose(a, b) for a, b in zip(found.maps, layout.maps, strict=True))
+    exact = np.array(beads.records[0]["exact_xy"])
+    assert np.allclose(exact[1], layout.to_channel(1, [exact[0]])[0])
+    with pytest.raises(ValueError, match="choose a channel registration"):
+        settings.registration = ScanRegistrationSettings(source="file")
+        scan_beads([path], settings, CAMERA)
+
+
+def test_a_file_the_channels_do_not_fit_beside_a_scan_is_left_out_and_said_so(tmp_path):
+    """A crop of one channel saved beside the DCIMG series in its folder, as the 2017 tubulin data's Cell03
+    has: the scan is read without it, the progress says which file was left out and why, and a folder of
+    nothing else is refused naming it."""
+    import tifffile
+    cal = fourpi.model_calibration()
+    layout = from_corners([4, 54, 104, 154], [2] * 4, 44, 44, flip_x=[0, 0, 1, 1])
+    xy = np.array([[12.0, 12.0], [31.0, 14.0], [14.0, 31.0], [30.0, 30.0]])
+    path, z = _dcimg_scan(tmp_path / "beads", cal, layout, xy)
+    tifffile.imwrite(tmp_path / "beads" / "Cell01_642_000_000.tif", np.zeros((3, 44, 44), np.uint16))
+    said = []
+    beads, _, _ = scan_beads([tmp_path / "beads"], _settings(), CAMERA, progress=said.append)
+    assert beads.data.shape[2] == len(z)
+    assert any(line.startswith("left out Cell01_642_000_000.tif") for line in said)
+    alone = tmp_path / "crop"
+    alone.mkdir()
+    tifffile.imwrite(alone / "crop.tif", np.zeros((3, 44, 44), np.uint16))
+    with pytest.raises(ValueError, match="fit none of the scans -- crop.tif"):
+        scan_beads([alone], _settings(), CAMERA)
+
+
+def test_maps_given_to_the_pupil_learning_are_held_as_given(tmp_path, monkeypatch):
+    """Beads that all sit in one place fix no turn of the channels: with ``maps`` the pupil model takes
+    the registration as given and holds it, and its start does not replace it with the beads' centroids;
+    without, it learns them from there."""
+    from smappy.calibrate.fourpi_beads import learn
+
+    import uipsf.workflows.fourpi as workflow
+    cal = fourpi.model_calibration()
+    layout = from_corners([4, 54, 104, 154], [2] * 4, 44, 44, flip_x=[0, 0, 1, 1])
+    path, _ = _dcimg_scan(tmp_path / "beads", cal, layout, np.array([[22.0, 22.0]]), n=9)
+    beads, _, _ = scan_beads([path], _settings(), CAMERA)
+    turn = np.eye(3)
+    turn[:2, :2] = [[0.998, 0.02], [-0.02, 0.998]]
+    turn[:2, 2] = [0.6, -0.3]
+    seen = {}
+
+    def capture(model, batch, start=None, **kwargs):
+        seen.update(model=model, start=start, specs={s.name: s for s in model.specs(batch, start)})
+
+    monkeypatch.setattr(workflow, "learn_fourpi", capture)
+    learn(beads, NA=1.35, wavelength_nm=660, n_imm=1.406, pixel_size_nm=100, steps_rad=(0.0,),
+          maps=[np.eye(3), turn, turn, turn])
+    spec = seen["specs"]["ch1.transform"]
+    assert spec.fixed and seen["start"]["transforms"] is None
+    assert np.allclose(np.r_[np.asarray(spec.init, float), 1.0].reshape(3, 3), turn, atol=1e-6)
+    learn(beads, NA=1.35, wavelength_nm=660, n_imm=1.406, pixel_size_nm=100, steps_rad=(0.0,))
+    assert not seen["specs"]["ch1.transform"].fixed and seen["start"] is None
+
+
 def test_beads_fitted_back_with_their_own_model_follow_the_stage(tmp_path):
     """The model that drew the beads, fitted back to them: z on the stage, slope one."""
     cal = fourpi.model_calibration()

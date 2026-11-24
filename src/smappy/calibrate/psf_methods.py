@@ -1153,7 +1153,10 @@ class FourPiPupil(_FourPi):
                     spec=settings.psf, photons_per_observation=settings.photons_per_observation,
                     bead_radius_nm=settings.bead_diameter_nm / 2, progress=progress, cancel=cancel,
                     kind="vector" if settings.vectorial else "scalar",
-                    magnitude_modes=magnitude_modes_of(settings), same_magnitude=settings.same_magnitude)
+                    magnitude_modes=magnitude_modes_of(settings), same_magnitude=settings.same_magnitude,
+                    # maps from a field of beads or a file are kept: the scans' beads may all sit in one
+                    # place, which fixes no turn or scale (docs/4pi.md §26)
+                    maps=None if settings.registration.source == "scans" else found["layout"].maps)
         run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings,
                    "wavelength_nm": optics["wavelengths"][0]}, False)
         if inputs["run"].save_model:

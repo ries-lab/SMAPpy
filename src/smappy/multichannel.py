@@ -319,10 +319,9 @@ class MultiChannelEngine:
             raise ValueError(f"detection must be one of {DETECTION}")
         self.stats = {"frames": 0, "candidates": 0, "pairs": 0, "localizations": 0,
                       "dropped_at_border": 0, "rejected": 0,
-                      "detect_seconds": 0.0, "fit_seconds": 0.0}
+                      "detect_seconds": 0.0, "fit_seconds": 0.0, "duplicates": 0}
         if self.detection == "pairs":
             self.stats["matched"] = 0
-            self.stats["duplicates"] = 0
 
     def push(self, frames: np.ndarray, first_frame: int = 0):
         import time
@@ -435,13 +434,14 @@ class MultiChannelEngine:
         keep = valid(locs, self.settings.max_fit_distance)
         self.stats["rejected"] += int((~keep).sum())
         locs = locs[keep]
-        if self.detection == "pairs":
-            # a streak's two ends found as two candidates, fitted to the one molecule
-            once = one_per_molecule(np.asarray(locs["x_pix"]), np.asarray(locs["y_pix"]),
-                                    np.asarray(locs["frame"]), np.asarray(locs["peak_x_pix"]),
-                                    np.asarray(locs["peak_y_pix"]))
-            self.stats["duplicates"] += int((~once).sum())
-            locs = locs[once]
+        # a streak's two ends found as two candidates, fitted to the one molecule -- on the channels'
+        # sum too: a 4Pi fit of the 2017 tubulin data had 9 % of its fits within a pixel of another of the
+        # same frame, which the authors' fit of the same frames has as one (docs/4pi.md §26)
+        once = one_per_molecule(np.asarray(locs["x_pix"]), np.asarray(locs["y_pix"]),
+                                np.asarray(locs["frame"]), np.asarray(locs["peak_x_pix"]),
+                                np.asarray(locs["peak_y_pix"]))
+        self.stats["duplicates"] += int((~once).sum())
+        locs = locs[once]
         self.stats["localizations"] += len(locs)
         cal = getattr(self.model, "calibration", None)
         if hasattr(cal, "phase_per_nm"):

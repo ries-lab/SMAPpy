@@ -11,10 +11,15 @@ import numpy as np
 import scipy.io as sio
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from tubulin_common import DATA, MOVIE, OUT, REGISTRATION, FIELDS, layout  # noqa: E402
+from tubulin_common import DATA, FIELDS, MOVIE, OUT, REGISTRATION, layout
 
-from smappy.channels import bead_projections, describe_map, register_channels, save_registration  # noqa: E402
-from smappy.io.dcimg import open_dcimg  # noqa: E402
+from smappy.channels import (
+    bead_projections,
+    describe_map,
+    register_channels,
+    save_registration,
+)
+from smappy.io.dcimg import open_dcimg
 
 OUT.mkdir(exist_ok=True)
 lay = layout()

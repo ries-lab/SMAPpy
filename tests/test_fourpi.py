@@ -342,9 +342,10 @@ def test_without_the_slope_the_plugin_asks_for_the_model(cal, drifting, tmp_path
 
 # ---------------------------------------------------------------- models from beads
 
-def _bead_scan(truth, gains=(1.0, 0.85, 0.95, 0.9), steps=(0.0,), beads=5, seed=11):
+def _bead_scan(truth, gains=(1.0, 0.85, 0.95, 0.9), steps=(0.0,), beads=5, seed=11, drifts=None):
     """Beads scanned through z with ``truth``, their phase moving with z, each at its own phase and a
-    little off the grid's focus, at the mirror ``steps``: (beads, C, Z, M, y, x) in photons."""
+    little off the grid's focus, at the mirror ``steps``: (beads, C, Z, M, y, x) in photons.  ``drifts``:
+    per bead, the cavity's drift through its scan, rad per slice."""
     nz, size = truth.volumes.shape[2], 25
     centre = (size - 1) / 2
     rng = np.random.default_rng(seed)
@@ -353,9 +354,10 @@ def _bead_scan(truth, gains=(1.0, 0.85, 0.95, 0.9), steps=(0.0,), beads=5, seed=
         phi_b, shift = rng.uniform(-np.pi, np.pi), rng.uniform(-2, 2)
         zi = np.arange(nz - 1, dtype=float) + shift
         z_nm = truth.z_index_to_nm(zi)
+        drift = 0.0 if drifts is None else drifts[b] * np.arange(nz - 1)
         per_step = []
         for s in steps:
-            phase = truth.phase_per_nm * z_nm + phi_b + s
+            phase = truth.phase_per_nm * z_nm + phi_b + s + drift
             spots = fourpi.spots(truth, np.full(len(zi), centre), np.full(len(zi), centre),
                                  zi, phase, size)                # (z, C, y, x)
             per_step.append(rng.poisson(40000 * np.clip(spots, 0, None)
@@ -405,6 +407,24 @@ def test_a_bead_scan_without_phase_steps_gives_back_the_model(cal, channels):
     assert fringe < 0.05 * np.mean(np.hypot(v[1], v[2]))
     bias, spread, error = _z_back(found, truth)
     assert abs(bias) < 5 and spread < 1.2 * error
+
+
+def test_scans_whose_cavity_drifted_each_its_own_way_keep_their_interference_at_a_rate_per_scan():
+    """Three one-bead scans, the cavity drifting through each at its own rate (0, +0.03 and -0.03 rad per
+    slice), as the 2017 tubulin data's Cell03 -- 05 did: at one rate for all, the beads' phases drift apart
+    towards the scan's ends and the model's interference is averaged away there (modulation 0.66 against
+    0.80 at 500 nm); at each scan's own rate it is the truth's everywhere, and the rates come back."""
+    truth = fourpi.model_calibration(offsets=[0.0, -2.1, 3.0, 1.1])
+    stacks = _bead_scan(truth, beads=3, drifts=[0.0, 0.03, -0.03])[:, :, :, 0]
+    one = fourpi.iab_from_beads(stacks, dz=truth.dz, channels="shared")
+    per = fourpi.iab_from_beads(stacks, dz=truth.dz, channels="shared", scan_of=[0, 1, 2])
+    w = truth.dz * abs(truth.phase_per_nm)
+    assert np.allclose(per.parameters["w_per_bead"], w + np.array([0.0, 0.03, -0.03]), atol=0.003)
+    assert np.allclose(one.parameters["w_per_bead"], per.parameters["w_per_slice"])
+    for z in (-500.0, 500.0):
+        target = fourpi.modulation(truth, z).mean()
+        assert fourpi.modulation(per, z).mean() == pytest.approx(target, abs=0.02)
+        assert fourpi.modulation(one, z).mean() < target - 0.08
 
 
 @pytest.mark.slow

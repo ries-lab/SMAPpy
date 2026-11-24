@@ -431,8 +431,12 @@ threshold* of the brightest one, both of any two closer than *isolation*.
 A bead brighter or dimmer than the median one by more than *outlier factor*
 is marked excluded in the table, where it can be let in again.  The channels are
 registered from the same images (an affine map from a few beads, a
-projective one from eight or more), and every channel's box (*box*) is cut
-where the registration puts the bead.
+projective one from eight or more, a shift where the beads all sit in one
+place), or, by *registration*, from a field of beads or a saved
+registration; every channel's box (*box*) is cut where the registration
+puts the bead.  A file in a scan's folder that the channels do not fit (a
+crop of one channel saved beside the scan) is left out, and the progress
+says so.
 
 **3. The model,** by the method:
 - **pupil model (uiPSF):** uiPSF's 4Pi pupil model.  One pupil per objective,
@@ -1083,6 +1087,15 @@ themselves, else the microscope's.
 
 ### x corners
 On the chip, as SMAP's 4Pi settings give them (`x4pi`).
+
+### registration
+*from the scans* registers the channels on the scans' own beads, which is
+right for scans of many beads spread over the field.  Scans of one bead
+each, or of a few in one place, fix where the channels lie there and
+nothing of how they are turned or scaled: then choose *from beads* -- a
+field of many beads taken in the same layout, measured once and kept
+beside it -- or *from a registration file*.  The pupil model then keeps
+the maps as given instead of learning them.
 
 ### mirror steps
 As set on the deformable mirrors.  Which way round they act is found from

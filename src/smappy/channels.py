@@ -370,7 +370,7 @@ YALE_4PI = from_corners([151, 389, 1474, 1713], [0, 0, 0, 0], 168, 168,
 
 # ----------------------------------------------------------------- 4Pi's channels part
 #: where a 4Pi's phase channels are on the chip, in the words its *channels* part offers
-FOURPI_LAYOUTS = (("auto", "the file's, else the microscope's"), ("microscope", "the microscope's"),
+FOURPI_LAYOUTS = (("auto", "the file's, the microscope's or the model's"), ("microscope", "the microscope's"),
                   ("file", "as the file lays them out"), ("typed", "typed corners"),
                   ("yale", "4Pi-SMS (Bewersdorf lab)"))
 FOURPI_TYPED = ("x_corners", "y_corners", "width", "height", "mirrored")
@@ -383,7 +383,8 @@ class FourPiChannelsSettings:
     The maps between the channels are not here: they are the model's, learnt with the PSF."""
     layout: str = param("auto", label="layout", choices=FOURPI_LAYOUTS,
                         help="where the phase channels are: the file's own layout, the "
-                             "microscope's (the database), typed, or the 4Pi-SMS design")
+                             "microscope's (the database), typed, or the 4Pi-SMS design; "
+                             "auto: the file's, else the microscope's, else the model's")
     x_corners: str = param("0, 200, 400, 600", label="x corners", unit="px",
                            help="each channel's left edge on the chip, comma-separated")
     y_corners: str = param("0, 0, 0, 0", label="y corners", unit="px",
@@ -646,15 +647,15 @@ def _spread(points: np.ndarray) -> float:
 
 
 def register_channels(projections, settings=None, match_px: float = 3.0,
-                      min_spread_px: float = 10.0) -> Registration:
+                      min_spread_px: float = 3.0) -> Registration:
     """Maps of every channel onto channel 0 from bead projections.
 
     ``projections`` is one (C, h, w) array per bead acquisition: each
     channel's image summed over the stack (`bead_projections`).  Beads of
     every acquisition are pooled.  Beads that reach less than
     ``min_spread_px`` (rms) along some direction give a shift alone: a
-    rotation or scale needs beads apart, and at a few mrad it moves the
-    channels by less than a tenth of a pixel over the 10 px they reach.
+    rotation or scale needs beads apart, and at 20 mrad it moves the
+    channels by less than a tenth of a pixel over the 3 px they reach.
     """
     from .calibrate.dual import bead_registration, fit_dual_transform
     from .dualfit import _match

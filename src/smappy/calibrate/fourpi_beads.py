@@ -371,7 +371,7 @@ def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
     from ..channels import bead_positions, register_channels
     from .input import discover_acquisitions
     tell = progress or (lambda text: None)
-    scans, seen = [], set()
+    scans, seen, skipped = [], set(), []
     # folders as the window's list holds them: each scan in them, one per series, in the order the Stacks
     # page lists them (`input.discover_acquisitions`, sorted by path) -- a bead's "stack" is its file there,
     # and in the order the files were added the rings of bead12_ fell on bead13_
@@ -384,8 +384,20 @@ def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
             continue
         seen.add(key)
         tell(f"reading {Path(path).name} ({len(scans) + 1})")
-        stack, layout = read_scan(path, settings, camera)
+        try:
+            stack, layout = read_scan(path, settings, camera)
+        except ValueError as error:
+            # a file the channels do not fit, beside the scans in their folder: the 2017 tubulin data's Cell03
+            # holds a 168 x 168 crop of one channel saved next to its DCIMG series.  Left out, and said so;
+            # refused only when no file fits
+            if "do not fit" not in str(error):
+                raise
+            skipped.append(f"{Path(path).name}: {error}")
+            tell(f"left out {skipped[-1]}")
+            continue
         scans.append((path, stack, layout))
+    if not scans:
+        raise ValueError("the channels fit none of the scans -- " + "; ".join(skipped))
     layout = scans[0][2]
     if any(s[2].size != layout.size or s[2].n_channels != layout.n_channels for s in scans):
         raise ValueError("the scans' channels differ in size or number")
