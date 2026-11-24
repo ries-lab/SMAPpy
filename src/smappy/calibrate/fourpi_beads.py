@@ -161,7 +161,8 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
         start = rough_start(batch, model)
         start["transforms"] = None                   # the model's own, the maps given, not the centroids'
     fit = learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm, start=start)
-    fit.recipe = recipe
+    if fit is not None:                              # what `save` keeps, to start from it again (in situ)
+        fit.recipe = recipe
     return fit
 
 
