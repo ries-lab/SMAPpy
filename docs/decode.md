@@ -777,7 +777,8 @@ the baselines on the benchmark, not reproduce their outputs.
    before netfit's C = 2: [`decode/plex-plan.md`](decode/plex-plan.md) (2026-11-19).
 6. **C = 4 with phase.**  No working baseline: against Spline 4Pi and its
    CRLB on the same simulations, then on Nup96.  Hao's branch is read for
-   parts and ideas only.
+   parts and ideas only.  The renderer (`netfit/render_4pi.py`) and the phase convention
+   are done, and the design is `docs/4pi.md` §30 (2026-11-25).
 7. **GUI.**  The fitter on the channel layer, the *Train* window, the
    de-biasing plugin, plugin pages.
 8. **Extra input maps.**  Chip coordinates (field-dependent PSFs) and sCMOS

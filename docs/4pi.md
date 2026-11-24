@@ -2285,8 +2285,8 @@ Ordered by what a user of a 4Pi-SMS would hit first.
    against the 4Pi photons, and colours assigned from it as *Assign colours* does with MINFLUX's `dcr`.
    The authors' `Cell01_ratio.mat` and `…_two_color.mat` are the check.  Colour from the s/p ratio inside
    the 4Pi cavity (the other route M7 names) needs no second camera, but this data cannot test it.
-2. **DECODE for 4Pi** (`docs/decode.md` §10 step 6): nothing yet.  It waits on the torch IAB renderer
-   (step 1) and settling the phase convention against the C++ `CSpline4Pi` on one bead stack.  A 4Pi network
+2. **DECODE for 4Pi** (`docs/decode.md` §10 step 6): the torch IAB renderer and the phase convention are done
+   (P5, §30); the network is designed there, not started.  A 4Pi network
    outputs the phase as well (one mixture with a von Mises factor, not Hao's two), so it is not netfit's C = 2
    plus two channels.  Dense tubulin, where the fitter's ROIs overlap, is where it should gain most.
 3. **Speed.**  The fitter is C++ on the CPU, 4× a 2C fit per spot (measured below); the whole movie is an
@@ -2773,3 +2773,109 @@ over all of it, the scatter on the even blocks' sure ones), against the authors'
 **Not done.**  A background that is not flat in a molecule's box, or the neighbours fitted with it, which is what
 this sample needs before in situ can learn from it; molecules chosen sparser (alone over several boxes and
 frames); the period held at the beads' while learning; the tied model on the Nup96.
+
+## 30. DECODE for 4Pi: the design, and the renderer (P5, 2026-11-25)
+
+Work package P5 (§25), step 6 of `docs/decode.md` §10: netfit at C = 4, with the interference phase as one more
+quantity of each molecule.  Three stages, each landed on its own: (1) a torch IAB renderer equal to `CSpline4Pi`,
+with the phase convention settled; (2) the network; (3) judged on simulations against the CRLB and Spline 4Pi, then
+on Nup96 and Gabin's tubulin.  Stage 1 is done (below); Jonas agreed the design on 2026-11-25.
+
+### Stage 1: the renderer (done)
+
+**`netfit/render_4pi.py`, `IABRenderer`.**  Draws ``N (I_c + A_c cos phi + B_c sin phi)`` in every channel in torch,
+on any device, from a `FourPiCalibration` as the fitter reads it (`fit_coeff`, (C, nz, ny, nx, 3, 64)): the
+geometry of `render.SplineRenderer` and of `CSpline4Pi::prepare` -- a square of ``min(nx, ny) - 3`` pixels around the
+nearest pixel, the voxel clamped to the grid and the fraction not, z by `z_nm_to_index`, negative values set to 0
+after I, A and B are summed (as `fourpi.add_frames`).  Each spot is drawn in each channel at that channel's own
+position, ``x``, ``y`` of shape (m, C), so the registration is the caller's.  Checked (`tests/test_netfit_render_4pi.py`):
+
+| check | result |
+| --- | --- |
+| against `fourpi.spots` (numpy), z beyond the grid at both ends, phases beyond pi | < 10^-6 of the peak |
+| noise-free torch spots of 10^5 photons, channels shifted by up to 0.4 px, fitted by Spline 4Pi's C++ | x, y < 0.002 px, z < 0.1 nm, phase < 0.001 rad, N < 0.1 % |
+| frames on the channel images against `fourpi.add_frames` cut by a layout (mirrored and stretched channels) | < 10^-4 of the peak |
+| float32 on MPS against the CPU | < 10^-5 of the peak |
+
+(The C++ fit's own float32 precision is the limit of the second row: the models are one.)  Speed, a 64 × 64
+four-channel frame with 40 spots, 23-px squares, on the Mac while other sessions loaded it: 7 500 spots/s on the CPU,
+9 500 on MPS, against 34 000 and 40 -- 60 000 for one channel's spline (`render.SplineRenderer`).  A 4Pi spot is
+twelve times a one-channel spot's data per pixel (four channels, three splines): the gather of 192 coefficients per
+pixel is the cost, the arithmetic one 64-term product per spot (a spot's fractions are the same for all its
+pixels).  On the CPU 256 spots per gather stay in the caches and run three times as fast as 1024; a GPU takes 1024.
+A training batch of 32 three-frame samples with ~50 molecules each is ~5 000 spots: half a second on the Mac,
+milliseconds on the 4090 or the H100, where the trainings run.
+
+**The phase convention, settled on beads** (`benchmarks/fourpi/phase_convention.py`).  SMAPpy keeps each channel's
+phase offset inside its own A_c and B_c, and the channels share one phase with nothing added (`smappy.fourpi`).
+DECODE_Internal's branch `4pi-simulation` (Hao Sha) reads uiPSF v1's files the same way (A = 2 Re, B = -2 Im) and
+then adds o_c = 0, pi/2, pi, 3 pi/2 per channel, cos(phi + o_c) and sin(phi + o_c) (`psf_kernel.py:1812`, `:2183`).
+Both fitted by the C++ fitter to the 1134 bead ROIs uiPSF v1 learned its model from (18 beads × 3 mirror phases ×
+21 planes), the branch's convention as A and B turned by o_c:
+
+| convention | Σ log L | median log L / ROI | period from the phase | the mirrors' steps (set +2, -2 rad) |
+| --- | --- | --- | --- | --- |
+| SMAPpy's | -2 132 646 | -1 580 | 258.5 nm | +2.06, -2.12 |
+| the branch's | -4 637 977 | -3 713 | 594.8 nm | -0.02, +0.05 |
+
+SMAPpy's fits every one of the ROIs better, and only it gives back the steps and the period; the branch counted the
+channels' offsets twice (`docs/decode.md` §2, "4Pi", item 2).  The renderer, the fitter and the training share
+SMAPpy's.
+
+### Stage 2: the network (proposed)
+
+**How Hao's network outputs the phase, and why ours differs.**  The branch's `loss.py` (`_vmmm_core_loss`) has a
+phase head with ``tanh``, read as ``phase = (pi t + pi) mod 2 pi``, and a sigma head read as the concentration
+``kappa = 1 / (sigma + 10^-4)``; the loss is ``3 (GMM(N, x, y, z), bg, 10 VMM(phi))``, the von Mises mixture over the
+pixels with the detection map's weights, separate from the position's mixture.  Three things differ here, each for
+a reason:
+
+1. **One mixture.**  Each component is Normal(N, x, y, z) × von Mises(phi) -- one molecule, one pixel, its phase.
+   In two mixtures a true molecule's phase may be explained by another pixel than its position, and the two
+   likelihoods need weights set by hand (the 10 and the 3).  The joint likelihood needs none: the phase is one more
+   factor of the molecule's density, as z is.
+2. **The mean as a point on the circle.**  The head gives two numbers, (c, s), and the mean is ``atan2(s, c)``
+   (normalised, so only the direction is learnt).  A scalar through ``tanh`` has an edge: phases just below +pi and
+   just above -pi are neighbours on the circle and opposite ends of the output, where ``tanh`` is flattest -- the
+   network has to jump across its whole range between two nearly equal spots, and is least able to there.  (c, s)
+   is continuous all round.
+3. **The concentration as a log.**  ``kappa = exp(k)`` (or softplus), with the von Mises' normaliser
+   ``log I_0(kappa)`` computed stably as ``log i0e(kappa) + kappa`` (torch's ``i0e``).  The reported
+   ``phase_err_rad`` is ``1 / sqrt(kappa)``, the Gaussian width the fitter's CRLB is, to which it tends at the
+   concentrations a molecule has (kappa of a few hundred to thousands).
+
+**What the network outputs is the fitter's table.**  The phase as the fitter reports it -- ``phase_per_nm z +
+phase0``, wrapped -- and z the envelope's (`z_env_nm`), not z from the phase: that needs the cavity's phase0, which
+drifts and is found from many molecules over time (*4Pi z*, `fourpi.cavity_phase`), which no single window can
+know.  So netfit's table has `z_nm` = `z_env_nm`, `phase_rad`, `phase_err_rad`, and *4Pi z* runs on it unchanged.
+One photon count, the total over the channels, as the fitter's shared N (the channels' shares are in their
+splines); a background per channel (Hao's branch had one for all four, though the channels' backgrounds differ).
+
+**Inputs.**  Netfit's two-channel grid (`netfit.channels.TwoChannels`, plex-plan §16) generalised to C channels: the
+network's grid is channel 0's pixels, every other channel moved onto it by a whole-pixel shift, the registration's
+remainder ``d_c(p)`` as two offset maps per channel (six for C = 4), read only where all four channels hold the
+camera's pixels.  The layout and the maps from the 4Pi model or the microscope (`fit_4pi.layout_of`), as Spline 4Pi
+takes them.  Early fusion, which won C = 2's architecture study (plex-plan §16): the four channels and their offset
+maps stacked as one input of the per-frame U-Net; netfit's other parts as they are (ConvGRU, 3 frames; the mixture
+with the reported sigma; `mixture_peak`).
+
+**Training sets** drawn with `IABRenderer`: molecules uniform in the crop at z uniform over the model's range, each
+channel's spot where the registration puts it; the cavity's phase0 per sample uniform on the circle, drifting within
+the window as `fourpi.cavity_drift` draws it (a rate and a random walk per frame, from the prefit); a background
+per channel and frame; the camera on each channel.  On-time 1 -- 3 frames (Jonas's rule).  The models: v2's bead
+model of the Ries-lab Nup96 (`~/.cache/uipsf/p2/bead_v2_4pi.h5`, with its maps) and P1's pupil model of the tubulin
+microscope (`smappy_p1/pupil_680_100_held_4pi.h5`).  The prefit -- backgrounds, photons, the phase's drift rate --
+by Spline 4Pi on the movie, as the two-channel job is prefitted by Spline 3D 2C (`netfit/prefit_two.py`).
+
+**Where.**  `netfit/channels.py` (C channels), `netfit/simulate.py` (a 4Pi batch), `netfit/network.py`'s `Layout`
+(a phase head), `netfit/loss.py` (the von Mises factor), `netfit/extract.py` (the phase and its error), the job's
+prefit and `fit_decode.py` reading a 4Pi model; trainings on gpuvm or decodebox.
+
+### Stage 3: judged (planned)
+
+On simulations at several densities, sparse to tubulin's ~70 a frame: detection (Jaccard), lateral and z RMSE
+against the CRLB of Spline 4Pi (`Global4PiPSF`'s), the phase's RMSE against its CRLB, z after *4Pi z*, the
+wrong-fringe share -- near focus (|z| < 300 nm) first, z beside lateral, the frame window labelled -- against Spline
+4Pi on the same frames, where its boxes overlap at density.  Then the Ries-lab Nup96 (the two rings' separation and
+the share of uncertain fringes, as §10 and §27 judge a model) and Gabin's tubulin against Spline 4Pi and the
+authors' localizations (§26).
