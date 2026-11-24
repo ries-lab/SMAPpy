@@ -144,36 +144,86 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     (`channels.ChannelLayout.maps`), held as given instead of learnt -- for beads that all sit in one place,
     which fix where the channels are there and nothing of their turn or scale (one-bead scans, docs/4pi.md
     §26); None learns them, started from the beads' centroids."""
-    from dataclasses import replace
-
-    import uipsf
-    from uipsf.model import PerObservation, make_pupil, pupil_grid
-    from uipsf.model.fourpi import FourPiModel
     from uipsf.workflows.fourpi import learn_fourpi
     spec = spec if spec is not None else FourPiBeadSettings().psf
-    if kind == "scalar" and magnitude_modes is None and spec.magnitude == "symmetric":
-        spec = replace(spec, magnitude="free")       # the scalar model needs every mode (above)
-    px = (pixel_size_nm, pixel_size_nm) if np.isscalar(pixel_size_nm) else tuple(pixel_size_nm)
-    optics = uipsf.Optics(NA=NA, wavelength_nm=wavelength_nm, n_imm=n_imm, n_med=n_imm if n_med is None else n_med,
-                          pixel_size_nm=px)
-    grid = pupil_grid(optics, spec, size=64, device=device)
-    pupils = [make_pupil(optics, spec, grid=grid, magnitude_override=magnitude_modes) for _ in range(2)]
     batch = beads.batch(read_noise_var)
     C, M = beads.data.shape[1], beads.data.shape[3]
-    model = FourPiModel(grid, batch.data.shape[-2:], n_channels=C, n_phases=M, n_max=spec.order,
-                        steps_rad=steps_rad, bead_radius_nm=bead_radius_nm, pupils=pupils,
-                        sigma_nm=(spec.blur_nm, spec.blur_nm), fit_sigma=spec.blur != "fixed",
-                        intensity=PerObservation() if photons_per_observation else None, kind=kind, plates=plates,
-                        round_sigma=spec.blur == "round", same_magnitude=same_magnitude,
-                        pixel_blur=spec.pixel_blur, learn_n_med=bool(getattr(spec, "learn_n_med", False)),
-                        transforms=None if maps is None else [np.asarray(m, float) for m in maps[1:]],
-                        fit_transform=maps is None)
+    recipe = {"NA": NA, "wavelength_nm": wavelength_nm, "n_imm": n_imm, "n_med": n_med,
+              "pixel_size_nm": pixel_size_nm, "roi_shape": tuple(batch.data.shape[-2:]), "n_channels": C,
+              "n_phases": M, "steps_rad": list(steps_rad), "spec": spec, "bead_radius_nm": bead_radius_nm,
+              "photons_per_observation": photons_per_observation, "kind": kind, "plates": plates,
+              "magnitude_modes": magnitude_modes, "same_magnitude": same_magnitude,
+              "maps": None if maps is None else [np.asarray(m, float).tolist() for m in maps]}
+    model = build_model(recipe, device=device)
     start = None
     if maps is not None:
         from uipsf.model.fourpi_start import rough_start
         start = rough_start(batch, model)
         start["transforms"] = None                   # the model's own, the maps given, not the centroids'
-    return learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm, start=start)
+    fit = learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm, start=start)
+    fit.recipe = recipe
+    return fit
+
+
+def build_model(recipe: dict, device=None, roi_shape=None):
+    """The `FourPiModel` ``recipe`` describes (`learn`'s arguments, as `save` keeps them with the model):
+    the optics, the PSF model's spec, the channels and steps, the bead and the form, and the maps where they
+    were held.  ``roi_shape`` replaces the recipe's boxes."""
+    from dataclasses import asdict, replace
+
+    import uipsf
+    from uipsf.model import PerObservation, make_pupil, pupil_grid
+    from uipsf.model.fourpi import FourPiModel
+    r = dict(recipe)
+    spec = r["spec"]
+    if isinstance(spec, dict):
+        spec = PSFModelSettings(**{k: v for k, v in spec.items() if k in PSFModelSettings.__dataclass_fields__})
+    if r["kind"] == "scalar" and r.get("magnitude_modes") is None and spec.magnitude == "symmetric":
+        spec = replace(spec, magnitude="free")       # the scalar model needs every mode (`learn`)
+    px = r["pixel_size_nm"]
+    px = (px, px) if np.isscalar(px) else tuple(px)
+    n_imm, n_med = r["n_imm"], r.get("n_med")
+    optics = uipsf.Optics(NA=r["NA"], wavelength_nm=r["wavelength_nm"], n_imm=n_imm,
+                          n_med=n_imm if n_med is None else n_med, pixel_size_nm=px)
+    grid = pupil_grid(optics, spec, size=64, device=device)
+    modes, maps = r.get("magnitude_modes"), r.get("maps")
+    pupils = [make_pupil(optics, spec, grid=grid, magnitude_override=modes) for _ in range(2)]
+    model = FourPiModel(grid, tuple(roi_shape or r["roi_shape"]), n_channels=r["n_channels"], n_phases=r["n_phases"],
+                        n_max=spec.order, steps_rad=r["steps_rad"], bead_radius_nm=r["bead_radius_nm"],
+                        pupils=pupils, sigma_nm=(spec.blur_nm, spec.blur_nm), fit_sigma=spec.blur != "fixed",
+                        intensity=PerObservation() if r["photons_per_observation"] else None, kind=r["kind"],
+                        plates=r["plates"], round_sigma=spec.blur == "round", same_magnitude=r["same_magnitude"],
+                        pixel_blur=spec.pixel_blur, learn_n_med=bool(getattr(spec, "learn_n_med", False)),
+                        transforms=None if maps is None else [np.asarray(m, float) for m in maps[1:]],
+                        fit_transform=maps is None)
+    model.recipe = dict(r, spec=asdict(spec))
+    return model
+
+
+def recipe_record(recipe: dict) -> dict:
+    """``recipe`` as a file keeps it: the spec a plain dict."""
+    from dataclasses import asdict, is_dataclass
+    spec = recipe["spec"]
+    return dict(recipe, spec=asdict(spec) if is_dataclass(spec) else dict(spec),
+                roi_shape=list(recipe["roi_shape"]))
+
+
+def shared_record(shared: dict) -> dict:
+    """A model's learnt shared values as plain lists, by name, to keep in a file."""
+    return {k: np.asarray(v.detach().cpu() if hasattr(v, "detach") else v, float).tolist() for k, v in shared.items()}
+
+
+def model_from_calibration(cal, device=None, roi_shape=None):
+    """(`FourPiModel`, shared values) of a 4Pi calibration a pupil model was saved to with its recipe and
+    values (`save`), to start from again -- in situ (`calibrate/fourpi_insitu.py`).  None for one without
+    them: a bead average, uiPSF v1's, or one saved before they were kept."""
+    import torch
+    record = (cal.parameters or {}).get("model")
+    values = (cal.parameters or {}).get("shared")
+    if not record or not values:
+        return None
+    model = build_model(record, device=device, roi_shape=roi_shape)
+    return model, {k: torch.as_tensor(np.asarray(v, np.float32)) for k, v in values.items()}
 
 
 def save(fit, path, z_range_nm: float = 600.0, dz_nm: float = 25.0, roi_px: Optional[int] = None,
@@ -183,7 +233,12 @@ def save(fit, path, z_range_nm: float = 600.0, dz_nm: float = 25.0, roi_px: Opti
     from uipsf.workflows.fourpi import calibration
 
     from ..fourpi import save_fourpi_calibration
-    cal = calibration(fit, z_range_nm=z_range_nm, dz_nm=dz_nm, roi_px=roi_px)
+    extra = {}
+    recipe = getattr(fit, "recipe", None)
+    if recipe is not None:
+        # what `model_from_calibration` rebuilds the model from, to start from it again (in situ)
+        extra = {"parameters": {"model": recipe_record(recipe), "shared": shared_record(fit.shared())}}
+    cal = calibration(fit, z_range_nm=z_range_nm, dz_nm=dz_nm, roi_px=roi_px, **extra)
     if layout is not None:
         cal.layout = layout.to_dict()
     save_fourpi_calibration(path, cal, overwrite=overwrite)
