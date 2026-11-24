@@ -327,7 +327,8 @@ beads with specks left out, a bead scoring above
 $$s_\mathrm{med} + \max\left( k\, \sigma_s, s_\mathrm{med} \right)$$
 
 is marked a double, $k$ the *doubles (k)*; it is excluded as a bead
-excluded by hand is.  Fewer than five beads have no median to go by, and
+excluded by hand is.  In two channels each is judged on its own, and a pair
+is a double when either of its beads is.  Fewer than five beads have no median to go by, and
 none is marked.  On the DECODE example beads, taken on an EMCCD with an
 astigmatic lens, the doubles scored 0.22 to 0.71 against a median of 0.09
 ($\sigma_s$ 0.03); on the Zenodo example beads the highest of 58 scored

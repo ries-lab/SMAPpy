@@ -1019,6 +1019,8 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
         ra, rb = channels[0].records[a], channels[1].records[b]
         record = dict(ra, id=i, channel_records=[ra, rb])
         record['x_px'], record['y_px'] = ra['full_image_xy']
+        # a double in either channel spoils the pair; the main channel's alone missed the secondary's
+        record['double'] = bool(ra.get('double')) or bool(rb.get('double'))
         record['brightness_accepted'] = ra['brightness_accepted'] and rb['brightness_accepted']
         record['brightness_reason'] = '; '.join(f'{name}: {r["brightness_reason"]}' for name, r in
                     zip(('main', 'secondary'), (ra, rb)) if not r['brightness_accepted']) or 'accepted'

@@ -443,9 +443,11 @@ def dual_rois(stacks, camera, settings=None, slices=KEEP) -> BeadROIs:
     roi_xy = np.stack([[_origin(stacks[s]) + (x, y) for s, x, y in centres] for centres in per_channel], 1)
     batch, noise = _batch(data, saturated, cuts[0][2], camera, roi_xy[:, 0], [c[0] for c in per_channel[0]],
                           roi_xy)
-    records = [{"id": i, "stack": m[0], "x_px": m[1], "y_px": m[2],
+    # `double` kept from the pair: without it `detected_marks` found no doubles in two channels and left
+    # them in, where one channel's records pre-exclude them
+    records = [{"id": i, "stack": m[0], "x_px": m[1], "y_px": m[2], "double": bool(r.get("double")),
                 "channels": [{"x_px": m[1], "y_px": m[2]}, {"x_px": sc[1], "y_px": sc[2]}]}
-               for i, (m, sc) in enumerate(zip(*per_channel))]
+               for i, (m, sc, r) in enumerate(zip(*per_channel, pairs))]
     messages = [f"{int((~fitted.accepted).sum())} of {len(fitted.accepted)} pairs off the starting transform",
                 f"{len(beads.records) - len(keep)} of {len(beads.records)} pairs too dim, both channels "
                 f"together: not used"]

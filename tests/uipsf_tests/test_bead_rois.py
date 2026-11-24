@@ -120,6 +120,34 @@ def test_pairs_their_rois_and_a_starting_transform_come_back_from_a_simulated_ch
     assert torch.equal(batch.field_xy, batch.roi_xy[:, 0])
 
 
+def test_a_pair_marked_double_stays_marked_in_the_two_channel_rois(monkeypatch):
+    """Two channels lost the pair's `double`, so the pupil model never pre-excluded doubles there."""
+    from smappy.calibrate import dual
+    from smappy.calibrate.core import doubles
+    from smappy.calibrate.dual import ArrangementSettings
+    found = dual.collect_dual_beads
+
+    def one_double(stacks, settings):
+        beads = found(stacks, settings)
+        beads.records[3]["double"] = True
+        return beads
+    monkeypatch.setattr(dual, "collect_dual_beads", one_double)
+    stacks, _, _ = zip(*[_chip(H_SMALL @ SHIFT, seed) for seed in range(2)], strict=True)
+    told = ArrangementSettings(layout="up-down", main_channel="upper")
+    rois = dual_rois(list(stacks), CAMERA, DualColorSettings(roi_size=15, channels=told), slices=slice(None))
+    assert doubles(rois.records) == [3]
+
+
+def test_a_pair_is_a_double_when_either_channel_saw_one():
+    from smappy.calibrate.dual import ArrangementSettings, collect_dual_beads
+    stack, _, _ = _chip(H_SMALL @ SHIFT, 0)
+    told = ArrangementSettings(layout="up-down", main_channel="upper")
+    beads = collect_dual_beads([stack], DualColorSettings(roi_size=15, channels=told))
+    for r in beads.records:
+        main, second = r["channel_records"]
+        assert r["double"] == (bool(main.get("double")) or bool(second.get("double")))
+
+
 @pytest.mark.slow
 def test_aberrations_come_back_through_smappys_reading_and_uipsfs_learning():
     """End to end: beads drawn by uipsf's model into ADU stacks on a chip, read, converted and cut by smappy,
