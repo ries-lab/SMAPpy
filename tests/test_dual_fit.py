@@ -619,7 +619,10 @@ def test_spline_2c_has_no_registration_from_the_movie_and_refuses_a_map_with_its
     from smappy.calibrate.dual import ChannelTransform, with_registration
     from smappy.plugins.fit import DualSplineFit, from_movie
     settings = DualSplineFit().Settings()
-    assert [f.name for f in fields(settings.model.registration)] == ["path"]
+    names = [f.name for f in fields(settings.model.registration)]
+    assert names[:2] == ["map", "path"] and not any(n.startswith("calibrate") for n in names)
+    assert [v for v, _ in fields(settings.model.registration)[0].metadata["smappy"].choices] == \
+        ["calibration", "file"]
     assert not from_movie(settings)
     assert DualSplineFit().measured(None, settings) is None
     beads, moved = dual_calibration(ratio=0.3), dual_calibration(dx=1.4, dy=0.8, ratio=0.3)
@@ -735,9 +738,9 @@ def test_gaussian_2c_says_when_its_registration_file_overrules_the_split_but_not
     save_channel_transform(path, ChannelTransform(cal.transformation, dict(cal.geometry), {}))
     plugin = DualGaussianFit()
     settings = plugin.Settings()
-    settings.model.registration.path, settings.model.registration.calibrate = str(path), False
+    settings.model.registration.path, settings.model.registration.map = str(path), "file"
     settings.channels.layout, settings.channels.main_channel = "right-left", "right"
     assert "registration file splits the chip up-down" in plugin.arrangement_conflict(settings)
     # measured from the movie, it is measured with the channels part: nothing overrules it
-    settings.model.registration.calibrate = True
+    settings.model.registration.map = "movie"
     assert plugin.arrangement_conflict(settings) is None

@@ -1,5 +1,5 @@
 ---
-version: "13"
+version: "14"
 covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.geometry_layout, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.pipeline.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.multichannel.SplitEngine, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
 ---
 
@@ -34,8 +34,9 @@ What it needs:
   conversion and offset, exactly as for the single-channel fitter.
 * **The transformation between the halves**: where the secondary half sees
   what the main half sees -- the [registration](plugin:Panels/Glossary) of the
-  two channels, also called channel alignment or chromatic correction.  There are three ways to get it.  Tick *calibrate
-  from this movie* and it is measured from the movie itself, which is the
+  two channels, also called channel alignment or chromatic correction.  There are three ways to get it, all in the
+  *channel registration* part.  Its *map* on *from this movie*, the default,
+  measures it from the movie itself, which is the
   usual route, because in a ratiometric experiment every molecule is already
   imaged in both halves.  Or choose a file: one written by an earlier run of
   this plugin or by *Analysis/Register/Calibrate transform* (`*_2ct.h5`), or a
@@ -287,7 +288,7 @@ localizations are written to the file as they are fitted; when a finishing
 step changed them, the file is written once more with the finished table,
 and every step goes into its history.
 
-**Calibrating from the movie.**  With *registration* > *from this movie* ticked, a
+**Calibrating from the movie.**  With the *channel registration*'s *map* on *from this movie*, a
 first pass runs before the fit.  It fits frames of the movie with a plain
 [Gaussian 2D](plugin:Localize/Gaussian 2D) fit read as two channels, with the
 same camera and detection settings as the real fit: the halves are cut apart
@@ -412,7 +413,7 @@ offers a Gaussian PSF beside its spline.  Where the code departs from the public
   $(1 - f)\,h$ above).  A mirrored half is flipped back as it is cut, so $f$
   is close to 1 for any splitter.
 * **No bead calibration is needed.**  The paper builds its transformation from
-  beads; here the movie alone can give it (*registration* > *from this movie*), by
+  beads; here the movie alone can give it (*map* > *from this movie*), by
   voting on the vectors between localizations of the same frame.
 * **Colour from the free photon split only.**  The paper also fits each
   molecule with the photon ratio fixed at each dye's value and keeps the most
@@ -444,16 +445,17 @@ calibration.
 ### model.link_sigma
 Worth ticking only to test whether the two halves really differ in width.
 
-### model.registration.path
-Ignored when *registration* > *from this movie* is ticked.
-
-### model.registration.calibrate
-On by default: this fitter has no bead calibration to bring a map along, and
-a movie's thousands of pairs measure it where the splitter is today.  Untick
-it to use a *transformation* file instead -- for a movie too sparse to
-register on, or to fit several movies with one map.  The calibration pass
+### model.registration.map
+*from this movie* by default: this fitter has no bead calibration to bring a
+map along, and a movie's thousands of pairs measure it where the splitter is
+today.  *file* uses a *transformation* file instead -- for a movie too sparse
+to register on, or to fit several movies with one map.  The calibration pass
 fits at most *at most* frames with a plain Gaussian; then the real fit runs
-over the whole movie.
+over the whole movie.  The part shows only what the map chosen reads: the
+pass's settings for the movie, the file and the *move* for a file.
+
+### model.registration.path
+Read only when *map* is *file*.
 
 ### model.registration.calibrate_locs
 10,000 in the dim channel is usually plenty; a sparse movie runs out of frames
@@ -496,9 +498,9 @@ It has to cover what the voted offset alone cannot: a 3 degree rotation over
 About seven times the residual of a healthy registration (0.13 px); tighter
 strips the edges of the field.
 
-### model.move.move
-How far the splitter's second channel moved on the chip since the beads, on
-top of the registration: the beads' map with a translation, constant or
+### model.registration.move
+Shown when the *map* is a *file*.  How far the splitter's second channel
+moved on the chip since that map was measured, on top of it: the beads' map with a translation, constant or
 over the frames.  A move of a pixel or more leaves the peaks of the two
 channels unpaired and each molecule fitted twice, once in each half, with
 the other half's box in the wrong place.  *typed* takes the rows and
@@ -518,9 +520,10 @@ against the frame with the move, and what is left after the move against
 z -- a slope there means the registration and the PSF models disagree,
 which a move cannot mend.  The measurement is kept beside the movie
 (`<movie>.channel_move.json`), so later previews and runs read it; the
-line under *move* says what was found.  Unlike *registration* > *from this
-movie*, which measures a new map with a plain Gaussian, this keeps the
-beads' map and measures with the model that made it.
+line under *move* says what was found.  Over a map from this movie there is
+no *move*: it would be the same Gaussians on the same movie, and measure
+nothing.  Only *over time* is offered there, the two channels drifting
+against each other during the acquisition, measured as above as a shift.
 *measured* is the default.  Where too few pairs are found to measure it,
 the fit goes on with the registration as it is and says so.  A constant
 move whose blocks differ by more than a quarter pixel is said to change:

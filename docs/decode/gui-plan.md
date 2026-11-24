@@ -179,6 +179,10 @@ typed move or none, and after a move pair nothing.
   and the calibration's sha256) and said in the run's text.  The part shows the move found in a line and
   a *Measure* button (`Plugin.part_runs` / a part window) that measures and draws the figure: the preview
   before a long inference.  Batches and chains measure by the same setting.
+  (2026-11-24, Jonas: in Spline 3D 2C and Gaussian 2D 2C the move is now folded into one *channel
+  registration* part with the map -- the calibration's or a file for Spline, from this movie or a file
+  for Gaussian, whose movie map takes no move but *over time*; DECODE and the training keep the move
+  alone, their map always the calibration's.  Spline 3D 2C no longer measures a map from the movie.)
 - **Applied through the registration**: a constant move as a translation of the map
   (`fit_two.moved_calibration`), a move over time as the map per block of frames -- for *DECODE* the
   offset maps per block, which a translation keeps within what the network was trained on.

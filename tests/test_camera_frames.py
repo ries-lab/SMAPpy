@@ -231,7 +231,7 @@ def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(t
         camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
         # the simulation names no microscope: its split is chosen, as the tutorial chooses it
         channels=ChannelsSettings(layout="up-down", main_channel="upper"),
-        model=DualGaussianModelSettings(registration=ChannelTransformSettings(calibrate=True, calibrate_skip=0)),
+        model=DualGaussianModelSettings(registration=ChannelTransformSettings(map="movie", calibrate_skip=0)),
         output=OutputSettings(path=str(tmp_path / "two.hdf5"))))
     probe = np.array([[5.0, 105.0], [95.0, 195.0], [50.0, 150.0]])
     true = (np.c_[probe, np.ones(3)] @ dual_transformation().T)[:, :2]

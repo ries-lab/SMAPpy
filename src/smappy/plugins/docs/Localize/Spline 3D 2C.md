@@ -52,8 +52,8 @@ What it needs:
   single-channel calibration or a SMAP `_3dcal.mat` will not do.  Left
   empty, *calibration* is *auto*, as in [Spline 3D](plugin:Localize/Spline 3D).
   When the splitter has moved since the beads, the PSFs and the map still
-  hold: *channel move* measures how far the second channel moved, with this
-  fit, and fits with the map moved by it.  There is no map measured from
+  hold: the *channel registration*'s *move* measures how far the second
+  channel moved, with this fit, and fits with the map moved by it.  There is no map measured from
   the movie with a plain Gaussian, as Gaussian 2D 2C has: a Gaussian's
   centre is not the spline's, so such a map is off by a few nanometres in
   ways that change with z.
@@ -458,15 +458,19 @@ drawn for another index than the calibration's.
 ### model.sample.sample_index
 In grey, the index the choice stands for; typing over it makes it *typed*.
 
+### model.registration.map
+*the calibration's*: the map the beads measured with the PSFs.  *file*: a
+transformation file in its place.
+
 ### model.registration.path
-A `_2ct.h5` from [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) or a
+Read only when *map* is *file*.  A `_2ct.h5` from [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) or a
 registration, used in place of the calibration's own; the PSFs are still the
 calibration's.  It must put the main channel on the same half as the
 calibration does, or the fit refuses: each PSF was made from its own half.
-For a splitter that moved since the beads, leave it empty and let *channel
-move* measure how far.
+For a splitter that moved since the beads, keep the calibration's map and
+let *move* measure how far.
 
-### model.move.move
+### model.registration.move
 How far the splitter's second channel moved on the chip since the beads, on
 top of the registration: the beads' map with a translation, constant or
 over the frames.  A move of a pixel or more leaves the peaks of the two

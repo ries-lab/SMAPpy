@@ -7,7 +7,7 @@ half sees what the first sees), a fit that fits both spots of a pair at once,
 and the colour assignment from the photon ratio.
 
 The transformation is measured from the movie itself (the model's
-*registration*, "from this movie") because that is the route that needs nothing else -- no beads, no
+*channel registration*, map "from this movie") because that is the route that needs nothing else -- no beads, no
 earlier file -- and the one most 2D users will take; a bead calibration or a
 saved ``_2ct.h5`` is said rather than shown.  3D, where the beads are needed
 for the PSF anyway, is the next tutorial.
@@ -156,19 +156,18 @@ def make(d) -> None:
            spot=[layout, main], point=layout, zoom=d.around(layout, 760))
 
     d.chapter("The transformation")
-    calibrate = field(panel, "model.registration.calibrate")
+    calibrate = field(panel, "model.registration.map")
     expand(calibrate)
-    type_into(panel, "model.registration.calibrate", True)
+    type_into(panel, "model.registration.map", "movie")
     d.settle()
-    d.shot("Under the model's registration, from this movie is ticked: the "
-           "transformation is measured from the movie's own molecules, which appear "
+    d.shot("Under the model's channel registration, the map is from this movie: "
+           "the transformation is measured from the movie's own molecules, which appear "
            "in both halves. No beads needed.",
            spot=[calibrate], point=calibrate,
            zoom=d.around(calibrate, 760))
-    path = field(panel, "model.registration.path")
-    d.shot("It is saved beside the result, to use again here. A dual-colour bead "
-           "calibration works too.",
-           spot=[path], point=path, zoom=d.around(path, 760))
+    d.shot("It is saved beside the result, to use again with the map set to file. "
+           "A dual-colour bead calibration works there too.",
+           spot=[calibrate], point=calibrate, zoom=d.around(calibrate, 760))
 
     d.chapter("The fit")
     model = section_of(panel, "model")

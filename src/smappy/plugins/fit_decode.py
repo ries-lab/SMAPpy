@@ -553,10 +553,10 @@ class DecodeFit(_FitPlugin):
         m = settings.two_channels.move
         if m.move == "none":
             return None, None
-        from .fit import DualModelSettings, DualSplineFit, DualSplineFitSettings
+        from .fit import DualModelSettings, DualSplineFit, DualSplineFitSettings, calibration_map
         spline = DualSplineFitSettings(source=settings.source, camera=settings.camera,
                                        model=DualModelSettings(calibration=str(two_channel_calibration(settings, meta)),
-                                                               move=m))
+                                                               registration=calibration_map(m)))
         return DualSplineFit().channel_move(spline, report)
 
     @staticmethod

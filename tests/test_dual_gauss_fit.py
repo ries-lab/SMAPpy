@@ -225,7 +225,7 @@ def test_the_2c2d_plugin_calibrates_on_the_movie_and_then_fits_it(tmp_path):
         source=SourceSettings(path=str(stack), chunk=50),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
-        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(calibrate=True, calibrate_frames=150)),
+        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(map="movie", calibrate_frames=150)),
         fit=FitSettings(roisize=13),
         output=OutputSettings(path=str(tmp_path / "out.hdf5"))))
 
@@ -270,7 +270,7 @@ def test_the_preview_shows_the_registration_it_measured_and_the_run_reuses_it(tm
         source=SourceSettings(path=str(stack), chunk=50),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
-        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(calibrate=True, calibrate_frames=150)),
+        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(map="movie", calibrate_frames=150)),
         fit=FitSettings(roisize=13),
         output=OutputSettings(path=str(tmp_path / "out.hdf5"))))
     measured = []
@@ -316,7 +316,7 @@ def test_without_a_microscope_the_split_is_chosen_never_detected(tmp_path):
         source=SourceSettings(path=str(stack)),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
-        model=DualGaussianModelSettings(registration=ChannelTransformSettings(calibrate=True, calibrate_skip=0)))
+        model=DualGaussianModelSettings(registration=ChannelTransformSettings(map="movie", calibrate_skip=0)))
     preview = DualGaussianFit().preview(Context(), settings, frame=0)
     assert "choose the layout" in preview.text
     with pytest.raises(ValueError, match="choose the layout"):
@@ -335,7 +335,7 @@ def test_a_failed_measurement_is_said_in_the_preview_not_raised(tmp_path):
         source=SourceSettings(path=str(stack)),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=1e6),    # nothing found
-        model=DualGaussianModelSettings(registration=ChannelTransformSettings(calibrate=True, calibrate_skip=0))))
+        model=DualGaussianModelSettings(registration=ChannelTransformSettings(map="movie", calibrate_skip=0))))
     preview = DualGaussianFit().preview(Context(), settings, frame=0)
     assert "measuring the transformation failed" in preview.text
     assert "channel registration" not in preview.plots
@@ -362,7 +362,7 @@ def test_a_saved_transformation_is_used_when_one_is_given(tmp_path):
         source=SourceSettings(path=str(stack), chunk=10),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
-        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(path=str(path), calibrate=False)),
+        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(path=str(path), map="file")),
         fit=FitSettings(roisize=13),
         output=OutputSettings(save=False)))
 
@@ -405,7 +405,7 @@ def test_a_2d_2c_run_reads_its_transformation_once_and_a_measured_one_not_at_all
         source=SourceSettings(path=str(stack), chunk=4),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
-        model=DualGaussianModelSettings(registration=ChannelTransformSettings(path=str(path), calibrate=False)),
+        model=DualGaussianModelSettings(registration=ChannelTransformSettings(path=str(path), map="file")),
         fit=FitSettings(roisize=13), output=OutputSettings(save=False)))
     plugin = DualGaussianFit()
     assert len(plugin.run(Context(), settings).locs) > 10
@@ -414,7 +414,7 @@ def test_a_2d_2c_run_reads_its_transformation_once_and_a_measured_one_not_at_all
     reads.clear()
     monkeypatch.setattr(DualGaussianFit, "_calibrate",
                         lambda self, ctx, s, save=True: SimpleNamespace(transform=t))
-    settings.model.registration.calibrate = True
+    settings.model.registration.map = "movie"
     assert len(plugin.run(Context(), settings).locs) > 10
     assert reads == []
 
@@ -423,7 +423,7 @@ def test_it_says_so_when_there_is_no_transformation_at_all(tmp_path):
     from smappy.plugins.fit import (DualGaussianFit, DualGaussianFitSettings,
                                     SourceSettings)
     settings = DualGaussianFitSettings(source=SourceSettings(path=str(tmp_path / "x.tif")))
-    settings.model.registration.calibrate = False                     # unticked, and no file
+    settings.model.registration.map = "file"                     # unticked, and no file
     assert "this movie" in DualGaussianFit().preflight(Context(), settings).text
     with pytest.raises(ValueError, match="needs a transformation"):
         settings.model.registration.load()
@@ -435,13 +435,13 @@ def test_without_a_transformation_the_question_offers_calibrating_not_a_doomed_r
     from smappy.plugins import PreflightQuestion
     from smappy.plugins.fit import DualGaussianFit, DualGaussianFitSettings
     settings = DualGaussianFitSettings()
-    settings.model.registration.calibrate = False                     # unticked, and no file
+    settings.model.registration.map = "file"                     # unticked, and no file
     question = DualGaussianFit().preflight(None, settings)
     assert isinstance(question, PreflightQuestion) and question.run_label == ""
     (choice,) = question.choices
-    assert choice.settings.model.registration.calibrate
-    assert not settings.model.registration.calibrate                  # the form's own untouched
-    settings.model.registration.calibrate = True
+    assert choice.settings.model.registration.map == "movie"
+    assert settings.model.registration.map == "file"                 # the form's own untouched
+    settings.model.registration.map = "movie"
     assert DualGaussianFit().preflight(None, settings) is None
 
 

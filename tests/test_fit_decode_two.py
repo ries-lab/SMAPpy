@@ -132,7 +132,7 @@ def test_a_move_measured_is_spline_3d_2c_s_on_the_model_s_calibration_and_what_t
     asked = []
 
     def measured(self, settings, report=lambda text: None):
-        asked.append((settings.model.calibration, settings.model.move.move))
+        asked.append((settings.model.calibration, settings.model.registration.move))
         return ChannelMove(np.array([[0.5, -1.25]]), None, {"how": "measured", "pairs": 99}), None
     monkeypatch.setattr(DualSplineFit, "measure_move", measured)
     DualSplineFit._moves.clear()

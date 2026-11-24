@@ -334,8 +334,8 @@ channel's are.  Beside them it finds what only two channels have:
   and named the dye right more often, but found fewer of the dimmest
   molecules.
 
-*channel move* is the two-channel fitters' own part: *none*, *typed* or
-*measured*.  A splitter that moved since the beads (Fig. 2a's 5.8 rows)
+*channel move* is the *move* of the two-channel fitters' *channel
+registration*: *none*, *typed* or *measured*.  A splitter that moved since the beads (Fig. 2a's 5.8 rows)
 leaves Spline 3D 2C pairing the wrong spots; the prefit moves the
 registration by it first.  *measured* measures it as
 [Spline 3D 2C](plugin:Localize/Spline 3D 2C) does, with x and y free in

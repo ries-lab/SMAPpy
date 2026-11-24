@@ -43,7 +43,7 @@ def _settings(movie, calibration, **move):
     from smappy.pipeline import FitSettings
     from smappy.plugins.fit import (
         CameraSettings,
-        ChannelMoveSettings,
+        SplineTransformSettings,
         DetectionSettings,
         DualModelSettings,
         DualSplineFitSettings,
@@ -55,7 +55,7 @@ def _settings(movie, calibration, **move):
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=20.0),
         model=DualModelSettings(calibration=str(calibration), link_photons=False,
-                                move=ChannelMoveSettings(**{"blocks": 3, "block_frames": 10, **move})),
+                                registration=SplineTransformSettings(**{"blocks": 3, "block_frames": 10, **move})),
         fit=FitSettings(roisize=13), output=OutputSettings(path=""))
 
 
@@ -192,3 +192,27 @@ def test_the_table_records_the_registration_it_was_fitted_with_the_correction_co
     # unmoved: the beads' own
     none = plugin.run(Context(), _settings(movie, calibration, move="none")).locs
     np.testing.assert_allclose(none.metadata["registration_used"]["transformation"], np.asarray(cal.transformation))
+
+
+def test_one_channel_registration_part_shows_what_its_map_and_move_read():
+    from smappy.plugins.fit import (ChannelTransformSettings, SplineTransformSettings, move_of,
+                                    registration_shown, registration_title)
+    gauss = ChannelTransformSettings()                       # the map from this movie, by default
+    shown = registration_shown(gauss)
+    assert shown["model.registration.calibrate_frames"] and not shown["model.registration.path"]
+    # over the movie's map a move measured once is nothing: only the drift over time is offered
+    assert not shown["model.registration.move"] and shown["model.registration.over_time"]
+    assert not shown["model.registration.blocks"]
+    assert move_of(gauss).move == "none" and registration_title(gauss).endswith("from this movie")
+    gauss.over_time = True
+    assert move_of(gauss).move == "measured" and move_of(gauss).learn == "shift"
+    assert registration_shown(gauss)["model.registration.blocks"]
+    assert registration_title(gauss).endswith("from this movie, drift over time")
+    gauss.map, gauss.path, gauss.over_time = "file", "beads_2ct.h5", False
+    shown = registration_shown(gauss)
+    assert shown["model.registration.path"] and not shown["model.registration.calibrate_frames"]
+    assert shown["model.registration.move"] and move_of(gauss).move == "measured"
+    spline = SplineTransformSettings(move="typed", columns=2.0)
+    shown = registration_shown(spline)
+    assert not shown["model.registration.path"] and shown["model.registration.columns"]
+    assert registration_title(spline) == "channel registration: the calibration's, move typed"

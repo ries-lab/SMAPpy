@@ -972,16 +972,8 @@ class _FitPlugin(Plugin):
                         channels, self._microscope_summary(settings))
                 if self.channel_part == "two":
                     registration = settings.model.registration
-                    measured = from_movie(settings)
-                    state.titles["model.registration"] = "registration: " + (
-                        "from this movie" if measured else
-                        Path(registration.path).name if registration.path else
-                        "the calibration's" if hasattr(settings.model, "calibration") else
-                        "none chosen")
-                    state.active["model.registration.path"] = not measured
-                    for name in () if not hasattr(registration, "calibrate") else ("calibrate_frames", "calibrate_locs", "calibrate_blocks",
-                                 "calibrate_skip", "measure"):
-                        state.active[f"model.registration.{name}"] = measured
+                    state.titles["model.registration"] = registration_title(registration)
+                    state.shown.update(registration_shown(registration))
         region = getattr(settings, "region", None)
         if region is not None:
             state.titles["region"] = region.summary()
@@ -1265,8 +1257,7 @@ class _FitPlugin(Plugin):
                 if written is not None and transform.path in (
                         "", getattr(self, "_default_transform", None)):
                     updates["model.registration.path"] = str(written)
-                    if hasattr(transform, "calibrate"):
-                        updates["model.registration.calibrate"] = False
+                    updates["model.registration.map"] = "file"
                     self._default_transform = str(written)
             # a recipe drawn with a bead calibration: a spline fitter fits
             # with that calibration, unless one was chosen
@@ -1790,29 +1781,91 @@ class SplineFitSettings(_Finishing, _Writing, _Reading):
 TRANSFORM_FILTER = ("Channel transformation (*_2ct.h5 *.h5 *.hdf5);;"
                     "All files (*)")
 
+#: how a two-channel fitter takes the channel move (`smappy.channel_move`, gui-plan §4b)
+MOVES = (("none", "none"), ("typed", "typed"), ("measured", "measured"))
+
+
+# The move's fields, made by functions so that each registration part puts them after its own map
+# (dataclass inheritance would put them first); DECODE's and the training's part is the move alone.
+def _move():
+    # measured by default (Jonas, 2026-11-23): a splitter moves between days, and a move left out pairs nothing;
+    # where it cannot be measured the fit goes on with the registration as it is, and says so
+    return param("measured", label="move", choices=MOVES,
+                 help="none: the map as it is; typed: moved by the rows and columns below; "
+                      "measured: from this movie, by the fit with x and y free per channel "
+                      "(Preview shows it; kept beside the movie)")
+
+
+def _rows():
+    return param(0.0, label="moved by", unit="rows",
+                 help="how far the second channel lies from where the map puts it, along the chip's rows")
+
+
+def _columns():
+    return param(0.0, label="and", unit="columns", beside=True, help="the same along the columns")
+
+
+def _over_time(help="a smooth curve over the frames instead of one move: for a splitter that drifts "
+                    "during the acquisition (the figure shows the drift either way)"):
+    return param(False, label="over time", help=help)
+
+
+def _learn():
+    # a shift, or an affine -- the shift with a rotation, scale and shear, constant over the movie (Jonas,
+    # 2026-11-23); either way one correction composed with the map
+    return param("shift", label="learn", choices=(("shift", "shift"), ("affine", "affine")), beside=True,
+                 help="shift: how far the second channel moved; affine: also how it turned, scaled and "
+                      "sheared, learnt from the same pairs (for a splitter turned since the beads)")
+
+
+def _blocks():
+    return param(20, label="blocks", min=2, advanced=True,
+                 help="blocks of frames spread over the movie the move is measured on")
+
+
+def _block_frames():
+    return param(50, label="frames a block", min=5, advanced=True, beside=True, help="frames in each block")
+
+
+@dataclass
+class ChannelMoveSettings:
+    """How far a split camera's second channel moved on the chip since the beads, on top of their map:
+    DECODE's and the DECODE training's part, whose map is always the calibration's, and what the
+    fitters' *channel registration* hands `smappy.channel_move` (`move_of`)."""
+    move: str = _move()
+    rows: float = _rows()
+    columns: float = _columns()
+    over_time: bool = _over_time()
+    learn: str = _learn()
+    blocks: int = _blocks()
+    block_frames: int = _block_frames()
+
+
+MOVE_FIELDS = ("move", "rows", "columns", "over_time", "learn", "blocks", "block_frames")
+
+
 @dataclass
 class ChannelTransformSettings:
-    """Where the second channel is.
+    """Gaussian 2D 2C's *channel registration*: where the second channel is.
 
-    Either a transformation measured earlier -- by *Register/Calibrate
-    transform*, or a dual-colour bead calibration, which carries one -- or one
-    measured from this very movie: fit its first frames with a plain Gaussian
-    over the whole frame, register the pairs, and go on to the real fit with
-    the result.  The second is the usual case, because a ratiometric
-    experiment images every molecule twice and so carries its own
-    registration; a saved file is for when the splitter is known to be stable,
-    or when the data are too sparse to register on.
-    """
+    The *map* measured from this very movie -- its first frames fitted with a plain Gaussian, the
+    pairs registered, the real fit run with the result -- or a file's: from *Calibrate transform*,
+    a dual-colour bead calibration or an earlier run.  The movie is the usual case: a ratiometric
+    experiment images every molecule twice and so carries its own registration; a file is for a
+    splitter known to be stable, or data too sparse to register on.
+
+    One part with the move (`ChannelMoveSettings`'s fields), because the two answer one question.
+    Over a map measured from the movie a move measured once is the same Gaussians on the same movie,
+    nothing; only *over time* adds to it, the channels drifting during the acquisition."""
+    # the movie by default (the user's, 2026-11-05): a Gaussian fit has no bead calibration to bring a
+    # map along, and the movie's own thousands of pairs measure it where the splitter is today
+    map: str = param("movie", label="map", choices=(("movie", "from this movie"), ("file", "file")),
+                     help="from this movie: fit its first frames with a plain Gaussian and register "
+                          "the pairs; file: a transformation measured earlier")
     path: str = param("", label="transformation", kind="open_file",
                       file_filter=TRANSFORM_FILTER,
                       help="from Register/Calibrate transform, or a dual-colour "
                            "bead calibration")
-    # on by default (the user's, 2026-11-05): a Gaussian fit has no bead calibration to bring a
-    # map along, and the movie's own thousands of pairs measure it where the splitter is today;
-    # Spline 3D 2C has no such field: its calibration carries a map (`SplineTransformSettings`)
-    calibrate: bool = param(True, label="from this movie",
-                            help="ignore the file: fit the first frames with a "
-                                 "plain Gaussian and register them")
     # A cap, not a target: what is wanted is enough *pairs*, and how many
     # frames that takes depends entirely on the sample and the dye.
     calibrate_frames: int = param(5000, label="at most", unit="frames", min=50,
@@ -1840,75 +1893,110 @@ class ChannelTransformSettings:
     save_calibration: bool = param(True, label="save it", advanced=True,
                                    help="write the measured transformation "
                                         "beside the output, as *_2ct.h5")
+    move: str = _move()
+    rows: float = _rows()
+    columns: float = _columns()
+    over_time: bool = _over_time()
+    learn: str = _learn()
+    blocks: int = _blocks()
+    block_frames: int = _block_frames()
 
     def load(self):
         from ..calibrate.transform import load_transform
         if not self.path:
             raise ValueError("a two-channel fit needs a transformation: choose a "
-                             "file, or tick the registration's 'from this movie'")
+                             "file, or set the registration's map to 'from this movie'")
         return load_transform(self.path)
 
 
 @dataclass
 class SplineTransformSettings:
-    """Spline 3D 2C's registration: the calibration's own or a file's; the PSFs are always the
-    calibration's.  No *from this movie*: a Gaussian's centres are not the spline's, so a map
-    measured with one put the channels a few nm apart in z-dependent ways; a splitter moved since
-    the beads is the *channel move*'s, measured with the spline model itself."""
+    """Spline 3D 2C's *channel registration*: the calibration's map or a file's, and the move on top;
+    the PSFs are always the calibration's.  No map from the movie: a Gaussian's centres are not the
+    spline's, so a map measured with one put the channels a few nm apart in z-dependent ways; a
+    splitter moved since the beads is the move's, measured with the spline model itself."""
+    map: str = param("calibration", label="map", choices=(("calibration", "the calibration's"), ("file", "file")),
+                     help="the calibration's: the beads' own; file: a _2ct.h5 in its place, with the "
+                          "calibration's PSFs")
     path: str = param("", label="transformation", kind="open_file", file_filter=TRANSFORM_FILTER,
-                      help="empty: the calibration's own; a _2ct.h5 to use instead, with the "
-                           "calibration's PSFs")
+                      help="a _2ct.h5 to use in place of the calibration's map")
+    move: str = _move()
+    rows: float = _rows()
+    columns: float = _columns()
+    over_time: bool = _over_time()
+    learn: str = _learn()
+    blocks: int = _blocks()
+    block_frames: int = _block_frames()
 
     def load(self):
         from ..calibrate.transform import load_transform
+        if not self.path:
+            raise ValueError("the registration's map is a file, and none is chosen")
         return load_transform(self.path)
 
 
 def from_movie(settings) -> bool:
-    """Whether the registration is measured from the movie: Gaussian 2D 2C's *from this movie*; the
-    spline fitter's part has no such field."""
-    return bool(getattr(settings.model.registration, "calibrate", False))
+    """Whether the registration's map is measured from the movie (Gaussian 2D 2C's)."""
+    return getattr(settings.model.registration, "map", "") == "movie"
 
 
-#: how a two-channel fitter takes the channel move (`smappy.channel_move`, gui-plan §4b)
-MOVES = (("none", "none"), ("typed", "typed"), ("measured", "measured"))
+def registration_file(registration) -> str:
+    """The file the map is read from, or "" when it is the movie's or the calibration's."""
+    return registration.path if getattr(registration, "map", "file") == "file" else ""
 
 
-@dataclass
-class ChannelMoveSettings:
-    """How far a split camera's second channel moved on the chip since the beads, on top of their
-    registration: the same part in every two-channel fitter and the DECODE training's prefit."""
-    # measured by default (Jonas, 2026-11-23): a splitter moves between days, and a move left out pairs nothing;
-    # where it cannot be measured the fit goes on with the registration as it is, and says so
-    move: str = param("measured", label="move", choices=MOVES,
-                      help="none: the registration as it is; typed: moved by the rows and columns below; "
-                           "measured: from this movie, by the fit with x and y free per channel "
-                           "(Preview shows it; kept beside the movie)")
-    rows: float = param(0.0, label="moved by", unit="rows",
-                        help="how far the second channel lies from where the registration puts it, along the "
-                             "chip's rows")
-    columns: float = param(0.0, label="and", unit="columns", beside=True, help="the same along the columns")
-    over_time: bool = param(False, label="over time",
-                            help="a smooth curve over the frames instead of one move: for a splitter that "
-                                 "drifts during the acquisition (the figure shows the drift either way)")
-    # what the correction to the beads' map learns (Jonas, 2026-11-23): a shift, or an affine -- the shift with a
-    # rotation, scale and shear, constant over the movie; either way one correction composed with the map
-    learn: str = param("shift", label="learn", choices=(("shift", "shift"), ("affine", "affine")), beside=True,
-                       help="shift: how far the second channel moved; affine: also how it turned, scaled and "
-                            "sheared, learnt from the same pairs (for a splitter turned since the beads)")
-    blocks: int = param(20, label="blocks", min=2, advanced=True,
-                        help="blocks of frames spread over the movie the move is measured on")
-    block_frames: int = param(50, label="frames a block", min=5, advanced=True, beside=True,
-                              help="frames in each block")
+def move_of(registration) -> ChannelMoveSettings:
+    """The move a *channel registration* asks for, as `smappy.channel_move` takes it.  Over a map
+    from the movie: none, or measured as a shift when *over time* asks for the drift."""
+    if getattr(registration, "map", "") == "movie":
+        return ChannelMoveSettings(**{**{f: getattr(registration, f) for f in MOVE_FIELDS},
+                                      "move": "measured" if registration.over_time else "none",
+                                      "learn": "shift"})
+    if isinstance(registration, ChannelMoveSettings):
+        return registration
+    return ChannelMoveSettings(**{f: getattr(registration, f) for f in MOVE_FIELDS})
 
 
-def move_shown(prefix: str, s: ChannelMoveSettings) -> Dict[str, bool]:
-    """Which of the part's rows the form shows: the move typed or how it is measured."""
-    return {f"{prefix}.rows": s.move == "typed", f"{prefix}.columns": s.move == "typed",
-            f"{prefix}.over_time": s.move == "measured", f"{prefix}.learn": s.move == "measured",
-            f"{prefix}.blocks": s.move == "measured",
-            f"{prefix}.block_frames": s.move == "measured"}
+def calibration_map(move: ChannelMoveSettings) -> SplineTransformSettings:
+    """Spline 3D 2C's *channel registration* with the calibration's map and ``move`` on top: how
+    DECODE and its training measure a move, with the spline model that made the map."""
+    return SplineTransformSettings(**{f: getattr(move, f) for f in MOVE_FIELDS})
 
+
+def move_shown(prefix: str, s) -> Dict[str, bool]:
+    """Which of a part's move rows the form shows: the move typed or how it is measured; over a map
+    from the movie only *over time* (and how it is measured, while it is on)."""
+    movie = getattr(s, "map", "") == "movie"
+    measured = s.over_time if movie else s.move == "measured"
+    return {f"{prefix}.move": not movie,
+            f"{prefix}.rows": not movie and s.move == "typed", f"{prefix}.columns": not movie and s.move == "typed",
+            f"{prefix}.over_time": movie or s.move == "measured", f"{prefix}.learn": not movie and s.move == "measured",
+            f"{prefix}.blocks": measured, f"{prefix}.block_frames": measured}
+
+
+def registration_title(s) -> str:
+    """The part's title: where the map comes from, then the move on top of it."""
+    if s.map == "movie":
+        where = "from this movie"
+    elif s.map == "calibration":
+        where = "the calibration's"
+    else:
+        where = Path(s.path).name if s.path else "no file chosen"
+    m = move_of(s)
+    moved = ("" if m.move == "none" else ", drift over time" if s.map == "movie"
+             else f", move {m.move}" + (" over time" if m.move == "measured" and m.over_time else ""))
+    return f"channel registration: {where}{moved}"
+
+
+def registration_shown(s) -> Dict[str, bool]:
+    """Which rows of a fitter's *channel registration* the form shows: the map's own, then the move's."""
+    shown = {"model.registration.path": getattr(s, "map", "file") == "file"}
+    if hasattr(s, "calibrate_frames"):
+        for name in ("calibrate_frames", "calibrate_locs", "calibrate_blocks", "calibrate_skip", "measure",
+                     "save_calibration"):
+            shown[f"model.registration.{name}"] = s.map == "movie"
+    shown.update(move_shown("model.registration", s))
+    return shown
 
 # The links two channels can share, declared once for both two-channel
 # models.  Fields made by functions rather than inherited, for the reason the
@@ -1977,10 +2065,9 @@ class DualModelSettings(_LinkedChannels):
         "the split the calibration's two PSFs carry")
     # where the second channel is: the calibration's own map or a file's; the channels'
     # rectangles are the *channels* part's
+    # and how far it moved on the chip since the beads, on top of that map (gui-plan §4b)
     registration: SplineTransformSettings = param(default_factory=SplineTransformSettings,
-                                                  label="registration", collapsed=True)
-    # how far the second channel moved on the chip since the beads, on top of the registration (gui-plan §4b)
-    move: ChannelMoveSettings = param(default_factory=ChannelMoveSettings, label="channel move", collapsed=True)
+                                                  label="channel registration", collapsed=True)
 
     def load(self):
         from ..calibrate.dual import load_dual_color_calibration
@@ -2380,7 +2467,7 @@ class _TwoChannelFit(_FitPlugin):
         """``(ChannelMove or None, the measurement's data or None)`` the part asks for: none, typed, or
         measured -- from this instance's or the movie's cache (`channel_move.cached`), else now."""
         from ..channel_move import ChannelMove
-        m = settings.model.move
+        m = move_of(settings.model.registration)
         if m.move == "typed":
             move = ChannelMove.typed(m.columns, m.rows)
             return (None if move.is_zero() else move), None
@@ -2408,7 +2495,7 @@ class _TwoChannelFit(_FitPlugin):
     def move_key(self, settings) -> str:
         """What the measurement depends on: the movie, the registration and the settings it runs with."""
         from ..channel_move import cache_key
-        what = {"fitter": type(self).__name__, "move": asdict(settings.model.move), "model": asdict(settings.model),
+        what = {"fitter": type(self).__name__, "move": asdict(move_of(settings.model.registration)), "model": asdict(settings.model),
                 "detection": asdict(settings.detection) if hasattr(settings, "detection") else None,
                 "frames": [settings.source.start, settings.source.stop], "camera": asdict(settings.camera),
                 "channels": asdict(settings.channels) if hasattr(settings, "channels") else None}
@@ -2423,7 +2510,7 @@ class _TwoChannelFit(_FitPlugin):
         from ..locs import concat
         from ..multichannel import MultiChannelEngine
         from ..pipeline import drive
-        m = settings.model.move
+        m = move_of(settings.model.registration)
         source = self.open_source(settings)
         layout = source.layout
         camera = self._camera(settings)
@@ -2638,8 +2725,7 @@ class _TwoChannelFit(_FitPlugin):
 
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
-        state.shown.update(move_shown("model.move", settings.model.move))
-        if settings.model.move.move == "measured" and settings.source.path:
+        if move_of(settings.model.registration).move == "measured" and settings.source.path:
             # a move measured before says what it found, under the part's own name
             try:
                 from ..channel_move import cached
@@ -2647,7 +2733,8 @@ class _TwoChannelFit(_FitPlugin):
             except Exception:
                 found = None
             if found is not None:
-                state.hints["model.move.move"] = found.line()
+                state.hints["model.registration.over_time" if from_movie(settings)
+                            else "model.registration.move"] = found.line()
         if state.notice is None:
             try:
                 conflict = self.arrangement_conflict(settings)
@@ -2919,7 +3006,7 @@ class _TwoChannelFit(_FitPlugin):
             try:
                 return self._with_move(settings, lambda: self._layer_preview(ctx, settings, frame), ctx.report)
             except Exception as error:
-                if settings.model.move.move != "measured":
+                if move_of(settings.model.registration).move != "measured":
                     raise
                 move_failed = str(error) or type(error).__name__
                 return self._layer_preview(ctx, settings, frame), None, None
@@ -2927,7 +3014,7 @@ class _TwoChannelFit(_FitPlugin):
         if move is not None:
             result.text = f"{result.text}\n{move.line()}"
             result.data["channel_move"] = move
-            if settings.model.move.move == "measured":
+            if move_of(settings.model.registration).move == "measured":
                 from ..channel_move import draw
                 result.plots = {**result.plots, "channel move": draw(move, data)}
         elif move_failed:
@@ -3199,13 +3286,13 @@ class DualSplineFit(_TwoChannelFit):
         # typed focus after the registration was first read, which must not be kept for the fit
         sample = settings.model.sample
         drawn = f"|{sample.focus_nm}|{sample.n_med()}" if sample.focus == "typed" else ""
-        return f"{settings.model.calibration}|{settings.model.registration.path}{drawn}"
+        return f"{settings.model.calibration}|{registration_file(settings.model.registration)}{drawn}"
 
     def read_registration(self, settings):
         """The dual-colour calibration: both PSFs, and its registration or the file's in place of it."""
         from ..calibrate.dual import with_registration
         calibration = settings.model.load()
-        if settings.model.registration.path:
+        if registration_file(settings.model.registration):
             return with_registration(calibration, settings.model.registration.load())
         return calibration
 
@@ -3255,7 +3342,9 @@ def _measuring_key(settings, sigma: float) -> Optional[str]:
         stat = Path(src.path).stat()
     except (OSError, TypeError, ValueError):
         return None
-    transform = replace(settings.model.registration, path="", save_calibration=False)
+    # the map's own settings: the move on top of it changes nothing the pass measures
+    transform = replace(settings.model.registration, path="", save_calibration=False,
+                        **{f: getattr(ChannelMoveSettings(), f) for f in MOVE_FIELDS})
     return repr((str(Path(src.path).resolve()), stat.st_size, stat.st_mtime_ns,
                  replace(src, live=False), settings.camera, settings.channels,
                  settings.detection, settings.fit,
@@ -3349,8 +3438,7 @@ class DualGaussianModelSettings(_LinkedChannels):
     # where the second channel is: a file's map or the movie's; the channels' rectangles are
     # the *channels* part's
     registration: ChannelTransformSettings = param(default_factory=ChannelTransformSettings,
-                                                   label="registration", collapsed=True)
-    move: ChannelMoveSettings = param(default_factory=ChannelMoveSettings, label="channel move", collapsed=True)
+                                                   label="channel registration", collapsed=True)
 
     def model(self, channels: int = 2):
         from ..psf import GlobalGaussianPSF
@@ -3396,14 +3484,15 @@ class DualGaussianFit(_TwoChannelFit):
     # 9: positions on the camera chip, as Spline 3D 2C's 11
     # 10: the calibration pass a two-channel fit, its pairs one per channel, no seam measured
     # 11: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`), drawn on either
-    version = "13"
+    # 14: one *channel registration*, the map and the move; over the movie's own map no move unless over time
+    version = "14"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):
         return settings.model.model()
 
     def registration_path(self, settings) -> str:
-        return settings.model.registration.path
+        return registration_file(settings.model.registration)
 
     def read_registration(self, settings):
         """A transformation off disk, or the one in a dual-colour calibration."""
@@ -3420,11 +3509,11 @@ class DualGaussianFit(_TwoChannelFit):
         camera = super().preflight(ctx, settings)
         if camera is not None:
             return camera
-        if settings.model.registration.calibrate or settings.model.registration.path:
+        if from_movie(settings) or settings.model.registration.path:
             return None
         from dataclasses import replace as _replace
         calibrated = _replace(settings, model=_replace(
-            settings.model, registration=_replace(settings.model.registration, calibrate=True)))
+            settings.model, registration=_replace(settings.model.registration, map="movie")))
         return PreflightQuestion(
             "No transformation chosen: the two channels cannot be paired "
             "without one.  Measure it from the first frames of this movie, or "

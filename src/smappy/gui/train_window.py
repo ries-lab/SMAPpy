@@ -148,7 +148,7 @@ class TwoChannelPrepare:
     spread: float = param(0.03, label="spread", min=0.0, max=0.5,
                           help="how far a molecule's share may lie from its dye's: 0.03 narrow, 0.06 broad "
                                "(fewer outliers in crowding, the dimmest found less)")
-    # how far the second channel moved on the chip since the beads, the two-channel fitters' own part (gui-plan
+    # how far the second channel moved on the chip since the beads, the fitters' *channel registration*'s move (gui-plan
     # §4b): the prefit pairs the channels with it; the network learns the beads' map and the fitter moves it
     move: ChannelMoveSettings = param(default_factory=ChannelMoveSettings, label="channel move", collapsed=True)
 
@@ -374,9 +374,11 @@ def prefit_move(settings: PrepareSettings, report=lambda entry: None) -> tuple:
     m = settings.two_channels.move
     if m.move == "none":
         return (0.0, 0.0)
-    from ..plugins.fit import DualModelSettings, DualSplineFit, DualSplineFitSettings, SourceSettings
+    from ..plugins.fit import (DualModelSettings, DualSplineFit, DualSplineFitSettings, SourceSettings,
+                               calibration_map)
     spline = DualSplineFitSettings(source=SourceSettings(path=str(settings.movie)), camera=settings.camera,
-                                   model=DualModelSettings(calibration=str(settings.calibration), move=m))
+                                   model=DualModelSettings(calibration=str(settings.calibration),
+                                                           registration=calibration_map(m)))
     move, _ = DualSplineFit().channel_move(spline, lambda text: report({"message": text}))
     if move is None:
         return (0.0, 0.0)
