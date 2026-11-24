@@ -1,5 +1,5 @@
 """4Pi in situ: a model learnt from single molecules in single frames, started from a bead model
-(`uipsf.workflows.fourpi_insitu`; docs/4pi.md §26)."""
+(`uipsf.workflows.fourpi_insitu`; docs/4pi.md §27)."""
 import math
 
 import numpy as np

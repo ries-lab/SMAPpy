@@ -554,7 +554,7 @@ The pages are *Pupils* (the learnt objectives) beside *Bead model's pupils*,
 in situ localises them -- and *Parameters*, the bead model's numbers and the
 in-situ model's side by side.
 
-**What to expect** (docs/4pi.md §26).  On the Ries-lab Nup96 movie, index-matched
+**What to expect** (docs/4pi.md §27).  On the Ries-lab Nup96 movie, index-matched
 and near the coverslip, in situ explained held-out molecules better by 4 nats
 each, but measured the pores no better than a good bead model of the same
 instrument: the rings' separation, the share of uncertain fringes and the

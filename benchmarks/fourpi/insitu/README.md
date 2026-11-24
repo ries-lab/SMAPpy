@@ -1,4 +1,4 @@
-# 4Pi in situ on the Ries-lab Nup96 movie (docs/4pi.md §26)
+# 4Pi in situ on the Ries-lab Nup96 movie (docs/4pi.md §27)
 
 The whole movie (zenodo 10823308, `~/.cache/uipsf/zenodo/4pi_smlm_nup96`, 70 files, 140 000 frames) and its
 26 bead scans (`4pi_40nm_bead`); outputs in `~/.cache/uipsf/p2/`.  Run from the repository with `PYTHONPATH=src`

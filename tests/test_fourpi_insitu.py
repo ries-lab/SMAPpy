@@ -1,5 +1,5 @@
 """4Pi in situ, SMAPpy's side: the molecules chosen from a fit and cut in every channel
-(`calibrate/fourpi_insitu.py`; docs/4pi.md §26).  The learning is uipsf's
+(`calibrate/fourpi_insitu.py`; docs/4pi.md §27).  The learning is uipsf's
 (`tests/uipsf_tests/test_fourpi_insitu.py`)."""
 
 from types import SimpleNamespace

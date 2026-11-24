@@ -171,7 +171,7 @@ def test_4pi_is_a_mode_whose_methods_are_the_pupil_model_the_bead_average_and_in
                                 psf=PSFModelSettings(magnitude="symmetric")))
     window._show_fourpi()
     assert modes_row()
-    # in situ has a 4Pi mode of its own (docs/4pi.md §26): its section, not the beads'
+    # in situ has a 4Pi mode of its own (docs/4pi.md §27): its section, not the beads'
     window.sample_box.setCurrentText("blinking molecules in the sample (in situ)")
     assert [window.mode_box.itemText(i) for i in range(window.mode_box.count())] == ["Single channel", "4Pi"]
     window.choose("blinking molecules in the sample (in situ)", "insitu", "4Pi")

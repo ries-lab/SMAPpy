@@ -1,4 +1,4 @@
-"""Learning a 4Pi model in situ, from a movie's own molecules, started from a bead model (docs/4pi.md §26, M6).
+"""Learning a 4Pi model in situ, from a movie's own molecules, started from a bead model (docs/4pi.md §27, M6).
 
 A bead model is the instrument on the day of the beads, through a bead sample; the movie is another day,
 another sample, another alignment.  Here the molecules of the movie itself teach the model, each seen once:
@@ -9,7 +9,7 @@ four boxes, one per channel, from one frame.
 background per channel (`molecule_model`).  Each molecule has its own x, y, z and cavity phase φ, so the
 cavity's drift over the movie is absorbed molecule by molecule and needs no model while learning.
 
-**What is learnt** (docs/4pi.md §26's table, D9's in-situ column for a matched index): both pupils' phase,
+**What is learnt** (docs/4pi.md §27's table, D9's in-situ column for a matched index): both pupils' phase,
 the coherence, the arms' balance, the channels' shares and phase offsets, the channels' maps, the blur and
 the misalignment's Δz.  Held: the pupils' magnitude (the objectives' apodisation: molecules are too dim to
 tell it, and it is the objectives' own), the buffer's index, and Δx, Δy -- held by a prior of

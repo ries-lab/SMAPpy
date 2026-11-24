@@ -1425,7 +1425,7 @@ class MoleculeElliptical(EllipticalGaussian):
 
 class FourPiInSitu(_FourPi):
     """In situ in the 4Pi mode: the 4Pi pupil model learnt from the movie's own molecules, started from a bead
-    model (`fourpi_insitu.run_insitu`; docs/4pi.md §26).  Its files are movies; its section *4Pi in situ*
+    model (`fourpi_insitu.run_insitu`; docs/4pi.md §27).  Its files are movies; its section *4Pi in situ*
     names the bead model and, if there is one, the fit of the movie with it.  A share of the molecules is held
     out and judges the learnt model against the bead model: the summary says by how much it explains them
     better, the evidence that in situ helped on these data."""

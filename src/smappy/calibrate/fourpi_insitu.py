@@ -1,5 +1,5 @@
 """4Pi in situ: a movie's own molecules, chosen from a Spline 4Pi fit and cut in every channel, for uiPSF's
-in-situ 4Pi learning (`uipsf.workflows.fourpi_insitu`; docs/4pi.md §26).  No torch and no Qt here: the PSF
+in-situ 4Pi learning (`uipsf.workflows.fourpi_insitu`; docs/4pi.md §27).  No torch and no Qt here: the PSF
 calibration window and a script call it alike.
 
 * **The molecules** come from a fit of the movie with the bead model (*Spline 4Pi*): its table says where each
@@ -29,7 +29,7 @@ LOCS_FILTER = "Localizations (*.hdf5 *.h5)"
 @dataclass
 class FourPiInSituSettings:
     """The PSF calibration window's *4Pi in situ* section: the bead model to start from, the molecules (a fit
-    of the movie with it, given or made here), which of them are learnt from and how (docs/4pi.md §26)."""
+    of the movie with it, given or made here), which of them are learnt from and how (docs/4pi.md §27)."""
     bead_model: str = param("", label="bead model", kind="open_file", file_filter=MODEL_FILTER,
                             help="the 4Pi pupil model learnt from beads, which in situ starts from")
     localizations: str = param("", label="localizations", kind="open_file", file_filter=LOCS_FILTER,
@@ -258,7 +258,7 @@ def fit_movie(paths, settings: FourPiInSituSettings, camera, out_path, progress=
 
 def run_insitu(paths, settings: FourPiInSituSettings, camera, save_to=None, progress=None, cancel=None,
                device=None, molecules: InSituMolecules | None = None, layout=None) -> FourPiInSituRun:
-    """In situ from the movie ``paths`` (module docstring; docs/4pi.md §26): the molecules (``molecules``, a
+    """In situ from the movie ``paths`` (module docstring; docs/4pi.md §27): the molecules (``molecules``, a
     detection's, or chosen and cut here), *held out* of them kept aside, the rest learnt from, both models
     judged on those held out, and the model saved to ``save_to`` (None: not saved)."""
     import torch

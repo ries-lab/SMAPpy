@@ -1,4 +1,4 @@
-"""4Pi in situ as a method of the PSF calibration window (`psf_methods.FourPiInSitu`; docs/4pi.md §26): a
+"""4Pi in situ as a method of the PSF calibration window (`psf_methods.FourPiInSitu`; docs/4pi.md §27): a
 bead model file, a simulated 4Pi movie in quadrant files, the molecules fitted, chosen, cut and learnt from,
 and the held-out molecules saying the learnt model is the better one."""
 import math
