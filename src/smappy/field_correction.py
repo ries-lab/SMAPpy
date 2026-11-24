@@ -45,7 +45,7 @@ GRID, DZ_NM = 11, 25.0
 #: and within the table's localisations, their 0.5th to 99.5th percentile and `Z_BEYOND_NM` beyond.  An in situ
 #: spline holds every height its molecules were learnt at, -0.4 to +3.5 µm about the plane in focus on Zenodo's
 #: Nup96 movie: measured over all of it, most test spots were microns out of focus and lost in a 13 px box
-#: (58 %), and the polynomial, spread over 3 µm, left 48 nm rms where the data lie (field-dependence.md §12.3)
+#: (58 %), and the polynomial, spread over 3 µm, left 48 nm rms where the data lie (field-dependence.md §13.3)
 #: The margin is at most `Z_MARGIN_MAX_NM`: a fit runs into the edge within a few planes, and a tenth of that
 #: in situ spline was 390 nm, which cut off the localisations' lowest third.
 Z_MARGIN, Z_BEYOND_NM, Z_MARGIN_MAX_NM = 0.1, 100.0, 150.0

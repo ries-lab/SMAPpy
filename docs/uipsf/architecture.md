@@ -2984,7 +2984,7 @@ The study and the choices: `docs/uipsf/field-dependence.md`.  What is built:
   (`molecule_stack_model(field_dependence=)`, which adds the focal surface's curvature,
   `CoverslipStackGeometry(curvature=)`, model file version unchanged: an optional geometry entry), in one
   channel or two: with two, every channel has its own polynomial of the main channel's chip position
-  (`bead_model`); §12 of the study.
+  (`bead_model`); §13 of the study.
 - **Two channels in SMAPpy**: `pupil.dual_calibration` gives each channel node splines over its own chip
   (`pupil.field_extent(…, channel)`, a secondary node drawn where `pupil.main_position` puts it), normalised by
   the pair's joint factor; the dual file keeps them per channel (``/main/field``, ``/secondary/field``);

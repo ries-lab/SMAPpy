@@ -64,7 +64,7 @@ decision of 14 November 2026), or on *auto* learnt from the glass (0.5 nm), boun
 With *field dependence* the pupil carries a `FieldPolynomial` as beads' does, centred where the plane is, and
 the focal surface gains its second order, ``geometry.curvature`` (nm at 50 µm from the centre, for u², uv, v²;
 a 300 nm prior): field curvature, which a bead's own z would absorb but a molecule held to the surface cannot.
-`docs/uipsf/field-dependence.md` §12 has what was built and measured.
+`docs/uipsf/field-dependence.md` §13 has what was built and measured.
 
 **The SAF sees only h** -- not the plane's slope, the sweep's focus or a molecule's δz, which are all the
 defocus's, through the immersion.  And the height enters through the SAF's decay alone, exp(−2πκh)

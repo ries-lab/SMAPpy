@@ -1,4 +1,4 @@
-"""Field dependence with two channels of a split chip (`docs/uipsf/field-dependence.md` §12.2): each channel its
+"""Field dependence with two channels of a split chip (`docs/uipsf/field-dependence.md` §13.2): each channel its
 own `FieldPolynomial` of the main channel's chip position, learnt from beads; each channel's node splines over
 its own part of the chip in the dual calibration; and SMAPpy's two-channel fitter blending each channel's nodes
 where its ROI is (`fit_cspline_field_global`)."""

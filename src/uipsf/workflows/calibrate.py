@@ -119,7 +119,7 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
             if field_centre_px is None:
                 raise ValueError("a field-dependent model needs the field's centre (the beads' chip positions)")
             # every channel its own polynomial of the main channel's chip position, which is the sample's
-            # (`Batch.field_xy`): docs/uipsf/field-dependence.md §12.2
+            # (`Batch.field_xy`): docs/uipsf/field-dependence.md §13.2
             field = field_for(psf, field_centre_px, optics[0].pixel_size_nm)
         channels.append(Channel(psf, transform=H, field=field))
     return ForwardModel(channels, geometry=BeadStackGeometry(drift=settings.drift, fit_tilt=settings.fit_tilt))
@@ -139,7 +139,7 @@ def insitu_model(optics, spec: PSFModelSettings, roi_shape, focus_nm: float, z_m
     64 samples at NA 1.43; 2 µm asked for 96, 2.25 times the work.
 
     ``field_centre_px``: astigmatism and coma varying over the chip about it (`FieldPolynomial`, as beads
-    learn them; `docs/uipsf/field-dependence.md` §12.3).  No focal surface: each molecule's height is free,
+    learn them; `docs/uipsf/field-dependence.md` §13.3).  No focal surface: each molecule's height is free,
     and takes a tilted or curved focus up as a bead's z does -- the coverslip's edge measured per region of the
     field says how far the focus varies over it (`insitu_rounds.edge_over_field`)."""
     from dataclasses import replace as replaced
@@ -169,7 +169,7 @@ def molecule_stack_model(optics, spec: PSFModelSettings, roi_shape, sweeps: int,
     ``centre_px`` as the focal plane is) and the focal surface's curvature (`CoverslipStackGeometry`'s
     ``curvature``), as beads learn them.  Each molecule is at its own place, so thousands of them sample the
     field far more densely than 20-50 beads.  In every channel, each its own polynomial of the main
-    channel's chip position, as `bead_model`'s (`docs/uipsf/field-dependence.md` §12.2)."""
+    channel's chip position, as `bead_model`'s (`docs/uipsf/field-dependence.md` §13.2)."""
     from dataclasses import replace as replaced
 
     from ..model import Bleaching, CoverslipStackGeometry

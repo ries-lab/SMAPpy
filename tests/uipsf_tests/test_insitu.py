@@ -272,7 +272,7 @@ def test_the_compiled_kernels_shapes_are_powers_of_two():
     assert padded.shape == (4, 2) and float(padded[3].abs().sum()) == 0.0
 
 
-# ------------------------------------------------------------------ field dependence (field-dependence.md §12.3)
+# ------------------------------------------------------------------ field dependence (field-dependence.md §13.3)
 def test_the_twin_of_a_field_flips_its_astigmatism_terms_and_keeps_its_coma_terms(optics):
     model, truth, _ = insitu_emitters(optics, n=1, truth_field={(6, 1, 0): 0.3})
     field = model.channels[0].field

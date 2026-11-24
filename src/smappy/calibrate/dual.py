@@ -1212,10 +1212,8 @@ def save_dual_color_calibration(path, calibration, result=None, overwrite=False)
                 if fs is not None:
                     # each channel's node splines over its own part of the chip, as a single
                     # calibration keeps them (`io.calibration`): optional, so the version stays
-                    fg = g.create_group('field')
-                    fg.create_dataset('coeff', data=fs.coeff, compression='gzip')
-                    fg.create_dataset('xs', data=fs.xs)
-                    fg.create_dataset('ys', data=fs.ys)
+                    from ..io.calibration import write_field_splines
+                    write_field_splines(g, fs)
             if result is not None:
                 g = f.create_group('diagnostics')
                 r = result.registration

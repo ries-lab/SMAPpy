@@ -207,7 +207,7 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     SAF damping, the bead's size or the stage's drift, which are the beads'.  *learn NA* is offered in every
     method for a minimal magnitude; in situ holding a bead model's γ holds its learnt NA too.  Field
     dependence is learnt by beads and by molecules on the coverslip, in one channel or two, and in situ
-    in one (docs/uipsf/field-dependence.md §12).  The tilt: always in
+    in one (docs/uipsf/field-dependence.md §13).  The tilt: always in
     situ, where molecules above the glass see it; for beads only through a coverslip of another index.
     Molecules on the coverslip in z sweeps choose the magnitude as beads do, but have no SAF damping of their
     own -- their common height damps the ring physically (`uipsf.model.CoverslipStackGeometry`) -- no bead,

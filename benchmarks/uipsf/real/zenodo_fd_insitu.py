@@ -1,5 +1,5 @@
 """Field dependence in situ on Zenodo `1ch_FD_smlm_nup96`, against the field the beads of `1ch_FD_bead` gave
-(`docs/uipsf/field-dependence.md`, §9 and §12.3).
+(`docs/uipsf/field-dependence.md`, §9 and §13.3).
 
     python benchmarks/uipsf/real/zenodo_fd_insitu.py detect
     python benchmarks/uipsf/real/zenodo_fd_insitu.py fit field
@@ -11,7 +11,7 @@ optics and the start are v1's from its own in situ result on these data (``psfmo
 NA 1.5, 680 nm, immersion 1.515, sample 1.406, 110 nm pixels, gain 0.47 e⁻/ADU, offset 100, the focus 0.8 µm
 above the coverslip.  v1 learnt 0.70 rad of Noll 6 at the chip's centre, 76 nm, but in v2's convention the
 data want the other sign: started at +76 nm the twin test prefers the mirrored pupil by 116 nats, started at
-−76 nm it agrees, and only then does the field match the beads' (`results/zenodo_fd_insitu.jsonl`, §12.3).
+−76 nm it agrees, and only then does the field match the beads' (`results/zenodo_fd_insitu.jsonl`, §13.3).
 No bead model of this microscope in v2 form: γ is held at the nominal value, with the run's warning.
 Learnt on gpuvm's H100 (`--device cuda`): 8-10 minutes a run; on the Mac's GPU round 1 grew to a 33.5 GB
 footprint and thrashed, on its CPU round 1 alone took over an hour.
@@ -358,7 +358,7 @@ if __name__ == "__main__":
     ap.add_argument("--rounds", type=int, default=3)
     # the CPU by default: on Apple's GPU round 1 of 2713 molecules grew to a 33.5 GB footprint and thrashed
     ap.add_argument("--device", default="cpu")
-    # the start's sign: v1's (+), or the other (-), which v2's twin test prefers on these data (§12.3)
+    # the start's sign: v1's (+), or the other (-), which v2's twin test prefers on these data (§13.3)
     ap.add_argument("--astigmatism", type=float, default=ASTIGMATISM_NM)
     ap.add_argument("--save", action="store_true", help="fit: save the spline as insitu_<kind>_3dcal.h5")
     ap.add_argument("--ways", nargs="+", default=list(WAYS), choices=WAYS)

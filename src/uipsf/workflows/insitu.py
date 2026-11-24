@@ -174,7 +174,7 @@ def twin(model, shared: dict) -> dict:
     is about.
 
     A field (`model.field`) adds to each mode's coefficient a function of the chip position, so its terms
-    mirror as their mode does: the astigmatism's flip with it, the coma's stay (§12.3 of
+    mirror as their mode does: the astigmatism's flip with it, the coma's stay (§13.3 of
     `docs/uipsf/field-dependence.md`).  The twin of a field-dependent pupil is then the twin at every place."""
     out = dict(shared)
     for c, ch in enumerate(model.channels):
@@ -206,7 +206,7 @@ def field_twin(model, shared: dict) -> dict:
     better (`calibrate_insitu`) settles the field's sign by the data, as the start settles the centre's.  On
     Zenodo `1ch_FD_smlm_nup96` the data refused the mirrored field by 478 and 853 nats from either start: the
     field's sign relative to the centre's is well pinned there, and the whole twin test decides the rest
-    (§12.3 of `docs/uipsf/field-dependence.md`)."""
+    (§13.3 of `docs/uipsf/field-dependence.md`)."""
     out = dict(shared)
     for c, ch in enumerate(model.channels):
         field = getattr(ch, "field", None)

@@ -4,7 +4,7 @@ A study, November 2026: the literature, the options for uipsf's coefficient fiel
 `NodalPolynomial` + `BSplineResidual` + `FocalSurface`) and for SMAPpy's fitter (`plan.md` §7.3), and
 measurements on synthetic data that decide between them.  What v1 built of it is §8, the first real field §9,
 node splines against the local pupil and a correction afterwards §11, and the field for the other samples and
-modalities -- molecules on the coverslip, two channels, in situ -- §12.
+modalities -- molecules on the coverslip, two channels, in situ -- §13; finer grids for large fields §12.
 
 **In short.**
 - *Representation in uipsf:* the Zernike coefficients as a nodal-aberration-theory polynomial of the field
@@ -476,7 +476,7 @@ spline keeps ``focal_curvature_nm_at_50um``.
   by 44 µm: 0.1 rad of uv is 0.02 rad at a corner); the node splines fit spots near a corner with a fraction
   of the centre spline's z bias.
 
-### 12.2 Two channels of a split chip (beads, and molecules on the coverslip)
+### 13.2 Two channels of a split chip (beads, and molecules on the coverslip)
 
 **Per channel, not shared.**  Each channel learns its own `FieldPolynomial`, and both are polynomials of the
 *main* channel's chip position, which is the sample's position (`Batch.field_xy`), so the two fields share one
@@ -514,7 +514,7 @@ not learn with a field); DECODE's two-channel models are the netfit session's.
   about its mean under 10 nm); with the centres' splines alone the z range came out compressed by about 40 %.
 - The same pair drawn for a focus 1.5 µm into the sample keeps both channels' grids.
 
-### 12.3 In situ, from the blinking molecules of the data
+### 13.3 In situ, from the blinking molecules of the data
 
 §6 asked for three things in situ: spots spread evenly over the field, and a way through two degeneracies --
 the ±z mirror solution, and a focal surface against a tilted or curved sample.
@@ -598,7 +598,7 @@ would also replace the nominal γ).
 
 **Fitting with it** (`zenodo_fd_insitu.py localise`, `beads`; `results/zenodo_fd_insitu_fits.json`).  The in situ
 calibrations saved as splines (the field's with a 9 × 9 grid, which warns that between its nodes the blend misses
-the model by 3.9 % of the peak: main's 13 × 13 grids halve that) and the whole movie fitted with Spline 3D,
+the model by 3.9 % of the peak; these runs predate the 13 × 13 grids of §12, which halve that) and the whole movie fitted with Spline 3D,
 116 000 localisations in 30 s a fit.  The movie cannot test the fits through its pores: an 800-frame calibration
 movie keeps 20 000 localisations over the chip after a precision cut, 10-30 per pore, and its tight clusters are
 single molecules blinking over a few frames, not pores.  Two tests instead:
