@@ -1,6 +1,6 @@
 ---
 version: "5"
-covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.channels.detection_lookup, smappy.channels.onto_reference, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.plugins.fit_4pi.model_geometry, smappy.microscope_db.Microscope.channel_layout, smappy.io.dcimg.DcimgSource.watch, smappy.plugins.fit_4pi.FourPiFit.watch_blocks]
+covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.channels.detection_lookup, smappy.channels.onto_reference, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.multichannel.cached_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.plugins.fit_4pi.model_geometry, smappy.microscope_db.Microscope.channel_layout, smappy.io.dcimg.DcimgSource.watch, smappy.plugins.fit_4pi.FourPiFit.watch_blocks]
 ---
 
 ## What it does
@@ -320,7 +320,11 @@ whole chip.
 
 ### model.channel_drift
 It costs a second fit of *drift blocks* × *frames per block* frames,
-5000 by default.  Worth it for every long acquisition, and whenever the
+5000 by default -- once: the curve is kept beside the movie, in
+`<movie>.channel_drift.json`, and a later run of the same movie with the
+same model, channels, camera, detection and drift settings reads it from
+there.  Such a run says so, and draws the curve without the offsets it was
+made from.  Delete the file to measure again.  Worth it for every long acquisition, and whenever the
 registration was not measured on the same day.  Each fit's offsets are
 weighed by its error and those that are no pair left out; with *over time*
 (the default) they make a smooth curve over the acquisition, as the

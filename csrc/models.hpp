@@ -356,7 +356,7 @@ struct CSplineField : CSpline {
 // and channel, the four channels' ROIs about 8 MB, which no core's cache
 // holds.  Voxel by voxel they are 12 lines, and a fit's whole working set
 // (4 x 169 voxels of 768 bytes) half a megabyte.  Measured in docs/4pi.md
-// section 26.
+// section 28.
 struct CSpline4Pi {
     static constexpr int NV = 6;
     static constexpr int VOXEL = 3 * 64;
@@ -422,7 +422,7 @@ struct CSpline4Pi {
         // of 32 added at the end -- six independent chains where a single sum
         // over i was one long dependent chain of multiply-adds, waiting on
         // each other's latency.  4-8x on `value` alone, on the Mac (docs/4pi.md
-        // section 26).  The halves change the order of the sums, so a fit
+        // section 28).  The halves change the order of the sums, so a fit
         // differs from the plain loop's in the last bits of float.
         float v[3], dx[3], dy[3], dz[3];
 #if defined(__GNUC__) || defined(__clang__)

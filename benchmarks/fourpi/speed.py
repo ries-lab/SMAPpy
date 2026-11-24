@@ -1,4 +1,4 @@
-"""Where *Spline 4Pi*'s time goes, end to end, on real 4Pi data (docs/4pi.md §26).
+"""Where *Spline 4Pi*'s time goes, end to end, on real 4Pi data (docs/4pi.md §28).
 
     nice python benchmarks/fourpi/speed.py [--frames N] [--drift] [--save DIR] [--compare DIR]
 
@@ -120,13 +120,23 @@ def fit_alone(model, camera, pairs):
     return n / (time.perf_counter() - t), n
 
 
-def whole(plugin, settings, frames, drift):
+def _forget_drift(movie):
+    try:
+        from smappy.multichannel import drift_cache_path
+    except ImportError:                  # a version before the cache
+        return
+    drift_cache_path(movie).unlink(missing_ok=True)
+
+
+def whole(plugin, settings, frames, drift, fresh=True):
     from smappy.io.hdf5 import LocalizationWriter
     from smappy.plugins import Context
     from smappy.plugins.fit_4pi import FourPiFit
     settings.source.stop = frames
     settings.model.channel_drift = drift
     out = Path(tempfile.mkdtemp()) / "locs.hdf5"
+    if drift and fresh:                  # measured, not read from a run before
+        _forget_drift(settings.source.path)
     settings.output.path = str(out)
     timer = Timer()
     timer.wrap(FourPiFit, "channel_drift", "drift prefit")
@@ -201,6 +211,11 @@ def main():
               + ", ".join(f"{k} {v:.1f} s" for k, v in parts.items())
               + f"; fit loop otherwise {loop:.1f} s (detection {s.get('detect_seconds', 0):.1f}, "
                 f"fit {s.get('fit_seconds', 0):.1f}); {len(result.locs)} localizations")
+        if args.drift:                   # again: the drift read from beside the movie, where it now is
+            again, wall2, parts2 = whole(plugin, make(), args.frames, True, fresh=False)
+            print(f"  again, the drift kept: {args.frames / wall2:,.0f} frames/s, {wall2:.1f} s; "
+                  + ", ".join(f"{k} {v:.1f} s" for k, v in parts2.items()))
+            _forget_drift(settings.source.path)
         if args.save:
             from smappy.io.hdf5 import save_localizations
             Path(args.save).mkdir(parents=True, exist_ok=True)

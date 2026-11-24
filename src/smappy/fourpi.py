@@ -110,7 +110,7 @@ class FourPiCalibration:
         """The coefficients as the fitter reads them, voxel by voxel: (C, nz, ny, nx, 3, 64).
 
         Each pixel's I, A and B in one run of 192 floats, where ``coeff`` has them
-        nz ny nx floats apart, so that a pixel's value is read in one run (docs/4pi.md §26).
+        nz ny nx floats apart, so that a pixel's value is read in one run (docs/4pi.md §28).
         Made on first use and kept while ``coeff`` is the same array; it is as large as
         ``coeff`` (74 MB for a 60-plane grid of 20 x 20 in four channels).
         """

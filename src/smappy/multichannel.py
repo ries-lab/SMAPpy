@@ -468,7 +468,7 @@ class MultiChannelEngine:
             return self._fitted(pairs)
         # Detection runs in this thread, single-threaded, and the C++ fit on every core with the
         # GIL released: one after the other, the cores idled through detection -- 60 % of the
-        # Nup96 movie's time once the fit was fast (docs/4pi.md section 26).  One fit in flight,
+        # Nup96 movie's time once the fit was fast (docs/4pi.md section 28).  One fit in flight,
         # so the blocks come back in order and memory holds at most two blocks of ROIs.
         before = self.end()
         if self._worker is None:

@@ -2458,3 +2458,81 @@ says to keep the bead model where it does not -- the evidence a user needs, sinc
 brings are not it.  The beads stay the default.  What is next, in order: the tubulin movie with P1's three-stack bead model; ring separations measured per time window (the
 62 nm against Nup96's ~50 nm is mostly the measurement's: drift within a window, ghosts, the two-Gaussian fit);
 the cavity phase as a prior over time (above), which would decide fringes rather than only describe them.
+
+## 28. Spline 4Pi's speed on the CPU (P4, 2026-11-24)
+
+Work package P4 of the plan (§25, on branch `claude/4pi-gaps` when this was written; P1's results are §26, P2's in situ §27): the whole plugin profiled
+on two real data sets, and what dominated made faster.  The profile is `benchmarks/fourpi/speed.py`; it also
+compares a run's localizations with a saved run's, which is how every change below was checked.
+
+**The data.**  *tubulin*: Gabin's 4Pi-SMS DCIMG (`Cell01_642_000_000.dcimg`, strips of 2048 × 168, the 4Pi-SMS
+corners), 73 candidates a frame.  There is no model of that microscope yet (P1 makes one), so the Ries-lab bead
+model stands in, without a registration: the work per molecule is a real fit's (a 60-plane grid of 20 × 20,
+13-px ROIs), but the fits are poor and take 24 iterations where Nup96's take 10 -- the fit is slower than it will
+be with the right model.  *nup96*: the Ries-lab Nup96-mMaple `.mat` series with v1's in-situ model and maps,
+7.7 candidates a frame.  1500 frames each, the Mac's ten cores, niced.
+
+**Where the time went (before).**
+
+| | tubulin | Nup96 |
+| --- | --- | --- |
+| reading alone (the channel layer) | 700 frames/s | 780 frames/s |
+| detection (one thread) | 0.6 ms/frame | 1.2 ms/frame |
+| the C++ fit | 1 690 fits/s, 23 frames/s | 2 430 fits/s, 315 frames/s |
+| *channel drift* prefit (10 × 500 frames) | 280 s | 31 s |
+| writing, *4Pi z* | < 0.3 s | < 0.1 s |
+
+Reading runs in its own thread (`pipeline.prefetch`) and was never the limit; writing and *4Pi z* (46 ms for
+100 000 localizations) are nothing.  What was: the C++ fit, then detection, which ran in turn with it on one
+thread while nine cores waited, and the drift prefit, which is a second fit of 5000 frames on every run.
+
+**1. The splines read voxel by voxel, summed four at a time** (`csrc/models.hpp`, `CSpline4Pi`).  Each pixel and
+channel sums 64 products for each of 12 quantities -- the value and three derivatives of I, A and B.  The
+coefficients were read in the calibration's layout, (3, 64, nz, ny, nx), each a stride of nz ny nx floats from the
+last: 192 cache lines per pixel and channel.  They are now a copy kept on the calibration,
+`FourPiCalibration.fit_coeff`, (C, nz, ny, nx, 3, 64): one run of 768 bytes.  That alone gained 15-25 % per core;
+the bigger cost was the arithmetic, every sum one dependent chain of 64 multiply-adds, scalar, waiting on the
+latency of the one before.  The four sums of a spline are now one 4-wide vector (GCC and Clang's vector type;
+the same sums in plain loops for MSVC), each split into two halves: six independent chains.  `value` alone went
+from 450 to 50-100 ns.  The halves change the order of the sums, so the numbers move in the last bits of a float:
+against the old fit on the same ROIs, the 99th percentile of the differences is 0.1 nm in x and y and under 1 nm
+in z; 0.07 % of fits (tubulin's poor ones) end in another optimum, as often better as worse.  On Nup96 none do.
+Per core, measured in CPU time with the old and new build alternating: **2.4× (tubulin), 2.8× (Nup96)**.  On all
+ten cores the old layout lost more -- ten cores' working sets of 8 MB each do not share a cache -- 2.6× and
+up to 5×.  `CSpline` (Spline 3D, 2C) has the same scalar chain and would gain from the same vectors; not done
+here, since it moves every 3D fit's last bits.
+
+**2. Each block fitted while the next is found** (`MultiChannelEngine.overlap`).  The fit of a block goes to a
+worker thread, and `flush` hands back the block before; `pipeline.drive` takes the last from `end`.  The same
+table in the same order (`test_fitting_while_the_next_block_is_found_changes_nothing`).  On for a whole file and
+the drift prefit; off for a live fit, which shows each block when it is fitted, and the preview.
+
+**3. The channel drift kept beside the movie** (`multichannel.cached_drift`, `<movie>.channel_drift.json`), keyed by
+the movie's path, size and time, the model's bytes, the layout with its maps, and every setting the prefit reads
+(camera, detection, fit region, fit, the drift's own) -- as the two-colour fitters' channel move is.  The second
+run of a movie fits nothing for it.  The curve is kept, not its fits: a run that reads it says so and draws the
+curve alone.  Measured again, the curve moved by at most 0.0016 px.
+
+**Before and after** (the best of the runs: other sessions' work loaded the Mac to 40-160 at times, so these
+vary by 20-40 % between runs; the per-core ratios above are the robust ones):
+
+| | tubulin before | tubulin after | Nup96 before | Nup96 after |
+| --- | --- | --- | --- | --- |
+| C++ fit, ten cores | 1 690 fits/s | 4 310 fits/s | 2 430 fits/s | 11 960 fits/s |
+| engine (detection + fit) | 23 frames/s | 58 frames/s | 230 frames/s | 720 frames/s |
+| whole plugin, no drift | 19 frames/s | 51 frames/s | 190 frames/s | 565 frames/s |
+| whole plugin, drift measured | 4 frames/s | 11 frames/s | 38 frames/s | 112 frames/s |
+| whole plugin, drift kept | (measured again) | 51 frames/s | (measured again) | 565 frames/s |
+
+("no drift" before is the fit loop of the run with the drift, its prefit taken out; after, a run reading the
+kept drift.)  The drift prefit's share is large here because 1500 frames are a short movie: on the whole Cell01
+(360 000 frames) its 5000 frames are 1.4 %.  At 51 frames/s Cell01 is two hours, with the stand-in model's 24
+iterations; with its own model (Nup96's 10) about one.  Reading from the share (145 frames/s) is no longer slower
+than fitting a dense movie, and on a sparse one it would be: copy the movie locally first.
+
+**What a GPU fitter would gain**, for the later decision.  A fit is about 50 evaluations of 4 × 169 pixels of
+800 multiply-adds -- 30 MFLOP, the same for every molecule, no branches: what a GPU does well, 20-100× the ten
+cores.  But after these changes the Nup96 movie is limited by reading (900 frames/s) and detection (one thread,
+1.2 ms a frame), not the fit: a GPU would gain less than 2× there.  Dense data is where it would pay: tubulin's 73
+molecules a frame keep the CPU at 51-58 frames/s, and a GPU fit would take it to reading's 700-800, 10-15×.
+So the GPU question is one of density: a DECODE-like network for dense 4Pi data (P5) answers the same need.
