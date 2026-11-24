@@ -638,12 +638,23 @@ def _shift(reference: np.ndarray, other: np.ndarray) -> np.ndarray:
                      iy - c.shape[0] // 2 + vertex(c[:, ix], iy)])
 
 
-def register_channels(projections, settings=None, match_px: float = 3.0) -> Registration:
+def _spread(points: np.ndarray) -> float:
+    """How far (x, y) ``points`` reach along their narrowest direction: the rms about
+    their mean along it, px."""
+    centred = np.asarray(points, float) - np.mean(points, axis=0)
+    return float(np.linalg.svd(centred, compute_uv=False)[-1] / np.sqrt(len(centred)))
+
+
+def register_channels(projections, settings=None, match_px: float = 3.0,
+                      min_spread_px: float = 10.0) -> Registration:
     """Maps of every channel onto channel 0 from bead projections.
 
     ``projections`` is one (C, h, w) array per bead acquisition: each
     channel's image summed over the stack (`bead_projections`).  Beads of
-    every acquisition are pooled.
+    every acquisition are pooled.  Beads that reach less than
+    ``min_spread_px`` (rms) along some direction give a shift alone: a
+    rotation or scale needs beads apart, and at a few mrad it moves the
+    channels by less than a tenth of a pixel over the 10 px they reach.
     """
     from .calibrate.dual import bead_registration, fit_dual_transform
     from .dualfit import _match
@@ -665,7 +676,14 @@ def register_channels(projections, settings=None, match_px: float = 3.0) -> Regi
         if len(source) == 0:
             raise ValueError(f"no bead of channel {c + 1} pairs with one of channel 1: "
                              "check the layout, or the beads' brightness")
-        if len(source) >= settings.min_pairs:
+        if len(source) >= 3 and _spread(source) < min_spread_px:
+            # pairs that all sit in one place fix a shift and nothing else: the one-bead scans of
+            # the 2017 tubulin data, the same bead three times within a pixel, made an "exact"
+            # affine map that turned the channels by radians a few pixels away (docs/4pi.md §26)
+            matrix = np.eye(3)
+            matrix[:2, 2] = np.mean(target - source, axis=0)
+            kind = "translation"
+        elif len(source) >= settings.min_pairs:
             matrix = fit_dual_transform(source, target, settings).transformation
             kind = "projective"
         elif len(source) >= 3:

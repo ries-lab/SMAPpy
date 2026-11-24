@@ -925,16 +925,19 @@ class _FourPi:
         if camera is None:
             raise ValueError("4Pi beads need the camera's conversion and offset: give them under microscope")
         tell = _counted(progress, 0.0, 1.0) or (lambda text: None)
-        from .fourpi_beads import brightness_outliers
+        from .fourpi_beads import SCAN_REGISTRATIONS, brightness_outliers
         settings = inputs["fourpi"]
         beads, layout, registration = scan_beads(paths, settings, camera, tell)
         E, C, J, M = beads.data.shape[:4]
         rms = ", ".join(f"{r:.2f}" for r in registration.rms_px[1:])
+        how = (f"the channels registered from {min(registration.pairs[1:])} pairs ({rms} px)"
+               if settings.registration.source == "scans" else
+               "the channels registered " + dict(SCAN_REGISTRATIONS)[settings.registration.source])
         outliers = brightness_outliers(beads, settings.brightness_range)
         found = {"beads": beads, "layout": layout, "registration": registration, "outliers": outliers}
         text = (f"{E} beads in {C} channels, {J} slices x {M} phase step{'s' if M > 1 else ''}"
                 + (f" ({len(outliers)} marked out by brightness)" if outliers else "")
-                + f"; the channels registered from {min(registration.pairs[1:])} pairs ({rms} px)")
+                + f"; {how}")
         detected = Detected(found, text, [(r["stack"], r["x_px"], r["y_px"], i) for i, r in enumerate(beads.records)])
         detected.seconds = self.seconds(detected, self.detected_marks(detected))
         return detected

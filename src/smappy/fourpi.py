@@ -887,6 +887,12 @@ class ScanPhases:
     offsets: np.ndarray         # phi_c, rad, channel 0 = 0
     bead_phases: np.ndarray     # phi_b, rad
     modulation: np.ndarray      # (beads, C)
+    #: each bead's own phase per slice, rad: ``w`` and the cavity's drift through that bead's scan
+    #: (`iab_from_beads`'s ``scan_of``); None where not measured
+    rates: Optional[np.ndarray] = None
+    #: the slice about which the rates were fitted, the middle of the fit's window: each bead's phase
+    #: there, ``rates * centre + bead_phases``, is what its fit fixes best whatever the rate
+    centre: float = 0.0
 
 
 def scan_phases(centre: np.ndarray, window=None) -> ScanPhases:
@@ -942,7 +948,8 @@ def scan_phases(centre: np.ndarray, window=None) -> ScanPhases:
     offsets = np.asarray(offsets)
     return ScanPhases(float(np.median(ws)), np.median(gains, axis=0),
                       np.angle(np.exp(1j * offsets).mean(axis=0)),
-                      np.angle(np.exp(1j * np.asarray(phases))), np.asarray(mods))
+                      np.angle(np.exp(1j * np.asarray(phases))), np.asarray(mods), np.asarray(ws, float),
+                      float(z.mean()))
 
 
 def _fringe_rates(data: np.ndarray, z: np.ndarray) -> tuple:
@@ -979,7 +986,7 @@ def _focus(stack: np.ndarray) -> float:
 
 def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
                    phases: Optional[ScanPhases] = None, steps=None, channels: str = "auto",
-                   max_condition: float = 10.0, **kwargs) -> FourPiCalibration:
+                   max_condition: float = 10.0, scan_of=None, **kwargs) -> FourPiCalibration:
     """A 4Pi model from bead scans.
 
     ``stacks`` is (beads, C, Z, h, w), or (beads, C, Z, M, h, w) with the
@@ -998,6 +1005,14 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
     model reaches as far as a quarter of them do (and two, without mirror
     steps).  ``smooth_nm`` is the sigma of a Gaussian along z
     that takes the beads' noise out of the model.
+
+    ``scan_of``: which scan each bead is from (a number per bead), for the rate at which its phase
+    advances through the scan: the fringe's plus the cavity's drift through that scan.  The beads of
+    one scan share a drift and take their median rate (`ScanPhases.rates`); None takes all beads as
+    one scan, at the beads' median.  Three one-bead scans of the 2017 tubulin data advanced 0.427,
+    0.431 and 0.451 rad per 20 nm slice, each to 0.002, so one rate put the last 0.6 rad off at the
+    scan's ends (docs/4pi.md §26).  Each bead's phase is held where its fit fixes it, at the fit
+    window's middle (`ScanPhases.centre`).  The model's period is the median's either way.
     """
     from scipy.ndimage import gaussian_filter1d, shift
     stacks = np.asarray(stacks, float)
@@ -1021,6 +1036,14 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
     first = stacks[:, :, :, 0]
     centre = first[..., h // 2 - 2:h // 2 + 3, w // 2 - 2:w // 2 + 3].sum(axis=(3, 4))
     ph = phases or scan_phases(centre)
+    own_rates = np.full(nb, ph.w)
+    if scan_of is not None and ph.rates is not None:
+        scans = np.asarray(scan_of)[used]
+        for k in np.unique(scans):
+            own_rates[scans == k] = np.median(np.asarray(ph.rates)[scans == k])
+    # each bead's phase at the middle of the window its rate was fitted over: what the fit fixes, and
+    # what a phase at slice 0 extrapolated at another rate would miss by the difference times the middle
+    middle_phase = ph.bead_phases + (ph.rates if ph.rates is not None else ph.w) * ph.centre
     target = float(np.median(foci))
     # every bead moved onto the grid where its focus is the median's
     aligned = np.empty_like(stacks)
@@ -1056,7 +1079,7 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
         the fitter's phase is for a molecule: A and B multiply it, and come
         out demodulated."""
         z_b = z - (target - foci)
-        return (ph.w * z_b + ph.bead_phases)[:, None] + sign * steps[None, :]
+        return (own_rates * (z_b - ph.centre) + middle_phase)[:, None] + sign * steps[None, :]
 
     def design(theta):
         theta = theta.ravel()
@@ -1108,7 +1131,8 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
     parameters = {"method": "IAB from a bead scan", "channels": solved,
                   "condition": float(conditions[each].max() if each.any() else conditions.max()),
                   "smooth_nm": float(smooth_nm),
-                  "w_per_slice": ph.w, "gains": ph.gains.tolist(), "offsets_rad": ph.offsets.tolist(),
+                  "w_per_slice": ph.w, "w_per_bead": own_rates.tolist(),
+                  "gains": ph.gains.tolist(), "offsets_rad": ph.offsets.tolist(),
                   "steps_rad": (sign * steps).tolist(), "beads": int(nb), "foci_slices": foci.tolist(),
                   "dropped_beads": dropped}
     parameters.update(kwargs.pop("parameters", {}))

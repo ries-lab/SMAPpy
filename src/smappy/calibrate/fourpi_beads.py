@@ -117,7 +117,7 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
           steps_rad=(2.0, 0.0, -2.0), spec=None, read_noise_var: float = 1.0, bead_radius_nm: float = 0.0,
           photons_per_observation: bool = True, device=None, progress=None, cancel=None,
           kind: str = "vector", plates: str = "aligned", warm: Optional[dict] = None, magnitude_modes=None,
-          same_magnitude: bool = True, n_med: Optional[float] = None):
+          same_magnitude: bool = True, n_med: Optional[float] = None, maps=None):
     """uiPSF's 4Pi model learnt from ``beads`` (`uipsf.workflows.fourpi.learn_fourpi`): a `FourPiFit`.
     ``steps_rad`` the deformable mirrors' steps as set; which way round they act is found from the data.
     ``spec`` the PSF model's choices (`PSFModelSettings`, default the 4Pi form's: `FourPiBeadSettings.psf`,
@@ -140,7 +140,10 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     (`learn_fourpi`'s ``values``).  ``magnitude_modes`` a Zernike magnitude's modes (Noll), the spec's if
     None; ``same_magnitude`` one magnitude for both objectives (`FourPiModel`): one γ for minimal pupils.
     The blur is the spec's: one σ for x and y by default (*round*), an x and a y σ apart being astigmatism,
-    which the pupils should hold, over the pixel's own blur."""
+    which the pupils should hold, over the pixel's own blur.  ``maps``: each channel's map onto channel 0
+    (`channels.ChannelLayout.maps`), held as given instead of learnt -- for beads that all sit in one place,
+    which fix where the channels are there and nothing of their turn or scale (one-bead scans, docs/4pi.md
+    §26); None learns them, started from the beads' centroids."""
     from dataclasses import replace
 
     import uipsf
@@ -162,8 +165,15 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
                         sigma_nm=(spec.blur_nm, spec.blur_nm), fit_sigma=spec.blur != "fixed",
                         intensity=PerObservation() if photons_per_observation else None, kind=kind, plates=plates,
                         round_sigma=spec.blur == "round", same_magnitude=same_magnitude,
-                        pixel_blur=spec.pixel_blur, learn_n_med=bool(getattr(spec, "learn_n_med", False)))
-    return learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm)
+                        pixel_blur=spec.pixel_blur, learn_n_med=bool(getattr(spec, "learn_n_med", False)),
+                        transforms=None if maps is None else [np.asarray(m, float) for m in maps[1:]],
+                        fit_transform=maps is None)
+    start = None
+    if maps is not None:
+        from uipsf.model.fourpi_start import rough_start
+        start = rough_start(batch, model)
+        start["transforms"] = None                   # the model's own, the maps given, not the centroids'
+    return learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm, start=start)
 
 
 def save(fit, path, z_range_nm: float = 600.0, dz_nm: float = 25.0, roi_px: Optional[int] = None,
@@ -190,12 +200,60 @@ def save(fit, path, z_range_nm: float = 600.0, dz_nm: float = 25.0, roi_px: Opti
 # refines the maps itself.
 
 
+SCAN_REGISTRATIONS = (("scans", "from the scans"), ("beads", "from beads"),
+                      ("file", "from a registration file"))
+
+
+@dataclass
+class ScanRegistrationSettings:
+    """Where the maps between the channels come from, by which each bead's box is cut in every channel:
+    the scans' own beads, or -- for scans of one bead, or of a few in one place, which fix a shift and
+    nothing else -- other beads in the same layout (a field of many), or a saved registration.  Spline
+    4Pi's *registration* part without *the model's*, which is what is being made here."""
+    source: str = param("scans", label="from", choices=SCAN_REGISTRATIONS,
+                        help="the scans' own beads, other bead images in the same layout, or a saved "
+                             "registration")
+    beads: str = param("", label="beads", kind="open_file",
+                       help="bead images in this layout (a field of many beads), or a folder of them; "
+                            "measured once, kept beside them")
+    path: str = param("", label="registration file", kind="open_file",
+                      file_filter="Channel registrations (*.json)",
+                      help="a channel registration (.json), as beads leave beside them")
+
+    def title(self) -> str:
+        return "registration: " + dict(SCAN_REGISTRATIONS).get(self.source, self.source)
+
+    def shown(self) -> dict:
+        return {"beads": self.source == "beads", "path": self.source == "file"}
+
+
+def given_maps(part: ScanRegistrationSettings, layout):
+    """The maps ``part`` gives for ``layout``, or None for the scans' own (`scan_beads`)."""
+    if part.source == "scans":
+        return None
+    if part.source == "beads":
+        from ..plugins.fit_4pi import registration_from_beads
+        return registration_from_beads(part.beads, layout)
+    if part.source == "file":
+        from ..channels import load_registration
+        if not part.path:
+            raise ValueError("registration from a file: choose a channel registration (.json)")
+        saved = load_registration(part.path)
+        if saved.size != layout.size or saved.n_channels != layout.n_channels:
+            raise ValueError(f"the registration was measured on {saved.n_channels} channels of {saved.size}, "
+                             f"the scans' layout has {layout.n_channels} of {layout.size}")
+        return saved.maps
+    raise ValueError(f"registration from {part.source!r}: scans, beads or file")
+
+
 @dataclass
 class FourPiBeadSettings:
     """The *4Pi beads* section of the PSF calibration window: the PSF model a section of its own
     (`PSFModelSettings`), as in every other workflow, and 4Pi's own fields."""
     # where the channels are: Spline 4Pi's own *channels* part, so a scan and the fit read the chip alike
     channels: FourPiChannelsSettings = param(default_factory=FourPiChannelsSettings, label="channels")
+    registration: ScanRegistrationSettings = param(default_factory=ScanRegistrationSettings,
+                                                   label="registration", collapsed=True)
     z_step_nm: float = param(0.0, label="z step", unit="nm", min=0.0,
                              help="the stage's step between slices; 0: from the scan's own record")
     mirror_steps: str = param("2, 0, -2", label="mirror steps", unit="rad",
@@ -242,6 +300,7 @@ def fourpi_shown(settings: FourPiBeadSettings, ring: bool = False) -> dict:
     *learn sample index* always; the *magnitude modes* only for a Zernike magnitude, whose modes they are."""
     from .pupil import model_shown
     shown = {f"channels.{n}": flag for n, flag in settings.channels.shown().items()}
+    shown.update({f"registration.{n}": flag for n, flag in settings.registration.shown().items()})
     beads = model_shown("beads", settings.psf.magnitude, ring=ring)
     for name in ("psf.saf_damping", "psf.learn_na", "psf.learn_n_med"):
         shown[name] = beads[name]
@@ -331,8 +390,15 @@ def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
     if any(s[2].size != layout.size or s[2].n_channels != layout.n_channels for s in scans):
         raise ValueError("the scans' channels differ in size or number")
     projections = [s[1].sum(axis=(1, 2)) for s in scans]                      # (C, h, w) each
-    tell("registering the channels")
-    registration = register_channels(projections)
+    maps = given_maps(settings.registration, layout)
+    if maps is None:
+        tell("registering the channels")
+        registration = register_channels(projections)
+    else:
+        from ..channels import Registration
+        C = layout.n_channels
+        registration = Registration([np.asarray(m, float) for m in maps], [0] * C, [float("nan")] * C,
+                                    ["identity"] + [settings.registration.source] * (C - 1))
     layout = layout.with_maps(registration.maps)
     half = int(settings.roi_size) // 2
     data, roi_xy, records = [], [], []
@@ -590,7 +656,8 @@ def average_model(found: dict, excluded=(), settings: Optional[FourPiBeadSetting
         stacks.append(per)
     step = float(abs(beads.z_nm[1] - beads.z_nm[0]))
     return iab_from_beads(np.asarray(stacks), dz=step, steps=steps_of(settings, M), layout=layout.to_dict(),
-                          transforms=np.asarray(layout.maps))
+                          transforms=np.asarray(layout.maps),
+                          scan_of=[beads.records[i].get("stack", 0) for i in keep])
 
 
 # ---------------------------------------------------------------- what the window shows of a learnt model

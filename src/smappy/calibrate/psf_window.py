@@ -501,7 +501,8 @@ class PSFCalibrationWindow(QMainWindow):
         except Exception:                            # no stacks, or values that do not read: index-matched
             ring = False
         self.fourpi_form.set_shown(fourpi_shown(settings, ring))
-        self.fourpi_form.set_titles({"channels": settings.channels.title()})
+        self.fourpi_form.set_titles({"channels": settings.channels.title(),
+                                     "registration": settings.registration.title()})
 
     def _forget(self, message: str) -> None:
         """A change of method or mode makes the result another calibration's: dropped, settings kept."""
