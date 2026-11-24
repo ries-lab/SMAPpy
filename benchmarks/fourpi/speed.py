@@ -212,7 +212,7 @@ def main():
               + f"; fit loop otherwise {loop:.1f} s (detection {s.get('detect_seconds', 0):.1f}, "
                 f"fit {s.get('fit_seconds', 0):.1f}); {len(result.locs)} localizations")
         if args.drift:                   # again: the drift read from beside the movie, where it now is
-            again, wall2, parts2 = whole(plugin, make(), args.frames, True, fresh=False)
+            _, wall2, parts2 = whole(plugin, make(), args.frames, True, fresh=False)
             print(f"  again, the drift kept: {args.frames / wall2:,.0f} frames/s, {wall2:.1f} s; "
                   + ", ".join(f"{k} {v:.1f} s" for k, v in parts2.items()))
             _forget_drift(settings.source.path)
