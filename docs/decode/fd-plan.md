@@ -104,7 +104,8 @@ four nodes' gather; synthetic × 2, a 9 × 9 grid; 2026-11-23): 6 M samples abou
 six trainings about five hours on one GPU, under three on gpuvm and decodebox together.
 
 Scoring, run on this Mac: `fd_study.py score` (Spline 3D on 13 × 13 ROIs at every molecule, three z
-starts; the networks on the CPU).  A smoke run of Spline 3D alone on synthetic × 2 at 5000 photons, 150
+starts; the networks on the Mac's GPU, about 5.5 minutes a field -- on its CPU, at about 50 ms a 7-frame
+window for each network, they took 55 minutes, Spline 3D under a second).  A smoke run of Spline 3D alone on synthetic × 2 at 5000 photons, 150
 windows a place: |z bias| at most 10.6 nm near focus and 24.5 nm over ±600 nm, the corners' SD 1.4 and
 1.3 times the local CRLB (few molecules a bin; the full run takes 600 a place).
 
@@ -124,4 +125,68 @@ CRLB, and the centre network's failure is measured beside it.  The numbers go in
 
 ## 8. Results
 
-(to come)
+2026-11-24.  Six trainings, 6 M samples each (186 epochs; synthetic on gpuvm, Zenodo on decodebox), every
+one finished.  Node grids: synthetic × 1 7 × 7 (blend error 0.41 %), × 2 9 × 9 (0.87 %), Zenodo 9 × 9
+(3.36 %: the field is steeper than the grid follows; the truth *is* the node splines here, so this costs
+the comparison nothing, but a real Zenodo calibration on that grid would be 3 % off between nodes).
+Scored by `fd_study.py score` (seed 7): 600 windows at each of 25 places, molecules alone and on for at
+least 90 % of the frame, background 20.  Near focus = |z| < 300 nm (three z bins); each place-bin holds 13
+to 26 molecules, so a bin's bias is uncertain by a few nm and the field's *maximum* over 75 bins is
+inflated by that noise.  RMSE pools the bias and the scatter (lateral the mean of x and y); "corners" the
+four corner places pooled; the CRLB that of the local PSF; recall over every scored molecule near focus.
+
+**Synthetic × 1** (±50 µm)
+
+| photons | method | max \|z bias\| over the field (nm) | median \|z bias\| (nm) | corners RMSE lat / ax (nm) | corners CRLB lat / ax (nm) | centre RMSE lat / ax (nm) | recall |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 5000 | Spline 3D, node splines | 11 | 2.0 | 6.9 / 10.6 | 5.1 / 9.5 | 5.8 / 11.2 | – |
+| 5000 | netfit, centre PSF | 102 | 14.2 | 49.1 / 37.0 | 5.1 / 9.6 | 5.2 / 10.0 | 1.000 |
+| 5000 | netfit, field | 7 | 1.5 | 7.2 / 11.7 | 5.1 / 9.6 | 5.5 / 9.3 | 1.000 |
+| 1500 | Spline 3D, node splines | 18 | 3.9 | 12.9 / 22.1 | 12.0 / 23.0 | 13.1 / 21.7 | – |
+| 1500 | netfit, centre PSF | 65 | 11.7 | 36.9 / 39.5 | 12.1 / 23.2 | 12.4 / 23.2 | 1.000 |
+| 1500 | netfit, field | 15 | 3.8 | 15.0 / 24.7 | 12.1 / 23.2 | 12.5 / 22.0 | 1.000 |
+
+**Synthetic × 2**
+
+| photons | method | max \|z bias\| over the field (nm) | median \|z bias\| (nm) | corners RMSE lat / ax (nm) | corners CRLB lat / ax (nm) | centre RMSE lat / ax (nm) | recall |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 5000 | Spline 3D, node splines | 15 | 2.8 | 8.9 / 13.8 | 5.7 / 10.5 | 5.5 / 11.4 | – |
+| 5000 | netfit, centre PSF | 256 | 40.1 | 101.5 / 87.8 | 5.7 / 10.5 | 5.0 / 8.2 | 0.999 |
+| 5000 | netfit, field | 8 | 1.9 | 8.0 / 16.3 | 5.7 / 10.6 | 4.8 / 9.8 | 0.999 |
+| 1500 | Spline 3D, node splines | 27 | 6.5 | 16.2 / 28.8 | 13.8 / 26.0 | 12.6 / 24.3 | – |
+| 1500 | netfit, centre PSF | 194 | 38.5 | 97.8 / 106.5 | 13.7 / 25.9 | 11.3 / 21.7 | 0.993 |
+| 1500 | netfit, field | 17 | 3.9 | 16.7 / 30.1 | 13.9 / 26.3 | 12.5 / 20.6 | 1.000 |
+
+**Zenodo** (±80 µm)
+
+| photons | method | max \|z bias\| over the field (nm) | median \|z bias\| (nm) | corners RMSE lat / ax (nm) | corners CRLB lat / ax (nm) | centre RMSE lat / ax (nm) | recall |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 5000 | Spline 3D, node splines | 14 | 2.5 | 20.6 / 21.3 | 9.3 / 12.3 | 7.3 / 15.6 | – |
+| 5000 | netfit, centre PSF | 383 | 81.8 | 143.1 / 209.9 | 9.4 / 12.5 | 5.6 / 9.7 | 0.941 |
+| 5000 | netfit, field | 20 | 2.7 | 15.4 / 24.3 | 9.3 / 12.3 | 6.2 / 11.5 | 1.000 |
+| 1500 | Spline 3D, node splines | 55 | 7.6 | 34.1 / 42.2 | 23.9 / 31.9 | 19.6 / 34.8 | – |
+| 1500 | netfit, centre PSF | 353 | 87.1 | 125.2 / 296.8 | 24.0 / 32.8 | 17.0 / 29.0 | 0.892 |
+| 1500 | netfit, field | 53 | 5.5 | 32.3 / 52.4 | 24.1 / 31.8 | 18.9 / 35.1 | 1.000 |
+
+What it says:
+
+* **The network trained with the field does what Spline 3D with node splines does.**  Its z bias over the
+  field is as small as the fitter's (median 1.5 to 5.5 nm, the fitter's 2.0 to 7.6), its RMSE at the
+  corners 1.2 to 2.0 times the local CRLB, the fitter's 1.0 to 2.2 (the robust ratios the score prints,
+  which leave the outliers out, are 0.8 to 1.5 for both), and its recall 1.0 everywhere.  The done criterion of §7 holds on all three fields.
+* **The network trained on the centre PSF fails away from the centre, the more the stronger the field.**
+  At the centre it is as good as the field network; at the corners its z is off by 100 nm (synthetic
+  × 1), 250 nm (× 2) and 380 nm (Zenodo), its lateral RMSE 3 to 18 times the CRLB, and on Zenodo it loses
+  6 to 11 % of the molecules.  Even the mild synthetic × 1 field is beyond it -- unlike Spline 3D on the
+  centre spline with §11's correction afterwards, which held there: a network has no fit to fall back on,
+  it reads a PSF it never saw.
+* **Costs.**  The field costs little at the centre -- the centre RMSE within a nm of the centre
+  network's on the synthetic fields, on Zenodo 1 to 2 nm laterally and 2 to 6 nm axially more -- and
+  training 25 % longer (§7).  Zenodo at 1500 photons is the one place the field network's axial RMSE at
+  the corners (52 nm) is above Spline 3D's (42 nm) and its CRLB (32 nm); its robust ratio there is 1.17,
+  so it is a tail of outliers in z, not a broader core -- worth a look with more molecules before calling
+  it a loss.  Spline 3D's own lateral RMSE at Zenodo's corners (21 nm at 5000 photons, CRLB 9) is outliers
+  too (robust ratio 1.25).
+
+The scores: `~/.cache/decode_smlm/netfit/fd/*_scores.jsonl` (a row per method, place, z bin and photon
+count); the models beside them, the gpuvm / decodebox copies under `~/decode_poc/fd/runs`.
