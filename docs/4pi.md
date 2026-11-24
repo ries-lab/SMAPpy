@@ -2400,3 +2400,54 @@ fall.  **The test on Nup96** (the whole movie, 70 files, 140 000 frames): learnt
 odd files, judged on the even ones, against the v2 bead model and v1's bead and in-situ models -- the
 pupils, the fits' log-likelihood on the same molecules, the CRLB at matched photons, z from the phase
 against the envelope's (slope and scatter), the share of uncertain fringes, and the rings' separation.
+
+### What it found (2026-11-24)
+
+**Simulated** (`tests/uipsf_tests/test_fourpi_insitu.py`, and 200 molecules in a script first): molecules drawn with
+a sample's pupils, coherence, channel offsets, Δz, maps and blur, learnt from a bead model a day off in each, a
+tenth of them started a fringe off.  Everything comes back: the pupils within 0.01 rad (from 0.15 off), the
+coherence within 0.02 (from 0.1), the channel offsets within 0.04 rad, Δz 63 nm for 60 (from 20), the maps within
+0.02 px (from 0.5), σ 50 for 50 (from 40); z within 5.6 nm median and every molecule on its fringe.
+
+**Nup96** (`benchmarks/fourpi/insitu/`; the whole movie, 140 000 frames).  The bead model is v2's, learnt by the
+window's defaults from all 102 beads of `4pi_40nm_bead` (9 min on a Mac's GPU; fringe period 264.9 nm).  The movie
+fitted with it (Spline 4Pi, *4Pi z*; 17 min, 1.15 M localizations); 3000 molecules chosen from the odd files
+(photons above the median, 841 median of those chosen), learnt in two rounds (21 min on a Mac's GPU; 16 left out
+as poor fits).  Every model then judged on the **even files** only:
+
+| model | held-out molecules: objective (nats) | deviance / px | logl_rel | CRLB x / y (nm) | CRLB z, envelope / phase (nm) | uncertain fringes | p < 0.9 | z_phase vs z_env: slope, scatter (× CRLB) | ring separation (nm, median, IQR) |
+|---|---|---|---|---|---|---|---|---|---|
+| v2 beads | 781 626 | 1.156 | −0.561 | 9.26 / 8.73 | 26.7 / 5.44 | 10.1 % | 29.8 % | 1.031, 1.37 | 61.9 (51.8 -- 72.7) |
+| **v2 in situ** | **773 213** | **1.144** | **−0.557** | 8.41 / 8.06 | 24.4 / 4.55 | 10.4 % | 30.7 % | 1.046, 1.46 | 62.1 (52.4 -- 72.1) |
+| v1 in situ | -- | -- | −0.559 | 9.54 / 8.78 | 19.7 / 5.17 | 14.7 % | 39.9 % | 1.076, 2.03 | 66.5 (54.2 -- 79.3) |
+| v1 beads | -- | -- | −0.561 | 9.65 / 8.91 | 26.2 / 5.63 | 10.7 % | 31.0 % | 1.015, 1.42 | 96.6 (74.4 -- 115.6) |
+
+The CRLBs are at 700 -- 1400 photons; the held-out objective is 2000 molecules of the even files, each localised
+on every model by uipsf from three z starts; the rings are each pore's z fitted by two Gaussians of one width,
+after one 3D drift (RCC on the beads' fit, sure fringes) taken off every table alike, over 4100 pores found by
+*Segment regions*' ring template.  The uncertain fringes are *4Pi z*'s own estimate, from each model's CRLBs.
+
+**What the in-situ model changed**: the coherence rose from 0.79 -- 0.84 to 0.93 -- 0.98 in every channel (v1 saw the
+same direction: modulation 0.76 from beads, 0.82 in situ), Δz from −155 to −93 nm, Δx, Δy by 6 -- 11 nm against
+a prior of 1 nm (the data pull hard; a run whose prior followed each round's result landed within 3 nm of
+this one), σ 40 → 36 nm, the period 264.9 → 267.4 nm.  The pupils moved by 0.19 (upper) and 0.15 rad rms (lower):
+the upper astigmatism 0.48 → 0.41 rad, its coma Z7 0.02 → −0.09, and the spherical Z11 −0.07 → −0.13 (upper)
+and −0.07 → −0.18 (lower) -- what a sample a few µm deep adds.
+
+**So, plainly: the in-situ model describes the molecules better, but measures the Nup96 no better.**
+- Better: 8 400 nats on 2000 held-out molecules (4 per molecule, the deviance per pixel 1.156 → 1.144), and the
+  spline fit's log-likelihood on every held-out localization.
+- Not better: the rings' separation is the same (62.1 against 61.9 nm, the same spread); the share of uncertain
+  fringes is not lower (10.4 against 10.1 %); the envelope's and the phase's z agree no better in nm (1.46 ×
+  24.4 = 35.6 nm against 1.37 × 26.7 = 36.6 nm).  The smaller CRLBs come from the higher coherence, and the
+  measurements do not show them: the scatter in units of the CRLB rose by as much as the CRLB fell.
+- Both v2 models beat v1's in-situ model clearly (14.7 % uncertain fringes, z scatter 2.0 × its CRLB).
+
+The Nup96 sample is index-matched and imaged near the coverslip, with the beads from the same instrument a short
+time before: the bead model was already right, and what in situ adds is within what these measures can see.
+In situ should matter where the bead model is wrong -- a mismatched buffer (D9), a deep sample, or beads only
+from another day or as few as Gabin's three one-bead stacks (§25, P1).  The method is therefore not offered in the
+PSF calibration window yet (the plan's step 4): that waits for a data set where it measures better.  What is next,
+in order: the tubulin movie with P1's three-stack bead model; ring separations measured per time window (the
+62 nm against Nup96's ~50 nm is mostly the measurement's: drift within a window, ghosts, the two-Gaussian fit);
+the cavity phase as a prior over time (§26 above), which would decide fringes rather than only describe them.
