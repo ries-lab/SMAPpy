@@ -220,6 +220,68 @@ class ChannelDrift:
     def to_dict(self) -> dict:
         return {"frames": self.frames.tolist(), "offsets_px": self.offsets.tolist()}
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "ChannelDrift":
+        return cls(np.asarray(d["frames"], float), np.asarray(d["offsets_px"], float))
+
+
+# ------------------------------------------------------------------------- the drift kept
+# The drift's prefit fits ten blocks of 500 frames before the fit starts -- on the 4Pi-SMS tubulin
+# movie as long as fitting 5000 frames -- and gave the same curve on every run of the same movie and
+# settings.  So it is kept beside the movie, as the two-colour fitters' channel move is
+# (`channel_move.cache_path`), keyed by everything it was measured from (`drift_cache_key`).  The
+# curve is kept, not the fits it was made of: a run that reads it draws the curve alone.
+
+def drift_cache_key(movie, calibration, settings: dict) -> str:
+    """What a channel drift depends on: the movie (its path, size and time, so a file written again
+    is measured again), the model's bytes, and the settings and layout it was measured with."""
+    import hashlib
+    import json
+    from pathlib import Path
+    h = hashlib.sha256()
+    path = Path(movie)
+    stat = path.stat() if path.is_file() else None
+    seen = [str(path.resolve()), stat and (stat.st_size, stat.st_mtime_ns)]
+    for part in (json.dumps(seen, default=str), json.dumps(settings, sort_keys=True, default=str)):
+        h.update(part.encode())
+    if calibration and Path(calibration).is_file():
+        h.update(hashlib.sha256(Path(calibration).read_bytes()).hexdigest().encode())
+    return h.hexdigest()[:16]
+
+
+def drift_cache_path(movie):
+    """Beside the movie: ``<movie>.channel_drift.json``, every measurement of it by its key."""
+    from pathlib import Path
+    p = Path(movie)
+    return p.with_name(p.name + ".channel_drift.json")
+
+
+def cached_drift(movie, key: str) -> Optional[ChannelDrift]:
+    import json
+    try:
+        found = json.loads(drift_cache_path(movie).read_text(encoding="utf-8")).get(key)
+    except (OSError, ValueError):
+        return None
+    try:
+        return None if found is None else ChannelDrift.from_dict(found)
+    except (KeyError, TypeError, ValueError):
+        return None                     # an entry of another version: measured again
+
+
+def keep_drift(movie, key: str, drift: ChannelDrift) -> None:
+    """Kept beside the movie; a folder that cannot be written to keeps nothing, silently."""
+    import json
+    path = drift_cache_path(movie)
+    try:
+        known = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, ValueError):
+        known = {}
+    known[key] = drift.to_dict()
+    try:
+        path.write_text(json.dumps(known), encoding="utf-8")
+    except OSError:
+        pass
+
 
 def measure_channel_drift(locs, channels: int, pixelsize_nm, block_of=None,
                           min_count: int = 20, over_time: bool = True, span=None) -> ChannelDrift:

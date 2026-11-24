@@ -292,10 +292,44 @@ class FourPiFit(_FitPlugin):
         return MultiChannelEngine(camera, finder, model, source.layout, settings.fit, drift,
                                   frame_shape=source.base.shape[-2:])
 
+    def drift_key(self, settings, camera, source) -> str:
+        """The cache's key for this run's channel drift (`multichannel.drift_cache_key`): the
+        movie, the model, the layout with its maps, and every setting the prefit reads -- the
+        frames, the camera, detection, the fit region, the fit's and the drift's own."""
+        from dataclasses import asdict
+        from ..multichannel import drift_cache_key
+        src, model = settings.source, settings.model
+        stop = min(src.stop, source.n_frames) if src.stop else source.n_frames
+        measured = {"version": self.version, "start": src.start, "stop": stop,
+                    "frames": source.n_frames, "camera": camera.to_dict(),
+                    "layout": source.layout.to_dict(), "starts": model.starts,
+                    "blocks": model.drift_blocks, "block_frames": model.drift_frames,
+                    "over_time": model.drift_over_time}
+        for part in ("detection", "region", "fit"):
+            value = getattr(settings, part, None)
+            if value is not None:
+                measured[part] = asdict(value)
+        # how many threads fit it changes nothing in it
+        measured.get("fit", {}).pop("n_threads", None)
+        return drift_cache_key(src.path, model.calibration, measured)
+
     def channel_drift(self, settings, camera, finder, source):
         """The channels' drift, from blocks of frames spread over the
         acquisition fitted with x and y free in every channel
-        (`multichannel.measure_channel_drift`)."""
+        (`multichannel.measure_channel_drift`); measured once for a movie and
+        its settings, and read from beside the movie after that
+        (`multichannel.cached_drift`)."""
+        from ..multichannel import cached_drift, keep_drift
+        key = self.drift_key(settings, camera, source)
+        kept = cached_drift(settings.source.path, key)
+        self._drift_kept = kept is not None
+        if kept is not None:
+            return kept
+        drift = self._measure_channel_drift(settings, camera, finder, source)
+        keep_drift(settings.source.path, key, drift)
+        return drift
+
+    def _measure_channel_drift(self, settings, camera, finder, source):
         from ..locs import concat
         from ..multichannel import MultiChannelEngine, measure_channel_drift
         from ..pipeline import drive
@@ -327,13 +361,18 @@ class FourPiFit(_FitPlugin):
                                      span=(float(starts[0]), float(min(starts[-1] + length, stop))))
 
     _drift = None
+    _drift_kept = False
 
     def run(self, ctx: Context, settings) -> Result:
         """The fit; with *channel drift*, its figure beside the run's, channel by channel, as the two-channel
         fitters draw their channel move (`channel_move.draw`)."""
-        self._drift = None
+        self._drift, self._drift_kept = None, False
         result = super().run(ctx, settings)
         drift = self._drift
+        if drift is not None and self._drift_kept:
+            from ..multichannel import drift_cache_path
+            result.text += (f"; the channels' drift as measured before, from "
+                            f"{drift_cache_path(settings.source.path).name}")
         if drift is not None:
             from ..channel_move import ChannelMove, draw
             for c in range(1, drift.offsets.shape[1]):

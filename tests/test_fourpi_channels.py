@@ -863,3 +863,67 @@ def test_nearest_pixel_detection_finds_what_bilinear_does(cal):
         engine.push(layout.cut(frames), 0)
         found[mode] = len(engine.flush())
     assert abs(found["nearest"] - found["bilinear"]) <= 0.02 * found["bilinear"]
+
+
+@pytest.mark.slow
+def test_the_channel_drift_is_measured_once_and_kept_beside_the_movie(cal, tmp_path, monkeypatch):
+    """A run with *channel drift* keeps the curve beside the movie; the next run of the same movie and
+    settings reads it rather than fitting the drift blocks again, and gives the same table.  A
+    setting the prefit reads, or the movie written again, measures it again."""
+    import os
+    from smappy import multichannel
+    from smappy.plugins import Context
+    from smappy.plugins.fit import CameraSettings, OutputSettings, SourceSettings
+    from smappy.plugins.fit_4pi import FourPiFit, FourPiFitSettings, FourPiModelSettings
+    model_path = tmp_path / "model_4pi.h5"
+    fourpi.save_fourpi_calibration(model_path, cal)
+    layout = side_by_side(4, 48, 48)
+    rng = np.random.default_rng(12)
+    n = 160
+    frame = np.repeat(np.arange(n), 2)
+    x, y = rng.uniform(10, 38, (2, len(frame)))
+    frames = fourpi.render_frames(cal, layout, frame, x, y, rng.uniform(-300, 300, len(frame)),
+                                  4000, phase0=0.4, n_frames=n, background=8)
+    adu = (frames / 0.5 + 100).astype(np.uint16)
+    paths = _write_quadrant_series(tmp_path, [layout.cut(adu)[:, c] for c in range(4)], 1)
+
+    def settings(blocks=2):
+        s = FourPiFitSettings(
+            source=SourceSettings(path=str(paths[0])),
+            camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
+            model=FourPiModelSettings(calibration=str(model_path), channel_drift=True,
+                                      drift_blocks=blocks, drift_frames=60),
+            output=OutputSettings(path=str(tmp_path / "out_locs.hdf5")))
+        s.finish.fourpi_z = False
+        return s
+
+    measured = []
+    original = FourPiFit._measure_channel_drift
+
+    def counting(self, *args):
+        measured.append(1)
+        return original(self, *args)
+    monkeypatch.setattr(FourPiFit, "_measure_channel_drift", counting)
+
+    first = FourPiFit().run(Context(), settings())
+    kept = multichannel.drift_cache_path(paths[0])
+    assert len(measured) == 1 and kept.exists()
+    again = FourPiFit().run(Context(), settings())
+    assert len(measured) == 1 and "as measured before" in again.text
+    assert np.array_equal(first.locs["x_nm"], again.locs["x_nm"])
+    assert first.locs.metadata["channel_drift"] == again.locs.metadata["channel_drift"]
+
+    FourPiFit().run(Context(), settings(blocks=3))          # another setting: measured again
+    assert len(measured) == 2
+    stat = os.stat(paths[0])                                # the movie written again
+    os.utime(paths[0], ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+    FourPiFit().run(Context(), settings())
+    assert len(measured) == 3
+
+
+def test_a_channel_drift_survives_its_cache_file():
+    from smappy.multichannel import ChannelDrift
+    drift = ChannelDrift(np.array([0.0, 50.0]), np.arange(16.0).reshape(2, 4, 2) / 10)
+    back = ChannelDrift.from_dict(drift.to_dict())
+    assert np.array_equal(back.frames, drift.frames) and np.array_equal(back.offsets, drift.offsets)
+    assert np.allclose(back.at([25.0]), drift.at([25.0]))
