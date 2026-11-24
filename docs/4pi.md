@@ -6,7 +6,8 @@ bead average, both in the PSF calibration window, live DCIMG and simulated 4Pi
 cameras (§16).  Of M7 the vectorial model is in and the window's default
 (§17, §19), with a start that reaches one optimum (§20), and the window learns one objective's minimal pupil (§23); the locked refit, multicolour and two cameras are not started.  M6
 (in situ) waits on the in-situ learning; dual colour on the layer (M8) is
-planned, not started.
+planned, not started.  What is still missing, and a two-colour tubulin data set
+for it, is §25 (2026-11-24); the work packages it planned are §26 -- 28.
 
 This page is written from four sources:
 - a read of SMAP's 4Pi code (`../SMAP`);
@@ -2217,6 +2218,160 @@ typed, n_med from PBS's 1.334:
 Here the index moves by 0.011 for 600 nats and the NA wants to rise to the grid's edge for 975: on M5's objective
 at its own NA there is no effective-NA deficit to explain, and PBS's index holds within 0.01.  (The 676 nm stack
 was not on this machine; M2's 1.40 behind 1.43 is another objective's, not checked here.)
+
+## 25. What is still missing, and the 2017-11-28 tubulin data (2026-11-24)
+
+### The folder `gabin/4Pi_frames/2017-11-28`
+
+On the VBC share (`/Volumes/VBCShare/RIES/Users/gabin/4Pi_frames/2017-11-28`), about 245 GB.  A
+Bewersdorf-design astigmatic 4Pi-SMS, as §10's Nup96: an sCMOS writing DCIMG strips of 2048 × 168 px with
+the four phase images side by side (the authors' channel centres x = 235, 474, 1557, 1797), plus **a second
+camera, an EMCCD (128 × 128 px)** -- the salvaged-fluorescence path for colour (Zhang et al. 2020).  The
+analysis files are those of the authors' MATLAB pipeline (`4Pi-SMS/fit_ast.m`), redone in 2020-09/10.
+`note.txt`: tubulin, AF647 + CF660C, 0.05 % (two dyes); Cell01, Cell02 4Pi at 100 fps, 642 nm at 600 mW,
+gain 200.  Read with `io/dcimg.py` as it is (a series opens as one source).
+
+| what | frames | what it is |
+| --- | --- | --- |
+| `Cell01/` (231 GB) | 120 DCIMG × 3000 = 360 000, 10 ms | **the tubulin movie, two colours**; `Cell01_642_000_000.tif` is a 3000-frame 168 × 168 crop of one channel |
+| `EMCCD/Cell01/` (11 GB) | 120 TIFF × 3001, 128 × 128 | the same movie's salvaged-fluorescence camera; 3001 pages per file against 3000 frames, so the first or last page has to be matched |
+| `Cell02` | -- | in `note.txt`, not in the folder |
+| `Cell03/`, `Cell04/`, `Cell05/` (41 MB each) | 61 one-frame DCIMG, 20 nm steps (1.2 µm), 0.3 / 0.5 / 0.5 s | **bead z scans, one bead each**, at the centre of each channel; no phase steps.  Cell04 is what the authors' phase calibration (`bead_642_dphi_cali_20200911.mat`) and astigmatism fit (`bead_642_Astfit_20200911.mat`) were made from.  A bright vertical structure sits at the channels' edges, away from the bead |
+| `Cell06/` -- `Cell12/` (7 MB each) | 10 frames, 100 ms; `EMCCD/CellNN/` 11 frames | **many beads in focus on both cameras**: channel alignment (`align_642_FMTtransform_20200914.mat`, from Cell12) and the sCMOS -> EMCCD registration (`two_camera_reg_20200911.mat`, a second-order polynomial per axis) |
+| `Cell01_642_tmpresult_20200912.mat` | 11.8 M rows | the authors' raw fits: x, y, t, astigmatic z, phase z, LL, CRLB, I, bg, σx, σy |
+| `Cell01_ratio.mat` | 11.8 M rows | per-localization photons on the two cameras (`RT`, `PT`) -- the colour ratio |
+| `Cell01_642v20_60.mat`, `…_two_color.mat` | 5.1 M rows | the filtered, unwrapped, drift-corrected result in Vutara's columns, and split into the two colours: **a reference to compare against** |
+| `Cell01_DCresult.mat`, `Cell01_1_drift.mat` | 119 cycles | the authors' drift correction (x, y, z per cycle) |
+| `Cell01_ll/`, `Cell01_ll_/` | -- | Vutara SRX `particles.csv` exports of the result |
+| `old/` | -- | the 2017 analysis, superseded by the 2020 one |
+
+### What it adds to the data we have
+
+| set | where | sample | colours | beads |
+| --- | --- | --- | --- | --- |
+| Ries-lab 4Pi, zenodo 10823308 | `~/.cache/uipsf/zenodo/4pi_40nm_bead`, `4pi_smlm_nup96` | Nup96 | 1 | 26, with 3 mirror phase steps |
+| 4Pi-SMS Example Data II, zenodo 4022827 | `…/4pi_sms_nup96` (one of four movie files) | Nup96 | 1 | 5 in one z stack |
+| zenodo 14287640 | `…/4pi_dcimg_astig` (Cell09, 2024) | -- | -- | one z stack |
+| **this folder** | VBC share | **tubulin** | **2, second camera** | 3 one-bead stacks; 7 two-camera bead fields |
+
+It is the only one with **two colours** and **two cameras**, the only **continuous structure** (filaments,
+where Nup96 is rings), and the only **whole long acquisition** (an hour, 360 000 frames) with the authors' own
+analysis of every step to compare with.  It is weaker in beads: one per stack, three stacks.
+
+**Test data, copied** to `~/.cache/uipsf/4pi_tubulin_2017-11-28/` (5.7 GB, 2026-11-24): the three bead stacks,
+Cell06 -- 12 on both cameras, the first two movie files (`Cell01_642_000_000` and `_001_000.dcimg`, 6000 frames)
+with their EMCCD files, `note.txt`, every analysis `.mat` of the top folder (the raw fits, the ratio, the
+result, the drift, the calibrations) and `Cell01_dmap.tif`.  The whole movie stays on the share, which reads
+at 100 MB/s (≈ 145 frames/s; the local copy reads at 700 frames/s), for the one run that needs it.  Nup96
+(4022827, 10823308) stays the test of z (the rings); this set is single colour on the sCMOS for now, the
+EMCCD and colour later.
+
+**The Ries-lab Nup96 in full.**  zenodo 10823308 (uiPSF, Fig. 2) has `Fig2_4pi_dataset.zip`, 16.35 GB: the 26
+phase-stepped bead stacks and all the movie files of `cell3_nup96_mMaple_045`.  The cache and the share
+(`Users/shah/example data for uiPSF`, `Projects/DECODE_data`) held only 2 of them; all 70 movie files and
+`parameters.txt` are in `~/.cache/uipsf/zenodo/4pi_smlm_nup96` since 2026-11-24 (15 GB).  4022827's zip (3.25 GB)
+is the whole 4Pi-SMS example, of which the cache holds the beads and the first movie file.
+
+### What is missing
+
+Ordered by what a user of a 4Pi-SMS would hit first.
+
+1. **Two colours by salvaged fluorescence (two cameras)** -- later, by decision (2026-11-24); the analysis is
+   single colour on the sCMOS for now.  M7's "multicolour" and "two cameras", not started.
+   What this data needs: the EMCCD's frames read beside the strip and matched frame by frame (the extra
+   page); a registration between the cameras from beads seen on both (Cell06 -- 12; the authors use a
+   second-order polynomial, `calibrate.dual` has affine and higher maps); per localization the photons on
+   the EMCCD at the registered position, position held (a fixed-position fit or an aperture sum); the ratio
+   against the 4Pi photons, and colours assigned from it as *Assign colours* does with MINFLUX's `dcr`.
+   The authors' `Cell01_ratio.mat` and `…_two_color.mat` are the check.  Colour from the s/p ratio inside
+   the 4Pi cavity (the other route M7 names) needs no second camera, but this data cannot test it.
+2. **DECODE for 4Pi** (`docs/decode.md` §10 step 6): nothing yet.  It waits on the torch IAB renderer
+   (step 1) and settling the phase convention against the C++ `CSpline4Pi` on one bead stack.  A 4Pi network
+   outputs the phase as well (one mixture with a von Mises factor, not Hao's two), so it is not netfit's C = 2
+   plus two channels.  Dense tubulin, where the fitter's ROIs overlap, is where it should gain most.
+3. **Speed.**  The fitter is C++ on the CPU, 4× a 2C fit per spot (measured below); the whole movie is an
+   hour or two, reading included.  A GPU fitter or DECODE (2) would help; reading 231 GB over the share is
+   its own limit.
+4. **Ghosts** -- later, by decision (2026-11-24).  §10 expects 11 -- 14 % wrong fringes; *4Pi z* gives the probability but nothing removes or
+   re-fits them: the locked refit (D4) is not started.  Filaments are continuous in z, so a structure-aware
+   unwrapping (a localization's fringe judged against its neighbours') is an idea this data can test and the
+   rings could not.
+5. **Drift over an hour in z.**  *4Pi z* follows the cavity's phase; the sample's 3D drift needs RCC / COMET on
+   the phase z, with ghosts in it.  Never run on a 4Pi movie this long; `Cell01_DCresult.mat` is the reference.
+6. **In situ (M6)**, and from dye stacks -- neither exists (below), after the in-situ learning: with one bead per stack here, a model learned from the
+   movie's own 11.8 M localizations matters more than for the Nup96 sets.  D9's sample geometry comes with it.
+7. **A model from three one-bead stacks.**  `iab_from_beads` and the pupil learning both took stacks of
+   several beads; here the three stacks have to be learned together, with a phase per stack (the cavity moves
+   between them).  The first thing to try on this data, before anything above.
+
+### Asked, and answered from the code (2026-11-24)
+
+- **4Pi from dye stacks: no.**  The PSF calibration window's 4Pi mode has two methods, the bead average and the
+  pupil model, both on bead scans (`psf_methods.FOURPI`, `fourpi_beads.scan_beads`); the molecule-stack methods
+  have no 4Pi variant, so `for_mode` offers none.
+- **4Pi in situ: no.**  Nothing in `calibrate/insitu*.py` or uipsf's in-situ workflows knows 4Pi; the 4Pi
+  learning is `uipsf/workflows/fourpi.py`'s `learn_fourpi`, from bead stacks.  M6 and D9 are plans.
+- **Channel drift: a prefit, yes.**  With *channel drift* on (off by default), Spline 4Pi first fits
+  *drift blocks* (10) blocks of *frames per block* (500) spread over the movie, with x and y free per channel
+  (`Global4PiPSF(shared=(False, False, True, False, True, True))`); `multichannel.measure_channel_drift`
+  keeps the better half by `x_err_nm` and fits each channel's offset against channel 0 as a robust,
+  error-weighted spline over time (*over time*), or a constant -- the channel move's machinery
+  (`channel_move.over_time`).  It is measured again on every run, not cached, and refused for a live fit.
+- **The fitter's speed.**  Yes, it is the IAB model: per pixel and channel three splines (I, A, B) where
+  Spline 3D 2C evaluates one, in four channels instead of two -- 6× the arithmetic per iteration, partly
+  repaid by fewer iterations (4.1 against 7.0).  Measured (`fit_cspline4pi_global` against
+  `fit_cspline_global` on the I splines of two channels, 2000 simulated spots, v1's bead model, all cores of
+  the Mac):
+
+  | ROI | 4Pi, 1 start | 4Pi, 2 z starts (default) | 4Pi, 2 × 2 phase starts | 2C |
+  | --- | --- | --- | --- | --- |
+  | 13 px | 5 840 fits/s | 5 400 | 1 850 | 24 100 |
+  | 17 px | 3 700 | 3 600 | 1 150 | 14 900 |
+
+  So a 4Pi spot costs 4× a 2C one, 13× with two phase starts.  The whole plugin on v1's Nup96 (1000 frames,
+  7 localizations a frame): 251 frames/s, 1 840 localizations/s, 60 % of it in the C++ fit.  §10's 13 -- 27
+  frames/s on 4Pi-SMS went mostly into reading, the drift pass and writing (§12, where the engine alone did
+  72 frames/s).  For Cell01: 11.8 M candidates at ~5 000 fits/s is about 40 min of fitting, and reading
+  231 GB from the share about as long -- an hour or two for the whole movie.
+
+### The plan: work packages (agreed 2026-11-24)
+
+Single colour first; two colours and ghosts later.  Each package is a session of its own, in its own
+worktree; P1, P2 and P4 started and landed on 2026-11-24 (§26, §27, §28).
+
+- **P1. Gabin's tubulin, single colour, end to end.**  A model from the three one-bead stacks (Cell03 -- 05)
+  learned together with a phase per stack (item 7); the layout and the channel registration from the
+  many-bead fields (Cell06 -- 12); Spline 4Pi and *4Pi z* on the first two DCIMG files of Cell01 (6000
+  frames); compared with the authors' `Cell01_tmpresult.mat` / `v20_60` on the same frames.  Data in
+  `~/.cache/uipsf/4pi_tubulin_2017-11-28`.  Where: `fourpi.py`, `calibrate/fourpi_beads.py`, uipsf's
+  `workflows/fourpi.py`, `benchmarks/fourpi/`.
+- **P2. 4Pi in situ (M6).**  A 4Pi model learned from a movie's own localizations, started from a bead
+  model; first on the full Ries-lab Nup96 (`~/.cache/uipsf/zenodo/4pi_smlm_nup96`, 70 files) against v1's
+  in-situ models, then as a method of the PSF window's 4Pi mode.  Where: uipsf's `workflows/fourpi.py` and
+  in-situ workflows, `calibrate/insitu_run.py`, `psf_methods.FOURPI`.
+- **P3. 4Pi from dye stacks** -- not now: no such data (2026-11-24).
+- **P4. Spline 4Pi throughput, on the CPU.**  Profile the whole plugin on a 4Pi-SMS DCIMG; the channel drift
+  cached beside the movie as the channel move is; the spline coefficients read contiguously per voxel in
+  `CSpline4Pi`; reading overlapped with fitting.  A GPU fitter is decided later, with the other fitters and
+  after benchmarking.  Where: `csrc/`, `plugins/fit_4pi.py`, `multichannel.py`, `pipeline.py`.
+- **P5. DECODE for 4Pi** -- open: DECODE-Plex and netfit's C = 2 are on main (0.7.6).  The torch IAB
+  renderer equal to `CSpline4Pi` with the phase convention settled, then a C = 4 network with the phase
+  as one more factor of each molecule's mixture, a von Mises distribution (the Gaussian of an angle).
+- **P6. 3D drift over a long 4Pi movie** -- open, P1 done: RCC / COMET on the phase z with only sure fringes,
+  checked against `Cell01_DCresult.mat`.
+
+P1 and P2 both touch uipsf's `workflows/fourpi.py`; P1 adds a per-stack phase to the bead learning, P2 a
+learning from localizations, so whichever lands second rebases.
+
+Checked for this note: the folder's files, the frame sizes and counts (read with `io/dcimg.py`), the
+authors' calibration files' contents, and the result files' columns.  Not checked: whether Spline 4Pi fits
+these frames with the default layout.
+
+- Zhang Y, Schroeder LK, Lessard MD, … Ries J, … Bewersdorf J (2020).  Nanoscale subcellular architecture
+  revealed by multicolor three-dimensional salvaged fluorescence imaging.  *Nat Methods* 17:225 (checked on
+  PubMed, 31907447).
+  [doi:10.1038/s41592-019-0676-4](https://doi.org/10.1038/s41592-019-0676-4).  The second camera and the
+  colour ratio.
 
 ## 26. The 2017-11-28 tubulin data, single colour, end to end (P1, 2026-11-24)
 
