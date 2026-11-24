@@ -363,8 +363,15 @@ class MultiChannelEngine:
     #: channels' extent if None (`scmos.for_layout`)
     frame_shape: Optional[Tuple[int, int]] = None
 
+    #: fit each block in a worker thread while the next blocks are read and their molecules found,
+    #: `flush` then handing back the block before -- for a whole file driven by `pipeline.drive`,
+    #: which takes the last one from `end`; a live fit or a preview wants each block's at once
+    overlap: bool = False
+
     _pairs: List[PairedROIs] = field(default_factory=list, init=False)
     _buffered: int = field(default=0, init=False)
+    _pending: Optional[object] = field(default=None, init=False)     # the fit in the worker
+    _worker: Optional[object] = field(default=None, init=False)
     #: how the channels are put onto channel 0 to find the molecules (`channels.RESAMPLING`)
     resampling: str = "nearest"
     _lookups: Optional[list] = field(default=None, init=False)
@@ -451,14 +458,42 @@ class MultiChannelEngine:
         return self.finder(summed, first_frame=first_frame, n_threads=self.settings.n_threads)[0]
 
     def flush(self):
+        """The buffered molecules fitted: their localizations -- or, with `overlap`, those of the
+        block fitted before, this one's fit started in the worker."""
+        if not self._pairs:
+            return self.end() if self.overlap else None
+        pairs = _concat_pairs(self._pairs)
+        self._pairs, self._buffered = [], 0
+        if not self.overlap:
+            return self._fitted(pairs)
+        # Detection runs in this thread, single-threaded, and the C++ fit on every core with the
+        # GIL released: one after the other, the cores idled through detection -- 60 % of the
+        # Nup96 movie's time once the fit was fast (docs/4pi.md section 26).  One fit in flight,
+        # so the blocks come back in order and memory holds at most two blocks of ROIs.
+        before = self.end()
+        if self._worker is None:
+            from concurrent.futures import ThreadPoolExecutor
+            self._worker = ThreadPoolExecutor(1, thread_name_prefix="smappy-fit")
+        self._pending = self._worker.submit(self._fitted, pairs)
+        return before
+
+    def end(self):
+        """The fit still in the worker, waited for (`overlap`); None when there is none."""
+        pending, self._pending = self._pending, None
+        if pending is None:
+            return None
+        return pending.result()
+
+    def __del__(self):
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
+            worker.shutdown(wait=False)
+
+    def _fitted(self, pairs: PairedROIs):
         import time
         from .locs import to_nm, valid
         from .pipeline import with_readout, without_readout
 
-        if not self._pairs:
-            return None
-        pairs = _concat_pairs(self._pairs)
-        self._pairs, self._buffered = [], 0
         started = time.perf_counter()
         extra = {}
         if getattr(self.model, "field_dependent", False):

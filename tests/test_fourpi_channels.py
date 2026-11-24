@@ -927,3 +927,34 @@ def test_a_channel_drift_survives_its_cache_file():
     back = ChannelDrift.from_dict(drift.to_dict())
     assert np.array_equal(back.frames, drift.frames) and np.array_equal(back.offsets, drift.offsets)
     assert np.allclose(back.at([25.0]), drift.at([25.0]))
+
+
+def test_fitting_while_the_next_block_is_found_changes_nothing(cal):
+    """`MultiChannelEngine.overlap`: each block fitted in a worker while the next is detected, its
+    localizations handed back a block later and the last by `end` -- the same table, in the same order."""
+    from smappy.metadata import CameraMetadata
+    from smappy.multichannel import MultiChannelEngine
+    from smappy.pipeline import FitSettings, drive
+    from smappy.plugins.fit import DetectionSettings
+    from smappy.psf import Global4PiPSF
+    layout = side_by_side(4, 48, 48)
+    rng = np.random.default_rng(13)
+    n = 60
+    frame = np.repeat(np.arange(n), 2)
+    x, y = rng.uniform(10, 38, (2, len(frame)))
+    frames = fourpi.render_frames(cal, layout, frame, x, y, rng.uniform(-300, 300, len(frame)), 4000,
+                                  phase0=0.4, n_frames=n, background=8)
+    blocks = [(i, layout.cut(frames[i:i + 10])) for i in range(0, n, 10)]
+    camera = CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=0.1)
+    tables = []
+    for overlap in (False, True):
+        settings = FitSettings(roisize=13, max_block_rois=40)     # a fit every few blocks
+        engine = MultiChannelEngine(camera, DetectionSettings().finder(), Global4PiPSF(cal), layout,
+                                    settings, overlap=overlap)
+        parts = []
+        drive(engine, iter(blocks), sink=parts.append, read_ahead=0)
+        tables.append(parts)
+    plain, overlapped = tables
+    assert len(plain) > 2 and len(overlapped) == len(plain)
+    for a, b in zip(plain, overlapped):
+        assert np.array_equal(a["frame"], b["frame"]) and np.array_equal(a["x_nm"], b["x_nm"])

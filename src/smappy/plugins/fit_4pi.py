@@ -289,8 +289,11 @@ class FourPiFit(_FitPlugin):
         drift = (self.channel_drift(settings, camera, finder, source)
                  if settings.model.channel_drift else None)
         self._drift = drift                 # the run's figure (`run`)
+        # a whole file: each block fitted while the next is found (`MultiChannelEngine.overlap`);
+        # a live fit shows each block as soon as it is fitted
         return MultiChannelEngine(camera, finder, model, source.layout, settings.fit, drift,
-                                  frame_shape=source.base.shape[-2:])
+                                  frame_shape=source.base.shape[-2:],
+                                  overlap=not settings.source.live)
 
     def drift_key(self, settings, camera, source) -> str:
         """The cache's key for this run's channel drift (`multichannel.drift_cache_key`): the
@@ -343,7 +346,7 @@ class FourPiFit(_FitPlugin):
                                                                  True, True),
                             n_starts=int(settings.model.starts))
         engine = MultiChannelEngine(camera, finder, free, source.layout, settings.fit,
-                                    frame_shape=source.base.shape[-2:])
+                                    frame_shape=source.base.shape[-2:], overlap=True)
         parts = []
         for first in starts:
             drive(engine, source.frames(chunk=src.chunk, start=int(first),
