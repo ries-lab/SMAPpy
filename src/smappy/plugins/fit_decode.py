@@ -432,7 +432,8 @@ class DecodeFit(_FitPlugin):
             meta = read_model(settings.model.path)
         except Exception:
             return False
-        if meta.get("field"):
+        from ..training.predictors import field_dependent
+        if field_dependent(meta):
             # a network trained with the field (its ``field`` header, `docs/decode/fd-plan.md` §4) fits it
             # itself: there is no centre spline's bias to subtract
             return False

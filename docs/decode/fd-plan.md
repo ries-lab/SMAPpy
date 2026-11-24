@@ -74,11 +74,11 @@ network without them is built exactly as before, so every saved model loads as i
   that has one says so; a field model on data whose ROI reaches beyond the nodes' span says that there
   the PSF is the edge's.
 
-* The correction afterwards (branch `claude/fd-correction`: `DecodeFit.field_dependent(settings)`, true
+* The correction afterwards (`DecodeFit.field_dependent(settings)`, true
   when the model's calibration has `field/`, and *After the fit*'s *field correction*) must not run on a
   model trained with the field: its bias is not the centre spline's.  The flag is the header's `field`
-  (`training.predictors.field_dependent(meta)`); `claude/fd-correction` already makes `field_dependent`
-  return False for such a model, reading `meta.get("field")` itself.
+  (`training.predictors.field_dependent(meta)`), which `DecodeFit.field_dependent` asks: such a model gets
+  no correction.
 
 ## 6. Tests
 
