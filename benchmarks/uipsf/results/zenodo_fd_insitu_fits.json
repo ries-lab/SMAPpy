@@ -1,0 +1,67 @@
+{
+ "beads": {
+  "beads": 237,
+  "slices": 120,
+  "grid": [
+   9,
+   9
+  ],
+  "in situ, field (node splines)": {
+   "all": 65.7,
+   "slope": 0.88,
+   "0-40 um": 57.7,
+   "40-70 um": 60.3,
+   "70-120 um": 78.2
+  },
+  "in situ, the field model's centre": {
+   "all": 141.1,
+   "slope": 0.698,
+   "0-40 um": 63.3,
+   "40-70 um": 125.7,
+   "70-120 um": 218.7
+  },
+  "in situ, learnt without field": {
+   "all": 136.2,
+   "slope": 0.731,
+   "0-40 um": 67.8,
+   "40-70 um": 119.5,
+   "70-120 um": 213.1
+  }
+ },
+ "movie_nodes_vs_centre": {
+  "0-30 um": {
+   "spots": 4011,
+   "median_gain_nats": 0.13,
+   "better": 0.606,
+   "z_moved_rms_nm": 10.6
+  },
+  "30-55 um": {
+   "spots": 7424,
+   "median_gain_nats": 2.18,
+   "better": 0.866,
+   "z_moved_rms_nm": 61.6
+  },
+  "55-80 um": {
+   "spots": 12606,
+   "median_gain_nats": 6.08,
+   "better": 0.948,
+   "z_moved_rms_nm": 75.7
+  },
+  "80-125 um": {
+   "spots": 11247,
+   "median_gain_nats": 10.82,
+   "better": 0.976,
+   "z_moved_rms_nm": 97.5
+  }
+ },
+ "field_correction": {
+  "z_range_nm": [
+   -290.0,
+   900.0
+  ],
+  "uncorrected_rms_nm": 112.0,
+  "residual_rms_nm": 54.0,
+  "lost": 0.18,
+  "note": "the field is too strong for the centre spline and a correction: failed (limit 5 nm)"
+ }
+}

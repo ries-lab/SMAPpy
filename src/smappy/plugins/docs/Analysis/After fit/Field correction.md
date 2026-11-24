@@ -1,6 +1,6 @@
 ---
-version: "1"
-covers: [smappy.field_correction.measure, smappy.field_correction.FieldCorrection, smappy.field_correction.basis, smappy.field_correction.kept, smappy.field_correction.corrected, smappy.field_correction.has_field, smappy.plugins.field_correction.CorrectField, smappy.plugins.field_correction.fitted_with, smappy.plugins.field_correction.calibration_for, smappy.plugins.field_correction.draw_correction]
+version: "2"
+covers: [smappy.field_correction.measure, smappy.field_correction.FieldCorrection, smappy.field_correction.basis, smappy.field_correction.kept, smappy.field_correction.z_range_of, smappy.field_correction.corrected, smappy.field_correction.has_field, smappy.plugins.field_correction.CorrectField, smappy.plugins.field_correction.fitted_with, smappy.plugins.field_correction.calibration_for, smappy.plugins.field_correction.draw_correction]
 ---
 
 ## What it does
@@ -110,8 +110,13 @@ background of the table's median localization.  They are fitted with 50
 iterations of the spline fitter, in the fit box the fit used (its record's,
 else 13 pixels).
 
-The z range is the spline's, less a tenth of it at each end, where a fit runs
-into the spline's edge.  A fit that ends more than 300 nm from the truth is
+The z range is where the table's localizations are: from their 0.5th to
+their 99.5th percentile of z, and 100 nm beyond each, within the spline's
+range less a tenth of it at each end, at most 150 nm (where a fit runs into
+the spline's edge).  A spline learnt in situ holds every height its molecules were found
+at, microns of them; measured over all of it, most test spots were far out of
+focus and lost, and the polynomial, spread over 3 µm, followed the bias where
+the data lie only to 48 nm.  A fit that ends more than 300 nm from the truth is
 counted as lost.  A fit that ends outside the range is left out of the
 polynomial fit.
 

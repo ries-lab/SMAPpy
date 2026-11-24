@@ -73,7 +73,7 @@ def detect(work):
         pickle.dump(rois, f)
 
 
-def fit(work, kind, rounds, device, astigmatism_nm=ASTIGMATISM_NM):
+def fit(work, kind, rounds, device, astigmatism_nm=ASTIGMATISM_NM, save=False):
     from smappy.calibrate.insitu_run import InSituModelSettings, run_insitu
     from smappy.calibrate.pupil import BeadSettings, PSFModelSettings, RunSettings
 
@@ -87,8 +87,10 @@ def fit(work, kind, rounds, device, astigmatism_nm=ASTIGMATISM_NM):
     def tell(entry):
         if "message" in entry:
             print(entry["message"], flush=True)
-    result = run_insitu(None, optics(), model, insitu, detection=selection(field), run=RunSettings(save_model=False),
-                        rois=rois, progress=tell, device=device)
+    # with --save the spline (and the field's node splines) beside the work: what *localise* fits with
+    result = run_insitu(None, optics(), model, insitu, detection=selection(field), run=RunSettings(save_model=save),
+                        rois=rois, progress=tell, device=device,
+                        save_to=os.path.join(work, f"insitu_{kind}_3dcal.h5") if save else None)
     minutes = (time.time() - t) / 60
     cal = result.cal
     p = {k: v.detach().cpu().double().numpy() for k, v in cal.shared().items()}
@@ -174,17 +176,197 @@ def compare(work):
         print(f"{name:10s} corners, Noll 5: {np.round(c[5], 2)}  Noll 6: {np.round(c[6], 2)}")
 
 
+#: how each localisation of the movie is fitted (*localise*): the field's node splines; the same model's
+#: centre spline alone; that fit with *Field correction* subtracted; the model learnt without the field
+WAYS = ("nodes", "centre", "corrected", "constant")
+
+
+def _spline(work, way):
+    import copy
+
+    from smappy.io.calibration import load_spline_calibration
+    cal = load_spline_calibration(os.path.join(work, f"insitu_{'constant' if way == 'constant' else 'field'}_3dcal.h5"))
+    if way in ("centre", "corrected"):
+        cal = copy.copy(cal)
+        cal.field_splines = None
+    return cal
+
+
+def localise(work, ways, frames, threads):
+    """Every frame (or the first ``frames``) fitted with Spline 3D on each way's spline, as the fitter does:
+    the dynamic cutoff, a 13 px box, each spot's chip position for the node splines.  Kept as
+    ``locs_<way>.npz``; *corrected* is the *centre* fit with `field_correction` applied, no fit of its own."""
+    from smappy.field_correction import corrected, kept, z_range_of
+    from smappy.io.calibration import load_spline_calibration
+    from smappy.io.tiff import open_stack
+    from smappy.pipeline import FitSettings, fit_stack
+    from smappy.plugins.fit import DetectionSettings
+    from smappy.psf import SplinePSF
+    src = open_stack(MOVIE)
+    stop = src.n_frames if frames is None else min(frames, src.n_frames)
+    for way in ways:
+        out = os.path.join(work, f"locs_{way}.npz")
+        if way == "corrected":
+            d = dict(np.load(os.path.join(work, "locs_centre.npz")))
+            field = load_spline_calibration(os.path.join(work, "insitu_field_3dcal.h5"))
+            t = time.time()
+            correction = kept(field, float(np.median(d["photons"])), float(np.median(d["background"])), 13,
+                              n_threads=threads, z_range=z_range_of(d["z_nm"]))
+            d["x_nm"], d["y_nm"], d["z_nm"], outside = corrected(d["x_nm"], d["y_nm"], d["z_nm"], correction,
+                                                                 (110.0, 110.0))
+            print(f"corrected: {outside.mean():.1%} outside what was measured, {time.time() - t:.0f} s; "
+                  f"{json.dumps(correction.summary())}", flush=True)
+            np.savez(out, **d)
+            continue
+        model = SplinePSF(_spline(work, way))
+        t = time.time()
+        locs, engine = fit_stack(src.frames(chunk=20, stop=stop), camera(), DetectionSettings().finder(threads),
+                                 model, FitSettings(roisize=13, n_threads=threads), read_ahead=1)
+        keep = ("frame", "x_nm", "y_nm", "z_nm", "photons", "background", "xy_err_nm", "z_err_nm", "logl",
+                "peak_x_pix", "peak_y_pix")
+        np.savez(out, **{k: np.asarray(locs[k]) for k in keep if k in locs})
+        print(f"{way}: {len(locs)} localisations in {(time.time() - t) / 60:.1f} min", flush=True)
+
+
+#: the pores (*npc*).  The movie is a calibration movie, 800 frames: after the precision cut 20 000
+#: localisations over the chip, 10-30 per pore, too few to measure one pore.  So the pores are pooled per band
+#: of distance from the chip's centre: each pore's localisations by DBSCAN (35 nm, 4 neighbours, 8-200 of
+#: them, at most 150 nm across), its z less its own median, and the two rings fitted to the band's pooled z as
+#: two Gaussians of equal weight and width, ``separation`` apart -- Nup96's two rings are ~50 nm apart in z
+#: (Thevathasan et al. 2019).  A z scale wrong at the edges of the field shows as a separation that changes
+#: from band to band.
+NPC_EPS_NM, NPC_K, NPC_MIN, NPC_MAX, NPC_WIDTH_NM = 35.0, 4, 8, 200, 150.0
+BANDS_UM = ((0, 30), (30, 55), (55, 80), (80, 125))
+
+
+def _two_rings(dz):
+    """(separation, its standard error, width) nm: two Gaussians of equal weight and width at ±s/2 about a
+    common offset, fitted to ``dz`` by maximum likelihood."""
+    from scipy.optimize import minimize
+
+    def nll(p):
+        m, s, w = p[0], abs(p[1]), abs(p[2]) + 1e-3
+        a = np.exp(-0.5 * ((dz - m - s / 2) / w) ** 2) + np.exp(-0.5 * ((dz - m + s / 2) / w) ** 2)
+        return -np.sum(np.log(a / (2 * w * np.sqrt(2 * np.pi)) + 1e-300))
+    best = min((minimize(nll, [0.0, s0, 20.0], method="Nelder-Mead", options=dict(xatol=0.01, fatol=1e-4,
+                                                                                  maxiter=4000))
+                for s0 in (20.0, 50.0, 80.0)), key=lambda r: r.fun)
+    m, s, w = best.x[0], abs(best.x[1]), abs(best.x[2])
+    h = 0.5                                                   # the curvature in s, numerically
+    curv = (nll([m, s + h, w]) - 2 * best.fun + nll([m, s - h, w])) / h ** 2
+    return float(s), float(1 / np.sqrt(curv)) if curv > 0 else float("nan"), float(w)
+
+
+def npc(work, ways):
+    """Each way's pooled ring separation per band (module notes above `NPC_EPS_NM`), and for the fits of the
+    same detections the log-likelihood each spot gained with the node splines over the centre spline, per band."""
+    from smappy.plugins.clusters import dbscan
+    results = {}
+    data = {way: np.load(os.path.join(work, f"locs_{way}.npz")) for way in ways}
+    for way, d in data.items():
+        ok = (d["xy_err_nm"] < 15) & (d["z_err_nm"] < 40) & (d["photons"] > 1000) & np.isfinite(d["z_nm"])
+        x, y, z = d["x_nm"][ok], d["y_nm"][ok], d["z_nm"][ok]
+        label = dbscan(np.c_[x, y], NPC_EPS_NM, NPC_K)
+        far, dz = [], []
+        for c in range(1, int(label.max()) + 1):
+            m = np.flatnonzero(label == c)
+            if not NPC_MIN <= len(m) <= NPC_MAX:
+                continue
+            if max(np.ptp(x[m]), np.ptp(y[m])) > NPC_WIDTH_NM:
+                continue
+            r = np.hypot(np.mean(x[m]) / 110.0 - CHIP_CENTRE[0], np.mean(y[m]) / 110.0 - CHIP_CENTRE[1]) * PIXEL_UM
+            far.append(np.full(len(m), r))
+            dz.append(z[m] - np.median(z[m]))
+        far, dz = np.concatenate(far), np.concatenate(dz)
+        out = {}
+        for a, b in BANDS_UM:
+            m = (far >= a) & (far < b) & (np.abs(dz) < 150)
+            sep, err, width = _two_rings(dz[m])
+            out[f"{a}-{b} um"] = dict(localisations=int(m.sum()), separation_nm=round(sep, 1),
+                                      error_nm=round(err, 1), width_nm=round(width, 1))
+        results[way] = out
+        print(way, json.dumps(out), flush=True)
+    if "nodes" in data and "centre" in data and "logl" in data["nodes"]:
+        a, b = data["nodes"], data["centre"]
+        if len(a["logl"]) == len(b["logl"]) and np.array_equal(a["frame"], b["frame"]):
+            gain = a["logl"] - b["logl"]
+            r = np.hypot(a["x_nm"] / 110.0 - CHIP_CENTRE[0], a["y_nm"] / 110.0 - CHIP_CENTRE[1]) * PIXEL_UM
+            bright = a["photons"] > 1000
+            out = {}
+            for lo, hi in BANDS_UM:
+                m = bright & (r >= lo) & (r < hi) & np.isfinite(gain)
+                out[f"{lo}-{hi} um"] = dict(spots=int(m.sum()), median_gain_nats=round(float(np.median(gain[m])), 2),
+                                            better=round(float(np.mean(gain[m] > 0)), 3))
+            results["nodes over centre, log-likelihood"] = out
+            print("nodes over centre:", json.dumps(out), flush=True)
+    with open(os.path.join(work, "npc.json"), "w") as f:
+        json.dump(results, f, indent=1)
+
+
+BEAD_WORK = os.path.join(DATA, "work_1ch_FD_bead")
+
+
+def beads(work):
+    """The in situ models' accuracy on beads of the same microscope: `zenodo_fd_beads.py detect`'s beads, every
+    slice within ±600 nm fitted with each in situ model drawn as a spline for an emitter at the glass
+    (`pupil.spline_calibration`: the node splines with it), the z error per bead after its own height, rms
+    over its slices, median per band of distance from the chip's centre -- §9's test, the beads' own model
+    there.  An in situ model of the wrong sign would put every bead's z mirrored, its error hundreds of nm."""
+    from smappy.calibrate.pupil import spline_calibration
+    from smappy.io.calibration import SplineCalibration
+    from smappy.psf import SplinePSF
+
+    import uipsf
+    with open(os.path.join(BEAD_WORK, "rois.pkl"), "rb") as f:
+        rois = pickle.load(f)
+    field = uipsf.load_model(os.path.join(work, "insitu_field_3dcal.h5"), device="cpu")
+    plain = uipsf.load_model(os.path.join(work, "insitu_constant_3dcal.h5"), device="cpu")
+    spline = spline_calibration(field, 20.0, 900.0, 27)
+    splines = {"in situ, field (node splines)": (spline, True),
+               "in situ, the field model's centre": (SplineCalibration(spline.coeff, spline.dz, spline.z0,
+                                                                      x0=spline.x0), False),
+               "in situ, learnt without field": (spline_calibration(plain, 20.0, 900.0, 27), False)}
+    b = rois.batch
+    data, z = b.data[:, 0].numpy(), b.z_nm.numpy().reshape(-1)
+    keep = np.abs(z) <= 600
+    xy = b.field_xy.numpy()
+    r = np.hypot(*(xy - CHIP_CENTRE).T) * PIXEL_UM
+    rois_ = np.ascontiguousarray(data[:, keep][:, :, 7:20, 7:20].reshape(-1, 13, 13), dtype=np.float32)
+    out = {"beads": int(len(xy)), "slices": int(keep.sum()), "grid": list(spline.field_splines.shape)}
+    print(f"{len(xy)} beads, {keep.sum()} slices each; z error rms per bead, median (nm); slope of z against "
+          f"the stage")
+    for name, (cal, blended) in splines.items():
+        m = SplinePSF(cal)
+        kw = dict(chip_xy=np.repeat(xy, keep.sum(), 0)) if blended else {}
+        fitted = m.unpack(m.fit(rois_, 50, 0, **kw))["z_nm"].reshape(len(xy), -1)
+        e = fitted - z[keep]
+        rms = np.sqrt(np.nanmean((e - np.nanmedian(e, 1, keepdims=True)) ** 2, 1))
+        slope = float(np.nanmedian([np.polyfit(z[keep][np.isfinite(f)], f[np.isfinite(f)], 1)[0] for f in fitted]))
+        row = {"all": round(float(np.nanmedian(rms)), 1), "slope": round(slope, 3)}
+        row.update({f"{a}-{c} um": round(float(np.nanmedian(rms[(r >= a) & (r < c)])), 1)
+                    for a, c in ((0, 40), (40, 70), (70, 120))})
+        out[name] = row
+        print(f"  {name:36s} {json.dumps(row)}", flush=True)
+    with open(os.path.join(work, "beads.json"), "w") as f:
+        json.dump(out, f, indent=1)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("step", choices=("detect", "fit", "compare"))
+    ap.add_argument("step", choices=("detect", "fit", "compare", "localise", "npc", "beads"))
     ap.add_argument("kind", nargs="?", choices=("field", "constant"), default="field")
     ap.add_argument("--rounds", type=int, default=3)
     # the CPU by default: on Apple's GPU round 1 of 2713 molecules grew to a 33.5 GB footprint and thrashed
     ap.add_argument("--device", default="cpu")
     # the start's sign: v1's (+), or the other (-), which v2's twin test prefers on these data (§12.3)
     ap.add_argument("--astigmatism", type=float, default=ASTIGMATISM_NM)
+    ap.add_argument("--save", action="store_true", help="fit: save the spline as insitu_<kind>_3dcal.h5")
+    ap.add_argument("--ways", nargs="+", default=list(WAYS), choices=WAYS)
+    ap.add_argument("--frames", type=int, default=None, help="localise: only the first frames")
+    ap.add_argument("--threads", type=int, default=6)
     ap.add_argument("--work", default=os.path.join(DATA, "results", "1ch_FD_smlm_nup96", "v2_fd"))
     a = ap.parse_args()
     os.makedirs(a.work, exist_ok=True)
-    {"detect": lambda: detect(a.work), "fit": lambda: fit(a.work, a.kind, a.rounds, a.device, a.astigmatism),
-     "compare": lambda: compare(a.work)}[a.step]()
+    {"detect": lambda: detect(a.work), "fit": lambda: fit(a.work, a.kind, a.rounds, a.device, a.astigmatism, a.save),
+     "compare": lambda: compare(a.work), "localise": lambda: localise(a.work, a.ways, a.frames, a.threads),
+     "npc": lambda: npc(a.work, a.ways), "beads": lambda: beads(a.work)}[a.step]()

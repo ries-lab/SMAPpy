@@ -87,7 +87,8 @@ class CorrectField(Plugin):
     Settings = FieldCorrectionSettings
     changes_locs = True
     grouping = "ungrouped"
-    version = "1"
+    # 2: measured over the localisations' z range, not the whole spline's (an in situ spline's is microns)
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: FieldCorrectionSettings) -> FormState:
         state = FormState()
@@ -105,7 +106,7 @@ class CorrectField(Plugin):
         return state
 
     def run(self, ctx: Context, settings: FieldCorrectionSettings) -> Result:
-        from ..field_correction import corrected, kept
+        from ..field_correction import corrected, kept, z_range_of
         from ..locs import table_pixel_sizes
         locs = ctx.locs
         if RECORD in locs.metadata:
@@ -121,7 +122,8 @@ class CorrectField(Plugin):
         photons = float(settings.photons) or _median(locs, "photons", 1000.0)
         background = float(settings.background) or _median(locs, "background", 10.0)
         ctx.report(f"measuring the field's bias at {photons:.0f} photons, background {background:.1f}")
-        correction = kept(cal, photons, background, roi)
+        # measured where the localisations are, not over a spline that may reach microns beyond them
+        correction = kept(cal, photons, background, roi, z_range=z_range_of(locs["z_nm"]))
         pixel = table_pixel_sizes(locs)
         x, y, z, outside = corrected(locs["x_nm"], locs["y_nm"], locs["z_nm"], correction, pixel)
         columns = dict(locs.columns)

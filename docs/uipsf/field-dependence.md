@@ -596,6 +596,39 @@ run warns of it; the run with the wrong sign saw 34 nm, its heights mirrored.  N
 the movie with the in situ node splines against the beads' (a v2 bead model of this microscope, held from,
 would also replace the nominal γ).
 
+**Fitting with it** (`zenodo_fd_insitu.py localise`, `beads`; `results/zenodo_fd_insitu_fits.json`).  The in situ
+calibrations saved as splines (the field's with a 9 × 9 grid, which warns that between its nodes the blend misses
+the model by 3.9 % of the peak: main's 13 × 13 grids halve that) and the whole movie fitted with Spline 3D,
+116 000 localisations in 30 s a fit.  The movie cannot test the fits through its pores: an 800-frame calibration
+movie keeps 20 000 localisations over the chip after a precision cut, 10-30 per pore, and its tight clusters are
+single molecules blinking over a few frames, not pores.  Two tests instead:
+
+- *The movie's own spots*, the same detections fitted with the node splines and with the field model's centre
+  spline: the node splines fit 61 % of the bright spots better within 30 µm of the centre (median +0.1 nats), 87 %
+  at 30-55 µm (+2.2), 95 % at 55-80 µm (+6.1) and 98 % beyond (+10.8), and move z by 11, 62, 76 and 98 nm rms.
+- *The beads of the same microscope* (`1ch_FD_bead`, 237 beads, every slice within ±600 nm, §9's test): each in
+  situ model drawn for an emitter at the glass, z error per bead after its own height, median, nm:
+
+| fitted with | all | 0-40 µm | 40-70 µm | 70-120 µm | z slope |
+| --- | --- | --- | --- | --- | --- |
+| in situ, node splines | **66** | 58 | 60 | **78** | 0.88 |
+| in situ, the field model's centre spline | 141 | 63 | 126 | 219 | 0.70 |
+| in situ, learnt without the field | 136 | 68 | 120 | 213 | 0.73 |
+| beads' own model, node splines (§9) | 36 | 25 | 27 | 51 | |
+
+With its field the in situ model's error hardly grows towards the edges (58 to 78 nm; 68 to 213 without), and its
+sign is right (a mirrored model's slope would be −1).  What is left, twice the beads' own model's error at the
+centre as well, is the model drawn outside what it was learnt from: molecules 0.3-3 µm deep, through a focus,
+with γ held at a nominal value, extrapolated to beads at the glass, its z scale 12 % short there.  A bead model
+of the microscope to hold γ from, and the beads drawn at their own depth, are what would close it.
+
+*Field correction* on this field fails, as §11's limit says it should: the bias of the centre spline is 112 nm rms
+and the polynomial follows it only to 54 nm, 18 % of its test spots lost at the edges.  It also showed that the
+correction measured over the whole spline (§11's rule), which for an in situ spline is 3.9 µm of heights: its
+lower edge, a tenth in, cut off a third of the localisations.  It is now measured over the localisations' own z
+range, within the spline's less at most 150 nm (`field_correction.z_range_of`, *Field correction* version 2).
+For a field this strong the node splines are the way to fit.
+
 The detection of this movie read 200 frames of the chip at once, 20 GB resident (31.6 GB at its peak): above what a
 calibration should take.  The benchmark reads 50; the window's default (`InSituSettings.block_frames`, 200) wants a
 size in bytes rather than frames for chips this large.

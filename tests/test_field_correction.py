@@ -129,3 +129,19 @@ def test_spline_3d_with_the_step_on_fits_with_the_centre_spline(tmp_path):
     settings.finish.field_correction = True
     assert not fitter.model(settings, None).field_dependent
     assert fitter.describe(None, settings).shown["finish.correction"] is True
+
+
+def test_the_correction_is_measured_where_the_localisations_are_not_over_the_whole_spline():
+    """An in situ spline holds microns of heights; the correction is measured over the localisations' own z
+    (their 0.5-99.5th percentile and 100 nm beyond), within the spline's range."""
+    from smappy.field_correction import z_range_of
+    z = np.r_[np.random.default_rng(0).uniform(-200, 150, 1000), [5000.0]]     # one far outlier, left out
+    lo, hi = z_range_of(z)
+    assert -325 <= lo <= -275 and 225 <= hi <= 275 and lo % 25 == 0 and hi % 25 == 0
+    assert z_range_of([np.nan]) is None
+    cal = calibration()
+    whole = measure(cal, 3000.0, 10.0, roi=11)
+    narrow = measure(cal, 3000.0, 10.0, roi=11, z_range=(-200.0, 200.0))
+    assert narrow.z_range == (-200.0, 200.0) and whole.z_range[1] - whole.z_range[0] > 400
+    with pytest.raises(ValueError, match="outside"):
+        measure(cal, 3000.0, 10.0, roi=11, z_range=(5000.0, 6000.0))

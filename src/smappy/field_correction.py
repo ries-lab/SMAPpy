@@ -41,8 +41,14 @@ Z_DEGREE = 14
 UV_ORDER = 4
 #: positions per side of the measuring grid over the nodes' field, and its z step, nm
 GRID, DZ_NM = 11, 25.0
-#: the z range measured: the spline's, less this share of it at each end, where a fit runs to the edge
-Z_MARGIN = 0.1
+#: the z range measured: the spline's, less this share of it at each end, where a fit runs to the edge;
+#: and within the table's localisations, their 0.5th to 99.5th percentile and `Z_BEYOND_NM` beyond.  An in situ
+#: spline holds every height its molecules were learnt at, -0.4 to +3.5 µm about the plane in focus on Zenodo's
+#: Nup96 movie: measured over all of it, most test spots were microns out of focus and lost in a 13 px box
+#: (58 %), and the polynomial, spread over 3 µm, left 48 nm rms where the data lie (field-dependence.md §12.3)
+#: The margin is at most `Z_MARGIN_MAX_NM`: a fit runs into the edge within a few planes, and a tenth of that
+#: in situ spline was 390 nm, which cut off the localisations' lowest third.
+Z_MARGIN, Z_BEYOND_NM, Z_MARGIN_MAX_NM = 0.1, 100.0, 150.0
 #: a fit counts as converged within this many nm of the truth in z
 LOST_NM = 300.0
 #: the polynomial's own rms residual in z above which the field is too strong for a correction (§11)
@@ -126,10 +132,11 @@ def _render(coeff: np.ndarray, z_index: np.ndarray, roi: int) -> np.ndarray:
 
 
 def measure(cal, photons: float, background: float, roi: int = 13, grid: int = GRID,
-            n_threads: int = 0, iterations: int = 50) -> FieldCorrection:
+            n_threads: int = 0, iterations: int = 50, z_range=None) -> FieldCorrection:
     """The correction of ``cal``'s centre spline for its field (``cal.field_splines``), at ``photons`` and
     ``background`` per pixel, on a ``roi``-pixel fit box: noise-free spots drawn with the node splines on a
-    ``grid`` × ``grid`` raster over the nodes' field and every `DZ_NM` in z, fitted with the centre spline."""
+    ``grid`` × ``grid`` raster over the nodes' field and every `DZ_NM` in z, fitted with the centre spline.
+    ``z_range`` (lowest, highest nm), where the table's localisations are (`z_range_of`), narrows the spline's."""
     from .calibrate.depth import in_focus, z_bounds
     from .field_splines import bilinear
     from .psf import SplinePSF
@@ -141,8 +148,13 @@ def measure(cal, photons: float, background: float, roi: int = 13, grid: int = G
         raise ValueError(f"the fit box ({roi} px) must be at least 2 px smaller than the calibration "
                          f"({lateral} px across)")
     lo, hi = z_bounds(cal)
-    margin = Z_MARGIN * (hi - lo)
+    margin = min(Z_MARGIN * (hi - lo), Z_MARGIN_MAX_NM)
     z_lo, z_hi = lo + margin, hi - margin
+    if z_range is not None:
+        z_lo, z_hi = max(z_lo, float(z_range[0])), min(z_hi, float(z_range[1]))
+        if z_hi - z_lo < 2 * DZ_NM:
+            raise ValueError(f"the localisations' z ({z_range[0]:.0f} to {z_range[1]:.0f} nm) lies outside the "
+                             f"calibration's ({lo:.0f} to {hi:.0f} nm)")
     z_true = np.arange(z_lo, z_hi + 1e-6, DZ_NM)
     z_index = cal.z_nm_to_index(z_true)
     nodes = [_render(fs.coeff[g], z_index, roi) for g in range(fs.coeff.shape[0])]
@@ -185,18 +197,32 @@ def measure(cal, photons: float, background: float, roi: int = 13, grid: int = G
 _KEPT: dict = {}
 
 
-def kept(cal, photons: float, background: float, roi: int = 13, n_threads: int = 0) -> FieldCorrection:
-    """`measure`, kept for the last few (calibration, depth, brightness, box): a batch asks for the same one
-    with every file.  The brightness is rounded to 5 %: closer is within the noise of what it moves (§11)."""
+def z_range_of(z_nm) -> tuple | None:
+    """(lowest, highest) nm a correction is measured over for localisations at ``z_nm``: their 0.5th to 99.5th
+    percentile and `Z_BEYOND_NM` beyond (`Z_MARGIN`'s note), rounded to `DZ_NM`; None without any."""
+    z = np.asarray(z_nm, float)
+    z = z[np.isfinite(z)]
+    if not len(z):
+        return None
+    lo, hi = np.percentile(z, [0.5, 99.5])
+    return (float(np.floor((lo - Z_BEYOND_NM) / DZ_NM) * DZ_NM), float(np.ceil((hi + Z_BEYOND_NM) / DZ_NM) * DZ_NM))
+
+
+def kept(cal, photons: float, background: float, roi: int = 13, n_threads: int = 0,
+         z_range=None) -> FieldCorrection:
+    """`measure`, kept for the last few (calibration, depth, brightness, box, z range): a batch asks for the
+    same one with every file.  The brightness is rounded to 5 %: closer is within the noise of what it moves
+    (§11)."""
     source = getattr(cal, "source", None)
     stamp = Path(source).stat().st_mtime if source and Path(source).is_file() else id(cal)
     depth = json.dumps((cal.parameters or {}).get("sample_depth"), sort_keys=True, default=str)
     key = (str(source), stamp, depth, round(float(np.log(max(photons, 1.0)) / 0.05)),
-           round(float(np.log(max(background, 0.1)) / 0.05)), int(roi))
+           round(float(np.log(max(background, 0.1)) / 0.05)), int(roi),
+           None if z_range is None else tuple(map(float, z_range)))
     if key not in _KEPT:
         if len(_KEPT) >= 4:
             _KEPT.pop(next(iter(_KEPT)))
-        _KEPT[key] = measure(cal, photons, background, roi, n_threads=n_threads)
+        _KEPT[key] = measure(cal, photons, background, roi, n_threads=n_threads, z_range=z_range)
     return _KEPT[key]
 
 
