@@ -136,7 +136,7 @@ def measure(cal, photons: float, background: float, roi: int = 13, grid: int = G
     fs = getattr(cal, "field_splines", None)
     if fs is None:
         raise ValueError("the calibration has no field dependence: there is nothing to correct")
-    lateral = min(cal.shape[1:])
+    lateral = min(min(cal.shape[1:]), min(fs.coeff.shape[-2:]))     # nodes beyond 9 x 9 are cut narrower
     if roi > lateral - 2:
         raise ValueError(f"the fit box ({roi} px) must be at least 2 px smaller than the calibration "
                          f"({lateral} px across)")
