@@ -611,47 +611,18 @@ def test_a_split_preview_reports_each_channels_own_cutoff(tmp_path):
     assert f"(cutoff {first:.3g})" in result.text and f"(cutoff {second:.3g})" in result.text
 
 
-def test_spline_2c_keeps_the_calibrations_psfs_with_a_registration_measured_from_the_movie(tmp_path, monkeypatch):
-    """The splitter moves between bead calibrations, the PSFs hardly: *measure from this movie* measures
-    with the calibration's layout and main channel, so each PSF stays on its half, and fits with both."""
-    import json
+def test_spline_2c_has_no_registration_from_the_movie_and_refuses_a_map_with_its_halves_swapped():
+    """A Gaussian's map is not the spline's: Spline 3D 2C takes the calibration's or a file's, and a
+    splitter moved since the beads is its channel move's."""
+    from dataclasses import fields
 
-    import h5py
-    import tifffile
     from smappy.calibrate.dual import ChannelTransform, with_registration
-    from smappy.plugins.fit import (CameraSettings, DetectionSettings, DualModelSettings, DualSplineFit,
-                                    DualSplineFitSettings, OutputSettings, SourceSettings)
-    from smappy.pipeline import FitSettings as PipelineFitSettings
-
-    rng = np.random.default_rng(7)
-    moved = dual_calibration(dx=1.4, dy=0.8, ratio=0.3)           # the splitter, since the beads
-    frames = np.stack([split_frame([(25.0, 15.0), (42.0, 21.0)], 24.0, 9000., 0.3, 30., rng, moved)
-                       for _ in range(12)])
-    stack = tmp_path / "split.tif"
-    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
-    beads = dual_calibration(ratio=0.3)                            # the beads' registration, now off
-    calibration_file = _dual_calibration_file(tmp_path / "dual_2Ccal.h5", beads)
-    asked = []
-
-    def measured(self, ctx, settings, save=True):
-        asked.append(settings.channels)
-        return SimpleNamespace(transform=ChannelTransform(moved.transformation, dict(moved.geometry),
-                                                          {"n_inliers": 100}))
-    monkeypatch.setattr(DualSplineFit, "_calibrate", measured)
-    settings = DualSplineFitSettings(
-        source=SourceSettings(path=str(stack), chunk=6),
-        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
-        detection=DetectionSettings(cutoff_mode="absolute", cutoff=20.0),
-        model=DualModelSettings(calibration=str(calibration_file)),
-        fit=PipelineFitSettings(roisize=13),
-        output=OutputSettings(path=str(tmp_path / "out.hdf5")))
-    settings.model.registration.calibrate = True
-    locs = DualSplineFit().run(Context(), settings).locs
-    assert (asked[0].layout, asked[0].main_channel) == ("up-down", "upper")
-    assert len(locs) > 15 and np.median(locs["ratio"]) == pytest.approx(0.3, abs=0.06)
-    with h5py.File(tmp_path / "out.hdf5") as f:                     # the file says what it was fitted with
-        assert json.loads(f.attrs["metadata"])["calibration"]["file"] == str(calibration_file)
-    # a registration with the other half as the main one would put each PSF on the wrong light
+    from smappy.plugins.fit import DualSplineFit, from_movie
+    settings = DualSplineFit().Settings()
+    assert [f.name for f in fields(settings.model.registration)] == ["path"]
+    assert not from_movie(settings)
+    assert DualSplineFit().measured(None, settings) is None
+    beads, moved = dual_calibration(ratio=0.3), dual_calibration(dx=1.4, dy=0.8, ratio=0.3)
     flipped = ChannelTransform(moved.transformation, dict(moved.geometry, main_channel="lower"), {})
     with pytest.raises(ValueError, match="wrong channels"):
         with_registration(beads, flipped)
@@ -746,19 +717,6 @@ def test_a_split_chosen_by_hand_that_the_calibration_overrules_is_said(tmp_path)
     assert "main upper" in said and "main right is not used" in said
     settings.channels.main_channel = "microscope"
     assert plugin.arrangement_conflict(settings) is None
-
-
-def test_measuring_takes_the_calibrations_layout_and_main_channel_together(tmp_path):
-    """A calibration that records its layout but no main channel is measured on its own axis, never
-    with the calibration's up-down beside a main channel chosen by hand for right-left -- the
-    combination a customer's run failed on (2026-11)."""
-    from smappy.calibrate.dual import resolve_arrangement
-    cal = dual_calibration()
-    cal.geometry = {k: v for k, v in cal.geometry.items() if k != "main_channel"}
-    plugin, settings = _by_hand(tmp_path, cal)
-    measuring = plugin.measuring_settings(settings).channels
-    told = resolve_arrangement(measuring)
-    assert (told.layout, told.main_channel) == ("up-down", "upper")
 
 
 def test_a_main_channel_off_the_layouts_axis_is_refused_naming_where_the_layout_came_from():

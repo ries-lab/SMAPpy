@@ -972,14 +972,14 @@ class _FitPlugin(Plugin):
                         channels, self._microscope_summary(settings))
                 if self.channel_part == "two":
                     registration = settings.model.registration
-                    measured = registration.calibrate
+                    measured = from_movie(settings)
                     state.titles["model.registration"] = "registration: " + (
                         "from this movie" if measured else
                         Path(registration.path).name if registration.path else
                         "the calibration's" if hasattr(settings.model, "calibration") else
                         "none chosen")
                     state.active["model.registration.path"] = not measured
-                    for name in ("calibrate_frames", "calibrate_locs", "calibrate_blocks",
+                    for name in () if not hasattr(registration, "calibrate") else ("calibrate_frames", "calibrate_locs", "calibrate_blocks",
                                  "calibrate_skip", "measure"):
                         state.active[f"model.registration.{name}"] = measured
         region = getattr(settings, "region", None)
@@ -1265,7 +1265,8 @@ class _FitPlugin(Plugin):
                 if written is not None and transform.path in (
                         "", getattr(self, "_default_transform", None)):
                     updates["model.registration.path"] = str(written)
-                    updates["model.registration.calibrate"] = False
+                    if hasattr(transform, "calibrate"):
+                        updates["model.registration.calibrate"] = False
                     self._default_transform = str(written)
             # a recipe drawn with a bead calibration: a spline fitter fits
             # with that calibration, unless one was chosen
@@ -1808,7 +1809,7 @@ class ChannelTransformSettings:
                            "bead calibration")
     # on by default (the user's, 2026-11-05): a Gaussian fit has no bead calibration to bring a
     # map along, and the movie's own thousands of pairs measure it where the splitter is today;
-    # Spline 3D 2C, whose calibration carries one, keeps it off (`SplineTransformSettings`)
+    # Spline 3D 2C has no such field: its calibration carries a map (`SplineTransformSettings`)
     calibrate: bool = param(True, label="from this movie",
                             help="ignore the file: fit the first frames with a "
                                  "plain Gaussian and register them")
@@ -1849,15 +1850,24 @@ class ChannelTransformSettings:
 
 
 @dataclass
-class SplineTransformSettings(ChannelTransformSettings):
-    """Spline 3D 2C's registration: the calibration's own, a file's, or one measured from the movie;
-    the PSFs are always the calibration's."""
+class SplineTransformSettings:
+    """Spline 3D 2C's registration: the calibration's own or a file's; the PSFs are always the
+    calibration's.  No *from this movie*: a Gaussian's centres are not the spline's, so a map
+    measured with one put the channels a few nm apart in z-dependent ways; a splitter moved since
+    the beads is the *channel move*'s, measured with the spline model itself."""
     path: str = param("", label="transformation", kind="open_file", file_filter=TRANSFORM_FILTER,
                       help="empty: the calibration's own; a _2ct.h5 to use instead, with the "
                            "calibration's PSFs")
-    calibrate: bool = param(False, label="from this movie",
-                            help="keep the calibration's PSFs and measure where the second channel is "
-                                 "from this movie: for a splitter moved since the beads")
+
+    def load(self):
+        from ..calibrate.transform import load_transform
+        return load_transform(self.path)
+
+
+def from_movie(settings) -> bool:
+    """Whether the registration is measured from the movie: Gaussian 2D 2C's *from this movie*; the
+    spline fitter's part has no such field."""
+    return bool(getattr(settings.model.registration, "calibrate", False))
 
 
 #: how a two-channel fitter takes the channel move (`smappy.channel_move`, gui-plan §4b)
@@ -1965,8 +1975,8 @@ class DualModelSettings(_LinkedChannels):
     link_background: bool = _link_background()
     photon_ratio: Optional[float] = _photon_ratio(
         "the split the calibration's two PSFs carry")
-    # where the second channel is: the calibration's own map, a file's or the movie's; the
-    # channels' rectangles are the *channels* part's
+    # where the second channel is: the calibration's own map or a file's; the channels'
+    # rectangles are the *channels* part's
     registration: SplineTransformSettings = param(default_factory=SplineTransformSettings,
                                                   label="registration", collapsed=True)
     # how far the second channel moved on the chip since the beads, on top of the registration (gui-plan §4b)
@@ -2502,7 +2512,7 @@ class _TwoChannelFit(_FitPlugin):
         channel's chip pixels onto the main's, the correction composed), where it came from, and the move."""
         used = self._used_last
         reg = settings.model.registration
-        out = {"from": ("measured from this movie" if reg.calibrate
+        out = {"from": ("measured from this movie" if from_movie(settings)
                         else reg.path or getattr(settings.model, "calibration", "") or "")}
         if used is not None:
             out["transformation"] = np.asarray(used.transformation, float).tolist()
@@ -2542,23 +2552,15 @@ class _TwoChannelFit(_FitPlugin):
     def measure(self, ctx: Context, settings):
         """A registration measured from the movie before the fit, or None."""
         found = self.measured(ctx, settings)
-        return None if found is None else self.with_measured(settings, found.transform)
+        return None if found is None else found.transform
 
     def measured(self, ctx: Context, settings, save: bool = False):
         """The `RegistrationResult` measured from this movie when *measure / calibrate from this
         movie* is ticked, else None: kept, so a preview pays for it once and the run that follows
         fits with the very registration the preview showed (`_calibrate`)."""
-        if not settings.model.registration.calibrate:
+        if not from_movie(settings):
             return None
-        return self._calibrate(ctx, self.measuring_settings(settings), save=save)
-
-    def measuring_settings(self, settings):
-        """The settings the calibration pass runs with."""
-        return settings
-
-    def with_measured(self, settings, transform):
-        """The registration the fit uses, from a transformation measured from the movie."""
-        return transform
+        return self._calibrate(ctx, settings, save=save)
 
     def registration(self, settings):
         """The registration: the one this run read, or off disk."""
@@ -2590,7 +2592,7 @@ class _TwoChannelFit(_FitPlugin):
     def fitted_geometry(self, settings) -> Optional[dict]:
         """The split the fit reads when it is not the *channels* part's: the registration file's
         geometry, or None when the registration is measured from this movie with the part."""
-        if settings.model.registration.calibrate:
+        if from_movie(settings):
             return None
         return self._read_geometry(settings) or _geometry_of(settings.model.registration.path,
                                                              settings.model.registration.load)
@@ -2658,7 +2660,7 @@ class _TwoChannelFit(_FitPlugin):
     def run(self, ctx: Context, settings) -> Result:
         settings = self.with_calibration(settings, ctx)
         found = self.measured(ctx, settings, save=True)
-        measured = None if found is None else self.with_measured(settings, found.transform)
+        measured = None if found is None else found.transform
 
         def fit():
             conflict = self.arrangement_conflict(settings)
@@ -2904,12 +2906,12 @@ class _TwoChannelFit(_FitPlugin):
         except ValueError:
             pass
         found, failed = None, ""
-        if settings.model.registration.calibrate:
+        if from_movie(settings):
             try:
                 found = self.measured(ctx, settings)
             except Exception as error:
                 failed = str(error) or type(error).__name__
-        measured = None if found is None else self.with_measured(settings, found.transform)
+        measured = None if found is None else found.transform
         move_failed = ""
 
         def previewed():
@@ -3210,38 +3212,10 @@ class DualSplineFit(_TwoChannelFit):
     geometry_source = "calibration"
 
     def fitted_geometry(self, settings) -> Optional[dict]:
-        """The calibration's split, measured from the movie or not: its PSFs belong to its halves.
+        """The calibration's split: its PSFs belong to its halves.
         A registration file beside it must agree with it (`dual.with_registration`)."""
         return self._read_geometry(settings) or _geometry_of(settings.model.calibration,
                                                              settings.model.load)
-
-    def measuring_settings(self, settings):
-        """Measured with the calibration's layout and main channel, so that each PSF stays on the
-        half it was made from (`dual.with_registration` refuses one that does not).
-
-        The two together or neither: the calibration's layout beside a main channel chosen by
-        hand for another layout (``up-down``, main ``right``) is refused when it is resolved,
-        which is how a calibration that does not record its main channel failed a run."""
-        g = settings.model.load().geometry
-        given = settings.channels
-        layout = g.get("layout")
-        if not layout:
-            return settings
-        main = g.get("main_channel")
-        if not main:
-            # the calibration's layout with the main channel of its own axis the dual calibration
-            # has always taken (`resolve_arrangement`), not the hand-chosen one of another axis
-            halves = ("left", "right") if "right-left" in layout else ("upper", "lower")
-            fits = layout == given.layout or (given.layout == "microscope"
-                                              and given.main_channel in halves)
-            main = given.main_channel if fits else "microscope"
-        return replace(settings, channels=replace(given, layout=layout, main_channel=main))
-
-    def with_measured(self, settings, transform):
-        """The calibration's PSFs with the registration measured from this movie: the splitter
-        moves between bead calibrations, the PSFs hardly."""
-        from ..calibrate.dual import with_registration
-        return with_registration(settings.model.load(), transform)
 
     def model(self, settings, camera):
         return settings.model.model(self.registration(settings), camera)

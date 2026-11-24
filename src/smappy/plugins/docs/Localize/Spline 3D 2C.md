@@ -53,8 +53,10 @@ What it needs:
   empty, *calibration* is *auto*, as in [Spline 3D](plugin:Localize/Spline 3D).
   When the splitter has moved since the beads, the PSFs and the map still
   hold: *channel move* measures how far the second channel moved, with this
-  fit, and fits with the map moved by it.  *measure from this movie* instead
-  measures a new map with a plain Gaussian.
+  fit, and fits with the map moved by it.  There is no map measured from
+  the movie with a plain Gaussian, as Gaussian 2D 2C has: a Gaussian's
+  centre is not the spline's, so such a map is off by a few nanometres in
+  ways that change with z.
 * **The camera**, as for any fit.
 * **Sparse data**, as for [Spline 3D](plugin:Localize/Spline 3D): a
   neighbour inside the [fit box](plugin:Panels/Glossary) (also called ROI
@@ -461,23 +463,8 @@ A `_2ct.h5` from [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) or a
 registration, used in place of the calibration's own; the PSFs are still the
 calibration's.  It must put the main channel on the same half as the
 calibration does, or the fit refuses: each PSF was made from its own half.
-Ignored when *registration* > *from this movie* is ticked.
-
-### model.registration.calibrate
-For a splitter that moved since the beads -- the residuals of *link xy*
-off-centre say so.  As in Gaussian 2D 2C, the first frames are fitted with a
-plain Gaussian as two channels, cut with the calibration's layout and main
-channel so that each PSF stays on its half (a layout chosen by hand under
-*channels* that says otherwise is not used, and a line under the form and a
-warning at the run say so), each channel detected on its own,
-and the pairs of the two channels registered; then the real
-fit runs with the calibration's PSFs and this registration.  *Preview*
-measures it too and shows it in a tab, *channel registration*; the
-measurement is kept, so the run uses the one the preview showed unless a
-setting it depends on changed since.
-
-### model.registration.calibrate_skip
-Set it to 0 for a movie that does not start with everything on.
+For a splitter that moved since the beads, leave it empty and let *channel
+move* measure how far.
 
 ### model.move.move
 How far the splitter's second channel moved on the chip since the beads, on
@@ -630,10 +617,7 @@ What to check, beyond the checks of [Spline 3D](plugin:Localize/Spline 3D)
   transformation (crosses); a cross on its partner's circle means the
   calibration fits this data.  A calibration made with a different splitter
   alignment misses.  The line above gives each channel's own cutoff on that
-  frame.  With *registration* > *from this movie* ticked, the crosses are drawn with
-  the registration measured from the movie, and the tab *channel
-  registration* shows how it was found -- the vote, the residuals, where the
-  pairs are -- as in [Calibrate transform](plugin:Analysis/Register/Calibrate transform).
+  frame.
 * **The ratio histogram** should show one peak per dye, and should not change
   with z: a ratio that drifts with height means the two PSFs do not describe
   the two halves at the same z.
