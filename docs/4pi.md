@@ -2337,3 +2337,66 @@ unwrapped and drift-corrected, 90 850, tied to the raw fits by `vutarapr`); pair
 the EMCCD and the second colour (out of scope); a drift rate per emitter in uiPSF's learning (not needed: the
 fitted-back phase rates 0.95 -- 1.02 are each scan's drift, held by the beads' own phases); the bead average's
 ends from three beads.
+
+## 27. In situ: a 4Pi model learned from the movie's own molecules (P2, M6; design 2026-11-24)
+
+§25's P2.  A bead model describes the instrument on the day of the beads, through a bead sample; the movie
+is another day, another sample and another alignment.  In situ learns the model from the movie's own
+molecules, starting from the bead model, as uiPSF v1 did for this Nup96 movie
+(`results/4pi_smlm_nup96/psfmodel_iter1_insitu_zernike_4pi.h5`, 2538 molecules) and as
+`calibrate/insitu_run.py` does for one channel.  Single colour; the Nup96 sample is index-matched
+(silicone, 1.406 both), so D9's layers vanish and today's `FourPiModel` is the model: D9's gap, cover
+and focus come with the first mismatched sample, not here.
+
+**The unit is one molecule in one frame**: four boxes, one per channel, one observation each (K = 1, no
+mirror steps).  `FourPiModel` takes it as it is: ``n_phases = 1``, ``Batch.z_nm = 0``, every molecule its
+own x, y, z, cavity phase φ, photon count (`Bleaching(order=0)`) and background per channel; no bead
+kernel.  Linking a blink's frames into one unit (as single-channel in situ does) is left for later:
+mMaple's blinks are short, and the cavity phase moves between frames.
+
+**The cavity phase needs no model while learning**: each molecule has its own φ, so the drift over the
+movie is absorbed molecule by molecule, and so is the fringe: the interference's z dependence is in the
+PSF, φ is what is left.  That φ should then follow one smooth curve in time -- a check of the learnt
+model, and later a prior that would decide wrong fringes (not in P2).
+
+**Held and free** (D9's table, its in-situ column, for a matched index):
+
+| parameter | in situ | why |
+|---|---|---|
+| both pupils' phase Zernikes | free | the aberrations are the sample's and the day's: depth, DM, realignment |
+| pupils' magnitude (γ, apodisation) | held at the beads' | the objectives' own; molecules too dim to tell |
+| coherence α_c, balance r_c, shares f_c | free | what changes most with the sample (D9) |
+| channel phase offsets δ_c (δ_0 = 0) | free | the wedges and the cavity, retuned per sample |
+| misalignment Δ | Δz free, Δx, Δy held | D9: Δz is what realigning moves; the lateral direction was not stable even from beads |
+| channel maps ``ch<c>.transform`` | free | the movie's registration is up to 1 px off the beads' (§8); the molecules span the field |
+| blur σ | free | takes up what moves during an exposure |
+| n_med, NA, wavelength | held | typed, as for beads |
+
+**The molecules** (`smappy.calibrate.fourpi_insitu`, no torch, no Qt):
+1. Spline 4Pi on the movie with the bead model: a table of x, y (channel 0's chip), z (the envelope's),
+   phase, photons, backgrounds, CRLBs and log-likelihood per molecule, and the layout it used.
+2. Chosen: converged fits, bright (above a photon floor), inside the model's z range less a margin,
+   alone (no other localization within a box in that frame), not an outlier in log-likelihood; then
+   spread over z by quotas in bins, up to a number (a few thousand), and spread over the movie.
+3. Cut: each molecule's position mapped into each channel by the layout (`ChannelLayout.to_channel`),
+   a box centred on the nearest pixel in every channel's image, in photons; each box's centre in its
+   channel is `Batch.roi_xy`, so the model's maps start from the layout's.
+
+**The learning** (`uipsf.workflows.fourpi_insitu`):
+1. The molecule model: the bead model's pupils, optics and per-channel numbers, ``n_phases = 1``.
+2. Each molecule localised on the start, the shared parameters held: x, y, z from the fitter; φ the best
+   of twelve round the circle (`best_phases`); z also from a fringe period above and below, the best kept
+   -- the same molecule has optima a period apart, which only the envelope tells apart.
+3. Outliers out by their deviance per pixel (a neighbour in the box, a bad cut), robust z-score.
+4. Every free parameter together, molecules and shared, with the beads' solver.
+5. Localised again from the three z starts on the new model, outliers out, learnt again (two rounds).
+6. Exported as the beads' are (`workflows.fourpi.calibration`): the same convention, so no sign to undo
+   (v1's in-situ export had the opposite phase sign to its bead export, §8).
+
+**The test of the method** is a simulation with a known truth: molecules drawn with a model whose
+pupils, coherence and maps differ from the start's by what a day can move, the cavity phase drifting;
+learnt from the start, the truth must come back closer than the start was, and the refit's z bias must
+fall.  **The test on Nup96** (the whole movie, 70 files, 140 000 frames): learnt on molecules from the
+odd files, judged on the even ones, against the v2 bead model and v1's bead and in-situ models -- the
+pupils, the fits' log-likelihood on the same molecules, the CRLB at matched photons, z from the phase
+against the envelope's (slope and scatter), the share of uncertain fringes, and the rings' separation.
