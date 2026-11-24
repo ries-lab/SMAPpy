@@ -170,16 +170,19 @@ def outliers(deviance, z: float = OUTLIER_Z) -> np.ndarray:
     return (d - med) / sd > z
 
 
-def learning_params(params: Params, settings: InSituSettings) -> Params:
+def learning_params(params: Params, settings: InSituSettings, offset=None) -> Params:
     """``params`` with the shared parameters that in situ learns free, the rest held (`HELD`, the settings'
-    own), and the misalignment's prior about its present value (`OFFSET_SIGMA_NM`)."""
+    own), and the misalignment's prior (`OFFSET_SIGMA_NM`) about ``offset``, the bead model's -- never about
+    a round's own result, or the rounds walk away from it."""
     specs = dict(params.specs)
     phys = params.physical()
     if "fourpi.offset" in specs:
         sigma = torch.as_tensor(settings.offset_sigma_nm, dtype=phys["fourpi.offset"].dtype,
                                 device=phys["fourpi.offset"].device)
         specs["fourpi.offset"] = replace(specs["fourpi.offset"],
-                                         prior=Gaussian(phys["fourpi.offset"].detach().clone(), sigma))
+                                         prior=Gaussian(phys["fourpi.offset"].detach().clone() if offset is None else
+                                                        torch.as_tensor(offset, dtype=sigma.dtype,
+                                                                        device=sigma.device), sigma))
     out = Params(list(specs.values()), params.n_emitters, dtype=phys["emitter.xyz"].dtype,
                  device=phys["emitter.xyz"].device, values=phys)
     return out.free(*[n for n, s in out.specs.items() if s.scope == "shared"]).fix(
@@ -215,9 +218,11 @@ def learn_insitu(bead_model: FourPiModel, bead_shared: dict, batch: Batch, start
         bad = outliers(found["deviance"], settings.outlier_z)
         kept = np.flatnonzero(~bad)
         sub = subset(batch, kept)
-        p = learning_params(params_for(model, sub, shared, {k: v[kept] for k, v in found.items()}), settings)
+        p = learning_params(params_for(model, sub, shared, {k: v[kept] for k, v in found.items()}), settings,
+                            bead_shared.get("fourpi.offset"))
         result = solver.solve(Problem(model, noise, sub, chunk_size), p, progress=tell("learn", r), cancel=cancel)
-        shared = {n: v.detach() for n, v in result.params.physical().items() if result.params.specs[n].scope == "shared"}
+        specs = result.params.specs
+        shared = {n: v.detach() for n, v in result.params.physical().items() if specs[n].scope == "shared"}
         rounds.append({"round": r, "kept": len(kept), "left_out": int(bad.sum()),
                        "median_deviance": float(np.median(found["deviance"])),
                        "objective": float(result.objective), "stop": result.stop_reason})
