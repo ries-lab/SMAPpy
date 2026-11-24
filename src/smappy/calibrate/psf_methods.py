@@ -422,6 +422,22 @@ class BeadAverage:
         return f"{int(np.sum(result.accepted))} of {len(result.beads.records)} beads used"
 
 
+def _field_text(cal, spline) -> str:
+    """With *field dependence*: how much astigmatism and coma vary over the emitters and whether it is real,
+    per channel that has a field, and when the saved spline grid is too coarse for it
+    (`field_splines.limit_warning`); "" without a field."""
+    from uipsf.diagnostics import field_report
+    text = ""
+    for c in range(cal.model.n_channels):
+        field = field_report(cal, c)
+        if field is not None:
+            text += "; " + ("" if cal.model.n_channels == 1 else f"channel {c + 1}: ") + field.summary()
+    channels = [spline] if spline is None or not hasattr(spline, "main") else [spline, spline.main,
+                                                                                  spline.secondary]
+    limits = {(getattr(s, "parameters", None) or {}).get("field_warning") for s in channels} - {None}
+    return text + "".join(f"; {w}" for w in sorted(limits))
+
+
 class PupilModel:
     key, label = "pupil", "pupil model (uiPSF)"
     sections = {"start from": True, "microscope": True, "model": True, "spline": True, "averaging": False}
@@ -611,19 +627,12 @@ class PupilModel:
         cal = run.result.cal
         if cal.result.stop_reason == "cancelled":
             return "stopped, nothing saved"
-        from uipsf.diagnostics import field_report
         from uipsf.diagnostics.figures import model_text
         # γ, the ring, σ, the drift and the tilt, where the model has them
         numbers = model_text(cal)
-        # with *field dependence*: how much astigmatism and coma vary over the beads, and whether it is real
-        field = field_report(cal)
-        # and when the saved spline grid is too coarse for the field (`field_splines.limit_warning`)
-        spline = getattr(run.result, "calibration", None)
-        limit = (getattr(spline, "parameters", None) or {}).get("field_warning")
         spill = spill_text(run.extra.get("spilled", 0))
         return (f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used" + (f"; {numbers}" if numbers else "")
-                + ("" if field is None else f"; {field.summary()}") + ("" if limit is None else f"; {limit}")
-                + (f"; {spill}" if spill else ""))
+                + _field_text(cal, getattr(run.result, "calibration", None)) + (f"; {spill}" if spill else ""))
 
 
 class InSitu:
@@ -1315,7 +1324,9 @@ class MoleculeStack:
         numbers = model_text(result.cal)
         text = (f"{len(result.cal.beads.used)} molecules used, {len(result.run.rounds)} rounds"
                 + (f", {numbers}" if numbers else ""))
-        return text + "".join(f"; {m}" for m in result.messages if not m.startswith("warning: "))
+        text += "".join(f"; {m}" for m in result.messages if not m.startswith("warning: "))
+        # with *field dependence*, as the beads' (`PupilModel.summary`)
+        return text + _field_text(result.cal, getattr(result, "calibration", None))
 
     def states(self, run: Run) -> dict:
         return {i: s.split(":")[0] for i, s in enumerate(self._state(run))}

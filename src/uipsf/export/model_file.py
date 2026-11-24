@@ -142,7 +142,8 @@ def describe(model: ForwardModel) -> dict:
     elif isinstance(g, CoverslipStackGeometry):
         geometry = dict(kind="coverslip stack", sweeps=g.sweeps, focus_nm=g.focus_nm.tolist(),
                         centre_px=list(g.centre_px), pixel_nm=list(g.pixel_nm), height_nm=g.height_nm,
-                        fit_plane=g.fit_plane, focus_prior_nm=g.focus_prior_nm, plane_prior=g.plane_prior)
+                        fit_plane=g.fit_plane, focus_prior_nm=g.focus_prior_nm, plane_prior=g.plane_prior,
+                        curvature=g.curvature)
     else:
         geometry = dict(kind="bead stack", drift=g.drift, drift_axes=g.drift_axes, drift_prior_nm=g.drift_prior_nm,
                         z_scale=g.z_scale, z_scale_prior=g.z_scale_prior)
@@ -205,7 +206,7 @@ def build(config: dict, device=None, dtype=torch.float32) -> ForwardModel:
     elif g.get("kind") == "coverslip stack":
         geometry = CoverslipStackGeometry(g["sweeps"], g["focus_nm"], g["centre_px"], g["pixel_nm"], g["height_nm"],
                                           g["fit_plane"], focus_prior_nm=g["focus_prior_nm"],
-                                          plane_prior=g["plane_prior"])
+                                          plane_prior=g["plane_prior"], curvature=g.get("curvature", False))
     else:
         geometry = BeadStackGeometry(g["drift"], g["drift_prior_nm"], g["z_scale"], g["z_scale_prior"], **tilt,
                                      drift_axes=g["drift_axes"])

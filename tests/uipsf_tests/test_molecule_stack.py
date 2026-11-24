@@ -96,6 +96,65 @@ def test_a_run_recovers_the_pupil_the_height_and_the_sweeps_foci_and_saves_a_spl
     assert carries_model(result.saved) and not (result.saved.parent / "cal.uipsf.h5").exists()
 
 
+@pytest.mark.slow
+def test_a_field_learnt_from_molecules_is_saved_as_node_splines_that_fit_a_corner_without_bias(tmp_path):
+    """*field dependence* with molecules on the coverslip: z sweeps over a 400 px chip (44 µm) whose astigmatism
+    changes over it give back the field, saved as node splines at the molecules' height; Spline 3D fitting
+    spots at a corner with them has a fraction of the z bias of the centre's spline."""
+    import torch
+    from smappy.calibrate.molecule_stack_run import run_molecule_stack
+    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, PSFModelSettings, RunSettings
+    from smappy.io.calibration import load_spline_calibration
+    from smappy.psf import SplinePSF
+
+    from uipsf.export import sample_psf
+    truth_field = {(6, 1, 0): 0.6, (5, 0, 1): 0.5, (8, 1, 0): 0.2}
+    size = 400
+    truth = write_sweeps(tmp_path, OPTICS, files=1, sweeps=2, per_frame=12, step_nm=100.0, span_nm=700.0,
+                         focus_um=(50.0,), size=size, truth_field=truth_field)
+    optics = OpticsSettings(NA=1.45, wavelength_nm=680.0, n_immersion=1.518, n_medium=1.334, pixel_x_nm=110.0,
+                            pixel_y_nm=110.0)
+    model = BeadSettings(psf=PSFModelSettings(zernike_order=4), field_dependence=True)
+    out = tmp_path / "cal.h5"
+    result = run_molecule_stack(truth["paths"], optics, model,
+                                MoleculeStackSettings(molecules=300, roi_px=15, max_rounds=2, height_nm=10.0),
+                                run=RunSettings(save_model=True), camera=CAMERA, save_to=out, device="cpu")
+    field = result.cal.model.channels[0].field
+    learnt = result.cal.shared()["field.phase"].detach().double()
+    true = torch.tensor([truth_field.get(t, 0.0) for t in field.layout], dtype=torch.float64)
+    # each mode's change at the chip's corners and edges, rad (a second-order term alone is weakly fixed by
+    # 44 µm of field: 0.1 rad of uv is 0.02 rad at a corner)
+    edge = torch.tensor([[x, y] for x in (15.0, 200.0, 385.0) for y in (15.0, 200.0, 385.0)], dtype=torch.float64)
+    error = field.basis(edge) * (learnt - true)
+    for j, _ in field.terms:
+        rows = [i for i, (m, _, _) in enumerate(field.layout) if m == j]
+        assert float(error[:, rows].sum(1).abs().max()) < 0.04, (j, learnt, true)
+    from smappy.calibrate.psf_methods import _field_text
+    assert "field dependence is significant" in _field_text(result.cal, result.calibration)
+    assert "molecules'" in _field_text(result.cal, result.calibration)
+    spline = load_spline_calibration(result.saved)
+    assert spline.field_splines is not None and spline.field_splines.shape[0] >= 3
+    assert "focal_curvature_nm_at_50um" in spline.parameters
+    # spots drawn with the truth at the molecules' height near a corner, fitted with and without the field
+    corner = (30.0, size - 30.0)
+    rng = np.random.default_rng(1)
+    n = 1200
+    xyz = np.c_[rng.uniform(-50, 50, (n, 2)), rng.uniform(-500, 500, n)]
+    mu = sample_psf(truth["model"], truth["shared"], xyz, roi_px=15,
+                    depth_nm=torch.tensor([truth["height_nm"]], dtype=torch.float64), field_xy=corner).numpy()
+    rois = rng.poisson(mu * 5000 + 10).astype(np.float32)
+    psf = SplinePSF(spline)
+    fielded = psf.unpack(psf.fit(rois, 50, 2, chip_xy=np.tile(corner, (n, 1))))
+    plain = psf.unpack(psf.fit(rois, 50, 2))
+    bins = np.digitize(xyz[:, 2], np.arange(-500, 501, 100))
+
+    def bias(r):        # the z offset per bin, rms over the bins, about the mean (the focus is the sweeps')
+        e = r["z_nm"] - xyz[:, 2]
+        m = np.array([np.median(e[bins == q]) for q in np.unique(bins)])
+        return float(np.sqrt(np.mean((m - m.mean()) ** 2)))
+    assert bias(fielded) < 10 and bias(plain) > 2 * bias(fielded), (bias(fielded), bias(plain))
+
+
 def test_the_window_offers_molecule_stacks_as_a_sample_and_detects_their_molecules(tmp_path, monkeypatch):
     import time
 
@@ -117,6 +176,11 @@ def test_the_window_offers_molecule_stacks_as_a_sample_and_detects_their_molecul
     assert window.detect_button.text() == "Detect molecules"
     form = window.model_form
     assert not form.row_layouts["bead_diameter_nm"].isRowVisible(form.fields["bead_diameter_nm"])
+    # *field dependence* is offered for molecules, and the run reads it
+    assert form.row_layouts["field_dependence"].isRowVisible(form.fields["field_dependence"])
+    form.set_values(dict(field_dependence=True))
+    assert window._part("model").field_dependence
+    form.set_values(dict(field_dependence=False))
     window.optics_form.set_values(dict(NA=1.45, wavelength_nm=680.0, n_immersion=1.518,
                                        pixel_x_nm=110.0, pixel_y_nm=110.0))
     window.medium_form.set_values(dict(medium="typed", n_medium=1.334))

@@ -89,10 +89,13 @@ TRUE_PHASE_NM = {5: -25.0, 6: 60.0, 11: 40.0}
 
 
 def stack_molecules(sweeps=3, per_frame=6, step_nm=100.0, span_nm=900.0, height_nm=10.0, gamma=0.5,
-                    foci=(40.0, -30.0, 10.0), plane=(6.0, -4.0), seed=0, dtype=torch.float32):
+                    foci=(40.0, -30.0, 10.0), plane=(6.0, -4.0), seed=0, dtype=torch.float32, chip=128,
+                    truth_field=None, curvature=(0.0, 0.0, 0.0)):
     """(model, truth, batch, defocus [E]): molecules on the coverslip at ``height_nm``, each seen once, in
     ``sweeps`` z sweeps of ``step_nm`` over ±``span_nm`` with each sweep's own focus and a tilted focal plane;
-    the pupil astigmatic and spherical (`TRUE_PHASE_NM`), γ ``gamma``."""
+    the pupil astigmatic and spherical (`TRUE_PHASE_NM`), γ ``gamma``.  On a ``chip`` px square; ``truth_field``
+    ({(Noll, i, j): rad}, `FieldPolynomial`'s layout) a field-dependent pupil, then with the focal surface's
+    ``curvature`` (nm at 50 µm, u², uv, v²)."""
     from smappy.calibrate.pupil import PSFModelSettings
 
     from uipsf.optics.zernike import noll_to_nm  # noqa: F401  (Noll indices of the pupil's modes)
@@ -106,10 +109,11 @@ def stack_molecules(sweeps=3, per_frame=6, step_nm=100.0, span_nm=900.0, height_
         for zk in stage:
             z += [zk] * per_frame
             sweep += [s] * per_frame
-            field += rng.uniform(10, 118, (per_frame, 2)).tolist()
+            field += rng.uniform(10, chip - 10, (per_frame, 2)).tolist()
     E = len(z)
-    model = molecule_stack_model(OPTICS, spec, (ROI, ROI), sweeps, np.zeros(sweeps), (64.0, 64.0), device="cpu",
-                                 dtype=dtype)
+    c = (chip - 1) / 2
+    model = molecule_stack_model(OPTICS, spec, (ROI, ROI), sweeps, np.zeros(sweeps), (c, c), device="cpu",
+                                 dtype=dtype, field_dependence=truth_field is not None)
     batch = uipsf.Batch(data=torch.zeros(E, 1, 1, ROI, ROI, dtype=dtype), z_nm=torch.tensor(z, dtype=dtype)[:, None],
                         stack_id=torch.tensor(sweep), field_xy=torch.tensor(field, dtype=dtype))
     pupil = model.psf.pupil
@@ -125,6 +129,10 @@ def stack_molecules(sweeps=3, per_frame=6, step_nm=100.0, span_nm=900.0, height_
               "emitter.xyz": torch.cat([xy, torch.zeros(E, 1, dtype=dtype)], 1),
               "emitter.photons": torch.tensor(rng.uniform(3000, 6000, E), dtype=dtype),
               "emitter.background": torch.full((E,), 15.0, dtype=dtype)}
+    if truth_field is not None:
+        layout = model.channels[0].field.layout
+        values["field.phase"] = torch.tensor([truth_field.get(t, 0.0) for t in layout], dtype=dtype)
+        values["geometry.curvature"] = torch.tensor(curvature, dtype=dtype)
     truth = parameters(model, batch, values, dtype=dtype)
     data = simulate(model, truth, batch, seed=seed + 1)
     start = {"xyz": torch.cat([xy + torch.tensor(rng.normal(0, 15, (E, 2)), dtype=dtype),
@@ -185,3 +193,37 @@ def test_the_rounds_recover_the_pupil_the_height_the_foci_and_the_plane_and_find
     # ~12 molecules a bin: the bend is the noise of their median, a third of a CRLB
     assert check.bend_rms(600) < 0.5 * np.median(check.crlb_nm) and 0.7 < check.scatter < 1.4
     assert check.bad.mean() < 0.05
+
+
+@pytest.mark.slow
+def test_molecules_over_the_chip_give_back_the_field_and_the_focal_surfaces_curvature():
+    """Field dependence from molecules on the coverslip: astigmatism varying over a 1000 px chip (110 µm) and a
+    curved focal surface, both recovered -- the curvature where the molecules' z is held to it, which a
+    field polynomial without it would have had to bend."""
+    from uipsf.workflows.molecule_stack import StackRoundSettings, learn_molecule_stack
+    truth_field = {(6, 1, 0): 0.2, (5, 0, 1): 0.15, (6, 2, 0): 0.1, (8, 1, 0): 0.1}
+    model, truth, batch, defocus = stack_molecules(sweeps=2, per_frame=10, chip=1000, truth_field=truth_field,
+                                                   curvature=(120.0, 0.0, 80.0))
+    run = learn_molecule_stack(model, batch, defocus, settings=StackRoundSettings(max_rounds=2))
+    cal = run.final.calibration
+    p = {k: v.detach().double() for k, v in cal.shared().items()}
+    t = {k: v.detach().double() for k, v in truth.physical().items()}
+    assert torch.allclose(p["field.phase"], t["field.phase"], atol=0.03), (p["field.phase"], t["field.phase"])
+    assert float((p["geometry.curvature"] - t["geometry.curvature"]).abs().max()) < 15.0, p["geometry.curvature"]
+    nm = (p["pupil.phase"] - t["pupil.phase"]) * OPTICS.wavelength_nm / (2 * np.pi)
+    assert float(nm.abs().max()) < 4.0
+    from uipsf.diagnostics import field_report
+    assert field_report(cal).significant
+    check = run.final.check
+    assert check.bend_rms(600) < 0.5 * np.median(check.crlb_nm) and check.bad.mean() < 0.05
+
+
+def test_a_field_dependent_coverslip_model_keeps_its_curvature_in_the_model_file():
+    model, truth, batch, _ = stack_molecules(sweeps=1, per_frame=1, step_nm=400.0, span_nm=400.0, chip=1000,
+                                             truth_field={(6, 1, 0): 0.2})
+    back = build(describe(model))
+    assert back.geometry.curvature and back.channels[0].field is not None
+    E = batch.n_emitters
+    names = {s.name for s in back.specs(batch, {"xyz": torch.zeros(E, 3), "photons": torch.ones(E),
+                                                "background": torch.ones(E)})}
+    assert {"geometry.curvature", "field.phase"} <= names

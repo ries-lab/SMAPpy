@@ -13,9 +13,10 @@ PHASE_NM = {5: -25.0, 6: 60.0, 7: 8.0, 11: 40.0}
 
 
 def truth_model(optics, height_nm: float = 10.0, gamma: float = 0.5, sigma_nm: float = 0.0, order: int = 4,
-                roi: int = 25):
+                roi: int = 25, truth_field=None, centre_px=(0.0, 0.0)):
     """(model, shared values): a minimal pupil of ``order`` with `PHASE_NM`, γ, σ and the molecules at
-    ``height_nm`` above the glass, as `molecule_stack_model` builds it for one sweep."""
+    ``height_nm`` above the glass, as `molecule_stack_model` builds it for one sweep; with ``truth_field``
+    ({(Noll, i, j): rad}, `FieldPolynomial`'s layout) varying over the chip about ``centre_px``."""
     import torch
     from smappy.calibrate.pupil import PSFModelSettings
 
@@ -23,8 +24,8 @@ def truth_model(optics, height_nm: float = 10.0, gamma: float = 0.5, sigma_nm: f
     from uipsf.simulate import template
     from uipsf.workflows.calibrate import molecule_stack_model
     spec = PSFModelSettings(zernike_order=order, magnitude="minimal", blur="round", blur_nm=max(sigma_nm, 0.0))
-    model = molecule_stack_model(optics, spec, (roi, roi), 1, [0.0], (0.0, 0.0), device="cpu",
-                                 dtype=torch.float64)
+    model = molecule_stack_model(optics, spec, (roi, roi), 1, [0.0], centre_px, device="cpu",
+                                 dtype=torch.float64, field_dependence=truth_field is not None)
     b = template(1, torch.zeros(1, 1, dtype=torch.float64), (roi, roi), dtype=torch.float64)
     import dataclasses
     b = dataclasses.replace(b, stack_id=torch.zeros(1, dtype=torch.long), field_xy=torch.zeros(1, 2))
@@ -34,6 +35,9 @@ def truth_model(optics, height_nm: float = 10.0, gamma: float = 0.5, sigma_nm: f
     values = {"pupil.phase": phase, "pupil.gamma": torch.tensor(gamma, dtype=torch.float64),
               "psf.sigma": torch.tensor([sigma_nm], dtype=torch.float64),
               "geometry.height": torch.tensor(height_nm, dtype=torch.float64)}
+    if truth_field is not None:
+        values["field.phase"] = torch.tensor([truth_field.get(t, 0.0) for t in model.channels[0].field.layout],
+                                             dtype=torch.float64)
     p = Params(model.specs(b, {"xyz": torch.zeros(1, 3), "photons": torch.ones(1), "background": torch.ones(1)}),
                1, dtype=torch.float64, values=values).physical()
     shared = {k: v for k, v in p.items() if not k.startswith("emitter.")}
@@ -43,11 +47,12 @@ def truth_model(optics, height_nm: float = 10.0, gamma: float = 0.5, sigma_nm: f
 def write_sweeps(folder, optics, files: int = 2, sweeps: int = 3, step_nm: float = 100.0, span_nm: float = 1000.0,
                  per_frame: int = 6, size: int = 128, photons=(3000.0, 6000.0), background: float = 20.0,
                  focus_um=(50.0, 50.2), sweep_jitter_nm: float = 20.0, plane=(0.0, 0.0), height_nm: float = 10.0,
-                 gamma: float = 0.5, seed: int = 0, up_down: bool = False):
+                 gamma: float = 0.5, seed: int = 0, up_down: bool = False, truth_field=None):
     """``files`` OME-TIFFs in ``folder``, each ``sweeps`` sweeps of the stage over ±``span_nm`` about its file's
     focus ``focus_um`` (each sweep's own off by up to ``sweep_jitter_nm``), ``per_frame`` molecules on in
     each frame at random places away from the edges; alternately up and down with ``up_down``.  The focal
-    plane's slope ``plane`` (nm per µm, x and y).  Returns the truth: the paths, each sweep's focus (nm,
+    plane's slope ``plane`` (nm per µm, x and y); ``truth_field`` a field-dependent pupil about the image's
+    centre (`truth_model`).  Returns the truth: the paths, each sweep's focus (nm,
     relative to its file's), the model and its shared values."""
     from pathlib import Path
 
@@ -56,7 +61,8 @@ def write_sweeps(folder, optics, files: int = 2, sweeps: int = 3, step_nm: float
 
     from uipsf.export import sample_psf
     rng = np.random.default_rng(seed)
-    model, shared = truth_model(optics, height_nm, gamma)
+    model, shared = truth_model(optics, height_nm, gamma, truth_field=truth_field,
+                                centre_px=((size - 1) / 2, (size - 1) / 2))
     roi = 25
     h = roi // 2
     px = np.asarray(optics.pixel_size_nm, float)
@@ -78,7 +84,9 @@ def write_sweeps(folder, optics, files: int = 2, sweeps: int = 3, step_nm: float
                     d = zk + jitter + (plane[0] * u + plane[1] * v)
                     xi, yi = int(round(x)), int(round(y))
                     xyz = torch.tensor([[(x - xi) * px[0], (y - yi) * px[1], -d]], dtype=torch.float64)
-                    spot = sample_psf(model, shared, xyz, roi, torch.tensor([height_nm], dtype=torch.float64))[0]
+                    where = None if truth_field is None else (x, y)
+                    spot = sample_psf(model, shared, xyz, roi, torch.tensor([height_nm], dtype=torch.float64),
+                                      field_xy=where)[0]
                     image[yi - h:yi + h + 1, xi - h:xi + h + 1] += rng.uniform(*photons) * spot.numpy()
                 frames.append(rng.poisson(image) / CAMERA.conversion + CAMERA.offset)
                 z_um.append(focus_um[k % len(focus_um)] + zk / 1000)

@@ -31,17 +31,18 @@ class FieldReport:
     span_um: float              # the beads' span over the chip, the larger side
     n_beads: int = 0
     determined: bool = True     # False: the coefficients' covariance is not positive definite (docstring)
+    unit: str = "beads"         # what the emitters are, for the text: "molecules" from a sample's
 
     def summary(self) -> str:
         nm = 1 / (2 * math.pi) * self.wavelength_nm
         if not self.determined:
-            return (f"field dependence is not determined by {self.n_beads} beads ({self.dof} coefficients): "
-                    "learn without it, or with more beads spread over the field")
+            return (f"field dependence is not determined by {self.n_beads} {self.unit} ({self.dof} coefficients): "
+                    f"learn without it, or with more {self.unit} spread over the field")
         parts = ", ".join(f"Noll {j} {d:+.3f} rad ({d * nm:+.0f} nm)" for j, (d, _) in self.changes.items())
         verdict = ("field dependence is significant" if self.significant
                    else "field dependence is not significant: learn without it")
         return (f"{verdict} ({self.gain:.0f} nats over {self.dof} coefficients, threshold {self.threshold:.0f}); "
-                f"largest changes over the beads' {self.span_um:.0f} µm: {parts}")
+                f"largest changes over the {self.unit}' {self.span_um:.0f} µm: {parts}")
 
 
 def field_report(cal, channel: int = 0, p: float = 1e-6) -> FieldReport | None:
@@ -80,5 +81,7 @@ def field_report(cal, channel: int = 0, p: float = 1e-6) -> FieldReport | None:
         err = math.sqrt(max(0.0, float(g @ cov[np.ix_(rows, rows)] @ g))) if determined else math.nan
         changes[j] = (float(values[k]), err)
     span = (xy.max(0).values - xy.min(0).values).numpy() * np.asarray(field.pixel_size_nm) / 1000.0
+    from ..model.geometry import BeadStackGeometry
+    unit = "beads" if isinstance(cal.model.geometry, BeadStackGeometry) else "molecules"
     return FieldReport(gain, dof, threshold, determined and gain > threshold, changes,
-                       float(ch.psf.grid.optics.wavelength_nm), float(span.max()), int(len(xy)), determined)
+                       float(ch.psf.grid.optics.wavelength_nm), float(span.max()), int(len(xy)), determined, unit)

@@ -206,15 +206,15 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     In situ decides the magnitude by its *hold* (a bead model's γ held, or γ learnt) and never learns the
     SAF damping, the bead's size or the stage's drift, which are the beads'.  *learn NA* is offered in every
     method for a minimal magnitude; in situ holding a bead model's γ holds its learnt NA too.  Field
-    dependence is for one channel of beads, for now (docs/uipsf/field-dependence.md).  The tilt: always in
+    dependence is learnt by beads and by molecules on the coverslip (docs/uipsf/field-dependence.md).  The tilt: always in
     situ, where molecules above the glass see it; for beads only through a coverslip of another index.
     Molecules on the coverslip in z sweeps choose the magnitude as beads do, but have no SAF damping of their
     own -- their common height damps the ring physically (`uipsf.model.CoverslipStackGeometry`) -- no bead,
-    no drift (each molecule is one frame), no field dependence and no tilt (a point at the glass sees none
-    through oil), and nothing held out."""
+    no drift (each molecule is one frame) and no tilt (a point at the glass sees none through oil), and
+    nothing held out; their field dependence adds the focal surface's curvature (`molecule_stack_run`)."""
     if method == "molecules":
         return {"psf.magnitude": True, "psf.saf_damping": False, "psf.learn_na": magnitude == "minimal",
-                "psf.learn_n_med": True, "bead_diameter_nm": False, "drift": False, "field_dependence": False,
+                "psf.learn_n_med": True, "bead_diameter_nm": False, "drift": False, "field_dependence": not dual,
                 "fit_tilt": False, "heldout": False, "max_dz_nm": False, "z_range_nm": False}
     beads = method != "insitu"
     return {"psf.magnitude": beads, "psf.saf_damping": beads and magnitude == "minimal" and ring,
@@ -560,7 +560,7 @@ def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int =
     psf = np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample, depth_nm=depth_nm), 0)
     scale = float(psf.sum(axis=(1, 2)).max())
     psf /= scale
-    field = field_splines(learned, dz_nm, z_range_nm, roi_size, upsample, scale)
+    field = field_splines(learned, dz_nm, z_range_nm, roi_size, upsample, scale, depth_nm=depth_nm)
     parameters = dict(_record(learned, dz_nm, z_range_nm, roi_size, upsample),
                       normalization="maximum plane sum = 1")
     psf = psf.astype(np.float32)
@@ -601,10 +601,12 @@ def field_extent(learned):
     return xy.min(0), xy.max(0)
 
 
-def field_splines(learned, dz_nm: float, z_range_nm: float, roi_size: int, upsample, scale: float):
+def field_splines(learned, dz_nm: float, z_range_nm: float, roi_size: int, upsample, scale: float,
+                  depth_nm: float | None = None, channel: int = 0):
     """The node splines of a field-dependent model (`smappy.field_splines.node_splines`), on the smallest
     grid over the beads' span whose blend keeps to `field_splines.TOLERANCE`, every node normalised by the
-    centre's ``scale`` so that the blend is one; None without a field, or when one spline is enough."""
+    centre's ``scale`` so that the blend is one; None without a field, or when one spline is enough.
+    ``depth_nm`` as `sample`'s (molecules on the coverslip: their height)."""
     from ..field_splines import node_splines
     extent = field_extent(learned)
     if extent is None:
@@ -612,8 +614,8 @@ def field_splines(learned, dz_nm: float, z_range_nm: float, roi_size: int, upsam
 
     def psf_at(x, y):
         # not cached: the grid search draws each PSF once, and keeping them held 3 GB for 13 × 13
-        return np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample,
-                                 field_xy=(float(x), float(y))), 0) / scale
+        return np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample, channel,
+                                 field_xy=(float(x), float(y)), depth_nm=depth_nm), 0) / scale
 
     return node_splines(psf_at, *extent)
 

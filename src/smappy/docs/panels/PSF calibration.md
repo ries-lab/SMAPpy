@@ -999,7 +999,13 @@ the chip, astigmatism up to the square of the distance, coma in proportion to
 it, as nodal aberration theory says an objective's aberrations vary.  The
 spline is then one per point of a grid over the beads' span, as fine as the
 learnt field needs (one spline when it is flat), and Spline 3D fits each spot
-with the splines around it blended.  Offered for beads of one channel.  Tick
+with the splines around it blended.  Offered for beads of one channel and for
+molecules on the coverslip in z sweeps.  Molecules are thousands of points
+spread over the chip, so they sample the field more densely than tens of beads;
+but each molecule's z is the stage's, held to the focal plane, so with the
+field the plane learns its curvature too (field curvature: the focus a few
+hundred nm lower or higher at the edges), which would otherwise be read as
+astigmatism.  The *Foci and plane* page shows it.  Tick
 it for a field of view of more than about 50 µm, or when beads at the edges
 fit worse than in the middle.  After the run the summary says whether the
 field is real -- a test of its coefficients against none, in nats beside its

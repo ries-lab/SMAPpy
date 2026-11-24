@@ -134,7 +134,7 @@ def insitu_model(optics, spec: PSFModelSettings, roi_shape, focus_nm: float, z_m
 
 def molecule_stack_model(optics, spec: PSFModelSettings, roi_shape, sweeps: int, focus_nm, centre_px,
                          height_nm: float | None = None, transforms=None, z_max_nm: float = 1100.0, device=None,
-                         dtype=torch.float32) -> ForwardModel:
+                         dtype=torch.float32, field_dependence: bool = False) -> ForwardModel:
     """The model learnt from single molecules on the coverslip through z sweeps (`CoverslipStackGeometry`,
     `molecule_stack`): one channel per `Optics` in ``optics``, the main one first, secondaries started at
     ``transforms`` as `bead_model`'s; each a point's PSF as ``spec`` describes it, with no SAF damping of
@@ -142,7 +142,13 @@ def molecule_stack_model(optics, spec: PSFModelSettings, roi_shape, sweeps: int,
     decays the supercritical light, and only that (`VectorPSF.saf_only_depth`: the phase at that height is
     every molecule's, the pupil's and the foci's to take up; drawn, the pupil is the objective's with it taken
     out, `VectorPSF.for_emitters`).  One focus per sweep, shared by the channels; one photon
-    count per molecule.  ``z_max_nm`` the sampling's defocus: the sweeps' ±1 µm and a margin."""
+    count per molecule.  ``z_max_nm`` the sampling's defocus: the sweeps' ±1 µm and a margin.
+
+    ``field_dependence``: astigmatism and coma varying over the chip (`FieldPolynomial`, centred at
+    ``centre_px`` as the focal plane is) and the focal surface's curvature (`CoverslipStackGeometry`'s
+    ``curvature``), as beads learn them.  Each molecule is at its own place, so thousands of them sample the
+    field far more densely than 20-50 beads.  In every channel, each its own polynomial: a split chip's two
+    halves see different parts of the objective's field (`docs/uipsf/field-dependence.md` §12)."""
     from dataclasses import replace as replaced
 
     from ..model import Bleaching, CoverslipStackGeometry
@@ -152,8 +158,10 @@ def molecule_stack_model(optics, spec: PSFModelSettings, roi_shape, sweeps: int,
     for o, H in zip(optics, transforms, strict=True):
         psf = make_psf(o, replaced(spec, saf_damping=False), roi_shape, z_max_nm=z_max_nm, device=device, dtype=dtype)
         psf.saf_only_depth = True
-        channels.append(Channel(psf, transform=H))
-    geometry = CoverslipStackGeometry(sweeps, focus_nm, centre_px, optics[0].pixel_size_nm, height_nm=height_nm)
+        field = FieldPolynomial(centre_px, optics[0].pixel_size_nm) if field_dependence else None
+        channels.append(Channel(psf, transform=H, field=field))
+    geometry = CoverslipStackGeometry(sweeps, focus_nm, centre_px, optics[0].pixel_size_nm, height_nm=height_nm,
+                                      curvature=field_dependence)
     return ForwardModel(channels, geometry=geometry, intensity=Bleaching(order=0))
 
 

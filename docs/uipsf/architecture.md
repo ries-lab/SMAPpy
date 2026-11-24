@@ -2980,7 +2980,10 @@ The study and the choices: `docs/uipsf/field-dependence.md`.  What is built:
   of 50 µm, each mode a polynomial of its own, ``field.phase`` [14].  `ForwardModel.channel_params` hands
   each channel's PSF ``pupil.phase`` as [E, n], one pupil per emitter; the pupil and emitter
   linearisations read it the same way, so the solver's field columns come from `pupil_linearisation`
-  (`test_field.py` checks them against the Jacobian).  Bead learning only: in situ sets it off.
+  (`test_field.py` checks them against the Jacobian).  Beads and molecules on the coverslip in z sweeps
+  (`molecule_stack_model(field_dependence=)`, which adds the focal surface's curvature,
+  `CoverslipStackGeometry(curvature=)`, model file version unchanged: an optional geometry entry); §12 of
+  the study.
 - **The report**, `diagnostics.field_report`: per mode the largest change across the used beads with its
   CRLB, and a Wald test of the 14 coefficients against zero, ½ c·C⁻¹·c in nats against ½ χ²(10⁻⁶): no
   refit.  The PSF calibration window's summary prints it when *field dependence* is ticked.

@@ -2,8 +2,9 @@
 
 A study, November 2026: the literature, the options for uipsf's coefficient field (`plan.md` §3, the slot
 `NodalPolynomial` + `BSplineResidual` + `FocalSurface`) and for SMAPpy's fitter (`plan.md` §7.3), and
-measurements on synthetic data that decide between them.  What v1 built of it is §8, the first real field §9, and
-node splines against the local pupil and a correction afterwards §11.
+measurements on synthetic data that decide between them.  What v1 built of it is §8, the first real field §9,
+node splines against the local pupil and a correction afterwards §11, and the field for the other samples and
+modalities -- molecules on the coverslip, two channels, in situ -- §12.
 
 **In short.**
 - *Representation in uipsf:* the Zernike coefficients as a nodal-aberration-theory polynomial of the field
@@ -445,3 +446,32 @@ re-drawn (`field_correction_study.py --field zenodo`, and `--largest-grid 9`), g
 (13 × 13) and 9.2 / 292 (9 × 9).  Those numbers are dominated by a few spots at the corners and the ends of
 the z range that converge elsewhere (0.8 % lost, the pupil fit's too).  Its x, y wobble drops from 1.1 to
 0.1 nm rms.  Bicubic blending of 16 nodes is not needed.
+
+## 13. The field for the other samples: molecules on the coverslip, two channels, in situ (November 2026)
+
+v1 learnt the field from beads of one channel.  This section is what was added for the PSF calibration's other
+samples, in the order they were built.
+
+### 13.1 Molecules on the coverslip in z sweeps
+
+**What is learnt.**  The same `FieldPolynomial` on the pupil, centred where the focal plane is
+(`MoleculeStackROIs.field_centre`, the image's centre), and one more thing: the focal surface's second order,
+``geometry.curvature`` (nm at 50 µm, for u², uv, v²; a 300 nm prior).  A bead fits its own z, so field
+curvature -- the focus lower or higher towards the edges -- costs beads nothing (§7).  A molecule's z is the
+stage's, held to the surface by a 0.5 nm prior; without the curvature terms a curved focus has nowhere to go but
+the pupil, and astigmatism varying as u² and v² is the nearest thing the field polynomial has.  The terms are
+learnt only with the field: a flat field's plane is all the focus there is.
+
+**Export.**  The node splines are drawn at the molecules' height, as the centre spline is (`pupil.field_splines`
+takes ``depth_nm`` now), over the molecules' span; the focal surface is the sample's and stays out of the PSF,
+as §6's export rule asks.  The summary and the *Foci and plane* page report the field and the curvature; the
+spline keeps ``focal_curvature_nm_at_50um``.
+
+**Measured, simulations** (`test_coverslip_stack.py`, `test_molecule_stack.py`):
+- 300 molecules in two sweeps over a 1000 px chip (110 µm), astigmatism changing by up to 0.2 rad per 50 µm and
+  coma by 0.1, with a focal surface curved by 120 and 80 nm (u², v²): the field coefficients come back within
+  0.03 rad, the curvature within 15 nm, the pupil within 4 nm, and the z check finds no bend.
+- Through SMAPpy from simulated OME-TIFF sweeps of a 400 px chip (44 µm; 0.6, 0.5 and 0.2 rad per 50 µm):
+  each mode's change at the chip's corners within 0.04 rad (a second-order coefficient alone is weakly fixed
+  by 44 µm: 0.1 rad of uv is 0.02 rad at a corner); the node splines fit spots near a corner with a fraction
+  of the centre spline's z bias.

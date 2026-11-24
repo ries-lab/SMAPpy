@@ -176,6 +176,11 @@ SWEEP_FOCUS_PRIOR_NM, PLANE_PRIOR_NM_PER_UM = 300.0, 50.0
 HEIGHT_START_NM, HEIGHT_MAX_NM = 0.5, 200.0
 #: how firmly each molecule's own z offset is held at the plane while learning (nm)
 OFFSET_HOLD_NM = 0.5
+#: the focal surface's curvature (``geometry.curvature``, with a field-dependent pupil): nm of focus at
+#: `CURVATURE_SCALE_UM` from the field's centre, the field polynomial's unit (`model.field`), for each of
+#: u², uv, v².  300 nm is the sweeps' focus prior: field curvature of an objective is a few hundred nm at the
+#: edge of a 100 µm field, and the prior only keeps the terms finite where the molecules span little field
+CURVATURE_PRIOR_NM, CURVATURE_SCALE_UM = 300.0, 50.0
 
 
 class CoverslipStackGeometry:
@@ -207,13 +212,19 @@ class CoverslipStackGeometry:
     Each molecule otherwise learns x, y, photons and background.  ``centre_px`` is the field's centre in
     chip pixels (`Batch.field_xy`'s), ``pixel_nm`` the pixel.  No coverslip tilt of the layers: with an oil
     objective a point at the glass sees none (the module docstring), and the focal plane's slope is the
-    tilt as these data see it."""
+    tilt as these data see it.
+
+    ``curvature`` adds the focal surface's second order, ``geometry.curvature`` (nm at `CURVATURE_SCALE_UM`,
+    for u², uv, v²): field curvature, the defocus over the field that a field-dependent pupil must not take
+    up (`docs/uipsf/field-dependence.md` §6.2).  Beads fit each one's z and so absorb it; here every
+    molecule's z is held to the surface, so without these terms a curved focus would bend the astigmatism the
+    field polynomial learns.  Learnt only with the field: a flat field's plane is its focus."""
 
     fit_tilt, tilt_rad, tilt_prior_rad = False, None, None
 
     def __init__(self, sweeps: int, focus_nm, centre_px, pixel_nm, height_nm: float | None = None,
                  fit_plane: bool = True, free_z: bool = False, focus_prior_nm: float = SWEEP_FOCUS_PRIOR_NM,
-                 plane_prior: float = PLANE_PRIOR_NM_PER_UM):
+                 plane_prior: float = PLANE_PRIOR_NM_PER_UM, curvature: bool = False):
         self.sweeps = int(sweeps)
         self.focus_nm = torch.as_tensor(focus_nm, dtype=torch.float32).reshape(self.sweeps)
         self.centre_px = tuple(float(v) for v in centre_px)
@@ -221,6 +232,7 @@ class CoverslipStackGeometry:
         self.height_nm = None if height_nm is None else float(height_nm)
         self.fit_plane, self.free_z = bool(fit_plane), bool(free_z)
         self.focus_prior_nm, self.plane_prior = float(focus_prior_nm), float(plane_prior)
+        self.curvature = bool(curvature)
 
     def checking(self) -> CoverslipStackGeometry:
         """The same geometry with every molecule's z free: the z check's."""
@@ -241,13 +253,20 @@ class CoverslipStackGeometry:
                 ParamSpec("geometry.plane", (2,), init=0.0, prior=Gaussian(0.0, self.plane_prior),
                           fixed=not self.fit_plane),
                 ParamSpec("geometry.height", (), init=h, transform=Bounded(0.0, HEIGHT_MAX_NM),
-                          fixed=self.height_nm is not None)]
+                          fixed=self.height_nm is not None)] + (
+                [ParamSpec("geometry.curvature", (3,), init=0.0, prior=Gaussian(0.0, CURVATURE_PRIOR_NM))]
+                if self.curvature else [])
 
     def plane_focus(self, p, batch) -> torch.Tensor:
-        """[E] nm: where the focal plane is for each molecule, its sweep's focus and the slope at its place."""
+        """[E] nm: where the focal plane is for each molecule, its sweep's focus and the slope at its place
+        (and the surface's curvature there, with ``curvature``)."""
         xyz = p["emitter.xyz"]
         uv = (batch.field_xy.to(xyz) - xyz.new_tensor(self.centre_px)) * xyz.new_tensor(self.pixel_nm) / 1000
-        return p["geometry.focus"][batch.stack_id.to(xyz.device)] + (uv * p["geometry.plane"]).sum(-1)
+        f = p["geometry.focus"][batch.stack_id.to(xyz.device)] + (uv * p["geometry.plane"]).sum(-1)
+        if self.curvature:
+            u, v = (uv / CURVATURE_SCALE_UM).unbind(-1)
+            f = f + (torch.stack([u * u, u * v, v * v], -1) * p["geometry.curvature"]).sum(-1)
+        return f
 
     def __call__(self, p, batch) -> torch.Tensor:
         """[E, K, 4] nm: x, y, the defocus through the immersion, the height in the sample."""

@@ -71,7 +71,8 @@ def model_for(rois: MoleculeStackROIs, optics, model, stack: MoleculeStackSettin
     transforms = None if C == 1 else [None, _unit(rois.transform.transformation)]
     return molecule_stack_model(o if C > 1 else o[0], model.psf, (roi, roi), rois.sweeps, np.zeros(rois.sweeps),
                                 rois.field_centre(), height_nm=stack.height_nm, transforms=transforms,
-                                z_max_nm=span + 100.0, device=device, dtype=dtype or torch.float32)
+                                z_max_nm=span + 100.0, device=device, dtype=dtype or torch.float32,
+                                field_dependence=bool(model.field_dependence) and C == 1)
 
 
 def _main_half(rois) -> Optional[str]:
@@ -90,7 +91,7 @@ def run_molecule_stack(paths, optics, model, stack: MoleculeStackSettings | None
                        dual: bool = False) -> MoleculeStackResult:
     """Z-sweep files to a learnt model and, with *save model*, its spline on disk (module docstring).
     ``optics`` an `OpticsSettings`, ``model`` a `BeadSettings` (its PSF model and *rejection (k)*; the beads'
-    size, drift, field dependence and held-out share are not read: `pupil.model_shown`); ``rois``, the molecules found already (*Detect*), skips finding them;
+    size, drift and held-out share are not read: `pupil.model_shown`); ``rois``, the molecules found already (*Detect*), skips finding them;
     ``device`` where it is learnt (default the fastest); ``chunk_size`` molecules at once (default from the
     memory available, `uipsf.workflows.molecule_stack.molecule_chunk`).  ``dual``: a chip split in two colours
     (`molecule_dual`), saved as a dual calibration for Spline 3D 2C."""
@@ -155,6 +156,8 @@ def stack_record(result: MoleculeStackResult) -> dict:
            "height_nm": float(shared["geometry.height"]),
            "sweep_focus_nm": [round(float(v), 1) for v in shared["geometry.focus"].detach().cpu()],
            "focal_plane_nm_per_um": [round(float(v), 3) for v in shared["geometry.plane"].detach().cpu()],
+           **({} if "geometry.curvature" not in shared else
+              {"focal_curvature_nm_at_50um": [round(float(v), 1) for v in shared["geometry.curvature"].detach().cpu()]}),
            "file_focus_um": [float(v) for v in result.rois.curve.focus_um]}
     check = result.check
     if check is not None:

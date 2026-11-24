@@ -81,7 +81,8 @@ def draw_z_check(figure, result) -> str:
 
 
 def draw_foci(figure, result) -> str:
-    """Each sweep's focus with its error, the plane's slope and the height."""
+    """Each sweep's focus with its error, the plane's slope (and with *field dependence* its curvature) and
+    the height."""
     shared = result.cal.shared()
     std = result.cal.result.std
     f = shared["geometry.focus"].detach().cpu().double().numpy()
@@ -102,7 +103,11 @@ def draw_foci(figure, result) -> str:
     plane = shared["geometry.plane"].detach().cpu().double().numpy()
     tilt = np.degrees(np.arctan(np.hypot(*plane) / 1000))
     h = float(shared["geometry.height"])
-    return (f"focal plane {plane[0]:.2f}, {plane[1]:.2f} nm/µm in x, y ({tilt:.2f}°); height {h:.1f} nm; "
+    curved = ""
+    if "geometry.curvature" in shared:
+        c = shared["geometry.curvature"].detach().cpu().double().numpy()
+        curved = f"; curvature {c[0]:.0f} u², {c[1]:.0f} uv, {c[2]:.0f} v² nm (u, v in 50 µm)"
+    return (f"focal plane {plane[0]:.2f}, {plane[1]:.2f} nm/µm in x, y ({tilt:.2f}°){curved}; height {h:.1f} nm; "
             f"foci spread {np.std(f):.0f} nm rms")
 
 
