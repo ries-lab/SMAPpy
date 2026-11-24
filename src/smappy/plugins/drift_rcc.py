@@ -16,8 +16,9 @@ class RCCDrift(KeepsDrift, Plugin):
     grouping = "ungrouped"
     Settings = RCCSettings
     name = "RCC drift correction"
-    # 2: each file of the selection corrected by a curve of its own
-    version = "2"
+    # 2: each file of the selection corrected by a curve of its own.  3: a
+    # 4Pi table estimated from its sure fringes, its envelope z moved with z
+    version = "3"
 
     def describe(self, ctx, settings) -> FormState:
         """What *within* and *dark frames* on auto take: the session's merge

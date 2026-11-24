@@ -59,9 +59,14 @@ from .params import param
 # the record of what was found where, not measurements of the structure.
 # A fit's table has no `x_pix`; a file saved in pixels keeps its own beside
 # the nm ones `io.formats.with_nm` adds, and they must move with them.
+# z_env_nm is a 4Pi fit's envelope z (`plugins/fourpi_z.py`), the same
+# position as z_nm measured another way: moved with it, a table corrected
+# for drift says one z twice, and *4Pi z* run again on it keeps the
+# correction -- its cavity phase, phase - k z_env, takes up the shift
+# (docs/4pi.md §31)
 _POSITION_COLUMNS = {"x_nm": 0, "x_pix": 0,
                      "y_nm": 1, "y_pix": 1,
-                     "z_nm": 2}
+                     "z_nm": 2, "z_env_nm": 2}
 
 # The linear transformations COMET can fit per frame besides the shift: for
 # each, which scales the cost divides out of a pair's difference (`_SCALES`)
@@ -298,6 +303,28 @@ class DriftSettings:
                                     min=10,
                                     help="frames between the spline's "
                                          "coefficients")
+    # A 4Pi table's ghosts -- a localization put a fringe away -- are a
+    # period (~300 nm) off in z, beyond the overlap's reach at the target
+    # sigma, so they pull little; on simulations with one in six on the
+    # wrong fringe the estimate from the sure ones was 5 % closer to the
+    # truth, and as good as from the right ones alone (docs/4pi.md §31).
+    sure_fringe: float = param(0.9, label="sure fringe", min=0.0, max=1.0,
+                               help="a 4Pi table's: estimate from the localizations "
+                                    "whose fringe is at least this probable; all are "
+                                    "corrected",
+                               advanced=True)
+    # z on knots of its own.  A 4Pi table's z, from the interference phase,
+    # is ten times more precise than its x and y, and carries what *4Pi z*'s
+    # cavity phase could not follow inside its time window -- an apparent z
+    # drift of a few nm over hundreds of frames, the same for every molecule
+    # (docs/4pi.md §31).  Finer knots follow it where x and y, with their
+    # coarser precision, would only be made noisier.
+    z_knot_frames: Optional[int] = param(None, label="z knot spacing", unit="frames",
+                                         min=10,
+                                         help="frames between the z curve's "
+                                              "coefficients; auto: the knot spacing, "
+                                              "an eighth of it for a 4Pi z",
+                                         advanced=True)
     spline_penalty: float = param(0.0, label="spline penalty", min=0,
                                   help="extra penalty on the curve's "
                                        "bending; 0 is none",
@@ -1066,6 +1093,7 @@ def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None
     settings' *reference* says (`Drift.referenced`); the rest is
     `_estimate_drift`'s."""
     settings = settings or DriftSettings()
+    select = sure_fringes(locs, select, settings.sure_fringe)
     # the passes and the halves run this again, each without the error bar
     whole = replace(settings, split_half=False)
     drift = _estimate_drift(locs, whole, select, pixelsize_nm, display,
@@ -1286,12 +1314,24 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
     n_coefficients = _n_coefficients(n_frames, settings.spline_knot_frames)
     basis = _spline_basis(np.arange(n_frames), n_coefficients, 0.0, n_frames - 1.0)
     basis_t = basis.T.tocsr()
+    transformed = settings.transformation != "shift"
+    # z on knots of its own (`DriftSettings.z_knot_frames`): the variables
+    # are then x and y's coefficients on the one basis and z's on the other,
+    # (n_coefficients, 2) and (n_z,) flattened one after the other
+    z_knots = z_knot_frames(settings, locs)
+    split_z = (not transformed and bool(np.any(z))
+               and _n_coefficients(n_frames, z_knots) != n_coefficients)
+    if split_z:
+        n_z = _n_coefficients(n_frames, z_knots)
+        basis_z = _spline_basis(np.arange(n_frames), n_z, 0.0, n_frames - 1.0)
+        basis_z_t = basis_z.T.tocsr()
+    n_curve = n_coefficients * 2 + n_z if split_z else n_coefficients * 3
     _log(display, f"spline drift: {n_coefficients} coefficients over {n_frames} "
-                  f"frames, {len(idx_i):,} pairs"
+                  f"frames" + (f" ({n_z} in z)" if split_z else "")
+                  + f", {len(idx_i):,} pairs"
                   + (", weighted by precision" if variances is not None else "")
                   + (f", z width {z_factor:.2f}x lateral" if z_factor != 1.0 else ""),
          progress)
-    transformed = settings.transformation != "shift"
     if transformed:
         model = _TransformationFit(settings, coords, n_frames, display, progress)
         coords = model.coords
@@ -1301,6 +1341,19 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
         # second differences of the coefficients: what "not oscillating" means
         d2 = np.diff(np.eye(n_coefficients), 2, axis=0)
         curvature = d2.T @ d2
+        if split_z:
+            d2 = np.diff(np.eye(n_z), 2, axis=0)
+            curvature_z = d2.T @ d2
+
+    def curve(flat):
+        """The coefficients as the optimizer holds them -> the drift per
+        frame, (n_frames, 3), and the coefficients themselves."""
+        if not split_z:
+            c = flat[:n_curve].reshape(n_coefficients, 3)
+            return np.ascontiguousarray(basis @ c), c
+        c = flat[:n_coefficients * 2].reshape(n_coefficients, 2)
+        cz = flat[n_coefficients * 2:n_curve]
+        return np.ascontiguousarray(np.column_stack([basis @ c, basis_z @ cz])), (c, cz)
 
     # Every evaluation costs the same -- one pass over the pairs -- so two of
     # them are enough to say how long the rest will take.  The total is only
@@ -1311,20 +1364,32 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
     def objective(flat, sigma, factor):
         # raising here is how the optimizer is left: it has no stop of its own
         _check_stop(stop, f"at sigma {sigma:.0f} nm")
-        c = flat[:n_coefficients * 3].reshape(n_coefficients, 3)
-        mu = np.ascontiguousarray(basis @ c)
+        mu, c = curve(flat)
         if transformed:
             value, gradient, extra = model.cost(
-                flat[n_coefficients * 3:], mu, frames, idx_i, idx_j, sigma,
+                flat[n_curve:], mu, frames, idx_i, idx_j, sigma,
                 factor, penalty, z_factor)
         else:
             value, gradient = cpu_wrapper_chunked_approx(
                 mu, coords, frames, idx_i, idx_j, sigma, factor,
                 z_factor=z_factor, variances=variances)
-        gradient = basis_t @ gradient.reshape(n_frames, 3)
-        if penalty:
-            value += penalty * float((c * (curvature @ c)).sum())
-            gradient = gradient + 2.0 * penalty * (curvature @ c)
+        gradient = gradient.reshape(n_frames, 3)
+        if split_z:
+            c, cz = c
+            lateral = basis_t @ gradient[:, :2]
+            axial = basis_z_t @ gradient[:, 2]
+            if penalty:
+                value += penalty * float((c * (curvature @ c)).sum()
+                                         + cz @ (curvature_z @ cz))
+                lateral = lateral + 2.0 * penalty * (curvature @ c)
+                axial = axial + 2.0 * penalty * (curvature_z @ cz)
+            gradient = np.concatenate([np.asarray(lateral).ravel(),
+                                       np.asarray(axial).ravel()])
+        else:
+            gradient = basis_t @ gradient
+            if penalty:
+                value += penalty * float((c * (curvature @ c)).sum())
+                gradient = gradient + 2.0 * penalty * (curvature @ c)
         state["evaluations"] += 1
         _report_evaluation(progress, state, expected, sigma)
         if transformed:
@@ -1335,8 +1400,7 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
              else settings.max_drift_nm / 3.0)
     target = settings.target_sigma_nm
     bound = settings.max_drift_nm * 2.0
-    coefficients = np.zeros(n_coefficients * 3
-                            + (model.n_variables if transformed else 0))
+    coefficients = np.zeros(n_curve + (model.n_variables if transformed else 0))
     while True:
         result = minimize(objective, coefficients, args=(sigma, 1.0), jac=True,
                           method="L-BFGS-B", bounds=[(-bound, bound)] * coefficients.size,
@@ -1350,12 +1414,11 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
             break
         sigma = max(sigma / 1.5, target)
 
-    drift = np.asarray(basis @ coefficients[:n_coefficients * 3]
-                       .reshape(n_coefficients, 3))
+    drift = np.asarray(curve(coefficients)[0])
     if not transformed:
         return Drift(drift, settings, n_used=len(coords))
     return Drift(drift, settings, n_used=len(coords),
-                 matrix=model.matrices(coefficients[n_coefficients * 3:]),
+                 matrix=model.matrices(coefficients[n_curve:]),
                  centre_nm=model.centre, transformation=settings.transformation)
 
 
@@ -1379,6 +1442,40 @@ def precision_variances(locs: Localizations, use_z: bool) -> Optional[np.ndarray
             good = out[~bad, axis]
             out[bad, axis] = np.median(good) if len(good) else 0.0
     return np.ascontiguousarray(out)
+
+
+# A 4Pi table's z on auto: knots this many times closer than x and y's.  On
+# Cell01 (docs/4pi.md §31) 250 frames against 2000 followed the cavity's
+# wander that *4Pi z*'s 1000-frame windows left in z (correlation 0.84 with
+# that wander measured in 100-frame windows), at a split-half noise of
+# 0.29 nm in z against 0.16 -- and left x and y as they were.
+FOURPI_Z_KNOTS = 8
+
+
+def sure_fringes(locs: Localizations, select, probability: float):
+    """``select`` narrowed to the rows whose fringe is at least
+    ``probability`` sure (*4Pi z*'s ``fringe_probability``); as it was for a
+    table without one, or a probability of 0."""
+    if not probability or "fringe_probability" not in locs:
+        return select
+    index = _selection(locs, select)
+    sure = np.asarray(locs["fringe_probability"])[index] >= probability
+    return index[sure]
+
+
+def is_fourpi(locs: Optional[Localizations]) -> bool:
+    """A table whose z is a 4Pi phase's, through *4Pi z*."""
+    return locs is not None and "phase_rad" in locs and "fringe_probability" in locs
+
+
+def z_knot_frames(settings: DriftSettings, locs: Optional[Localizations] = None) -> int:
+    """The z curve's knot spacing: *z knot spacing*, or on auto the knot
+    spacing -- an eighth of it for a 4Pi table (`FOURPI_Z_KNOTS`)."""
+    if settings.z_knot_frames is not None:
+        return int(settings.z_knot_frames)
+    if is_fourpi(locs):
+        return max(10, int(settings.spline_knot_frames) // FOURPI_Z_KNOTS)
+    return int(settings.spline_knot_frames)
 
 
 def _n_coefficients(n_frames: int, knot_frames: int) -> int:
@@ -1591,7 +1688,10 @@ def _rcc_prepass(locs: Localizations, settings: DriftSettings, select,
     """
     from .rcc import RCCSettings, estimate_drift_rcc
 
-    rcc = RCCSettings(n_timepoints=settings.rcc_prepass_windows,
+    # no error bar of its own: it is a pass, and COMET's halves (if asked)
+    # run the whole of this again
+    rcc = RCCSettings(n_timepoints=settings.rcc_prepass_windows, split_half=False,
+                      sure_fringe=settings.sure_fringe,
                       use_z=settings.use_z, group=settings.group,
                       group_dx_nm=settings.group_dx_nm, group_dt=settings.group_dt)
     if settings.rcc_prepass_max_drift_nm:

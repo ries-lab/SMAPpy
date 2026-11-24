@@ -1,5 +1,5 @@
 ---
-version: "4"
+version: "5"
 covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.fiducials.find_and_choose, smappy.fiducials.bead_names, smappy.fiducials.beads_in_regions, smappy.plugins.drift_fiducials.roi_regions, smappy.roi_manager.core.ROIProject.session_rows, smappy.beads.select_beads, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads, smappy.beads.bead_values, smappy.beads.with_bead_ids, smappy.fiducials.structures_in_regions, smappy.fiducials.column_markers, smappy.fiducials.marker_weights, smappy.fiducials.marker_errors, smappy.beads.fit_offsets_and_spline, smappy.plugins.drift_fiducials.FiducialDrift.react, smappy.plugins.drift_fiducials.FiducialDrift.describe]
 ---
 
@@ -473,7 +473,8 @@ otherwise, or not wanted.
 ## Output
 
 * **The table**, with the drift subtracted from `x_nm`, `y_nm` and `z_nm`
-  (or the pixel attributes) of every localization.  The beads stay in the
+  (or the pixel attributes) of every localization, and from a 4Pi fit's
+  envelope z, `z_env_nm`.  The beads stay in the
   table, corrected like everything else.  The correction is recorded in the
   file's history and can be undone.
 * **The drift curve**, x, y and z against frame, the same figure as COMET's

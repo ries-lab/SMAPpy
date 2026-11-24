@@ -1,6 +1,6 @@
 ---
-version: "5"
-covers: [smappy.drift.estimate_drift, smappy.drift._estimate_spline, smappy.drift._spline_basis, smappy.drift._two_stage, smappy.drift._rcc_prepass, smappy.drift._grouped, smappy.drift.merge_from_session, smappy.drift.estimate_cost, smappy.drift._sigma_levels, smappy.drift.Drift.apply, smappy.drift.Drift.referenced, smappy.drift.Drift.then, smappy.drift.Drift.parameters, smappy.drift.Drift.noise_nm, smappy.drift.Drift.insignificant_axes, smappy.drift.split_halves, smappy.drift.precision_variances, smappy.drift._TransformationFit, smappy._comet.core.drift_optimizer.comet_run_kd, smappy._comet.core.drift_optimizer.optimize_3d_chunked_better_moving_avg_kd, smappy._comet.core.cpu_wrapper.cpu_wrapper_chunked_approx, smappy._comet.core.segmenter.segmentation_wrapper, smappy._comet.core.interpolation.interpolate_drift, smappy._comet.core.qc_utils.flag_flawed_segments_by_lift]
+version: "6"
+covers: [smappy.drift.estimate_drift, smappy.drift._estimate_spline, smappy.drift._spline_basis, smappy.drift._two_stage, smappy.drift._rcc_prepass, smappy.drift._grouped, smappy.drift.merge_from_session, smappy.drift.estimate_cost, smappy.drift._sigma_levels, smappy.drift.Drift.apply, smappy.drift.Drift.referenced, smappy.drift.Drift.then, smappy.drift.Drift.parameters, smappy.drift.Drift.noise_nm, smappy.drift.Drift.insignificant_axes, smappy.drift.split_halves, smappy.drift.precision_variances, smappy.drift.sure_fringes, smappy.drift.z_knot_frames, smappy.drift.is_fourpi, smappy.drift._TransformationFit, smappy._comet.core.drift_optimizer.comet_run_kd, smappy._comet.core.drift_optimizer.optimize_3d_chunked_better_moving_avg_kd, smappy._comet.core.cpu_wrapper.cpu_wrapper_chunked_approx, smappy._comet.core.segmenter.segmentation_wrapper, smappy._comet.core.interpolation.interpolate_drift, smappy._comet.core.qc_utils.flag_flawed_segments_by_lift]
 ---
 
 ## What it does
@@ -201,9 +201,27 @@ axes[0].set_ylabel("drift (nm)", fontsize=8)
 axes[0].legend(fontsize=7, frameon=False)
 ```
 
+**A 4Pi table.**  A [4Pi](plugin:Panels/Glossary) fit's z, from the
+interference phase after [4Pi z](plugin:Analysis/After fit/4Pi z), is about
+ten times more precise than its x and y, and it is known only up to a whole
+fringe: a localization put on the wrong fringe, a *ghost*, sits about 300 nm
+from where it should.  Two things change for such a table (one with
+`fringe_probability`).  The drift is estimated from the localizations whose
+fringe is at least *sure fringe* (90 %) likely, though all are corrected;
+ghosts are too far away to pull much on the overlap, so this is a small
+gain, but a free one.  And z gets knots of its own, an eighth of the *knot
+spacing* (250 frames by default): *4Pi z* follows the cavity of the
+microscope in windows of 1000 frames, and what the cavity does inside a
+window is in z as a shift of every molecule of a frame -- drift, as far as
+COMET can tell, and it takes it out.  On Gabin's tubulin movie that was a
+few nm over a few hundred frames, and the fine z cost 0.3 nm of noise.
+
 **6. Correcting.**  The drift of each frame is subtracted from `x_nm`,
 `y_nm` and `z_nm` (or the pixel attributes) of every localization in that
-frame, whether or not it was selected.
+frame, whether or not it was selected -- and from a 4Pi table's envelope
+z, `z_env_nm`, which is the same position measured another way.  So *4Pi
+z* run again on the corrected table keeps the correction: its cavity phase
+takes up the shift.
 
 **7. The error bar.**  With *error bar* on (the default), the field is cut
 in two at its middle, and the drift is estimated again from each half on
@@ -340,7 +358,11 @@ coefficients is one sparse matrix product.  A B-spline cannot overshoot its
 coefficients, so the curve does not ring between knots the way an
 interpolating spline through noisy estimates can.  A *spline penalty*
 $\lambda$ adds $\lambda \sum_k (c_{k+1} - 2c_k + c_{k-1})^2$ per axis to the
-cost.
+cost.  With a *z knot spacing* $\Delta_z$ that gives another $K_z$, z is a
+spline of its own on $K_z$ knots and the variables are $2K + K_z$; on auto
+$\Delta_z = \Delta$, or $\Delta / 8$ for a 4Pi table (`phase_rad` and
+`fringe_probability` in it).  With a *transformation* z keeps the lateral
+knots.
 
 The widths are $\sigma_0 = \sigma_\mathrm{init}$ (default $R/3$), then
 $\sigma_{n+1} = \max(\sigma_n / 1.5,\ \sigma_\mathrm{target})$, one full
@@ -501,6 +523,18 @@ over-smoothing up to 4000.  Drift that changes faster wants a smaller
 spacing.  The noise grows by about $\sqrt{2}$ for every halving of the
 spacing; the *error bar* shows whether a finer spacing still leaves the
 drift well above it.
+
+### z_knot_frames
+Only a table whose z is much more precise than x and y, and moves faster,
+wants it: a 4Pi table's, where auto already takes an eighth.  The *error
+bar* shows whether the finer z is still above its noise; on the tubulin
+movie 125 frames was too (0.4 nm), but followed little more than 250.
+
+### sure_fringe
+Ignored for a table without `fringe_probability`.  0 estimates from every
+localization.  On simulations with one localization in six on the wrong
+fringe, 0.9 brought the curve 5 % closer to the truth, as close as the right
+fringes alone; higher leaves out good localizations for nothing.
 
 ### precision_weights
 Leave it on.  On simulations it lowered the error by 10-20% in every axis,

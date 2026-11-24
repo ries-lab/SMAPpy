@@ -52,7 +52,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from .drift import REFERENCES, Drift, _grouped, _positions_nm, _selection, split_halves
+from .drift import (REFERENCES, Drift, _grouped, _positions_nm, _selection, split_halves,
+                    sure_fringes)
 from .locs import Localizations
 from .params import param
 
@@ -132,6 +133,13 @@ class RCCSettings:
                                    help="leave the zero-shift sample out of "
                                         "the axial peak search",
                                    advanced=True)
+    # as COMET's (`DriftSettings.sure_fringe`); measured, it changed RCC's
+    # curve by less than its noise (docs/4pi.md §31)
+    sure_fringe: float = param(0.9, label="sure fringe", min=0.0, max=1.0,
+                               help="a 4Pi table's: estimate from the localizations "
+                                    "whose fringe is at least this probable; all are "
+                                    "corrected",
+                               advanced=True)
     # the estimate again from each half of the field, as COMET's error bar
     # (`DriftSettings.split_half`); RCC takes seconds, so it costs seconds
     split_half: bool = param(True, label="error bar",
@@ -157,6 +165,7 @@ def estimate_drift_rcc(locs: Localizations, settings: Optional[RCCSettings] = No
     ``stop`` ends it between time windows by raising `plugins.Stopped`.
     """
     settings = settings or RCCSettings()
+    select = sure_fringes(locs, select, settings.sure_fringe)
 
     all_frames = np.asarray(locs["frame"], dtype=np.int64)
     n_frames = int(all_frames.max()) + 1 if len(all_frames) else 0

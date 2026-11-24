@@ -87,7 +87,8 @@ class FiducialDrift(KeepsDrift, Plugin):
     name = "Fiducials drift correction"
     # 2: the other files of the table keep their positions; 3: a bead that
     # disagrees with the others is left out, and beads can be chosen by hand
-    version = "4"
+    # 5: a 4Pi table's envelope z (z_env_nm) moved with z
+    version = "5"
 
     def run(self, ctx: Context, settings: FiducialSettings) -> Result:
         locs = ctx.locs

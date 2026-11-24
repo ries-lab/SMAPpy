@@ -103,6 +103,19 @@ papers and in other software.
   molecules of a simulation, the molecules found divided by those found,
   missed and invented together -- 1 when every molecule is found and nothing
   else, 0 when none is.
+* **4Pi** (also called 4Pi-SMS, or interferometric SMLM): two objectives
+  around the sample whose two images of a molecule interfere, so that the
+  brightness of the phase images tells z to a few nanometres -- the
+  interference phase -- but only within one fringe.
+* **fringe** (its length the fringe period, about 260 -- 300 nm): the z
+  range over which a 4Pi phase runs once round; z on the right fringe is
+  told by the spot's shape, the *envelope*, which is much coarser.
+* **ghost** (also called a wrong fringe, or a phase wrap): a 4Pi
+  localization put on a neighbouring fringe, a whole period above or below
+  where it is.
+* **cavity phase**: the phase the 4Pi microscope's two arms add on their
+  own, which wanders as the instrument warms and settles; *4Pi z* follows it
+  over time and takes it out.
 
 ## Camera
 

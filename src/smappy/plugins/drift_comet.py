@@ -6,7 +6,7 @@ from typing import Optional
 from dataclasses import replace
 
 from ..drift import (DriftSettings, estimate_cost, estimate_drift, merge_from_session,
-                     merge_values)
+                     merge_values, z_knot_frames)
 from . import (Context, FormState, ParamInfo, Plugin, PreflightChoice,
                PreflightQuestion, Result, register)
 from .drift_result import KeepsDrift, drift_result, per_file
@@ -25,8 +25,10 @@ class CometDrift(KeepsDrift, Plugin):
     # rather than being skipped by it.  3: a transformation besides the shift
     # (off by default: the shift alone gives the numbers it gave).  4: each
     # file of the selection corrected by a curve of its own.  5: precision
-    # weights, an error bar from halves of the field, a width of z of its own
-    version = "5"
+    # weights, an error bar from halves of the field, a width of z of its own.
+    # 6: a 4Pi table's z on knots of its own and estimated from its sure
+    # fringes; its envelope z moved with z
+    version = "6"
 
     # Longer than this and the run is worth agreeing to first.  Five minutes
     # is where waiting stops being waiting and starts being a decision.
@@ -83,10 +85,13 @@ class CometDrift(KeepsDrift, Plugin):
         not with a transformation."""
         dx, dt = merge_values(ctx.session if ctx is not None else None)
         shift = settings.transformation == "shift"
+        locs = getattr(ctx, "locs", None) if ctx is not None else None
         return FormState(
             hints={"group_dx_nm": dx, "group_dt": dt,
-                   "transformation_knot_frames": settings.spline_knot_frames},
+                   "transformation_knot_frames": settings.spline_knot_frames,
+                   "z_knot_frames": z_knot_frames(settings, locs)},
             active={"transformation": settings.spline,
+                    "z_knot_frames": settings.spline and shift,
                     "transformation_knot_frames":
                         settings.spline and not shift,
                     "precision_weights": settings.spline and shift,

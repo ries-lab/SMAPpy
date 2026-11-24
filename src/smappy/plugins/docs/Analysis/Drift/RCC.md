@@ -1,6 +1,6 @@
 ---
-version: "2"
-covers: [smappy.rcc.estimate_drift_rcc, smappy.drift.merge_from_session, smappy.rcc._pair_shifts, smappy.rcc._axial_shifts, smappy.rcc._solve, smappy.drift.split_halves, smappy.drift.Drift.noise_nm]
+version: "3"
+covers: [smappy.rcc.estimate_drift_rcc, smappy.drift.merge_from_session, smappy.rcc._pair_shifts, smappy.rcc._axial_shifts, smappy.rcc._solve, smappy.drift.split_halves, smappy.drift.Drift.noise_nm, smappy.drift.sure_fringes]
 ---
 
 ## What it does
@@ -271,6 +271,14 @@ wide range lets its maximum wander.
 ### exclude_zero_lag
 See *In detail*.
 
+### sure_fringe
+For a [4Pi](plugin:Panels/Glossary) table after [4Pi
+z](plugin:Analysis/After fit/4Pi z), whose ghosts -- localizations put a
+fringe, about 300 nm, away in z -- the correlations find no peak at; on
+simulations it changed the curve by less than its noise.  It is here so that
+RCC and COMET estimate from the same localizations.  Ignored for a table
+without `fringe_probability`.
+
 ### split_half
 It triples a run that takes seconds.  Off only where those seconds matter,
 as in a batch of many files.
@@ -278,7 +286,8 @@ as in a batch of many files.
 ## Output
 
 * **The table**, with the drift subtracted from `x_nm`, `y_nm` and `z_nm` (or
-  the pixel attributes) of every localization.  The correction is recorded in the
+  the pixel attributes) of every localization, and from a 4Pi fit's envelope
+  z, `z_env_nm`.  The correction is recorded in the
   file's history and can be undone.
 * **The drift curve**, x, y and z against frame (*Show result*), one per
   file when the selection holds several, with the halves' curves dashed in

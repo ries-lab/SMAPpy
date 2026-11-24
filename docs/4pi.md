@@ -2357,8 +2357,9 @@ worktree; P1, P2 and P4 started and landed on 2026-11-24 (§26, §27, §28).
 - **P5. DECODE for 4Pi** -- open: DECODE-Plex and netfit's C = 2 are on main (0.7.6).  The torch IAB
   renderer equal to `CSpline4Pi` with the phase convention settled, then a C = 4 network with the phase
   as one more factor of each molecule's mixture, a von Mises distribution (the Gaussian of an angle).
-- **P6. 3D drift over a long 4Pi movie** -- open, P1 done: RCC / COMET on the phase z with only sure fringes,
-  checked against `Cell01_DCresult.mat`.
+- **P6. 3D drift over a long 4Pi movie** -- done on the authors' fits of the whole movie (§31): RCC / COMET on the
+  phase z, sure fringes, z on knots of its own, checked against `Cell01_DCresult.mat`; our own fit of a long
+  stretch waits for the share.
 
 P1 and P2 both touch uipsf's `workflows/fourpi.py`; P1 adds a per-stack phase to the bead learning, P2 a
 learning from localizations, so whichever lands second rebases.
@@ -2879,3 +2880,85 @@ wrong-fringe share -- near focus (|z| < 300 nm) first, z beside lateral, the fra
 4Pi on the same frames, where its boxes overlap at density.  Then the Ries-lab Nup96 (the two rings' separation and
 the share of uncertain fringes, as §10 and §27 judge a model) and Gabin's tubulin against Spline 4Pi and the
 authors' localizations (§26).
+
+## 31. 3D drift over the hour-long tubulin movie (P6, 2026-11-25)
+
+§25's P6: the sample's drift in x, y and z over Cell01 (360 000 frames, an hour), measured by *COMET* and *RCC* on
+the phase z after *4Pi z*, against the authors' (`Cell01_DCresult.mat`'s `shifts`, a curve per frame).  The
+script is `benchmarks/fourpi/tubulin_drift.py`, its outputs in `smappy_p6/` beside the data; the simulations are
+`smappy.simulate.simulate_fourpi_drift` and `tests/test_drift_fourpi.py`.
+
+**Which localizations.**  The share holding the movie was not mounted while this was done, so our own fit covers
+only the 6000 cached frames (§26).  The whole hour is the authors' own raw fits, `Cell01_642_tmpresult_20200912.mat`
+(11.8 M), made into a 4Pi table: their x and y, their astigmatic z as the envelope (turned to our direction,
+`-0.8975 zf + 473.7`, fitted to our envelope on the 283 802 pairs of the first 6000 frames, 53 nm scatter), their
+phase (ours less a constant on those pairs, resultant 0.95).  Their CRLB holds x and y but not the phase's error
+or the envelope's, so those are modelled from what they have, fitted to ours on the same pairs (the phase's from
+photons, modulation and background, R² 0.94; the envelope's from photons and the widths' CRLB, R² 0.79).  So the
+localizations are theirs, *4Pi z* and the drift ours: the methods compared on the same data.  *4Pi z* on them:
+4.8 % expected wrong fringes, 86 % at least 90 % sure, the envelope scattering 1.4× its modelled error.
+
+**What changed in the drift plugins, and why** (COMET version 6, RCC 3, Fiducials 5):
+
+1. **Ghosts pull little, but the sure fringes are a free gain.**  A localization on the wrong fringe is a period,
+   294 nm, off in z: beyond COMET's overlap at its 30 nm target width, and a side peak RCC's ±200 nm axial search
+   does not reach.  On simulations with 4 % ghosts the curves from all, from the sure and from the right
+   localizations alone were the same to 0.01 nm; with one in six on the wrong fringe (an envelope four times as
+   wrong as it says), COMET's z came 5 % closer to the truth from the sure fringes (1.01 → 0.96 nm over three
+   seeds), as close as from the right ones; RCC's did not move.  So *sure fringe* (0.9, both plugins): a table
+   with `fringe_probability` is estimated from those at least that sure, and all are corrected.  On Cell01
+   the curves from all and from the sure differ by 0.1 nm rms per axis on our 6000 frames, and over the authors'
+   hour by 0.2 nm (COMET) and 0.3 -- 0.4 nm (RCC) -- each its noise, about.
+2. **z on knots of its own.**  *4Pi z* takes the cavity's phase out in 1000-frame windows; what the cavity does
+   within a window stays in z, the same for every molecule of a frame -- drift, as far as a drift correction can
+   tell.  On our 6000 frames the cavity measured in 100-frame windows (1.5 nm as z) moved 3.8 nm rms away from the
+   1000-frame one; over the authors' hour 5.9 nm.  COMET's spline at 2000 frames cannot follow it, and finer knots
+   for all axes made x and y noisier (on simulations 0.16 → 0.39 nm).  So the spline has a *z knot spacing*, on
+   auto an eighth of the knot spacing for a 4Pi table (250 frames) and the knot spacing otherwise
+   (`drift.z_knot_frames`).  On simulations with Cell01's cavity wander, z against the drift the table shows went
+   from 2.1 to 0.9 nm, x and y unchanged.  On Cell01 the z the fine knots add correlates with the cavity *4Pi z*
+   missed, measured independently in 100-frame windows: 0.84 on our 6000 frames, 0.73 over the authors' hour (a
+   30 % sample); the split-half noise of the fine z is 0.29 nm (0.16 at 2000), against a 12 nm swing.
+3. **The envelope moves with z.**  Every drift correction (`Drift.apply`) now moves `z_env_nm` with `z_nm`: the
+   table says one z twice, and *4Pi z* run again on a corrected table keeps the correction -- its cavity, phase
+   less k z_env, takes the shift up as far as its windows follow it, which a sample's drift they do.  Before, a
+   second *4Pi z* undid the z correction.
+4. COMET's *RCC first* no longer makes RCC's error bar, two RCC runs whose result it threw away.
+
+Order: *4Pi z* first, then the drift.  The drift on the phase z then takes out the sample's drift and what *4Pi z*
+left of the cavity together.
+
+**The whole hour** (the authors' fits; COMET as *RCC first* over 120 windows and then within 50 nm on a random
+30 % of the localizations -- the whole within 300 nm is 19 billion pairs, 457 GB -- 3.5 min each; RCC over 120
+windows, one per 3000-frame cycle as theirs, 3 min):
+
+| ours | x vs theirs (rms) | y | z | peak to peak x, y, z (theirs 44, 77, 104) | correlation x, y, z |
+| --- | --- | --- | --- | --- | --- |
+| COMET, sure fringes, z knots 2000 | 0.5 nm | 0.5 | 34.0 | 45, 79, 80 | 0.999, 1.000, 0.35 |
+| COMET, all, z knots 2000 | 0.6 | 0.6 | 33.9 | 45, 79, 80 | 0.999, 0.999, 0.35 |
+| COMET, sure fringes, z knots 250 (the default) | 0.5 | 0.5 | 34.1 | 45, 79, 87 | 0.999, 1.000, 0.34 |
+| RCC, sure fringes | 0.5 | 0.6 | 34.1 | 46, 79, 79 | 0.999, 0.999, 0.34 |
+| RCC, all | 0.6 | 0.8 | 34.0 | 46, 79, 79 | 0.999, 0.999, 0.35 |
+
+- **Lateral: the same drift**, to half a nanometre over an hour of 44 and 77 nm, by both methods.
+- **z: different curves, the same z.**  The curves differ by 34 nm rms, most around cycle 61, yet the corrected z
+  agree: on the 5.1 M localizations of their final table, our z less our drift minus their final z has a median
+  per cycle that varies by 2.5 nm (sd; 14 nm peak to peak) over the 120 cycles -- 17 nm before our correction.
+  The curves split the same movement differently.  Theirs is the phase's alone: their pipeline has no cavity, so
+  their drift is the sample's and the cavity's together.  Ours is what remains after *4Pi z* has tied each window's
+  z to the envelope.  The event at cycle 61 shows it: near frame 183 000 the envelope and the phase both step by
+  about −45 nm (the sample moved; both curves step), and near frame 209 000 the envelope steps back by +60 nm
+  while the phase does not.  *4Pi z* follows the envelope, so our raw z steps back and our drift with it; theirs,
+  from the phase, never had the second step.  After each pipeline's own correction the z agree throughout.  Which
+  is the sample's "true" z drift depends on the reference -- the objectives' focus (the envelope) or the
+  interference's zero (the phase) -- and does not matter for the picture: a drift correction on the structure
+  takes out whichever is left.
+- **Sure fringes or all, coarse or fine z: the same against theirs** (within 0.1 nm rms), as it must be at
+  their 3000-frame resolution; the fine z's gain is inside a cycle, which their curve cannot show (above).
+
+**Not done.**  Our own fit of a long stretch: the share (`/Volumes/VBCShare`) was not mounted on 2026-11-25; the
+benchmark takes a fitted table as it is (`tubulin_drift.py TABLE`), so 20 files (60 000 frames, 38 GB, about
+20 min to copy and fit at P4's speed) are one run when it is.  The ghosts themselves (§25 item 4) stay: the drift
+no longer cares about them, the picture still does.  A blink merged across fringes averages a ghost into its z
+(`group`'s z is a mean); with the sure fringes taken first the estimate does not see it, but a merged picture
+would.
