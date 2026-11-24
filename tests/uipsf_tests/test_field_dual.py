@@ -124,7 +124,8 @@ def test_a_two_channel_field_becomes_node_splines_per_channel_that_the_global_fi
     path = tmp_path / "pair_3dcal.h5"
     save_dual_color_calibration(path, cal)
     cal = load_dual_color_calibration(path)
-    assert np.allclose(cal.secondary.field_splines.coeff, second.coeff)
+    # float16 on disk, as a single calibration's nodes (`io.calibration.write_field_splines`)
+    assert np.allclose(cal.secondary.field_splines.coeff, second.coeff, rtol=1e-3, atol=1e-7)
     assert cal.main.parameters["field_grid"] == list(main.shape)
     # emitters near the main half's corner, against the field's centre, fitted with the nodes and without
     rng = np.random.default_rng(0)
