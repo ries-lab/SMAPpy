@@ -349,17 +349,6 @@ def _unit(h) -> np.ndarray:
     return h / h[2, 2]
 
 
-def _bright_enough(brightness, saturated, brightness_range) -> list:
-    """The indices not *too dim*: at least the median of the unsaturated ones divided by
-    √``brightness_range``, the bead average's lower bound (`core.classify_brightness`); all with no range."""
-    brightness = np.asarray(brightness, float)
-    unsaturated = ~np.asarray(saturated, bool)
-    if brightness_range is None or not unsaturated.any():
-        return list(range(len(brightness)))
-    lower = float(np.median(brightness[unsaturated])) / np.sqrt(brightness_range)
-    return [i for i, b in enumerate(brightness) if b >= lower]
-
-
 def _origin(st) -> np.ndarray:
     return np.array(st.roi[:2] if st.roi is not None else (0, 0), float)
 
@@ -423,15 +412,11 @@ def dual_rois(stacks, camera, settings=None, slices=KEEP) -> BeadROIs:
     # ones too dim, judged by the pair's light in both channels together: a ratiometric pair sends little
     # to one channel, and judging each channel apart dropped real pairs for their dim half
     fitted = fit_dual_transform(beads.secondary_points, beads.main_points, beads.settings.registration)
-    keep = _bright_enough([sum(part["brightness_adu"] for part in r["channel_records"]) for r in beads.records],
-                          [any(part["saturated"] for part in r["channel_records"]) for r in beads.records],
-                          settings.brightness_range)
+    keep = [i for i, r in enumerate(beads.records) if r["brightness_reason"] != "too dim"]   # `dual.judge_pairs`
     if not keep:
-        raise ValueError("every pair is too dim in a channel beside the others: review detection and brightness "
+        raise ValueError("every pair is too dim, both channels together: review detection and brightness "
                          "range")
     pairs = [beads.records[i] for i in keep]
-    for i, r in zip(keep, pairs):
-        r["pair_brightness_adu"] = sum(part["brightness_adu"] for part in r["channel_records"])
     per_channel = []
     for ch in (0, 1):
         per_channel.append([(r["channel_records"][ch]["stack"],) + tuple(int(round(v)) for v in

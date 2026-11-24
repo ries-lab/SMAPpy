@@ -1,7 +1,7 @@
 ---
 title: Bead average
 summary: The PSF calibration window's bead average -- turns z-stacks of fluorescent beads into the measured 3D PSF model the Spline 3D fitters use, and for a split camera into two models and the transformation between the halves.
-covers: [smappy.calibrate.core.find_peaks, smappy.calibrate.core.merged_neighbours, smappy.calibrate.core.judge_shapes, smappy.calibrate.core.shape_scores, smappy.calibrate.core.measure_peaks, smappy.calibrate.core.select_beads, smappy.calibrate.core.brightness_centre, smappy.calibrate.core.detect_beads, smappy.calibrate.dual.resolved_geometry, smappy.calibrate.dual.resolve_arrangement, smappy.calibrate.dual.bead_registration, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics]
+covers: [smappy.calibrate.core.find_peaks, smappy.calibrate.core.merged_neighbours, smappy.calibrate.core.judge_shapes, smappy.calibrate.core.shape_scores, smappy.calibrate.core.measure_peaks, smappy.calibrate.core.select_beads, smappy.calibrate.core.brightness_centre, smappy.calibrate.core.detect_beads, smappy.calibrate.dual.resolved_geometry, smappy.calibrate.dual.resolve_arrangement, smappy.calibrate.dual.bead_registration, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.judge_pairs, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics]
 ---
 
 ## What it does
@@ -237,6 +237,13 @@ secondary.  Steps 1 and 2 run in each half on its own.  Then:
   a mirror if the layout says *mirrored*), the most common offset between
   the beads of the two halves is found, and a bead is paired with its
   nearest neighbour in the other half when each is the other's nearest.
+* **A pair's brightness** is the light of its two beads together, judged
+  against the pairs' median by the *brightness range* as one bead is: a
+  pair is set aside when it is too dim or too bright in the sum, when
+  either bead is saturated or when either bead's position fit failed.  A
+  dye that sends little light to one half, or a ratiometric pair, is dim
+  there and still well measured; judged half by half such pairs were lost.
+  The pupil model reads the same verdict and leaves out only the too dim.
 * **The transformation** from the secondary half to the main half is a
   projective map, a 3x3 matrix -- enough for a shift, a rotation, a scale
   and a small tilt of the image plane.  It is fitted to the paired

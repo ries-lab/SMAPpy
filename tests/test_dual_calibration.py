@@ -476,3 +476,21 @@ def test_the_projective_fit_is_exact_from_four_pairs_to_twenty_thousand(n):
     mapped = np.c_[source, np.ones(n)] @ truth.T
     fitted = np.asarray(fit_projective(source, mapped[:, :2] / mapped[:, 2:]))
     assert np.allclose(fitted / fitted[2, 2], truth, atol=1e-9)
+
+
+def test_a_pair_dim_in_one_channel_is_judged_by_its_light_in_both_together():
+    from smappy.calibrate.dual import judge_pairs
+
+    def pair(main, second, saturated=False, reason="accepted"):
+        return {"channel_records": [{"brightness_adu": main, "saturated": saturated, "brightness_reason": reason},
+                                    {"brightness_adu": second, "saturated": False, "brightness_reason": "accepted"}]}
+    records = [pair(1000, 1000) for _ in range(5)] + [
+        pair(1900, 100),                                   # ratiometric: dim in one channel, not in the sum
+        pair(150, 150),                                    # dim in both: too dim
+        pair(1000, 1000, saturated=True),
+        pair(1000, 1000, reason="unreliable lateral fit"),
+        pair(9000, 9000)]
+    judge_pairs(records, brightness_range=6.0)
+    assert [r["brightness_reason"] for r in records[5:]] == [
+        "accepted", "too dim", "saturated", "unreliable lateral fit", "too bright"]
+    assert records[5]["brightness_accepted"] and records[5]["pair_brightness_adu"] == 2000

@@ -1021,10 +1021,8 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
         record['x_px'], record['y_px'] = ra['full_image_xy']
         # a double in either channel spoils the pair; the main channel's alone missed the secondary's
         record['double'] = bool(ra.get('double')) or bool(rb.get('double'))
-        record['brightness_accepted'] = ra['brightness_accepted'] and rb['brightness_accepted']
-        record['brightness_reason'] = '; '.join(f'{name}: {r["brightness_reason"]}' for name, r in
-                    zip(('main', 'secondary'), (ra, rb)) if not r['brightness_accepted']) or 'accepted'
         records.append(record)
+    judge_pairs(records, s.brightness_range)
     geometry = {'layout': g.layout, 'main_channel': g.main_channel, 'channels': chip.to_dict(),
                 'image_shape': list(shape), 'coordinate_system': 'camera-chip' if full_chip else 'roi-local',
                 'sources': sources, 'convention': 'zero-based pixel centres'}
@@ -1059,6 +1057,35 @@ class DualColorResult:
 
     def save(self, path, overwrite=False):
         save_dual_color_calibration(path, self.calibration, self, overwrite)
+
+
+def judge_pairs(records, brightness_range) -> None:
+    """Each pair's brightness verdict, in place, from its light in both channels together: *saturated*
+    (in either channel), *unreliable lateral fit* (either), *too dim* or *too bright* (the sum outside
+    `brightness_range` about the unsaturated pairs' median) or *accepted*.
+
+    Judging each channel apart dropped real pairs for their dim half: a ratiometric pair, or a dye that
+    sends little to one channel, is dim there and well measured in the sum.  The pupil model judges
+    pairs this way too (`pupil.dual_rois`), keeping all but the *too dim*, as it does for one channel."""
+    total = np.array([sum(part['brightness_adu'] for part in r['channel_records']) for r in records], float)
+    saturated = np.array([any(part['saturated'] for part in r['channel_records']) for r in records], bool)
+    lower = upper = None
+    if brightness_range is not None and (~saturated).any():
+        centre, half = float(np.median(total[~saturated])), np.sqrt(brightness_range)
+        lower, upper = centre / half, centre * half
+    for r, b, sat in zip(records, total, saturated):
+        if sat:
+            reason = 'saturated'
+        elif any(part['brightness_reason'] == 'unreliable lateral fit' for part in r['channel_records']):
+            reason = 'unreliable lateral fit'
+        elif lower is not None and b < lower:
+            reason = 'too dim'
+        elif upper is not None and b > upper:
+            reason = 'too bright'
+        else:
+            reason = 'accepted'
+        r.update(pair_brightness_adu=float(b), brightness_reason=reason, brightness_accepted=reason == 'accepted',
+                 brightness_lower_adu=lower, brightness_upper_adu=upper)
 
 
 def build_dual_calibration(beads, excluded=(), progress=None):
