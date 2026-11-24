@@ -84,6 +84,8 @@ def inputs(method, dual: bool, paths, part: Callable[[str], Any]) -> dict:
         out["molecules"] = part("molecules")
     if method.sections.get("4Pi", False):
         out["fourpi"] = part("4Pi")
+    if method.sections.get("4Pi in situ", False):
+        out["fourpi_insitu"] = part("4Pi in situ")
     optics = part("microscope")
     if paths:
         # the camera every run takes, chosen and typed values included.  Incomplete, the method
@@ -150,7 +152,7 @@ def list_calibration(path, method, dual: bool, paths, camera=None) -> None:
 
 def fitter_of(method, dual: bool) -> str:
     """The fitter a calibration of this method is for, by its path."""
-    if method.key == "fourpi" or method.sections.get("4Pi", False):
+    if method.key == "fourpi" or method.sections.get("4Pi", False) or method.sections.get("4Pi in situ", False):
         return "Localize/Spline 4Pi"
     if not getattr(method, "listed", True):
         return "Analysis/After fit/Astigmatic z"

@@ -143,7 +143,7 @@ def test_beads_fitted_back_with_their_own_model_follow_the_stage(tmp_path):
     assert all(abs(s - 1) < 0.02 for s in fits["phase_slope"].values())
 
 
-def test_4pi_is_a_mode_whose_methods_are_the_pupil_model_and_the_bead_average():
+def test_4pi_is_a_mode_whose_methods_are_the_pupil_model_the_bead_average_and_in_situ():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     from smappy.calibrate.psf_window import PSFCalibrationWindow
@@ -171,10 +171,19 @@ def test_4pi_is_a_mode_whose_methods_are_the_pupil_model_and_the_bead_average():
                                 psf=PSFModelSettings(magnitude="symmetric")))
     window._show_fourpi()
     assert modes_row()
-    # in situ has no 4Pi mode yet: its sample offers one channel only
+    # in situ has a 4Pi mode of its own (docs/4pi.md §26): its section, not the beads'
     window.sample_box.setCurrentText("blinking molecules in the sample (in situ)")
-    assert window.mode_box.currentText() == "Single channel" and window.sections["4Pi"].isHidden()
-    assert [window.mode_box.itemText(i) for i in range(window.mode_box.count())] == ["Single channel"]
+    assert [window.mode_box.itemText(i) for i in range(window.mode_box.count())] == ["Single channel", "4Pi"]
+    window.choose("blinking molecules in the sample (in situ)", "insitu", "4Pi")
+    assert window.method.key == "fourpi_insitu"
+    assert not window.sections["4Pi in situ"].isHidden() and window.sections["4Pi"].isHidden()
+    assert window.sections["in situ"].isHidden() and window.sections["beads"].isHidden()
+    assert window.files_section.button.text() == "movies"
+    assert window.fourpi_insitu_form.fields["fit_frames"].isVisibleTo(window)
+    from smappy.calibrate.fourpi_insitu import FourPiInSituSettings
+    window.fourpi_insitu_form.set(FourPiInSituSettings(localizations="fit.hdf5"))
+    window._show_fourpi_insitu()
+    assert not window.fourpi_insitu_form.fields["fit_frames"].isVisibleTo(window)
     # and back to beads, the pupil model in the 4Pi mode
     window.choose("beads in a z stack", "pupil", "4Pi")
     assert window.method.key == "fourpi_pupil"

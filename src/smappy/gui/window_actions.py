@@ -192,7 +192,10 @@ def _psf_parts(w) -> Dict[str, Any]:
         parts["elliptical"] = w.elliptical_form
     if fourpi:
         parts["4Pi"] = w.fourpi_form
-    if not insitu and not fourpi and not molecules:
+    fourpi_insitu = reads.get("4Pi in situ", False)
+    if fourpi_insitu:
+        parts["4Pi in situ"] = w.fourpi_insitu_form
+    if not insitu and not fourpi and not molecules and not fourpi_insitu:
         parts["beads"] = w.detection_form
     return parts
 

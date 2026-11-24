@@ -2446,8 +2446,15 @@ and −0.07 → −0.18 (lower) -- what a sample a few µm deep adds.
 The Nup96 sample is index-matched and imaged near the coverslip, with the beads from the same instrument a short
 time before: the bead model was already right, and what in situ adds is within what these measures can see.
 In situ should matter where the bead model is wrong -- a mismatched buffer (D9), a deep sample, or beads only
-from another day or as few as Gabin's three one-bead stacks (§25, P1).  The method is therefore not offered in the
-PSF calibration window yet (the plan's step 4): that waits for a data set where it measures better.  What is next,
-in order: the tubulin movie with P1's three-stack bead model; ring separations measured per time window (the
+from another day or as few as Gabin's three one-bead stacks (§25, P1).
+
+**In the window** (decided 2026-11-24, the user: in situ an option beside the beads): the in-situ sample has a
+4Pi mode, *pupil model (in situ), 4Pi* (`psf_methods.FourPiInSitu`, `calibrate/fourpi_insitu.run_insitu`), with
+a section of its own, *4Pi in situ*: the bead model file to start from (a pupil model this window saved, which
+now keeps its recipe and learnt values, `fourpi_beads.model_from_calibration`), the movie's Spline 4Pi fit with
+it or the frames to fit here, and the molecules.  A fifth of the molecules is held out and localised on both
+models: the summary says by how many nats per molecule the in-situ model explains them better, and a warning
+says to keep the bead model where it does not -- the evidence a user needs, since the CRLBs a higher coherence
+brings are not it.  The beads stay the default.  What is next, in order: the tubulin movie with P1's three-stack bead model; ring separations measured per time window (the
 62 nm against Nup96's ~50 nm is mostly the measurement's: drift within a window, ghosts, the two-Gaussian fit);
 the cavity phase as a prior over time (§26 above), which would decide fringes rather than only describe them.

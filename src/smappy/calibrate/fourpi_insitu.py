@@ -14,16 +14,32 @@ calibration window and a script call it alike.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
+from ..channels import FourPiChannelsSettings
 from ..plugins import param
+
+MODEL_FILTER = "4Pi models (*.h5)"
+LOCS_FILTER = "Localizations (*.hdf5 *.h5)"
 
 
 @dataclass
 class FourPiInSituSettings:
-    """Which molecules of the fit the in-situ learning takes, and how it learns (docs/4pi.md §26)."""
+    """The PSF calibration window's *4Pi in situ* section: the bead model to start from, the molecules (a fit
+    of the movie with it, given or made here), which of them are learnt from and how (docs/4pi.md §26)."""
+    bead_model: str = param("", label="bead model", kind="open_file", file_filter=MODEL_FILTER,
+                            help="the 4Pi pupil model learnt from beads, which in situ starts from")
+    localizations: str = param("", label="localizations", kind="open_file", file_filter=LOCS_FILTER,
+                               help="a Spline 4Pi fit of these movies with the bead model; empty: they are "
+                                    "fitted here")
+    fit_frames: int = param(20000, label="frames fitted", unit="frames", min=100,
+                            help="without localizations: how many frames from the start are fitted")
+    # where the channels are, as Spline 4Pi reads the movie: read only to fit it here
+    channels: FourPiChannelsSettings = param(default_factory=FourPiChannelsSettings, label="channels",
+                                             collapsed=True)
     molecules: int = param(3000, label="molecules", min=100,
                            help="how many molecules are learnt from, chosen over z and the movie")
     min_photons: float = param(0.0, label="min photons", min=0.0,
@@ -35,6 +51,9 @@ class FourPiInSituSettings:
                         help="the molecules are spread over z in this many bins of equal quota")
     rounds: int = param(2, label="rounds", min=1, max=5, advanced=True,
                         help="localise, leave out the poor fits, learn: this many times")
+    held_out: float = param(0.2, label="held out", min=0.0, max=0.5, advanced=True,
+                            help="this share of the molecules is not learnt from, and judges the in-situ "
+                                 "model against the bead model")
     seed: int = param(0, label="seed", advanced=True, help="which molecules are drawn, where there are more")
 
 
@@ -165,3 +184,221 @@ def cut(source, layout, locs, index, camera, roi_size: int, pixel_nm, drift=None
     start = {"xyz": xyz[keep], "photons": photons[keep], "background": background[keep],
              "phase": np.zeros(int(keep.sum()))}
     return InSituMolecules(data[keep], positions[keep].astype(float), start, frame[keep], index[keep])
+
+
+# ---------------------------------------------------------------- the run, as the window and a script make it
+
+@dataclass
+class FourPiInSituRun:
+    """What a run of in situ left: the learnt fit (`uipsf.workflows.fourpi_insitu.FourPiInSitu`), the bead
+    model it started from (model, shared values, calibration), the molecules, which of them were held out,
+    the held-out comparison (objective of each model, nats, lower is better), and the calibration saved."""
+    fit: object
+    bead: tuple
+    bead_calibration: object
+    molecules: InSituMolecules
+    held: np.ndarray
+    heldout: dict
+    layout: object
+    calibration: object = None
+    saved: Path | None = None
+    messages: list = field(default_factory=list)
+
+    @property
+    def gain_nats(self) -> float | None:
+        """How much better the in-situ model explains the held-out molecules than the bead model, nats per
+        molecule; None without any held out."""
+        if not self.heldout:
+            return None
+        return (self.heldout["bead"] - self.heldout["in situ"]) / max(1, len(self.held))
+
+
+def bead_model_of(path, device=None):
+    """(calibration, model, shared) of a bead model file, or a ValueError saying why it cannot start in situ."""
+    from ..fourpi import load_fourpi_calibration
+    from .fourpi_beads import model_from_calibration
+    if not path:
+        raise ValueError("give the bead model: in situ starts from a 4Pi pupil model learnt from beads")
+    cal = load_fourpi_calibration(path)
+    made = model_from_calibration(cal, device=device)
+    if made is None:
+        raise ValueError(f"{Path(path).name} keeps no pupil model to start from: in situ needs a 4Pi pupil "
+                         "model saved by this program's PSF calibration (a bead average or uiPSF v1's will not do)")
+    return (cal,) + made
+
+
+def z_range_of(cal) -> float:
+    """The z the calibration covers either side of focus, nm."""
+    ends = cal.z_index_to_nm(np.array([0.0, float(cal.shape[0])]))      # the first and the last knot
+    return float(np.min(np.abs(ends)))
+
+
+def fit_movie(paths, settings: FourPiInSituSettings, camera, out_path, progress=None):
+    """The localizations in situ chooses from: the given fit, or *Spline 4Pi* on the first *frames fitted*
+    frames of the movie with the bead model and the section's channels (and *4Pi z*'s phase), saved to
+    ``out_path``."""
+    from ..io.formats import load
+    if settings.localizations:
+        return load(settings.localizations)[0]
+    from ..plugins import Context
+    from ..plugins.fit import CameraSettings, OutputSettings, SourceSettings
+    from ..plugins.fit_4pi import FourPiFit, FourPiFitSettings, FourPiModelSettings
+    px = _pixel(camera)
+    fit = FourPiFitSettings(source=SourceSettings(path=str(paths[0]), stop=int(settings.fit_frames)),
+                            camera=CameraSettings(conversion=camera.conversion, offset=camera.offset,
+                                                  pixelsize_um=float(np.mean(px)) / 1000.0),
+                            model=FourPiModelSettings(calibration=str(settings.bead_model)),
+                            output=OutputSettings(path=str(out_path)))
+    fit.channels = settings.channels
+    ctx = Context()
+    if progress is not None:
+        ctx.report = lambda text: progress({"message": f"fitting with the bead model: {text}", "fraction": 0.05})
+    return FourPiFit().run(ctx, fit).locs
+
+
+def run_insitu(paths, settings: FourPiInSituSettings, camera, save_to=None, progress=None, cancel=None,
+               device=None, molecules: InSituMolecules | None = None, layout=None) -> FourPiInSituRun:
+    """In situ from the movie ``paths`` (module docstring; docs/4pi.md §26): the molecules (``molecules``, a
+    detection's, or chosen and cut here), *held out* of them kept aside, the rest learnt from, both models
+    judged on those held out, and the model saved to ``save_to`` (None: not saved)."""
+    import torch
+
+    from uipsf.workflows import fourpi_insitu as fi
+    tell = progress or (lambda entry: None)
+    cal, bead_model, bead_shared = bead_model_of(settings.bead_model, device)
+    if molecules is None:
+        molecules, layout = detect(paths, settings, camera, progress)
+    rng = np.random.default_rng(settings.seed)
+    n = len(molecules)
+    held = np.sort(rng.permutation(n)[:round(settings.held_out * n)])
+    learn = np.setdiff1d(np.arange(n), held)
+    batch = fi.molecule_batch(molecules.data, molecules.roi_xy, frame=molecules.frame)
+    start = molecules.start
+
+    def part(index):
+        return fi.subset(batch, index), {k: v[index] for k, v in start.items()}
+
+    sub, sub_start = part(learn)
+    fit = fi.learn_insitu(bead_model, bead_shared, sub, sub_start, cal.period_nm,
+                          settings=fi.InSituSettings(rounds=settings.rounds), progress=tell, cancel=cancel)
+    heldout = {}
+    if len(held) and fit.result is not None and fit.result.stop_reason != "cancelled":
+        tell({"message": f"judging both models on {len(held)} held-out molecules", "fraction": 0.95})
+        hb, hs = part(held)
+        model = fi.molecule_model(bead_model, tuple(batch.data.shape[-2:]))
+        for name, shared in (("bead", bead_shared), ("in situ", fit.shared)):
+            heldout[name] = float(fi.localise(model, shared, hb, hs, cal.period_nm)["objective"].sum())
+    out = FourPiInSituRun(fit, (bead_model, {k: torch.as_tensor(v) for k, v in bead_shared.items()}), cal,
+                          molecules, held, heldout, layout)
+    if save_to is not None and fit.result is not None and fit.result.stop_reason != "cancelled":
+        save(out, save_to)
+    return out
+
+
+def detect(paths, settings: FourPiInSituSettings, camera, progress=None):
+    """(the chosen molecules cut, the layout) from the movie ``paths``: the fit, the choice, the cut."""
+    import tempfile
+
+    from ..channels import ChannelLayout
+    from ..io.tiff import open_stack
+    tell = progress or (lambda entry: None)
+    cal, _, _ = bead_model_of(settings.bead_model)
+    if camera is None:
+        raise ValueError("4Pi in situ needs the camera's conversion, offset and pixel size: give them under "
+                         "microscope")
+    out = Path(tempfile.mkdtemp()) / "insitu_fit_locs.hdf5"
+    locs = fit_movie(paths, settings, camera, out, progress)
+    record = (getattr(locs, "metadata", None) or {}).get("channel_layout")
+    if record is None:
+        raise ValueError("the localizations keep no channel layout: give a Spline 4Pi fit of these movies")
+    layout = ChannelLayout.from_dict(record)
+    tell({"message": "choosing the molecules", "fraction": 0.1})
+    index = choose(locs, z_range_of(cal), settings)
+    if not len(index):
+        raise ValueError("no molecule passes: lower *min photons* or check that the fit is of these movies")
+    px = _pixel(camera)
+    mol = cut(open_stack(paths[0]), layout, locs, index, camera, settings.roi_size, px,
+              progress=lambda text: tell({"message": text, "fraction": 0.12}))
+    return mol, layout
+
+
+def _pixel(camera) -> tuple:
+    px = camera.pixelsize_nm_xy
+    if px is None:
+        raise ValueError("4Pi in situ needs the camera's pixel size: give it under microscope")
+    return px
+
+
+def save(result: FourPiInSituRun, path) -> object:
+    """The in-situ model as a 4Pi calibration for *Spline 4Pi*, beside its layout and its recipe and values --
+    so in situ can start from it again -- at ``path``; the calibration."""
+    from uipsf.workflows import fourpi_insitu as fi
+
+    from ..fourpi import save_fourpi_calibration
+    from .fourpi_beads import recipe_record, shared_record
+    bead_cal = result.bead_calibration
+    roi = bead_cal.shape[1] + 1                     # the bead model's box: its knots per side
+    dz = float(bead_cal.dz)
+    z = z_range_of(bead_cal)
+    params = {"bead_model": str(bead_cal.source), "heldout_nats": result.heldout,
+              "shared": shared_record(result.fit.shared)}
+    recipe = getattr(result.bead[0], "recipe", None)
+    if recipe is not None:
+        params["model"] = recipe_record(recipe)
+    cal = fi.calibration(result.fit, z_range_nm=z, dz_nm=dz, roi_px=roi, parameters=params)
+    if result.layout is not None:
+        cal.layout = result.layout.to_dict()
+    save_fourpi_calibration(path, cal, overwrite=True)
+    result.calibration, result.saved = cal, Path(path)
+    return cal
+
+
+# ---------------------------------------------------------------- the window's pages
+
+def draw_molecules(figure, result: FourPiInSituRun) -> str:
+    """The molecules learnt from: their z and photons as the fit with the bead model gave them, and as the
+    in-situ model localises them; those left out as poor fits apart."""
+    m = result.molecules
+    learnt = np.setdiff1d(np.arange(len(m)), result.held)
+    kept = learnt[result.fit.kept]
+    out = np.setdiff1d(learnt, kept)
+    z_start = m.start["xyz"][:, 2]
+    z_found = np.full(len(m), np.nan)
+    z_found[learnt] = result.fit.found["xyz"][:, 2]
+    a, b = figure.subplots(1, 2)
+    bins = np.linspace(np.nanmin(z_start), np.nanmax(z_start), 25)
+    a.hist(z_start[kept], bins, histtype="step", label="bead model's fit")
+    a.hist(z_found[kept], bins, histtype="step", label="in situ")
+    if len(out):
+        a.hist(z_found[out], bins, histtype="step", label="left out")
+    a.set_xlabel("z (nm)")
+    a.set_ylabel("molecules")
+    a.legend(fontsize="small")
+    b.scatter(z_start[kept], z_found[kept] - z_start[kept], s=3, alpha=0.4)
+    b.axhline(0, color="0.5", lw=0.8)
+    b.set_xlabel("z, bead model's fit (nm)")
+    b.set_ylabel("in situ − bead model (nm)")
+    return f"{len(kept)} molecules used, {len(out)} left out as poor fits, {len(result.held)} held out"
+
+
+def parameter_rows(result: FourPiInSituRun) -> tuple:
+    """(columns, rows): the shared numbers of the bead model and of the in-situ model side by side, and the
+    held-out molecules' objective under each."""
+    bead, insitu = result.bead[1], result.fit.shared
+
+    def text(v):
+        return ", ".join(f"{x:.3g}" for x in np.atleast_1d(np.asarray(v, float)))
+
+    rows = []
+    for name, label in (("fourpi.coherence", "coherence"), ("fourpi.balance", "upper arm's share"),
+                        ("fourpi.share", "channels' shares (1 - 3)"), ("fourpi.delta", "phase offsets (rad)"),
+                        ("fourpi.offset", "misalignment x, y, z (nm)"), ("psf.sigma", "blur σ (nm)")):
+        if name in bead and name in insitu:
+            rows.append((label, text(bead[name]), text(insitu[name].cpu())))
+    if result.calibration is not None:
+        rows.append(("fringe period (nm)", f"{result.bead_calibration.period_nm:.1f}",
+                     f"{result.calibration.period_nm:.1f}"))
+    if result.heldout:
+        rows.append((f"held out: objective of {len(result.held)} molecules (nats)",
+                     f"{result.heldout['bead']:.0f}", f"{result.heldout['in situ']:.0f}"))
+    return ("", "bead model", "in situ"), rows

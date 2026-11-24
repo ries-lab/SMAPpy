@@ -72,7 +72,9 @@ searches it, so a folder of bead stacks calibrates from all of them.
 ### mode
 
 *Dual colour* and *4Pi* are offered only by the methods that have them, as
-in the window.  Another mode is refused, with the modes the method has.
+in the window.  Another mode is refused, with the modes the method has.  *4Pi* has the pupil model and the bead average from bead
+scans, and *insitu* from a 4Pi movie, which reads the *4Pi in situ* part: the
+bead model to start from and the movie's fit with it.
 
 ## References
 

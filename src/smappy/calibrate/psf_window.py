@@ -350,6 +350,10 @@ class PSFCalibrationWindow(QMainWindow):
         from .fourpi_beads import FourPiBeadSettings
         self.fourpi_form = SettingsForm(FourPiBeadSettings)
         self.fourpi_form.changed.connect(self._show_fourpi)
+        # 4Pi in situ: the bead model it starts from, the movie's fit with it, which molecules and how
+        from .fourpi_insitu import FourPiInSituSettings
+        self.fourpi_insitu_form = SettingsForm(FourPiInSituSettings)
+        self.fourpi_insitu_form.changed.connect(self._show_fourpi_insitu)
         self.sections = {"microscope": CollapsibleSection("microscope", self.optics_form, expanded=False),
                          "model": CollapsibleSection("model", model, expanded=True),
                          "in situ": CollapsibleSection("in situ", insitu, expanded=True),
@@ -357,6 +361,7 @@ class PSFCalibrationWindow(QMainWindow):
                          "elliptical": CollapsibleSection("elliptical Gaussian", self.elliptical_form,
                                                           expanded=True),
                          "4Pi": CollapsibleSection("4Pi", self.fourpi_form, expanded=True),
+                         "4Pi in situ": CollapsibleSection("4Pi in situ", self.fourpi_insitu_form, expanded=True),
                          "beads": CollapsibleSection("beads", holder, expanded=True),
                          "spline": CollapsibleSection("spline", self.spline_form, expanded=False)}
         for section in self.sections.values():
@@ -455,7 +460,10 @@ class PSFCalibrationWindow(QMainWindow):
         self._show_fourpi()
         self._show_model()
         # 4Pi finds its beads on channel 0 by itself, and its channels are its section's
-        self.sections["beads"].setVisible(not insitu and not fourpi and not molecules)
+        fourpi_insitu = reads.get("4Pi in situ", False)
+        self.sections["4Pi in situ"].setVisible(fourpi_insitu)
+        self._show_fourpi_insitu()
+        self.sections["beads"].setVisible(not insitu and not fourpi and not molecules and not fourpi_insitu)
         self.files_section.button.setText(getattr(self.method, "files", "bead stacks"))
         self.detect_button.setText(f"Detect {getattr(self.method, 'finds', 'beads')}")
         # z sweeps are read as movies are, frame by frame, each molecule ringed on its own frame
@@ -703,6 +711,17 @@ class PSFCalibrationWindow(QMainWindow):
                                                    and self.optics_camera.is_em)})
         self._show_model()
         self._show_channels()
+
+    def _show_fourpi_insitu(self) -> None:
+        """*4Pi in situ*'s fields for fitting the movie here -- the frames, the channels -- only while no
+        localizations are given: a given fit brings its own layout."""
+        if not hasattr(self, "fourpi_insitu_form"):
+            return
+        try:
+            given = bool(self.fourpi_insitu_form.value().localizations)
+        except ValueError:
+            given = False
+        self.fourpi_insitu_form.set_shown({"fit_frames": not given, "channels": not given})
 
     def _show_model(self) -> None:
         """The model's fields the method reads, and only those (`pupil.model_shown`): in situ without the
@@ -1106,6 +1125,7 @@ class PSFCalibrationWindow(QMainWindow):
         return {"beads": self.detection_form, "in situ": self.insitu_form,
                 "in situ detection": self.insitu_detection_form, "molecules": self.molecule_form,
                 "elliptical": self.elliptical_form, "4Pi": self.fourpi_form,
+                "4Pi in situ": self.fourpi_insitu_form,
                 "model": self.model_form, "spline": self.spline_form}[name].value()
 
     def _inputs(self) -> dict:

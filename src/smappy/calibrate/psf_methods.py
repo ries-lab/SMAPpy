@@ -1423,6 +1423,146 @@ class MoleculeElliptical(EllipticalGaussian):
         return _unit_positions(run.result["rois"])
 
 
+class FourPiInSitu(_FourPi):
+    """In situ in the 4Pi mode: the 4Pi pupil model learnt from the movie's own molecules, started from a bead
+    model (`fourpi_insitu.run_insitu`; docs/4pi.md §26).  Its files are movies; its section *4Pi in situ*
+    names the bead model and, if there is one, the fit of the movie with it.  A share of the molecules is held
+    out and judges the learnt model against the bead model: the summary says by how much it explains them
+    better, the evidence that in situ helped on these data."""
+    key, label = "fourpi_insitu", "pupil model (in situ), 4Pi"
+    sections = {"start from": False, "microscope": False, "model": False, "spline": False, "averaging": False,
+                "4Pi in situ": True}
+    columns = ("state", "molecules")
+    marks = False
+    has_stack = False
+    files = "movies"
+    finds = "molecules"
+    needs_torch = True
+
+    def detect(self, paths, dual, inputs, progress=None) -> Detected:
+        from .fourpi_insitu import detect
+        if dual:
+            raise ValueError("4Pi in situ reads the 4Pi mode's four channels")
+        tell = _counted(progress, 0.0, 1.0) or (lambda text: None)
+        settings = inputs["fourpi_insitu"]
+        molecules, layout = detect(paths, settings, inputs.get("camera"),
+                                   lambda entry: tell(entry.get("message", "")))
+        n = len(molecules)
+        held = round(settings.held_out * n)
+        text = (f"{n} molecules (median {np.median(molecules.start['photons']):.0f} photons), {n - held} to "
+                f"learn from and {held} held out; learning takes about {duration(0.6 * n)}")
+        return Detected({"molecules": molecules, "layout": layout}, text, [])
+
+    def detected_text(self, detected: Detected, marks: dict) -> str:
+        return detected.text
+
+    def detected_marks(self, detected: Detected) -> dict:
+        return {}
+
+    def detected_rows(self, detected: Detected, marks: dict) -> list:
+        return [(("chosen", len(detected.found["molecules"])), False)]
+
+    def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from .fourpi_insitu import run_insitu
+        from .pupil import default_save_path
+        settings = inputs["fourpi_insitu"]
+        found = detected.found if detected is not None else None
+        save_to = None
+        if inputs["run"].save_model:
+            if previous is not None and previous.saved is not None:
+                save_to = previous.saved
+            else:
+                base = default_save_path(paths, False)
+                save_to = base.with_name(base.stem + "_insitu_4pi.h5")
+        done = run_insitu(paths, settings, inputs.get("camera"), save_to=save_to, progress=progress, cancel=cancel,
+                          molecules=found["molecules"] if found else None, layout=found["layout"] if found else None)
+        run = Run({"insitu": done, "settings": settings, "calibration": done.calibration}, False, done.saved)
+        gain = done.gain_nats
+        if gain is not None and gain <= 0:
+            run.extra["warning"] = (f"the in-situ model explains the held-out molecules no better than the bead "
+                                    f"model ({gain:+.1f} nats per molecule): keep the bead model")
+        return run
+
+    def finish(self, run: Run, progress=None) -> Run:
+        return run
+
+    def _calibration(self, run: Run):
+        """The in-situ model's calibration: the saved one, or one written to a temporary file to draw."""
+        done = run.result["insitu"]
+        if done.calibration is None:
+            import tempfile
+            from .fourpi_insitu import save
+            save(done, Path(tempfile.mkdtemp()) / "insitu_4pi.h5")
+            done.saved = None
+        return done.calibration
+
+    def save_as(self, run: Run, path) -> Path:
+        from .fourpi_insitu import save
+        done = run.result["insitu"]
+        save(done, path)
+        run.result["calibration"] = done.calibration
+        run.saved = Path(path)
+        return run.saved
+
+    def pages(self, run: Run) -> list:
+        from types import SimpleNamespace
+
+        from uipsf.diagnostics.figures import unit_choices
+
+        from .fourpi_beads import MODEL_PARTS, draw_model, draw_pupils
+        from .fourpi_insitu import draw_molecules, parameter_rows
+        done = run.result["insitu"]
+        cal = self._calibration(run)
+        fit = SimpleNamespace(model=done.fit.model, shared=lambda: done.fit.shared)
+        bead = SimpleNamespace(model=done.bead[0], shared=lambda: done.bead[1])
+        return [Page("Pupils", lambda f, s, e, chosen: draw_pupils(f, fit, chosen["units"]), follows_selection=False,
+                     controls={"units": unit_choices()}),
+                Page("Bead model's pupils", lambda f, s, e, chosen: draw_pupils(f, bead, chosen["units"]),
+                     follows_selection=False, controls={"units": unit_choices()}),
+                Page("Model", lambda f, s, e, chosen: draw_model(f, cal, chosen["show"]), follows_selection=False,
+                     controls={"show": MODEL_PARTS}),
+                Page("Molecules", lambda f, s, e: draw_molecules(f, done), follows_selection=False),
+                Page("Parameters", None, follows_selection=False, table=lambda: parameter_rows(done))]
+
+    def rows(self, run: Run, marks: dict) -> list:
+        done = run.result["insitu"]
+        n = len(done.molecules)
+        learnt = n - len(done.held)
+        used = len(done.fit.kept)
+        return [(("used", used), False), (("left out as poor fits", learnt - used), True),
+                (("held out", len(done.held)), False)]
+
+    def initial_marks(self, run: Run) -> dict:
+        return {}
+
+    def mark(self, run: Run, bead: int):
+        return None
+
+    def stacks(self, run: Run):
+        return None, None
+
+    def states(self, run: Run) -> dict:
+        return {}
+
+    def positions(self, run: Run) -> list:
+        return []
+
+    def summary(self, run: Run) -> str:
+        done = run.result["insitu"]
+        if done.fit.result is None or done.fit.result.stop_reason == "cancelled":
+            return "stopped, nothing saved"
+        coherence = ", ".join(f"{float(c):.2f}" for c in done.fit.shared["fourpi.coherence"])
+        text = f"{len(done.fit.kept)} molecules learnt; coherence {coherence}"
+        if done.calibration is not None:
+            text += f"; fringe period {done.calibration.period_nm:.1f} nm"
+        gain = done.gain_nats
+        if gain is not None:
+            text += (f"; on {len(done.held)} held-out molecules {abs(gain):.1f} nats per molecule "
+                     f"{'better' if gain > 0 else 'worse'} than the bead model")
+        return text
+
+
 #: what the window's *sample* box offers: what was imaged, first, before the method
 SAMPLES = ("beads in a z stack", "molecules on the coverslip in a z stack",
            "blinking molecules in the sample (in situ)")
@@ -1439,7 +1579,7 @@ SAMPLE_METHODS = {SAMPLES[0]: ("pupil", "average", "elliptical"),
                   SAMPLES[2]: ("insitu",)}
 
 #: the methods in the 4Pi mode, by the key of the method they are in the others
-FOURPI = {"average": FourPiAverage(), "pupil": FourPiPupil()}
+FOURPI = {"average": FourPiAverage(), "pupil": FourPiPupil(), "insitu": FourPiInSitu()}
 
 #: the methods that run in one channel only
 ONE_CHANNEL = ("insitu", "elliptical", "molecules elliptical")

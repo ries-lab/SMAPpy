@@ -24,6 +24,7 @@ from typing import List
 from ..calibrate.dual import DualColorSettings
 from ..calibrate.elliptical import EllipticalCalibrationSettings
 from ..calibrate.fourpi_beads import FourPiBeadSettings
+from ..calibrate.fourpi_insitu import FourPiInSituSettings
 from ..calibrate.insitu import InSituSettings
 from ..calibrate.insitu_run import InSituModelSettings
 from ..calibrate.molecule_stack import MoleculeStackSettings
@@ -47,7 +48,7 @@ class PSFCalibrationSettings:
     method: str = param("pupil", label="method", choices=METHOD_KEYS,
                         help="pupil: uiPSF's model from beads; average: the bead average; elliptical: "
                              "astigmatic widths; molecules: from molecules on the coverslip; insitu: "
-                             "from a blinking measurement")
+                             "from a blinking measurement (in 4Pi, a 4Pi movie from a bead model)")
     mode: str = param("Single channel", label="mode", choices=MODES,
                       help="one channel, a split camera's two (dual colour), or 4Pi's four")
     save_as: str = param("", label="save as", kind="save_file",
@@ -67,12 +68,14 @@ class PSFCalibrationSettings:
     elliptical: EllipticalCalibrationSettings = param(default_factory=EllipticalCalibrationSettings,
                                                       label="elliptical Gaussian", collapsed=True)
     fourpi: FourPiBeadSettings = param(default_factory=FourPiBeadSettings, label="4Pi", collapsed=True)
+    fourpi_insitu: FourPiInSituSettings = param(default_factory=FourPiInSituSettings, label="4Pi in situ",
+                                                collapsed=True)
 
 
 #: `psf_run.inputs`' names for the parts, against the settings' fields
 PARTS = {"run": "run", "microscope": "microscope", "model": "model", "spline": "spline", "beads": "beads",
          "in situ": "in_situ", "in situ detection": "in_situ_detection", "molecules": "molecules",
-         "elliptical": "elliptical", "4Pi": "fourpi"}
+         "elliptical": "elliptical", "4Pi": "fourpi", "4Pi in situ": "fourpi_insitu"}
 
 
 def stack_paths(stacks: str, subdirectories: bool = True) -> List[str]:
@@ -169,14 +172,15 @@ class PSFCalibration(Plugin):
             return FormState(notice=Notice(str(error)))
         reads = method.sections
         insitu, fourpi = reads.get("in situ", False), reads.get("4Pi", False)
-        molecules = reads.get("molecules", False)
+        molecules, fourpi_insitu = reads.get("molecules", False), reads.get("4Pi in situ", False)
         from ..calibrate.pupil import bead_size_warning
         beads_model = reads["model"] and not insitu and not fourpi and not molecules
         warning = bead_size_warning(settings.model) if beads_model else None
         return FormState(notice=Notice(warning) if warning else None, shown={
             "model": reads["model"], "spline": reads["spline"], "in_situ": insitu,
             "in_situ_detection": insitu, "molecules": molecules, "elliptical": reads.get("elliptical", False),
-            "fourpi": fourpi, "beads": not insitu and not fourpi and not molecules,
+            "fourpi": fourpi, "fourpi_insitu": fourpi_insitu,
+            "beads": not insitu and not fourpi and not molecules and not fourpi_insitu,
             "run.start_from": reads["start from"], "beads.channels": dual, "beads.registration": dual,
             "molecules.channels": dual, "molecules.registration": dual})
 
