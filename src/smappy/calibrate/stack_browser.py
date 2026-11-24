@@ -31,6 +31,16 @@ REJECTED = "#d62728"
 MARKED = " (marked)"
 
 
+def _show_plane(ax, plane, log: bool) -> None:
+    """One plane on its own contrast: its 1st to 99.95th percentile, or the log above the 1st."""
+    low, high = np.percentile(plane, (1, 99.95))
+    if log:
+        shown = np.log1p(np.maximum(plane - low, 0))
+        ax.imshow(shown, cmap="gray", vmin=0, vmax=max(float(shown.max()), 1e-9))
+    else:
+        ax.imshow(plane, cmap="gray", vmin=low, vmax=max(high, low + 1))
+
+
 def ring_style(state: str) -> tuple:
     """A ring's (colour, line style) for a bead's ``state``: `COLOURS`, red for any other (rejected, too
     dim, a double); dashed for a choice not yet applied (`MARKED`)."""
@@ -56,6 +66,7 @@ class StackBrowser(QWidget):
         self.states: dict = {}
         self.selected: set = set()
         self.dz_nm = None                    # the detection's z step; None: the files' own
+        self._ranges: dict = {}              # (path, stack, dz) -> (low, high): *same contrast in every plane*
         self.box_px = 15                     # a ring's diameter: the bead box
         self.movie = False                   # movies (in situ): frames read one at a time, rings on their frame
         self._sources: dict = {}             # movie mode: the open acquisitions
@@ -101,7 +112,15 @@ class StackBrowser(QWidget):
         self.log_box = QCheckBox("log contrast")
         self.log_box.setToolTip("a logarithmic scale, so that faint beads and the rings of bright ones show")
         self.log_box.toggled.connect(self.draw)
-        layout.addWidget(self.log_box)
+        self.global_box = QCheckBox("same contrast in every plane")
+        self.global_box.setToolTip("one contrast for the whole stack, from its brightest plane, so that the "
+                                   "intensity falling off away from focus shows as the planes are scrolled")
+        self.global_box.toggled.connect(self.draw)
+        boxes = QHBoxLayout()
+        boxes.addWidget(self.log_box)
+        boxes.addWidget(self.global_box)
+        boxes.addStretch(1)
+        layout.addLayout(boxes)
 
     # ----------------------------------------------------------------- data
     def set_paths(self, paths, dz_nm=None) -> None:
@@ -223,12 +242,16 @@ class StackBrowser(QWidget):
         z = int(np.clip(self.plane_slider.value(), 0, len(images) - 1))
         plane = images[z].astype(float)
         ax = self.figure.subplots()
-        low, high = np.percentile(plane, (1, 99.95))
-        if self.log_box.isChecked():
-            shown = np.log1p(np.maximum(plane - low, 0))
-            ax.imshow(shown, cmap="gray", vmin=0, vmax=max(float(shown.max()), 1e-9))
+        self.global_box.setVisible(True)
+        if self.global_box.isChecked():
+            low, high = self._stack_range(self.acquisitions[a], k, images)
+            if self.log_box.isChecked():
+                ax.imshow(np.log1p(np.maximum(plane - low, 0)), cmap="gray", vmin=0,
+                          vmax=max(float(np.log1p(high - low)), 1e-9))
+            else:
+                ax.imshow(plane, cmap="gray", vmin=low, vmax=max(high, low + 1))
         else:
-            ax.imshow(plane, cmap="gray", vmin=low, vmax=max(high, low + 1))
+            _show_plane(ax, plane, self.log_box.isChecked())
         stack = self._stack_index(a, k)
         here = [p for p in self.positions if p[0] == stack]
         from matplotlib.patches import Circle
@@ -250,6 +273,16 @@ class StackBrowser(QWidget):
         self.title.setText(f"{self.acquisitions[a]}" + (f" - stack {k + 1}/{len(stacks)}" if len(stacks) > 1 else "")
                            + (f" - {found} beads ringed" if self.positions else ""))
         self.canvas.draw_idle()
+
+    def _stack_range(self, path: str, k: int, images) -> tuple:
+        """(low, high) of the whole stack for *same contrast in every plane*: the darkest plane's 1st
+        percentile and the brightest plane's 99.95th, the per-plane contrast's own numbers, so the plane in
+        focus looks as it does alone and the others dimmer.  Every plane is read once, then kept."""
+        key = (path, k, self.dz_nm)
+        if key not in self._ranges:
+            per = np.array([np.percentile(np.asarray(images[i], float), (1, 99.95)) for i in range(len(images))])
+            self._ranges[key] = (float(per[:, 0].min()), float(per[:, 1].max()))
+        return self._ranges[key]
 
     def _frame_z(self, path: str, frame: int, n_frames: int) -> str:
         """", sweep 2, stage z 1.250 µm" for a frame of a z sweep (`molecule_stack.frame_z_um`, split as the
@@ -298,13 +331,9 @@ class StackBrowser(QWidget):
             self.canvas.draw_idle()
             return
         self.stack_box.setVisible(False)
+        self.global_box.setVisible(False)          # a movie is never read whole for its range
         ax = self.figure.subplots()
-        low, high = np.percentile(plane, (1, 99.95))
-        if self.log_box.isChecked():
-            shown = np.log1p(np.maximum(plane - low, 0))
-            ax.imshow(shown, cmap="gray", vmin=0, vmax=max(float(shown.max()), 1e-9))
-        else:
-            ax.imshow(plane, cmap="gray", vmin=low, vmax=max(high, low + 1))
+        _show_plane(ax, plane, self.log_box.isChecked())
         here = [p for p in self.positions if p[0] == a and len(p) > 4 and p[4] == f]
         radius = self.box_px / 2
         for _, x, y, unit, _ in here:

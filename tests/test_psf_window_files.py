@@ -217,3 +217,24 @@ def test_the_buttons_pass_no_clicked_flag_as_an_argument(app, monkeypatch):
     window.halves_button.click()
     assert calls == [("open", (), {}), ("halves", (), {})]
     window.close()
+
+
+def test_same_contrast_in_every_plane_scales_every_plane_by_the_stacks_brightest(app, monkeypatch):
+    from smappy.calibrate.input import BeadStack
+    from smappy.calibrate.stack_browser import StackBrowser
+    browser = StackBrowser()
+    images = np.stack([np.full((16, 16), 100.0) for _ in range(5)])
+    for z, peak in enumerate((200, 600, 1000, 600, 200)):
+        images[z, 8, 8] = peak
+    browser.acquisitions = ["a.tif"]
+    browser._cache["a.tif"] = [BeadStack(images, np.arange(5) * 50.0)]
+    assert not browser.global_box.isChecked()          # off by default
+    browser.draw()                                     # the first draw puts the slider in the middle
+    clims = []
+    for ticked in (False, True):
+        browser.global_box.setChecked(ticked)
+        browser.plane_slider.setValue(0)
+        browser.draw()
+        clims.append(browser.figure.axes[0].images[0].get_clim()[1])
+    alone, together = clims
+    assert alone < 200 and together > 800              # the dim plane on the in-focus plane's range

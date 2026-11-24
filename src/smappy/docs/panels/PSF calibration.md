@@ -107,7 +107,9 @@ selects the bead.  Molecules' z sweeps and in situ's movies are shown frame
 by frame instead: every frame until the molecules are detected, then only
 the frames they were found on, each ringed on its own frame.  A z sweep's
 frame also shows its sweep and the stage's z, read from the file's
-metadata.
+metadata.  Each plane has its own contrast, unless *same contrast in
+every plane* is ticked: then one contrast for the whole stack shows how the
+beads dim away from focus.
 
 **Finding the beads** is the bead calibration's own: the same detection, the
 same settings under *beads*, the same verdict on each bead's brightness.  Of
@@ -121,7 +123,7 @@ in both together.  Specks do not cost a bead its isolation either, so a lower
 smoothing merged into the first costs it its isolation, and a bead whose shape
 is far from the others' -- two beads closer than any search can split -- is
 marked *double?* and excluded on Calibrate, a dashed red ring, where space
-lets it in again (the bead calibration's page says how both are found).  A
+lets it in again -- in two channels a pair, when either channel's bead is one (the bead calibration's page says how both are found).  A
 *too bright* bead is kept and judged by its fit, which shows a doublet.  The camera's numbers come from the camera database, as a fit of
 the same files would take them.
 
@@ -1356,7 +1358,8 @@ On *auto* the circle inscribed in the image.  Set it smaller for an
 illumination smaller than the image, larger when the whole image is lit.
 
 ### z step
-Only for files that do not record the stage's z for each frame; with
+For bead stacks on *auto* the step is the files' own; after *Detect beads*
+the field shows it (several if the files differ).  For molecules: only for files that do not record the stage's z for each frame; with
 *frames per sweep*, every sweep upwards from the first frame.
 
 ### frames per sweep
@@ -1490,6 +1493,18 @@ standing in for the entry's *astigmatism*; Spline 3D fits with it where there
 is no bead calibration, and *Simulate* draws with it (*calibration*'s
 menu).  Asks first, saying what it replaces.  Only for beads taken on a
 recognised microscope in its current setup.
+
+### log contrast
+For faint beads and the rings around bright ones; with *same contrast in
+every plane* the logarithm too is the whole stack's.
+
+### same contrast in every plane
+Off by default, when each plane is scaled to its own range so that a bead
+far out of focus can still be seen.  Ticked, the whole stack is shown on one
+range, from the darkest plane's 1st percentile to the brightest plane's
+99.95th, so scrolling through the planes shows the intensity fall away from
+focus.  The stack is read whole once, when it is first shown this way; not
+for movies.
 
 ### Exclude / include
 Marks the selected beads for the next *Calibrate*: a bead to be left out,
