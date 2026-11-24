@@ -543,6 +543,13 @@ plane fitted through the regions' edges: how far the focus moves over the field 
 with a warning beyond 150 nm (the focus the edge sets is then the field's average).  On simulated heights a
 focus tilted by 3 nm/µm came back within 0.5 nm/µm, and an untilted one within 0.5 with a span under 50 nm.
 
+**The field's own mirror.**  After round 1 the rounds also fit the *field twin* -- the pupil at the centre kept,
+the field's astigmatism terms flipped (`insitu.field_twin`) -- and keep it if the data prefer it by more than
+10 nats.  It guards against a local solution right at the centre and mirrored where the field dominates.  On
+the Zenodo movie below the data refused the field twin by 853 and 478 nats from either start: the field's sign
+relative to the centre's is well pinned there, and it never flipped.  It costs one more fit of round 1's
+molecules (about 2 of 10 minutes on the H100).
+
 **A small field is not judged.**  A run on a simulated 8 µm movie with a model too small for its pupil found a
 "significant" field, 31 nats against a threshold of 27 and 0.4 rad of astigmatism across 5 µm: the model's
 misfit, which varies with the brightness and so with the position under a Gaussian illumination, taken up by a
@@ -555,3 +562,40 @@ real, span 25 µm.
 start of the right sign: every mode's change at the chip's corners and edges within 4 of its CRLBs (each under
 0.04 rad), the twin test agreeing, the field significant.  The whole run through SMAPpy on a simulated movie,
 with node splines drawn through the in situ model's heights.
+
+**Measured, Zenodo `1ch_FD_smlm_nup96` against `1ch_FD_bead`** (`benchmarks/uipsf/real/zenodo_fd_insitu.py`,
+`results/zenodo_fd_insitu.jsonl`).  Nup96-SNAP-AF647, 800 frames of the same 1608 × 1608 chip as the beads (177 µm),
+v1's optics (NA 1.5, sample 1.406, immersion 1.515), the focus started at 0.8 µm, γ held at the nominal 0.36 (no
+v2 bead model of this microscope), Zernike order 6, 2713 molecules drawn over 4 × 4 regions, three rounds; 8-10
+minutes a run on gpuvm's H100.
+
+| | start +76 nm (v1's sign) | start −76 nm | without the field |
+| --- | --- | --- | --- |
+| twin test | prefers the twin by 116 nats | agrees | -- |
+| the field's mirror (after round 1) | worse by 853 nats | worse by 478 nats | -- |
+| blur σ | 51 nm | 50 nm | 62 nm |
+| focus | 1085 nm | 344 nm | 896 nm |
+| field report | 18 600 nats, significant | 12 600 nats, significant | -- |
+
+Started with v1's sign of astigmatism the twin test said what was wrong: the data prefer the mirrored pupil.
+Started with the other sign it agrees, and then the field is the beads'.  Each mode's change over the chip (its
+value less the centre's, rms over 150-1450 px), rad:
+
+| Noll | beads (51 beads) | in situ | v1 in situ | in situ − beads | v1 in situ − beads |
+| --- | --- | --- | --- | --- | --- |
+| 5 | 0.379 | 0.333 | 0.433 | **0.050** | 0.159 |
+| 6 | 0.236 | 0.221 | 0.291 | **0.066** | 0.152 |
+| 7 | 0.138 | 0.135 | 0.192 | **0.005** | 0.066 |
+| 8 | 0.156 | 0.109 | 0.183 | **0.048** | 0.054 |
+
+The in situ field is within 0.05-0.07 rad of the beads' over the chip, coma within 0.005 rad on Noll 7: three times
+closer than v1's in situ map.  The blur shrinks from 62 to 50 nm once the field is learnt, as §6.4 expected: what
+one pupil for the field could not hold had gone into σ.  The coverslip's edge in 3 × 3 regions puts the focus
+tilted by +0.7 and −0.9 nm/µm against the coverslip, 178 nm over the field (68 nm rms beside the plane), and the
+run warns of it; the run with the wrong sign saw 34 nm, its heights mirrored.  Not measured: the localisation of
+the movie with the in situ node splines against the beads' (a v2 bead model of this microscope, held from,
+would also replace the nominal γ).
+
+The detection of this movie read 200 frames of the chip at once, 20 GB resident (31.6 GB at its peak): above what a
+calibration should take.  The benchmark reads 50; the window's default (`InSituSettings.block_frames`, 200) wants a
+size in bytes rather than frames for chips this large.

@@ -454,6 +454,13 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     if edge and not any(r.focus_prior is not None for r in learned.rounds[1:]) and len(learned.rounds) > 1:
         messages.append("no coverslip edge found: the molecules may lie too deep; the focus is not pinned by "
                         "the coverslip -- type it if it is known")
+    sign = getattr(learned, "field_sign", None)
+    if sign is not None:
+        if learned.field_flipped:
+            messages.append(f"the field's astigmatism mirrored fitted better by {-sign.delta_nats:.0f} nats after "
+                            f"round 1: taken (the start sets the sign at the field's centre, the data the field's)")
+        else:
+            messages.append(f"the field's sign: its astigmatism mirrored fits worse by {sign.delta_nats:.0f} nats")
     if field_on and learned.rounds:
         edges = field_edges(learned.final.calibration, rois.pixel_size_nm)
         if edges is not None:

@@ -282,6 +282,17 @@ def test_the_twin_of_a_field_flips_its_astigmatism_terms_and_keeps_its_coma_term
         assert float(after) == (-float(before) if j in (5, 6) else float(before)), j
 
 
+def test_the_field_twin_mirrors_only_the_fields_astigmatism_and_keeps_the_pupil(optics):
+    from uipsf.workflows.insitu import field_twin
+    model, truth, _ = insitu_emitters(optics, n=1, truth_field={(6, 1, 0): 0.3})
+    field = model.channels[0].field
+    shared = dict(truth.physical(), **{"field.phase": torch.arange(1.0, len(field.layout) + 1, dtype=f64)})
+    t = field_twin(model, shared)
+    assert torch.equal(t["pupil.phase"], shared["pupil.phase"])
+    for (j, _, _), before, after in zip(field.layout, shared["field.phase"], t["field.phase"], strict=True):
+        assert float(after) == (-float(before) if j in (5, 6) else float(before)), j
+
+
 def test_with_matched_indices_the_twin_of_a_field_images_the_mirrored_height_at_every_place():
     optics = uipsf.Optics(NA=1.2, wavelength_nm=680, n_imm=1.33, n_med=1.33, pixel_size_nm=(110, 110))
     model, truth, batch = insitu_emitters(optics, n=3, kind="scalar",
@@ -295,7 +306,7 @@ def test_with_matched_indices_the_twin_of_a_field_images_the_mirrored_height_at_
         assert torch.allclose(model.psf(pb, -xyz), model.psf(pa, xyz), rtol=1e-9, atol=1e-12)
 
 
-@pytest.mark.slow
+@pytest.mark.long          # ~30 s: a learning study and the field's mirror fitted
 def test_molecules_in_the_sample_spread_over_the_chip_give_back_the_field(optics):
     """In situ with *field dependence*: 160 emitters over a 1000 px chip (127 × 116 µm), astigmatism and coma
     changing over it, learnt from a start of the right sign without the field: the field comes back at the
@@ -324,3 +335,8 @@ def test_molecules_in_the_sample_spread_over_the_chip_give_back_the_field(optics
         assert torch.all(error.abs() < 4 * sd + 0.005) and float(sd.max()) < 0.04, (j, error, sd)
     assert result.twin.verdict == "agree"
     assert field_report(result.calibration).significant
+    # the field's own mirror (the centre kept, its astigmatism flipped), which the rounds try after round 1:
+    # the data refuse it here, where the field was learnt with the right sign
+    from uipsf.workflows.insitu import TWIN_DECISIVE_NATS, field_twin, twin_fit
+    flip = twin_fit(model, result.calibration, replace(batch, start=None), Poisson(), HEIGHTS, mirror=field_twin)
+    assert flip.delta_nats > TWIN_DECISIVE_NATS

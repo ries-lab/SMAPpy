@@ -1010,7 +1010,11 @@ so its dimmer edges count as much as its centre.  Each molecule's height is
 learnt anyway, so a focus tilted or curved against the coverslip is taken up
 by the heights and changes the PSF only through the depth; the coverslip's
 edge measured in 3 × 3 regions says how much the focus moves over the field,
-with a warning beyond 150 nm.  Over a field of less than 20 µm the field is
+with a warning beyond 150 nm.  The sign of the field's astigmatism is the
+data's: after the first round its mirror is fitted too and kept if it fits
+better, as the twin test does for the whole pupil.  On Zenodo's Nup96 movie the
+field learnt in situ came within 0.05-0.07 rad of the beads' over 177 µm, once
+the start's astigmatism had the sign the twin test agreed with.  Over a field of less than 20 µm the field is
 not judged and no grid of splines is made: there a polynomial of the position
 takes up the model's own misfit.  Molecules are thousands of points
 spread over the chip, so they sample the field more densely than tens of beads;

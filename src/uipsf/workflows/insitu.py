@@ -196,6 +196,28 @@ def twin(model, shared: dict) -> dict:
     return out
 
 
+def field_twin(model, shared: dict) -> dict:
+    """``shared`` with only the field's astigmatism terms mirrored, the pupil at the field's centre kept: the
+    solution that is right where the field vanishes and mirrored where it dominates.
+
+    With a field the ±z degeneracy could be local: the start's astigmatism sets the sign at the centre, the
+    field starts at zero, and where it grows larger than the centre's astigmatism the molecules might settle
+    on their mirrored heights, the field's astigmatism with the wrong sign.  Fitting this and keeping the
+    better (`calibrate_insitu`) settles the field's sign by the data, as the start settles the centre's.  On
+    Zenodo `1ch_FD_smlm_nup96` the data refused the mirrored field by 478 and 853 nats from either start: the
+    field's sign relative to the centre's is well pinned there, and the whole twin test decides the rest
+    (§12.3 of `docs/uipsf/field-dependence.md`)."""
+    out = dict(shared)
+    for c, ch in enumerate(model.channels):
+        field = getattr(ch, "field", None)
+        pre = prefix(c)
+        if field is not None and pre + "field.phase" in shared:
+            v = torch.as_tensor(shared[pre + "field.phase"])
+            parity = v.new_tensor([(-1.0) ** abs(noll_to_nm(j)[1]) for j, _, _ in field.layout])
+            out[pre + "field.phase"] = -parity * v
+    return out
+
+
 def twin_model(model):
     """``model`` with its pupils' held modes mirrored as `twin` mirrors the learnt ones: a pupil held from a
     bead model is the twin's too, or the test compares a mirrored pupil with an unmirrored part."""
@@ -299,16 +321,20 @@ def learn_insitu(model, batch, start: dict | None = None, noise=None, heights=No
 
 
 def twin_fit(model, cal: Calibration, batch, noise, heights, solver=None, chunk_size=INSITU_CHUNK,
-             starts=None) -> TwinTest:
+             starts=None, mirror=None) -> TwinTest:
     """The twin of ``cal``'s pupil fitted to its used emitters, each localised on the twin first.
 
     Converged to the solver's own tolerance, not stage 1's looser one: stopped early, the twin's optimum is
     too high, and a start of the wrong sign then passed as agreeing with the data.  ``starts`` [E, S], per
-    emitter of ``batch``, replaces the common ``heights`` (`width_starts` on the twin)."""
+    emitter of ``batch``, replaces the common ``heights`` (`width_starts` on the twin).  ``mirror``: another
+    mirroring than the whole twin, `field_twin`, which leaves the pupil and its held modes as they are."""
     solver = solver if solver is not None else GaussNewtonLBFGS()
     sub = on_model_device(batch, model).subset(torch.tensor(cal.beads.used))
-    mirrored = twin(model, cal.shared())
-    model = twin_model(model)
+    if mirror is None:
+        mirrored = twin(model, cal.shared())
+        model = twin_model(model)
+    else:
+        mirrored = mirror(model, cal.shared())
     if starts is not None:          # per emitter of ``batch``, [E, S]
         found, _ = localise_from_starts(model, mirrored, sub, noise, np.asarray(starts)[np.asarray(cal.beads.used)])
     else:

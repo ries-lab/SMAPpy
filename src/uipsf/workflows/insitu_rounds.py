@@ -47,7 +47,9 @@ import torch
 from ..noise import ShiftedPoisson
 from .insitu import (
     INSITU_CHUNK,
+    TWIN_DECISIVE_NATS,
     InSituCalibration,
+    field_twin,
     in_focus_height,
     learn_insitu,
     localise_from_heights,
@@ -259,6 +261,8 @@ class Round:
 class InSituRun:
     rounds: list = field(default_factory=list)
     model: object = None               # the model of the last round, its focus prior the edge's
+    field_sign: object = None          # with a field: round 1 against its field's astigmatism mirrored (`TwinTest`)
+    field_flipped: bool = False        # whether the mirrored field fitted better, and was taken
 
     @property
     def final(self) -> InSituCalibration:
@@ -363,6 +367,19 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
     run.rounds.append(Round(1, ids, cal, list(rois.state)))
     if _stopped(cal):
         return run
+    if s.twin_test and any(getattr(ch, "field", None) is not None for ch in model.channels):
+        # the field's sign by the data, before the rounds build on it (`insitu.field_twin`)
+        tell({"message": "round 1: the field's sign -- its astigmatism mirrored, fitted to the same molecules",
+              "round": 1})
+        learnt = cal.calibration.shared()
+        heights = start_heights(model, float(learnt["geometry.focus"]))
+        run.field_sign = twin_fit(model, cal.calibration, replace(batch, start=None), noise, heights,
+                                  starts=width_starts(model, field_twin(model, learnt), _widths(rois, ids), roi),
+                                  mirror=field_twin)
+        if run.field_sign.delta_nats <= -TWIN_DECISIVE_NATS:
+            cal = replace(cal, calibration=replace(cal.calibration, result=run.field_sign.twin))
+            run.rounds[0] = replace(run.rounds[0], calibration=cal)
+            run.field_flipped = True
     pool = _capped_pool(rois, sel, s.pool_per_bin)
     current = model
     history = []                       # (focus, edge shift) of every round that found the edge
