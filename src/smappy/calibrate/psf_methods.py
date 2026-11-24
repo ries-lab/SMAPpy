@@ -754,7 +754,8 @@ class InSitu:
         numbers = model_text(result.cal)            # σ and the tilt, where learnt
         text = (f"{len(result.cal.beads.used)} frames used, {len(result.run.rounds)} rounds, focus {focus:.0f} nm"
                 + (f", {numbers}" if numbers else "") + ("" if twin is None else f", twin test: {twin.verdict}"))
-        return text + "".join(f"; {w}" for w in result.messages)
+        return (text + "".join(f"; {w}" for w in result.messages)
+                + _field_text(result.cal, getattr(result, "calibration", None)))
 
     def states(self, run: Run) -> dict:
         """Each unit's state, for its ring on the Stacks page: the last round's."""

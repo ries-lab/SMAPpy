@@ -96,15 +96,14 @@ def test_a_run_recovers_the_pupil_the_height_and_the_sweeps_foci_and_saves_a_spl
     assert carries_model(result.saved) and not (result.saved.parent / "cal.uipsf.h5").exists()
 
 
-@pytest.mark.slow
-def test_a_field_learnt_from_molecules_is_saved_as_node_splines_that_fit_a_corner_without_bias(tmp_path):
+@pytest.mark.long          # 30-140 s: a learning study
+def test_a_field_learnt_from_molecules_becomes_node_splines_that_fit_a_corner_without_bias(tmp_path):
     """*field dependence* with molecules on the coverslip: z sweeps over a 400 px chip (44 µm) whose astigmatism
     changes over it give back the field, saved as node splines at the molecules' height; Spline 3D fitting
     spots at a corner with them has a fraction of the z bias of the centre's spline."""
     import torch
     from smappy.calibrate.molecule_stack_run import run_molecule_stack
     from smappy.calibrate.pupil import BeadSettings, OpticsSettings, PSFModelSettings, RunSettings
-    from smappy.io.calibration import load_spline_calibration
     from smappy.psf import SplinePSF
 
     from uipsf.export import sample_psf
@@ -115,10 +114,10 @@ def test_a_field_learnt_from_molecules_is_saved_as_node_splines_that_fit_a_corne
     optics = OpticsSettings(NA=1.45, wavelength_nm=680.0, n_immersion=1.518, n_medium=1.334, pixel_x_nm=110.0,
                             pixel_y_nm=110.0)
     model = BeadSettings(psf=PSFModelSettings(zernike_order=4), field_dependence=True)
-    out = tmp_path / "cal.h5"
+    # not saved: a grid's file takes longer than the run (the node splines' file is test_field_dual's)
     result = run_molecule_stack(truth["paths"], optics, model,
-                                MoleculeStackSettings(molecules=300, roi_px=15, max_rounds=2, height_nm=10.0),
-                                run=RunSettings(save_model=True), camera=CAMERA, save_to=out, device="cpu")
+                                MoleculeStackSettings(molecules=240, roi_px=15, max_rounds=1, height_nm=10.0),
+                                run=RunSettings(save_model=False), camera=CAMERA, device="cpu")
     field = result.cal.model.channels[0].field
     learnt = result.cal.shared()["field.phase"].detach().double()
     true = torch.tensor([truth_field.get(t, 0.0) for t in field.layout], dtype=torch.float64)
@@ -129,10 +128,11 @@ def test_a_field_learnt_from_molecules_is_saved_as_node_splines_that_fit_a_corne
     for j, _ in field.terms:
         rows = [i for i, (m, _, _) in enumerate(field.layout) if m == j]
         assert float(error[:, rows].sum(1).abs().max()) < 0.04, (j, learnt, true)
+    from smappy.calibrate.molecule_stack_run import calibration_of
     from smappy.calibrate.psf_methods import _field_text
-    assert "field dependence is significant" in _field_text(result.cal, result.calibration)
-    assert "molecules'" in _field_text(result.cal, result.calibration)
-    spline = load_spline_calibration(result.saved)
+    spline = calibration_of(result)
+    assert "field dependence is significant" in _field_text(result.cal, spline)
+    assert "molecules'" in _field_text(result.cal, spline)
     assert spline.field_splines is not None and spline.field_splines.shape[0] >= 3
     assert "focal_curvature_nm_at_50um" in spline.parameters
     # spots drawn with the truth at the molecules' height near a corner, fitted with and without the field

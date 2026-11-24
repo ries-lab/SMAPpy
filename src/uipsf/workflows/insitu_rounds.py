@@ -153,6 +153,64 @@ def coverslip_edge(h, sd, window: float = 0.3, max_blur: float | None = None) ->
     return Edge(float(best.x[0]), _sd_of_first(f, best.x, float(np.median(s0_i))), float(w), len(x), float(kappa))
 
 
+@dataclass
+class FieldEdges:
+    """The coverslip's edge measured in regions of the field (`edge_over_field`)."""
+    centres_px: np.ndarray             # [R, 2] each region's molecules' median chip position
+    shift_nm: np.ndarray               # [R] its edge (`Edge.shift_nm`)
+    sd_nm: np.ndarray                  # [R]
+    plane: np.ndarray                  # (offset nm, slope nm/µm in x, in y): the weighted plane through them
+    rms_nm: float                      # the edges' weighted rms about the plane
+    span_nm: float                     # the plane's range over the regions
+
+    def summary(self) -> str:
+        return (f"the coverslip's edge over the field: {len(self.shift_nm)} regions, the focus tilted by "
+                f"{self.plane[1]:+.1f}, {self.plane[2]:+.1f} nm/µm in x, y ({self.span_nm:.0f} nm over the "
+                f"field), {self.rms_nm:.0f} nm rms beside it")
+
+
+def edge_over_field(h, sd, xy, pixel_nm, tiles: int = 3, window: float = 0.3, min_heights: int = 60):
+    """The coverslip's edge (`coverslip_edge`) in each of ``tiles`` × ``tiles`` regions of the molecules' span
+    with at least ``min_heights`` heights, and the plane through them: how far the focus moves over the field
+    relative to the coverslip (`FieldEdges`), None with fewer than three such regions.
+
+    In situ the heights are free, so a focal plane tilted against the coverslip, or a curved one, is taken up
+    by the heights as a bead's z takes it -- the PSF changes with depth only through the index mismatch, a
+    few nanometres of path for 100 nm (`docs/uipsf/field-dependence.md` §7).  What it costs is the edge's: one
+    edge for the whole field is blurred by the tilt, and the focus it sets is the field's average.  This
+    measures it rather than modelling it: a focal surface and a tilted or curved sample make the same heights,
+    and only the coverslip -- where the sample touches it -- tells them apart, region by region."""
+    h, sd, xy = np.asarray(h, float), np.asarray(sd, float), np.asarray(xy, float).reshape(-1, 2)
+    ok = np.isfinite(h) & np.isfinite(sd) & (sd > 0) & np.isfinite(xy).all(1)
+    h, sd, xy = h[ok], sd[ok], xy[ok]
+    if len(h) < 3 * min_heights:
+        return None
+    lo, hi = xy.min(0), xy.max(0) + 1e-9
+    cell = np.clip(((xy - lo) / (hi - lo) * tiles).astype(int), 0, tiles - 1)
+    centres, shifts, sds = [], [], []
+    for i in range(tiles):
+        for j in range(tiles):
+            m = (cell[:, 0] == i) & (cell[:, 1] == j)
+            if m.sum() < min_heights:
+                continue
+            edge = coverslip_edge(h[m], sd[m], window)
+            if edge is None or not np.isfinite(edge.sd_nm) or edge.sd_nm <= 0:
+                continue
+            centres.append(np.median(xy[m], 0))
+            shifts.append(edge.shift_nm)
+            sds.append(edge.sd_nm)
+    if len(shifts) < 3:
+        return None
+    centres, shifts, sds = np.asarray(centres), np.asarray(shifts), np.asarray(sds)
+    um = (centres - centres.mean(0)) * np.asarray(pixel_nm, float) / 1000.0
+    A = np.c_[np.ones(len(um)), um]
+    w = 1.0 / sds ** 2
+    plane = np.linalg.lstsq(A * np.sqrt(w)[:, None], shifts * np.sqrt(w), rcond=None)[0]
+    fitted = A @ plane
+    rms = float(np.sqrt(np.sum(w * (shifts - fitted) ** 2) / np.sum(w)))
+    return FieldEdges(centres, shifts, sds, plane, rms, float(fitted.max() - fitted.min()))
+
+
 def below_coverslip(h, sd, edge: Edge, k: float = 3.0) -> np.ndarray:
     """Which heights above the coverslip ``h`` (the edge's shift taken off), with CRLBs ``sd``, lie below it by
     more than ``k`` errors: each height's scatter, κ times its CRLB as the edge measured it, and the edge's own

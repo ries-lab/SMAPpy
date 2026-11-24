@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from uipsf.workflows.insitu_rounds import _focus_per_height, _moved, below_coverslip, coverslip_edge
+from uipsf.workflows.insitu_rounds import _focus_per_height, _moved, below_coverslip, coverslip_edge, edge_over_field
 
 
 def heights(n=1500, on_coverslip=0.2, shift=120.0, sd=30.0, scatter=1.2, outliers=0.01, seed=0):
@@ -70,3 +70,22 @@ def test_moved_is_the_rms_change_in_standard_errors_of_the_change():
     old = {"pupil.phase": torch.zeros(4), "geometry.focus": torch.tensor(700.0)}
     new = {"pupil.phase": torch.tensor([0.01, -0.01, 0.0, 0.0]) * np.sqrt(2), "geometry.focus": torch.tensor(700.0)}
     assert _moved(new, old, sd, sd) == pytest.approx(np.sqrt(2 / 5))
+
+
+def test_the_coverslip_edge_measured_over_the_field_finds_a_tilted_focus():
+    """A focus tilted against the coverslip by 3 nm/µm over a 100 µm field: every region's lowest molecules
+    sit that much higher or lower, and the plane through the regions' edges gives the tilt back."""
+    rng = np.random.default_rng(3)
+    n = 6000
+    xy = rng.uniform(0, 1000, (n, 2))                         # chip pixels, 100 nm each
+    h, s = heights(n=n, shift=0.0, seed=4)
+    tilt = 3.0                                                # nm per µm, along x
+    h = h + tilt * (xy[:, 0] - 500) * 0.1
+    edges = edge_over_field(h, s, xy, (100.0, 100.0), tiles=3)
+    assert edges is not None and len(edges.shift_nm) == 9
+    assert abs(edges.plane[1] - tilt) < 0.5 and abs(edges.plane[2]) < 0.5
+    assert edges.span_nm == pytest.approx(tilt * 66.7, rel=0.25)        # the regions' centres span ~2/3
+    assert "tilted" in edges.summary()
+    flat = edge_over_field(*heights(n=n, shift=0.0, seed=5), xy, (100.0, 100.0))
+    assert abs(flat.plane[1]) < 0.5 and flat.span_nm < 50.0
+    assert edge_over_field(h[:100], s[:100], xy[:100], (100.0, 100.0)) is None      # too few

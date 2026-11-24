@@ -348,16 +348,16 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
 
 
 def sample_heights(model: ForwardModel, shared: dict, heights_nm, roi_px=None, upsample: int | None = None,
-                   focus_nm: float | None = None) -> torch.Tensor:
+                   focus_nm: float | None = None, field_xy=None) -> torch.Tensor:
     """An in situ model's PSF for emitters on the region's centre at ``heights_nm`` above the coverslip,
     seen through its focus (``focus_nm``, default the learnt ``geometry.focus``): [N, Y, X] on the CPU, as
     `sample_psf`.  The focus enters as the stage defocus z = −f, the height as the depth in the sample
-    (`InSituGeometry`)."""
+    (`InSituGeometry`).  ``field_xy`` as `sample_psf`'s."""
     h = torch.as_tensor(heights_nm, dtype=torch.float64).reshape(-1)
     f = float(shared["geometry.focus"] if focus_nm is None else focus_nm)
     xyz = torch.zeros(len(h), 3, dtype=torch.float64)
     xyz[:, 2] = -f
-    return sample_psf(model, shared, xyz, roi_px, h, upsample=upsample)
+    return sample_psf(model, shared, xyz, roi_px, h, upsample=upsample, field_xy=field_xy)
 
 
 @dataclass

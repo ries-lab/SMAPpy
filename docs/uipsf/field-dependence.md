@@ -513,3 +513,45 @@ not learn with a field); DECODE's two-channel models are the netfit session's.
   −360 to +360 nm: Spline 3D 2C with the node splines puts them within a few nm of their z (the bias's rms
   about its mean under 10 nm); with the centres' splines alone the z range came out compressed by about 40 %.
 - The same pair drawn for a focus 1.5 µm into the sample keeps both channels' grids.
+
+### 12.3 In situ, from the blinking molecules of the data
+
+§6 asked for three things in situ: spots spread evenly over the field, and a way through two degeneracies --
+the ±z mirror solution, and a focal surface against a tilted or curved sample.
+
+**The spots, evenly over the field.**  The selection draws each z bin's molecules one from each of 4 × 4 regions
+of the field in turn (`insitu.spread_draw`, ``field_tiles``); `run_insitu` sets it and redraws the detection's
+selection at the start, so every round chooses that way.  Under a Gaussian illumination the brightness window
+otherwise draws mostly from the middle of the field, where the brightest molecules are; a plain draw of 90 from
+a field with nine tenths of its molecules in the middle put more than 50 in one of nine regions, the spread draw
+5 to 20 in each.
+
+**The mirror solution.**  The twin test fits the twin of the learnt pupil, A'(k) = A*(−k), and compares; with a
+field the twin is the twin *at every place*, so the field's terms mirror as their mode does: astigmatism's
+flip, coma's stay (`insitu.twin`; with matched indices the twin of a field-dependent pupil images the mirrored
+height exactly at every chip position, `test_insitu.py`).  The start's sign of astigmatism still decides, as
+without a field, and the field only adds to it; a field that changes the astigmatism's sign somewhere on the
+chip would need the twin test per region, which nothing so far has shown to be needed.
+
+**The focal surface against a tilted or curved sample.**  Not modelled.  In situ every molecule's height is
+learnt, so a focus tilted or curved against the coverslip is taken up by the heights, as a bead's z takes it
+(§7), and the PSF sees it only through the depth: the index mismatch's few nanometres of path per 100 nm.  A
+focal surface and a tilted or curved sample make the same heights, so no fit can tell them apart -- only the
+coverslip can, where the sample touches it.  So the coverslip's edge is measured in 3 × 3 regions of the field
+(`insitu_rounds.edge_over_field`, each region's lowest heights as `coverslip_edge` reads the whole field's) and a
+plane fitted through the regions' edges: how far the focus moves over the field against the coverslip, reported,
+with a warning beyond 150 nm (the focus the edge sets is then the field's average).  On simulated heights a
+focus tilted by 3 nm/µm came back within 0.5 nm/µm, and an untilted one within 0.5 with a span under 50 nm.
+
+**A small field is not judged.**  A run on a simulated 8 µm movie with a model too small for its pupil found a
+"significant" field, 31 nats against a threshold of 27 and 0.4 rad of astigmatism across 5 µm: the model's
+misfit, which varies with the brightness and so with the position under a Gaussian illumination, taken up by a
+polynomial of the position.  Below 20 µm of emitters (`diagnostics.field.MIN_SPAN_UM`) the report says the field
+cannot be told, and the export makes no node splines (`pupil.field_extent`); M5's beads, whose small field is
+real, span 25 µm.
+
+**Measured, simulations** (`test_insitu.py`, `test_insitu_run.py`): 160 emitters in the sample over a
+1000 px chip (127 × 116 µm), astigmatism changing by up to 0.25 rad per 50 µm and coma by 0.12, learnt from a
+start of the right sign: every mode's change at the chip's corners and edges within 4 of its CRLBs (each under
+0.04 rad), the twin test agreeing, the field significant.  The whole run through SMAPpy on a simulated movie,
+with node splines drawn through the in situ model's heights.

@@ -1004,7 +1004,15 @@ the coverslip in z sweeps, in one channel or two.  With two channels of a split
 chip each channel learns its own field -- the two colours cross the objective
 at different wavelengths and then each half passes its own optics -- and keeps
 its own grid of splines over its half of the chip; Spline 3D 2C blends each
-channel's where its spot is.  Molecules are thousands of points
+channel's where its spot is.  In situ, from the blinking molecules of the data
+(one channel), the molecules are drawn evenly from 4 × 4 regions of the field,
+so its dimmer edges count as much as its centre.  Each molecule's height is
+learnt anyway, so a focus tilted or curved against the coverslip is taken up
+by the heights and changes the PSF only through the depth; the coverslip's
+edge measured in 3 × 3 regions says how much the focus moves over the field,
+with a warning beyond 150 nm.  Over a field of less than 20 µm the field is
+not judged and no grid of splines is made: there a polynomial of the position
+takes up the model's own misfit.  Molecules are thousands of points
 spread over the chip, so they sample the field more densely than tens of beads;
 but each molecule's z is the stage's, held to the focal plane, so with the
 field the plane learns its curvature too (field curvature: the focus a few

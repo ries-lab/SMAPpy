@@ -81,6 +81,16 @@ def gaussian_transforms(model, batch) -> dict:
             and g["transform_fit"][c]["rms_px"] <= GAUSS_MAX_RMS_PX}
 
 
+def field_for(psf, centre_px, pixel_size_nm):
+    """The `FieldPolynomial` a channel with ``psf`` learns about ``centre_px``: the default terms of the modes
+    its pupil learns (astigmatism needs order 2, coma 3; a held mode has no centre to vary about), None when
+    it learns none of them."""
+    from ..model.field import DEFAULT_TERMS
+    learnt = set(getattr(psf.pupil, "phase_modes", ()))
+    terms = [t for t in DEFAULT_TERMS if t[0] in learnt]
+    return FieldPolynomial(centre_px, pixel_size_nm, terms=terms) if terms else None
+
+
 def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max_nm: float = 0.0,
                device=None, dtype=torch.float32, held: Held | None = None, field_centre_px=None) -> ForwardModel:
     """The model a bead calibration learns: one channel per `Optics` in ``optics`` (one, or a list, the
@@ -110,7 +120,7 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
                 raise ValueError("a field-dependent model needs the field's centre (the beads' chip positions)")
             # every channel its own polynomial of the main channel's chip position, which is the sample's
             # (`Batch.field_xy`): docs/uipsf/field-dependence.md §12.2
-            field = FieldPolynomial(field_centre_px, optics[0].pixel_size_nm)
+            field = field_for(psf, field_centre_px, optics[0].pixel_size_nm)
         channels.append(Channel(psf, transform=H, field=field))
     return ForwardModel(channels, geometry=BeadStackGeometry(drift=settings.drift, fit_tilt=settings.fit_tilt))
 
@@ -137,7 +147,7 @@ def insitu_model(optics, spec: PSFModelSettings, roi_shape, focus_nm: float, z_m
     from ..model import Bleaching, InSituGeometry
     psf = make_psf(optics, replaced(spec, saf_damping=False), roi_shape, held=held, z_max_nm=z_max_nm,
                    device=device, dtype=dtype)
-    field = None if field_centre_px is None else FieldPolynomial(field_centre_px, optics.pixel_size_nm)
+    field = None if field_centre_px is None else field_for(psf, field_centre_px, optics.pixel_size_nm)
     return ForwardModel([Channel(psf, field=field)],
                         geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
                         intensity=Bleaching(order=0))
@@ -169,7 +179,7 @@ def molecule_stack_model(optics, spec: PSFModelSettings, roi_shape, sweeps: int,
     for o, H in zip(optics, transforms, strict=True):
         psf = make_psf(o, replaced(spec, saf_damping=False), roi_shape, z_max_nm=z_max_nm, device=device, dtype=dtype)
         psf.saf_only_depth = True
-        field = FieldPolynomial(centre_px, optics[0].pixel_size_nm) if field_dependence else None
+        field = field_for(psf, centre_px, optics[0].pixel_size_nm) if field_dependence else None
         channels.append(Channel(psf, transform=H, field=field))
     geometry = CoverslipStackGeometry(sweeps, focus_nm, centre_px, optics[0].pixel_size_nm, height_nm=height_nm,
                                       curvature=field_dependence)

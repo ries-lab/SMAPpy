@@ -262,8 +262,8 @@ and excitation (the donuts of MINFLUX and STED, above).
   coma as polynomials of the chip position (`FieldPolynomial`), its report, node splines over the chip
   blended per spot in Spline 3D (`docs/uipsf/architecture.md`, "Field dependence"); molecules on the
   coverslip in z sweeps, with the focal surface's curvature; two channels, a field each, blended per
-  channel in Spline 3D 2C (study §12).  Next: the gridded residual, in situ, the focal surface for large
-  bead fields.  (uiPSF v1's map export to FD-DeepLoc is
+  channel in Spline 3D 2C; in situ, the molecules drawn evenly over the field (study §12).  Next: the gridded
+  residual, the focal surface for large bead fields.  (uiPSF v1's map export to FD-DeepLoc is
   misregistered by n/(n−1), review §E.)
 
 ### Physics (M8 and this session's studies)

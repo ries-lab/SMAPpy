@@ -79,6 +79,10 @@ class InSituModelSettings:
 #: movie, so that a movie dense enough to fill every bin from its first block is still sampled through its
 #: whole length -- its bleaching, its drift of focus, the late sparse frames
 MIN_BLOCKS = 10
+#: with *field dependence*: each z bin drawn evenly from this many by this many regions of the field
+#: (`insitu.spread_draw`), and the coverslip's edge measured in 3 × 3 (`edge_over_field`); a focus that moves
+#: by more than `EDGE_SPAN_NM` over the field against the coverslip is warned about
+FIELD_TILES, EDGE_TILES, EDGE_SPAN_NM = 4, 3, 150.0
 #: reading stops, with z bins still short, once one bin has this many times its share passing: the short ones
 #: are short in these data (below the coverslip, the outermost heights), not for want of frames read
 SPARSE_FACTOR = 20
@@ -243,12 +247,14 @@ def used_heights(run) -> tuple[float, float]:
 
 
 def insitu_spline(model, shared: dict, heights_nm: tuple, dz_nm: float, roi_size: int, z: str = "focus",
-                  upsample: Optional[int] = None, camera=None):
+                  upsample: Optional[int] = None, camera=None, extent=None):
     """smappy's `SplineCalibration` of an in situ model: its PSF at the learnt focus, sampled every ``dz_nm``
     through ``heights_nm`` (lowest, highest), normalised as the bead calibrations' (the brightest plane
     sums to 1).  ``z`` "focus": the spline's z is the height above the plane in focus (the sharpest
     plane, z = 0 there), as a bead spline's; "height": the height above the coverslip, the grid then
-    reaching down to it, since the spline's z0 must lie on it."""
+    reaching down to it, since the spline's z0 must lie on it.  ``extent`` ((x, y) lowest, highest chip
+    pixels, `pupil.field_extent`) of a field-dependent model: node splines over it (`pupil.node_splines`), each
+    drawn on the same heights and normalised by the centre's scale; the centre is the field's."""
     from uipsf.export import sample_heights
 
     from ..io.calibration import SplineCalibration
@@ -266,7 +272,16 @@ def insitu_spline(model, shared: dict, heights_nm: tuple, dz_nm: float, roi_size
     sharpest = float(heights[int(np.argmax(psf.max(axis=(1, 2))))])
     reference = 0.0 if z == "height" else sharpest
     z0 = (high - reference) / dz_nm                            # z = -(index - z0)·dz = height - reference
-    psf /= float(psf.sum(axis=(1, 2)).max())
+    scale = float(psf.sum(axis=(1, 2)).max())
+    psf /= scale
+    field = None
+    if extent is not None:
+        from .pupil import node_splines
+
+        def psf_at(x, y):
+            node = sample_heights(model, shared, heights, roi_size, up, field_xy=(x, y)).double().numpy()
+            return np.maximum(node, 0) / scale
+        field = node_splines(psf_at, *extent)
     focus = float(shared["geometry.focus"])
     parameters = {"method": "uipsf2_insitu", "normalization": "maximum plane sum = 1",
                   "z_convention": "emitter_nm = -(index-z0)*dz",
@@ -281,11 +296,14 @@ def insitu_spline(model, shared: dict, heights_nm: tuple, dz_nm: float, roi_size
     if optics is not None:                                    # the sample's index it was learnt at (`pupil.learnt_index`)
         parameters.update(sample_index=float(optics.n_med), n_immersion=float(optics.n_imm))
     psf = psf.astype(np.float32)
-    return SplineCalibration(spline_coefficients(psf), float(dz_nm), float(z0), x0=(roi_size - 1) / 2, psf=psf,
-                             em_on=None if camera is None else bool(camera.is_em),
-                             pixelsize_um=None if camera is None or camera.pixelsize_um is None
-                             else np.atleast_1d(np.asarray(camera.pixelsize_um, float)),
-                             parameters=parameters)
+    out = SplineCalibration(spline_coefficients(psf), float(dz_nm), float(z0), x0=(roi_size - 1) / 2, psf=psf,
+                            em_on=None if camera is None else bool(camera.is_em),
+                            pixelsize_um=None if camera is None or camera.pixelsize_um is None
+                            else np.atleast_1d(np.asarray(camera.pixelsize_um, float)),
+                            parameters=parameters)
+    from .pupil import _with_field
+    _with_field(out, field)
+    return out
 
 
 # ------------------------------------------------------------------ a whole run
@@ -320,6 +338,8 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     (`microscope_db.gamma_of`: its entry's ``gamma``, or a minimal pupil kept with it) rather than learning
     it, since γ learnt from molecules trades with the focus; with none, a nominal γ (`NOMINAL_GAMMA`), with
     a warning: on M2 holding 0.36 instead of the beads' 0.08 moved the learnt astigmatism by 0.24 rad."""
+    from dataclasses import replace
+
     import torch
 
     from uipsf.workflows import insitu_model
@@ -339,10 +359,20 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     if not len(rois.ids("used")):
         raise ValueError("no molecules chosen: review the detection's settings")
     detection = detection.resolved(rois.pixel_size_nm)
+    field_on = bool(getattr(model, "field_dependence", False))
+    centre = None
+    if field_on:
+        # the field's centre: the middle of the molecules' span, as the beads' (`pupil.field_centre`)
+        xy = np.asarray(rois.units.centre, float)
+        centre = tuple(float(v) for v in (xy.min(0) + xy.max(0)) / 2)
+        if detection.field_tiles <= 1:
+            # every bin drawn evenly over the field, from the first round on: the detection drew without it
+            from .insitu import select
+            detection = replace(detection, field_tiles=FIELD_TILES)
+            rois.state, rois.bins, rois.edges = select(rois.units, detection)
     o = optics.optics(rois.camera, 1)[0]
     roi = int(rois.units.regions.shape[-1])
     guess = 1000.0 if insitu.focus_nm is None else float(insitu.focus_nm)
-    from dataclasses import replace
 
     from ..microscope_db import pupil_of
     from .pupil import load_start
@@ -401,8 +431,9 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
         raise ValueError("a focus from the coverslip needs the sample on the coverslip: type the focus instead")
 
     def make(focus):
+        extra = {} if centre is None else dict(field_centre_px=centre)
         return insitu_model(o, spec, (roi, roi), focus, device=device, held=held, fit_focus=focus_fit == "learnt",
-                            fit_tilt=model.fit_tilt)
+                            fit_tilt=model.fit_tilt, **extra)
     learnt = make(guess)
     start, previous = start_shared(learnt, run.start_from, astigmatism or 0.0, o.wavelength_nm, kept)
     result_focus = None
@@ -423,6 +454,14 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     if edge and not any(r.focus_prior is not None for r in learned.rounds[1:]) and len(learned.rounds) > 1:
         messages.append("no coverslip edge found: the molecules may lie too deep; the focus is not pinned by "
                         "the coverslip -- type it if it is known")
+    if field_on and learned.rounds:
+        edges = field_edges(learned.final.calibration, rois.pixel_size_nm)
+        if edges is not None:
+            messages.append(edges.summary())
+            if edges.span_nm > EDGE_SPAN_NM:
+                messages.append(f"warning: the focus moves by {edges.span_nm:.0f} nm over the field against the "
+                                f"coverslip (a tilted coverslip or focal plane): the focus the coverslip set is "
+                                f"the field's average; the PSF hardly changes with it")
     result.messages += messages
     cal = learned.final
     if cal.twin is not None:
@@ -433,6 +472,21 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
         path = Path(save_to) if save_to else default_save_path(paths, False)
         result.saved = save(path, cal.calibration, result.calibration, overwrite=bool(save_to))
     return result
+
+
+def field_edges(cal, pixel_size_nm):
+    """The coverslip's edge over the field (`uipsf.workflows.insitu_rounds.edge_over_field`) from the heights
+    ``cal`` (a uipsf `Calibration`) learnt its molecules at, with their CRLBs and chip positions; None
+    without positions or with too few molecules."""
+    from uipsf.workflows.insitu_rounds import edge_over_field
+    xy = cal.beads_field_xy() if callable(getattr(cal, "beads_field_xy", None)) else None
+    if xy is None:
+        return None
+    h = cal.result.params.physical()["emitter.xyz"][:, 2].detach().cpu().double().numpy()
+    sd = cal.result.std["emitter.xyz"][:, 2].detach().cpu().double().numpy()
+    if len(h) != len(xy):
+        return None
+    return edge_over_field(h, sd, xy, pixel_size_nm, EDGE_TILES)
 
 
 def calibration_of(result: InSituRunResult, spline=None, insitu: InSituModelSettings | None = None):
@@ -449,9 +503,10 @@ def calibration_of(result: InSituRunResult, spline=None, insitu: InSituModelSett
             low, high = sharpest - span, sharpest + span
         else:
             low, high = low - SPLINE_MARGIN_NM, high + SPLINE_MARGIN_NM
+        from .pupil import field_extent
         result.calibration = insitu_spline(model, cal.shared(), (low, high), dz,
                                            int(result.rois.units.regions.shape[-1]), insitu.spline_z,
-                                           camera=result.rois.camera)
+                                           camera=result.rois.camera, extent=field_extent(cal))
         from uipsf.diagnostics import coverslip_tilt
         tilt = coverslip_tilt(cal)                        # with its CRLB, as a bead model's record keeps it
         if tilt is not None:

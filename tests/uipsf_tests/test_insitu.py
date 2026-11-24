@@ -19,17 +19,22 @@ f64 = torch.float64
 
 def insitu_emitters(optics, n=12, focus=600.0, true_focus=None, P=24, roi=(11, 11), seed=0, photons=3000.0,
                     phase=(0.1, 0.7, -0.2, 0.15, 0.1), kind="vector", frames=1, frame_factors=None,
-                    heights=(0.0, 1000.0)):
+                    heights=(0.0, 1000.0), truth_field=None, chip=1000.0):
     """(model, truth Params, Batch): ``n`` emitters at heights in ``heights`` (nm, uniform), seen with the
     focus at ``true_focus`` (default ``focus``, the model's start); astigmatism, coma and spherical (Noll 5–9).
 
     With ``frames`` > 1 each emitter is a linked blink: one position in all its frames, photons per frame
-    (`PerObservation`), its count times ``frame_factors`` [frames] (default 1 in every frame)."""
+    (`PerObservation`), its count times ``frame_factors`` [frames] (default 1 in every frame).
+
+    ``truth_field`` ({(Noll, i, j): rad}): a field-dependent pupil (`FieldPolynomial` about the middle of a
+    ``chip`` px square), the emitters spread over the chip."""
+    from uipsf.model import Channel, FieldPolynomial
     grid = uipsf.PupilGrid.build(optics, P, device="cpu", dtype=f64)
     pupil = uipsf.ZernikePupil(grid, n_max=4)
     psf = uipsf.VectorPSF(grid, pupil, roi, sigma_nm=(30.0, 30.0), kind=kind)
     intensity = Bleaching(order=0) if frames == 1 else PerObservation()
-    model = uipsf.ForwardModel(psf, geometry=InSituGeometry(focus), intensity=intensity)
+    field = None if truth_field is None else FieldPolynomial((chip / 2, chip / 2), optics.pixel_size_nm)
+    model = uipsf.ForwardModel([Channel(psf, field=field)], geometry=InSituGeometry(focus), intensity=intensity)
     g = torch.Generator().manual_seed(seed)
     xy = (torch.rand(n, 2, generator=g, dtype=f64) - 0.5) * 150
     h = heights[0] + torch.rand(n, generator=g, dtype=f64) * (heights[1] - heights[0])
@@ -45,6 +50,9 @@ def insitu_emitters(optics, n=12, focus=600.0, true_focus=None, P=24, roi=(11, 1
         factors = torch.ones(frames, dtype=f64) if frame_factors is None else torch.as_tensor(frame_factors, dtype=f64)
         values["emitter.photons_per_slice"] = N[:, None] * factors
     b0 = template(n, torch.zeros(frames, dtype=f64), roi, dtype=f64)
+    if field is not None:
+        values["field.phase"] = torch.tensor([truth_field.get(t, 0.0) for t in field.layout], dtype=f64)
+        b0 = replace(b0, field_xy=torch.rand(n, 2, generator=g, dtype=f64) * chip)
     truth = parameters(model, b0, values, dtype=f64)
     return model, truth, simulate(model, truth, b0, seed=seed + 1)
 
@@ -262,3 +270,57 @@ def test_the_compiled_kernels_shapes_are_powers_of_two():
     assert [_bucket(n) for n in (1, 3, 4, 5, 300, 513, 1284)] == [1, 4, 4, 8, 512, 1024, 1536]
     padded = _pad_dim0(torch.ones(3, 2), 4)
     assert padded.shape == (4, 2) and float(padded[3].abs().sum()) == 0.0
+
+
+# ------------------------------------------------------------------ field dependence (field-dependence.md §12.3)
+def test_the_twin_of_a_field_flips_its_astigmatism_terms_and_keeps_its_coma_terms(optics):
+    model, truth, _ = insitu_emitters(optics, n=1, truth_field={(6, 1, 0): 0.3})
+    field = model.channels[0].field
+    shared = dict(truth.physical(), **{"field.phase": torch.arange(1.0, len(field.layout) + 1, dtype=f64)})
+    t = twin(model, shared)
+    for (j, _, _), before, after in zip(field.layout, shared["field.phase"], t["field.phase"], strict=True):
+        assert float(after) == (-float(before) if j in (5, 6) else float(before)), j
+
+
+def test_with_matched_indices_the_twin_of_a_field_images_the_mirrored_height_at_every_place():
+    optics = uipsf.Optics(NA=1.2, wavelength_nm=680, n_imm=1.33, n_med=1.33, pixel_size_nm=(110, 110))
+    model, truth, batch = insitu_emitters(optics, n=3, kind="scalar",
+                                          truth_field={(6, 1, 0): 0.4, (5, 1, 1): 0.3, (8, 0, 1): 0.2})
+    p = truth.physical()
+    q = dict(p, **{k: v for k, v in twin(model, p).items() if k.startswith(("pupil.", "field."))})
+    pa, pb = model.channel_params(p, batch, 0), model.channel_params(q, batch, 0)
+    for dz in (-400.0, 250.0):
+        xyz = torch.full((3, 1, 3), 0.0, dtype=f64)
+        xyz[..., 2] = dz
+        assert torch.allclose(model.psf(pb, -xyz), model.psf(pa, xyz), rtol=1e-9, atol=1e-12)
+
+
+@pytest.mark.slow
+def test_molecules_in_the_sample_spread_over_the_chip_give_back_the_field(optics):
+    """In situ with *field dependence*: 160 emitters over a 1000 px chip (127 × 116 µm), astigmatism and coma
+    changing over it, learnt from a start of the right sign without the field: the field comes back at the
+    chip's corners, the twin test still agrees, and the report calls the field significant."""
+    from uipsf.diagnostics import field_report
+    truth_field = {(6, 1, 0): 0.25, (5, 0, 1): 0.2, (6, 0, 2): 0.1, (8, 1, 0): 0.12}
+    model, truth, batch = insitu_emitters(optics, n=160, P=16, roi=(9, 9), photons=5000.0, focus=600.0,
+                                          true_focus=650.0, truth_field=truth_field)
+    phase = torch.zeros(len(model.psf.pupil.phase_modes), dtype=f64)
+    phase[1] = 0.4
+    result = learn_insitu(model, batch, start={"pupil.phase": phase}, heights=HEIGHTS)
+    field = model.channels[0].field
+    fit = result.calibration.result
+    learnt = fit.params.physical()["field.phase"].detach().double()
+    true = truth.physical()["field.phase"]
+    lo, hi = next((a, b) for n, a, b in fit.params.layout("shared") if n == "field.phase")
+    cov = fit.covariance_shared[lo:hi, lo:hi].detach().double()
+    # each mode's change at the chip's corners and edges against its own CRLB there: 160 molecules pin a
+    # corner's astigmatism to about 0.02 rad, a third of what the field does there
+    corners = torch.tensor([[x, y] for x in (0.0, 500.0, 1000.0) for y in (0.0, 500.0, 1000.0)], dtype=f64)
+    for j, _ in field.terms:
+        rows = [i for i, (m, _, _) in enumerate(field.layout) if m == j]
+        g = field.basis(corners)[:, rows]
+        error = g @ (learnt - true)[rows]
+        sd = torch.sqrt(torch.einsum("ei,ij,ej->e", g, cov[rows][:, rows], g))
+        assert torch.all(error.abs() < 4 * sd + 0.005) and float(sd.max()) < 0.04, (j, error, sd)
+    assert result.twin.verdict == "agree"
+    assert field_report(result.calibration).significant

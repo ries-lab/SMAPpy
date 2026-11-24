@@ -195,7 +195,7 @@ def test_the_rounds_recover_the_pupil_the_height_the_foci_and_the_plane_and_find
     assert check.bad.mean() < 0.05
 
 
-@pytest.mark.slow
+@pytest.mark.long          # 30-140 s: a learning study
 def test_molecules_over_the_chip_give_back_the_field_and_the_focal_surfaces_curvature():
     """Field dependence from molecules on the coverslip: astigmatism varying over a 1000 px chip (110 µm) and a
     curved focal surface, both recovered -- the curvature where the molecules' z is held to it, which a

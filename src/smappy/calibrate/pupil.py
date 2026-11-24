@@ -598,8 +598,10 @@ def field_extent(learned, channel: int = 0):
     """((x, y) lowest, (x, y) highest) chip pixels of the beads a field-dependent model was learnt on, in
     channel ``channel``'s own chip pixels (the main channel's positions through the model's transform): where
     its field is known, and so the span of that channel's spline grid; None without a field or bead
-    positions."""
-    if getattr(learned.model.channels[channel], "field", None) is None:
+    positions, or over less than `uipsf.diagnostics.field.MIN_SPAN_UM`, where the field's report says it
+    cannot be told from the model's misfit: one spline, not a grid of that misfit."""
+    field = getattr(learned.model.channels[channel], "field", None)
+    if field is None:
         return None
     if callable(getattr(learned, "beads_field_xy", None)):
         xy = learned.beads_field_xy()
@@ -609,6 +611,9 @@ def field_extent(learned, channel: int = 0):
     if not xy:
         return None
     xy = np.asarray(xy, float)
+    from uipsf.diagnostics.field import MIN_SPAN_UM
+    if float(np.max((xy.max(0) - xy.min(0)) * np.asarray(field.pixel_size_nm)) / 1000.0) < MIN_SPAN_UM:
+        return None
     if channel:
         xy = _apply(np.linalg.inv(_transform(learned)), xy)
     return xy.min(0), xy.max(0)

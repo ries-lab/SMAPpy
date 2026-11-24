@@ -171,7 +171,11 @@ def twin(model, shared: dict) -> dict:
     m = 1, kept as coma is.  Its second order, an astigmatism ∝ t², is even and would flip, which no tilt
     can do: at 1° it is 0.007 rad of astigmatism for a molecule 1 µm deep (oil) and 0.03 rad through the
     plate of a water objective (`optics.layers.aberrations`), against the tenths of a radian the twin test
-    is about."""
+    is about.
+
+    A field (`model.field`) adds to each mode's coefficient a function of the chip position, so its terms
+    mirror as their mode does: the astigmatism's flip with it, the coma's stay (§12.3 of
+    `docs/uipsf/field-dependence.md`).  The twin of a field-dependent pupil is then the twin at every place."""
     out = dict(shared)
     for c, ch in enumerate(model.channels):
         pupil = ch.psf.pupil
@@ -184,6 +188,11 @@ def twin(model, shared: dict) -> dict:
                 v = torch.as_tensor(shared[name])
                 parity = v.new_tensor([(-1.0) ** abs(noll_to_nm(j)[1]) for j in modes])
                 out[name] = sign * parity * v
+        field = getattr(ch, "field", None)
+        if field is not None and pre + "field.phase" in shared:
+            v = torch.as_tensor(shared[pre + "field.phase"])
+            parity = v.new_tensor([(-1.0) ** abs(noll_to_nm(j)[1]) for j, _, _ in field.layout])
+            out[pre + "field.phase"] = -parity * v
     return out
 
 

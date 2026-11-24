@@ -39,8 +39,10 @@ what would mislead the fit -- overlapping molecules first.  The steps, each a fu
    unresolved pair is wider or elongated for its z; then a random draw of the bin's share of ``molecules`` (`quotas`) from a
    **brightness window** ``window_factor`` (3) wide below the bin's ``window_top`` (90th) percentile of
    photons, not the brightest: those are where unresolved pairs collect, and with a Gaussian
-   illumination they are the field's centre.  Of the molecules, ``heldout`` (10 %) are held out, all
-   their frames.
+   illumination they are the field's centre.  With ``field_tiles`` above 1 (*field dependence*) each bin's
+   draw is spread evenly over that many by that many regions of the field (`spread_draw`), so the edges,
+   dimmer under a Gaussian illumination and fewer, tell the field as much as the centre does.  Of the
+   molecules, ``heldout`` (10 %) are held out, all their frames.
 
 Every unit is a record with its state (*used*, *held out*, *rejected*, *not drawn*) and the reason,
 as the beads are (`uipsf.workflows.rejection`).  `InSituROIs.batch` is the `uipsf.Batch` of the used
@@ -118,6 +120,10 @@ class InSituSettings:
     heldout: float = param(0.1, label="held out", min=0.0, max=0.5, hidden=True,
                            help="the fraction of molecules kept out of learning, for the held-out check")
     seed: int = param(0, label="seed", hidden=True, help="the random draws' seed")
+    # with *field dependence* the run sets 4 (`insitu_run.FIELD_TILES`): each bin drawn evenly over the field
+    field_tiles: int = param(1, label="field tiles", min=1, hidden=True,
+                             help="draw each z bin's molecules evenly from this many by this many regions of "
+                                  "the field")
     # Not in the window yet: a script's, for one channel of a split chip (M2's 665LP movies, October 2026)
     region: Optional[tuple] = param(None, label="region", hidden=True,
                                     help="(x, y, width, height) in the movie's pixels: only molecules inside "
@@ -501,10 +507,32 @@ def select(u: Units, settings: InSituSettings, proxy=None, photons=None, shape=N
         for i in pools[k]:
             state[i] = "not drawn"
     take = quotas([len(pools.get(k, ())) for k in range(settings.bins)], settings.molecules)
+    tiles = int(getattr(settings, "field_tiles", 1) or 1)
+    xy = np.asarray(u.centre, float)
     for k, pool in pools.items():
-        for i in rng.permutation(pool)[:take[k]]:
+        for i in spread_draw(pool, xy, take[k], tiles, rng):
             state[i] = "held out" if held[int(u.blink[i])] else "used"
     return state, bins, edges
+
+
+def spread_draw(pool, xy, n: int, tiles: int, rng) -> np.ndarray:
+    """``n`` of the units ``pool`` drawn at random, evenly over ``tiles`` × ``tiles`` regions of the span of
+    every unit's chip position ``xy`` [U, 2]: one from each region in turn (the regions' order and each
+    region's own random), so a region with fewer gives all it has and the others make up the number.  One
+    region is a plain random draw, the same as before there were regions."""
+    pool = np.asarray(pool, int)
+    if tiles <= 1 or len(pool) <= n:
+        return rng.permutation(pool)[:n]
+    lo, hi = xy.min(0), xy.max(0) + 1e-9
+    cell = np.clip(((xy[pool] - lo) / (hi - lo) * tiles).astype(int), 0, tiles - 1)
+    key = cell[:, 0] * tiles + cell[:, 1]
+    queues = [list(rng.permutation(pool[key == t])) for t in rng.permutation(np.unique(key))]
+    out = []
+    while len(out) < n:
+        for q in queues:
+            if q and len(out) < n:
+                out.append(q.pop())
+    return np.asarray(out, int)
 
 
 def quotas(pools, total: int) -> list:

@@ -40,7 +40,7 @@ SELECTION = InSituSettings(block_frames=150, molecules=63)          # 3 a bin
 
 
 def small_model(optics, spec, roi_shape, focus_nm, z_max_nm=2000.0, device=None, dtype=torch.float32, held=None,
-                fit_focus=True, fit_tilt=False):
+                fit_focus=True, fit_tilt=False, field_centre_px=None):
     """`insitu_model` with a pupil of 16 samples on the CPU instead of 64, for seconds rather than a minute: the
     same builder (`uipsf.model.build`), a smaller grid."""
     from dataclasses import replace
@@ -51,7 +51,10 @@ def small_model(optics, spec, roi_shape, focus_nm, z_max_nm=2000.0, device=None,
     grid = pupil_grid(optics, spec, size=16, device="cpu", dtype=dtype)
     psf = make_psf(optics, spec, roi_shape, held=held, grid=grid)
     geometry = uipsf.model.InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt)
-    return uipsf.ForwardModel(psf, geometry=geometry, intensity=uipsf.model.Bleaching(order=0))
+    from uipsf.workflows.calibrate import field_for
+    field = None if field_centre_px is None else field_for(psf, field_centre_px, optics.pixel_size_nm)
+    return uipsf.ForwardModel([uipsf.model.Channel(psf, field=field)], geometry=geometry,
+                              intensity=uipsf.model.Bleaching(order=0))
 
 
 def small(**kw):
@@ -153,6 +156,61 @@ def test_a_movie_becomes_a_saved_in_situ_calibration(movie_file, tmp_path, monke
 
 
 @pytest.mark.slow
+def test_field_dependence_in_situ_draws_over_the_field_reports_it_and_saves_node_splines(movie_file, tmp_path,
+                                                                                         monkeypatch):
+    """*field dependence* through a whole in situ run, on a small model: the molecules redrawn evenly over the
+    field, the field learnt (the movie has none, so it is reported not significant), the coverslip's edge
+    measured over the field, and the spline saved -- one spline, since 8 µm tell no field."""
+    from smappy.calibrate.insitu_run import run_insitu
+    from smappy.calibrate.psf_methods import _field_text
+
+    import uipsf.workflows
+    import uipsf.workflows.insitu as insitu_module
+    monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
+    monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
+    path, _ = movie_file
+    result = run_insitu([path], OPTICS_SETTINGS, replace(small(zernike_order=3), field_dependence=True),
+                        InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
+                        SELECTION, camera=CAMERA, save_to=tmp_path / "insitu_3dcal.h5")
+    field = result.cal.model.channels[0].field
+    assert field is not None and [j for j, _ in field.terms] == [5, 6, 7, 8]
+    assert result.rois.state.count("used") > 0
+    # the movie's 64 px (8 µm) are no field: what the polynomial takes up there is the small model's misfit,
+    # which varies over the movie's Gaussian illumination with the brightness -- 31 nats against a threshold of
+    # 27 -- so a field this small is not judged (`diagnostics.field.MIN_SPAN_UM`)
+    text = _field_text(result.cal, result.calibration)
+    assert "cannot be told over only" in text and "molecules" in text
+    # 63 molecules are too few to measure the coverslip's edge in regions (`edge_over_field`): no line about it
+    assert not any("coverslip's edge over the field" in m for m in result.messages)
+    # and so the spline is one, not a grid of that misfit
+    assert result.calibration.field_splines is None
+    import uipsf
+    learned = uipsf.load_model(result.saved, device="cpu")
+    assert learned.model.channels[0].field is not None
+
+
+def test_an_in_situ_spline_of_a_field_dependent_model_has_node_splines_over_the_molecules():
+    from smappy.calibrate.insitu_run import insitu_spline
+
+    import uipsf
+    from uipsf.model import Channel
+    from uipsf.workflows.calibrate import field_for
+    model, shared = model_and_shared()
+    psf = model.channels[0].psf
+    fielded = uipsf.ForwardModel([Channel(psf, field=field_for(psf, (500.0, 500.0), psf.grid.optics.pixel_size_nm))],
+                                 geometry=model.geometry, intensity=model.intensity)
+    field = fielded.channels[0].field
+    shared = dict(shared, **{"field.phase": torch.tensor([0.5 if t == (6, 1, 0) else 0.0 for t in field.layout],
+                                                         dtype=f64)})
+    cal = insitu_spline(fielded, shared, (100.0, 1300.0), 50.0, 15, extent=((0.0, 0.0), (1000.0, 1000.0)))
+    assert cal.field_splines is not None and cal.field_splines.shape[0] >= 3
+    assert cal.parameters["field_grid"] == list(cal.field_splines.shape)
+    assert cal.field_splines.coeff.shape[1:] == cal.coeff.shape
+    plain = insitu_spline(model, {k: v for k, v in shared.items() if k != "field.phase"}, (100.0, 1300.0), 50.0, 15)
+    assert np.allclose(plain.coeff, cal.coeff, atol=1e-6)      # the centre is the field's centre
+
+
+@pytest.mark.slow
 def test_learn_coverslip_tilt_learns_it_in_situ_and_keeps_it_in_the_files(movie_file, tmp_path, monkeypatch):
     # *learn coverslip tilt* through to the model, its result and both files.  The movie has no tilt, but its
     # pupil a coma (Noll 7, -0.2 rad) that order 2 cannot hold, so the tilt along y takes it: no value is
@@ -212,6 +270,11 @@ def test_the_window_offers_in_situ_with_its_own_section_and_finds_molecules_in_a
     shown = {k: v.isVisibleTo(window) for k, v in window.sections.items()}
     assert shown["in situ"] and not shown["beads"] and window.detect_button.text() == "Detect molecules"
     assert window.files_section.button.text() == "movies" and window.mode_box.currentText() == "Single channel"
+    form = window.model_form                                  # *field dependence*, offered in situ and read
+    assert form.row_layouts["field_dependence"].isRowVisible(form.fields["field_dependence"])
+    form.set_values(dict(field_dependence=True))
+    assert window._part("model").field_dependence
+    form.set_values(dict(field_dependence=False))
     window.optics_form.set_values(dict(NA=1.43, wavelength_nm=680.0, n_immersion=1.516))
     window.medium_form.set_values(dict(medium="typed", n_medium=1.335))
     window.insitu_detection_form.set_values(dict(molecules=63))

@@ -2993,6 +2993,15 @@ The study and the choices: `docs/uipsf/field-dependence.md`.  What is built:
   every channel's nodes one after another; `GlobalSplinePSF.fit(…, chip_xy=(n, C, 2))`, which
   `MultiChannelEngine.flush` fills from each channel's ROI centre on the chip.  `SplitEngine` passes each
   channel's chip position too (`LocalizationEngine.on_chip`).
+- **In situ** (`insitu_model(field_centre_px=)`, set by `run_insitu` with *field dependence*): the field
+  polynomial, no focal surface (each height is free and takes it up); `twin` mirrors the field's astigmatism
+  terms as it mirrors the pupil's; the selection draws each z bin evenly over 4 × 4 regions of the field
+  (`insitu.spread_draw`, `InSituSettings.field_tiles`, redrawn at the run's start); the coverslip's edge per
+  region of 3 × 3 (`insitu_rounds.edge_over_field`) reports how far the focus moves over the field;
+  `insitu_spline(extent=)` draws node splines through `sample_heights(field_xy=)` and `pupil.node_splines`.
+- **Builders keep only the modes a pupil learns** (`calibrate.field_for`): coma needs order 3; a field of
+  less than `diagnostics.field.MIN_SPAN_UM` (20 µm) is not judged by the report and gets no node splines
+  (`pupil.field_extent`).
 - **The report**, `diagnostics.field_report`: per mode the largest change across the used beads with its
   CRLB, and a Wald test of the 14 coefficients against zero, ½ c·C⁻¹·c in nats against ½ χ²(10⁻⁶): no
   refit.  The PSF calibration window's summary prints it when *field dependence* is ticked.

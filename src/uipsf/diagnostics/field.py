@@ -11,6 +11,12 @@ Too few beads do not determine the field at all: 4 beads for the 14 coefficients
 seven modes left a covariance with negative eigenvalues (the fit's Hessian singular, November 2026, a
 customer's dual-free run), whose square roots stopped the report, and the window's *State* with it.  Then
 the report says the field is not determined (``determined``), with no gain and no uncertainties.
+
+Over a small field the test is not asked.  An imperfect model's misfit that varies with position -- with
+the brightness, under a Gaussian illumination -- is what a polynomial of the position takes up there: an in
+situ run on a simulated 8 µm movie found 31 nats against a threshold of 27, the field "changing" by 0.4 rad of
+astigmatism across it.  Below `MIN_SPAN_UM` the report says the field cannot be told and calls it not
+significant.  M5's beads, whose linear astigmatism of 0.09 rad per half field is real, span 25 µm.
 """
 from __future__ import annotations
 
@@ -18,6 +24,9 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
+
+#: the emitters' span (µm, the larger side) below which a field is not judged (module docstring)
+MIN_SPAN_UM = 20.0
 
 
 @dataclass
@@ -35,6 +44,9 @@ class FieldReport:
 
     def summary(self) -> str:
         nm = 1 / (2 * math.pi) * self.wavelength_nm
+        if self.span_um < MIN_SPAN_UM:
+            return (f"field dependence cannot be told over only {self.span_um:.0f} µm of {self.unit}: learn without "
+                    f"it, or from {self.unit} spread over at least {MIN_SPAN_UM:.0f} µm")
         if not self.determined:
             return (f"field dependence is not determined by {self.n_beads} {self.unit} ({self.dof} coefficients): "
                     f"learn without it, or with more {self.unit} spread over the field")
@@ -83,5 +95,6 @@ def field_report(cal, channel: int = 0, p: float = 1e-6) -> FieldReport | None:
     span = (xy.max(0).values - xy.min(0).values).numpy() * np.asarray(field.pixel_size_nm) / 1000.0
     from ..model.geometry import BeadStackGeometry
     unit = "beads" if isinstance(cal.model.geometry, BeadStackGeometry) else "molecules"
-    return FieldReport(gain, dof, threshold, determined and gain > threshold, changes,
-                       float(ch.psf.grid.optics.wavelength_nm), float(span.max()), int(len(xy)), determined, unit)
+    span_um = float(span.max())
+    return FieldReport(gain, dof, threshold, determined and gain > threshold and span_um >= MIN_SPAN_UM, changes,
+                       float(ch.psf.grid.optics.wavelength_nm), span_um, int(len(xy)), determined, unit)

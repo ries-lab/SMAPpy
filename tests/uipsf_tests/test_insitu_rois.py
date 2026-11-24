@@ -280,3 +280,21 @@ def test_movies_are_read_until_enough_pass_but_always_spread_over_the_whole_movi
     # wanting more than the movie has reads all of it
     rois = insitu_run.movie_rois([path], I.InSituSettings(molecules=5000, block_frames=21, bins=5), camera)
     assert len(rois.sources[0]["read"]) == 50
+
+
+def test_with_field_tiles_each_bin_is_drawn_evenly_over_the_field():
+    """*field dependence* in situ: the draw takes one molecule from each region of the field in turn, so a
+    field crowded in its middle (a Gaussian illumination) still gives its corners their share."""
+    from smappy.calibrate.insitu import spread_draw
+    rng = np.random.default_rng(0)
+    xy = np.r_[rng.normal(500, 80, (900, 2)), rng.uniform(0, 1000, (100, 2))]   # most in the middle
+    pool = np.arange(len(xy))
+    drawn = spread_draw(pool, xy, 90, 3, np.random.default_rng(1))
+    cell = np.clip((xy[drawn] - xy.min(0)) / (xy.max(0) + 1e-9 - xy.min(0)) * 3, 0, 2).astype(int)
+    counts = np.bincount(cell[:, 0] * 3 + cell[:, 1], minlength=9)
+    plain = np.random.default_rng(1).permutation(pool)[:90]
+    pcell = np.clip((xy[plain] - xy.min(0)) / (xy.max(0) + 1e-9 - xy.min(0)) * 3, 0, 2).astype(int)
+    assert len(set(drawn.tolist())) == 90
+    assert counts.min() >= 5 and counts.max() <= 20                         # every region its share
+    assert np.bincount(pcell[:, 0] * 3 + pcell[:, 1], minlength=9).max() > 50   # a plain draw: the middle
+    assert np.array_equal(spread_draw(pool, xy, 90, 1, np.random.default_rng(1)), plain)
