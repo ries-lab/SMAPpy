@@ -348,14 +348,26 @@ struct CSplineField : CSpline {
 //
 // The starts of z, the phase and N are set per ROI by the caller
 // (`fit_cspline4pi_global`'s phasor start) before `init` runs.
+//
+// The coefficients are kept voxel by voxel, (nz, ny, nx, 3, 64): a pixel's
+// I, A and B are 192 floats in a row (`FourPiCalibration.fit_coeff`).  In the
+// calibration's own layout, (3, 64, nz, ny, nx) as `CSpline` reads, each of
+// them was a read 4 nz ny nx bytes from the last: 192 cache lines per pixel
+// and channel, the four channels' ROIs about 8 MB, which no core's cache
+// holds.  Voxel by voxel they are 12 lines, and a fit's whole working set
+// (4 x 169 voxels of 768 bytes) half a megabyte.  Measured in docs/4pi.md
+// section 26.
 struct CSpline4Pi {
     static constexpr int NV = 6;
+    static constexpr int VOXEL = 3 * 64;
 
-    const float* coeff;     // (3, 64, nz, ny, nx): I, A, B
+    const float* coeff;     // (nz, ny, nx, 3, 64): I, A, B of each voxel
     int nx, ny, nz;
     float z_start, phase_start = 0.0f, n_start = 0.0f;
 
     mutable float delta_f[64], delta_dx[64], delta_dy[64], delta_dz[64];
+    // the same four, interleaved: delta4[4 i + j] is (f, dx, dy, dz)[j][i]
+    alignas(16) mutable float delta4[256];
     mutable float cos_p, sin_p;
     mutable int xstart, ystart, zstart, off_x, off_y;
 
@@ -388,6 +400,12 @@ struct CSpline4Pi {
         zstart = static_cast<int>(std::floor(theta[4]));
         compute_delta3d(xc - xstart, yc - ystart, theta[4] - zstart, delta_f,
                         delta_dx, delta_dy, delta_dz);
+        for (int i = 0; i < 64; ++i) {
+            delta4[4 * i] = delta_f[i];
+            delta4[4 * i + 1] = delta_dx[i];
+            delta4[4 * i + 2] = delta_dy[i];
+            delta4[4 * i + 3] = delta_dz[i];
+        }
         cos_p = std::cos(theta[5]);
         sin_p = std::sin(theta[5]);
     }
@@ -397,19 +415,44 @@ struct CSpline4Pi {
         int yc = std::min(std::max(iy + ystart + off_y, 0), ny - 1);
         int zc = std::min(std::max(zstart, 0), nz - 1);
 
-        const int base = (zc * ny + yc) * nx + xc;
-        const int stride = nx * ny * nz;
-        float v[3] = {0, 0, 0}, dx[3] = {0, 0, 0}, dy[3] = {0, 0, 0}, dz[3] = {0, 0, 0};
-        for (int k = 0; k < 3; ++k) {
-            const float* plane = coeff + k * 64 * stride + base;
-            for (int i = 0; i < 64; ++i) {
-                const float c = plane[i * stride];
-                v[k] += delta_f[i] * c;
-                dx[k] += delta_dx[i] * c;
-                dy[k] += delta_dy[i] * c;
-                dz[k] += delta_dz[i] * c;
+        const float* voxel = coeff + static_cast<std::ptrdiff_t>((zc * ny + yc) * nx + xc) * VOXEL;
+        // Twelve sums of 64 products: the value and three derivatives of each
+        // of I, A and B.  The four of one spline sit side by side, one 4-wide
+        // vector operation per coefficient, and each is split into two halves
+        // of 32 added at the end -- six independent chains where a single sum
+        // over i was one long dependent chain of multiply-adds, waiting on
+        // each other's latency.  4-8x on `value` alone, on the Mac (docs/4pi.md
+        // section 26).  The halves change the order of the sums, so a fit
+        // differs from the plain loop's in the last bits of float.
+        float v[3], dx[3], dy[3], dz[3];
+#if defined(__GNUC__) || defined(__clang__)
+        typedef float f4 __attribute__((vector_size(16)));
+        const f4 zero = {0.0f, 0.0f, 0.0f, 0.0f};
+        f4 lo[3] = {zero, zero, zero}, hi[3] = {zero, zero, zero};
+        const f4* d4 = reinterpret_cast<const f4*>(delta4);
+        for (int i = 0; i < 32; ++i)
+            for (int k = 0; k < 3; ++k) {
+                lo[k] += d4[i] * voxel[64 * k + i];
+                hi[k] += d4[i + 32] * voxel[64 * k + i + 32];
             }
+        for (int k = 0; k < 3; ++k) {
+            const f4 t = lo[k] + hi[k];
+            v[k] = t[0]; dx[k] = t[1]; dy[k] = t[2]; dz[k] = t[3];
         }
+#else
+        // the same sums in the same order, without the vector type
+        float lo[3][4] = {}, hi[3][4] = {};
+        for (int i = 0; i < 32; ++i)
+            for (int k = 0; k < 3; ++k)
+                for (int j = 0; j < 4; ++j) {
+                    lo[k][j] += delta4[4 * i + j] * voxel[64 * k + i];
+                    hi[k][j] += delta4[4 * (i + 32) + j] * voxel[64 * k + i + 32];
+                }
+        for (int k = 0; k < 3; ++k) {
+            v[k] = lo[k][0] + hi[k][0]; dx[k] = lo[k][1] + hi[k][1];
+            dy[k] = lo[k][2] + hi[k][2]; dz[k] = lo[k][3] + hi[k][3];
+        }
+#endif
         const float N = theta[2];
         const float psf = v[0] + v[1] * cos_p + v[2] * sin_p;
         dudt[0] = -N * (dx[0] + dx[1] * cos_p + dx[2] * sin_p);
@@ -438,9 +481,8 @@ struct CSpline4Pi {
         const int xc = std::min(std::max(ix + ox, 0), nx - 1);
         const int yc = std::min(std::max(iy + oy, 0), ny - 1);
         const int zc = std::min(std::max(iz, 0), nz - 1);
-        const int stride = nx * ny * nz;
-        const int base = (zc * ny + yc) * nx + xc;
-        for (int k = 0; k < 3; ++k) iab[k] = coeff[k * 64 * stride + base];
+        const float* voxel = coeff + static_cast<std::ptrdiff_t>((zc * ny + yc) * nx + xc) * VOXEL;
+        for (int k = 0; k < 3; ++k) iab[k] = voxel[k * 64];
     }
 };
 

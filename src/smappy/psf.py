@@ -517,7 +517,7 @@ class Global4PiPSF(_GlobalPSF):
             from .fourpi import link as plain
             link = plain(len(rois), self.n_channels)
         return FitResult(*_fit3d.fit_cspline4pi_global(
-            np.ascontiguousarray(rois, np.float32), self.calibration.coeff,
+            np.ascontiguousarray(rois, np.float32), self.calibration.fit_coeff,
             np.ascontiguousarray(link, np.float32), np.array(self.shared, np.int32),
             int(self.n_starts), int(self.phase_starts), int(self.z_step),
             int(iterations), int(n_threads), variance))

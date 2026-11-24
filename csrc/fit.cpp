@@ -442,7 +442,8 @@ int phasor_starts(const std::vector<smappy::CSpline4Pi>& models,
 // 4Pi: one emitter in every phase channel, fitted with the IAB model.
 //
 // rois   (n, C, sz, sz)
-// coeff  (C, 3, 64, nz, ny, nx)   each channel's I, A and B splines
+// coeff  (C, nz, ny, nx, 3, 64)   each channel's I, A and B splines, voxel by
+//                                 voxel (`FourPiCalibration.fit_coeff`)
 // link   (n, 2, C, 6)             as for `fit_cspline_global`, over
 //                                 (x, y, N, bg, z, phase)
 // shared (6,)
@@ -461,10 +462,10 @@ py::tuple fit_cspline4pi_global(const Array& rois, const Array& coeff, const Arr
     const GlobalDims dims = check_global_rois(rois);
     const py::ssize_t n = dims.n;
     const int channels = dims.channels, sz = dims.sz;
-    if (coeff.ndim() != 6 || coeff.shape(0) != channels || coeff.shape(1) != 3 ||
-        coeff.shape(2) != 64)
+    if (coeff.ndim() != 6 || coeff.shape(0) != channels || coeff.shape(4) != 3 ||
+        coeff.shape(5) != 64)
         throw std::invalid_argument(
-            "4Pi spline coefficients must have shape (channels, 3, 64, nz, ny, nx)");
+            "4Pi spline coefficients must have shape (channels, nz, ny, nx, 3, 64)");
     if (link.ndim() != 4 || link.shape(0) != n || link.shape(1) != 2 ||
         link.shape(2) != channels || link.shape(3) != P)
         throw std::invalid_argument("link must have shape (n, 2, channels, 6)");
@@ -474,9 +475,9 @@ py::tuple fit_cspline4pi_global(const Array& rois, const Array& coeff, const Arr
     phase_starts = std::max(phase_starts, 1);
     z_step = std::max(z_step, 1);
 
-    const int nz = static_cast<int>(coeff.shape(3));
-    const int ny = static_cast<int>(coeff.shape(4));
-    const int nx = static_cast<int>(coeff.shape(5));
+    const int nz = static_cast<int>(coeff.shape(1));
+    const int ny = static_cast<int>(coeff.shape(2));
+    const int nx = static_cast<int>(coeff.shape(3));
     const py::ssize_t plane = py::ssize_t(3) * 64 * nz * ny * nx;
     std::vector<CSpline4Pi> models;
     for (int c = 0; c < channels; ++c)

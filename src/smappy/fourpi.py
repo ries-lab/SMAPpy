@@ -106,6 +106,22 @@ class FourPiCalibration:
         return None
 
     @property
+    def fit_coeff(self) -> np.ndarray:
+        """The coefficients as the fitter reads them, voxel by voxel: (C, nz, ny, nx, 3, 64).
+
+        Each pixel's I, A and B in one run of 192 floats, where ``coeff`` has them
+        nz ny nx floats apart, so that a pixel's value is read in one run (docs/4pi.md §26).
+        Made on first use and kept while ``coeff`` is the same array; it is as large as
+        ``coeff`` (74 MB for a 60-plane grid of 20 x 20 in four channels).
+        """
+        kept = self.__dict__.get("_fit_coeff")
+        if kept is None or kept[0] is not self.coeff:
+            packed = np.ascontiguousarray(self.coeff.transpose(0, 3, 4, 5, 1, 2), np.float32)
+            kept = (self.coeff, packed)
+            self.__dict__["_fit_coeff"] = kept
+        return kept[1]
+
+    @property
     def shape(self) -> tuple:
         """The spline grid, (nz, ny, nx)."""
         return self.coeff.shape[3:]
