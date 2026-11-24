@@ -223,6 +223,14 @@ Opens a `.chain.yaml` file.
 ### new
 Starts an empty chain, with *build* open.
 
+### paste
+Adds the plugins whose settings are on the clipboard as steps at the end of
+the chain, each with those settings: set a plugin up on the session in its
+tab, *Copy settings* in its menu (right-click its title) or *Edit > Copy
+settings* (Ctrl+Alt+C), then *paste* here.  With no chain shown it starts
+one.  The same menu's *Add to batch* does both at once and opens this
+window; for a chain it adds the chain's steps as its panel shows them.
+
 ### build
 Folded under the chain's file name: the tools that change which steps it
 has.  Opened by itself for a new, empty chain.

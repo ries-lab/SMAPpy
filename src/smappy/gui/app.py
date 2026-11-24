@@ -1186,6 +1186,28 @@ class ControlWindow(QMainWindow):
         self.statusBar().showMessage(said, 10000)
         return said
 
+    def add_panel_to_batch(self, panel) -> Optional[str]:
+        """A plugin's own menu, *Add to batch*: the plugin with its settings as they stand, as a step
+        at the end of the batch window's chain, opened; a chain's steps, as its panel shows them."""
+        from .batch_window import plugin_step
+        from .chain_panel import ChainPanel
+        source = self._source_of_panel(panel)
+        if source is None:
+            return None
+        _, path, panel, instance, _ = source
+        holder = panel.parentWidget()
+        while holder is not None and not isinstance(holder, ChainPanel):
+            holder = holder.parentWidget()
+        if instance is not None and instance.chain and holder is not None:
+            steps = holder.current_spec().steps
+        else:
+            steps = [plugin_step(path, panel.form.values())]
+        self.open_batch()
+        self.batch_window.add_steps(steps)
+        said = f"added to the batch: {self._plugin_title(path)}"
+        self.statusBar().showMessage(said, 10000)
+        return said
+
     def _plugin_title(self, path: str) -> str:
         ref = plugins.refs().get(path)
         return ref.name if ref is not None else path.rsplit("/", 1)[-1]

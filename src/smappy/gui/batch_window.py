@@ -46,6 +46,15 @@ COLUMNS = ("data", "filter", "status")
 ERROR = "#e0453a"          # reads on a light and a dark window
 
 
+def plugin_step(path: str, values: dict):
+    """A chain step of plugin ``path`` with ``values`` (by dotted name), stamped with its version."""
+    try:
+        version = plugins.get(path).version
+    except Exception:                    # not found here: the chain says so when it is built
+        version = ""
+    return chains.Step(plugin=path, values=dict(values), version=version)
+
+
 def _count(n: int, what: str) -> str:
     return f"{n} {what}{'' if n == 1 else 's'}"
 
@@ -169,9 +178,14 @@ class BatchWindow(QMainWindow):
         open_chain.clicked.connect(self.open_chain)
         new_chain = QPushButton("new")
         new_chain.clicked.connect(lambda: self.set_chain(ChainSpec()))
+        paste = QPushButton("paste")
+        paste.setToolTip("the plugins whose settings Copy settings put on the clipboard, added to "
+                         "the chain as steps with those settings")
+        paste.clicked.connect(lambda: self._paste_asked())
         pick.addWidget(self.chooser, 1)
         pick.addWidget(open_chain)
         pick.addWidget(new_chain)
+        pick.addWidget(paste)
         column.addLayout(pick)
         # a chain of a fit and four analyses, opened, is taller than a screen
         from PySide6.QtWidgets import QScrollArea
@@ -518,6 +532,35 @@ class BatchWindow(QMainWindow):
         if not spec.steps:
             self.chain_panel.edit.setChecked(True)
         self.refresh_inputs()
+
+    def add_steps(self, steps) -> None:
+        """``steps`` (`chain.Step`) at the end of the chain shown, a new one if there is none: a plugin
+        set up in a tab, or a chain's steps, sent here to run over the files."""
+        spec = self.current_chain() if self.chain_panel is not None else ChainSpec()
+        spec.steps = list(spec.steps) + list(steps)
+        self.set_chain(spec)
+
+    def paste_settings(self, text: Optional[str] = None) -> str:
+        """*paste*: each plugin whose settings *Copy settings* put on the clipboard (or in ``text``) as a
+        step with those values.  What was added; ValueError when the text holds no plugin's settings."""
+        from PySide6.QtWidgets import QApplication
+
+        from .. import handoff
+        settings = handoff.parse_view_settings(QApplication.clipboard().text() if text is None else text)
+        entries = [e for e in (settings or {}).get("plugins") or [] if e.get("plugin")]
+        if not entries:
+            raise ValueError("the clipboard holds no plugin's settings: Copy settings in a plugin's "
+                             "menu, or with its section in front, first")
+        self.add_steps(plugin_step(e["plugin"], e.get("values") or {}) for e in entries)
+        return "added: " + ", ".join(e["plugin"].rsplit("/", 1)[-1] for e in entries)
+
+    def _paste_asked(self) -> None:
+        try:
+            said = self.paste_settings()
+        except ValueError as error:
+            QMessageBox.information(self, "Paste settings", str(error))
+            return
+        self.statusBar().showMessage(said, 10000)
 
     def current_chain(self) -> ChainSpec:
         return self.chain_panel.current_spec()

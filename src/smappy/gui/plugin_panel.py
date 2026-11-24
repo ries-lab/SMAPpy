@@ -473,6 +473,11 @@ class PluginPanel(QWidget):
         paste.setEnabled(why is None)
         paste.setToolTip(why or "")
         paste.triggered.connect(lambda: owner.paste_into_panel(self))
+        if hasattr(owner, "add_panel_to_batch"):
+            batch = menu.addAction("Add to batch")
+            batch.setToolTip("this plugin with these settings, as a step at the end of the batch "
+                             "window's chain (a chain: its steps)")
+            batch.triggered.connect(lambda: owner.add_panel_to_batch(self))
         return menu
 
     def refresh_derived(self) -> None:

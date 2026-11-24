@@ -115,6 +115,22 @@ def test_the_batch_window_writes_the_job_it_shows(app, tmp_path):
     assert again.job().to_dict()["inputs"] == job.to_dict()["inputs"]
 
 
+def test_the_batch_windows_paste_adds_the_copied_plugins_as_steps_with_their_settings(app):
+    from smappy import handoff
+    from smappy.gui.batch_window import BatchWindow
+    window = BatchWindow()
+    text = handoff.settings_text(handoff.plugin_settings(
+        [("Analysis/Drift/RCC", {"n_timepoints": 7}, "")]))
+    assert window.paste_settings(text) == "added: RCC"           # no chain yet: one started
+    window.paste_settings(text)
+    steps = window.current_chain().steps
+    assert [s.plugin for s in steps] == ["Analysis/Drift/RCC"] * 2
+    assert steps[0].values["n_timepoints"] == 7 and steps[1].values["n_timepoints"] == 7
+    with pytest.raises(ValueError, match="no plugin's settings"):
+        window.paste_settings("not settings")
+    window.close()
+
+
 def test_the_batch_window_follows_the_runners_lines(app, tmp_path):
     from smappy.gui.batch_window import BatchWindow
     from smappy.batch import Input

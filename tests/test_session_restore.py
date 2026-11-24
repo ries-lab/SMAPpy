@@ -462,6 +462,22 @@ def test_a_plugins_own_menu_copies_it_and_pastes_into_that_panel_alone(app, tmp_
         _close(app, windows)
 
 
+def test_add_to_batch_puts_the_plugin_with_its_settings_at_the_end_of_the_batch_chain(app, tmp_path):
+    windows, window = _plugin_window_and_tab(app, tmp_path)
+    try:
+        control = windows[0]
+        _items(window.panel.settings_menu())["Add to batch"].trigger()
+        _items(window.panel.settings_menu())["Add to batch"].trigger()     # twice: two steps
+        steps = control.batch_window.current_chain().steps
+        assert [s.plugin for s in steps] == [RCC, RCC]
+        assert steps[-1].values["n_timepoints"] == 33 and steps[-1].version
+        assert control.batch_window.isVisible()
+    finally:
+        if windows[0].batch_window is not None:
+            windows[0].batch_window.close()
+        _close(app, windows)
+
+
 def test_a_sections_title_menu_in_a_tab_has_copy_and_paste_settings(app, tmp_path):
     from PySide6.QtCore import QPoint
     windows, _ = _plugin_window_and_tab(app, tmp_path)
