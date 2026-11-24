@@ -341,10 +341,14 @@ def concat(tables: "Sequence[Localizations]") -> Localizations:
     """Stack tables that need not share columns; a missing one is NaN.
 
     Integer columns missing from a table stay integer: an id (`ids.is_id`)
-    is -1 there, in none, and any other (``frame``, a flag) 0.  Metadata
+    is -1 there, in none, and any other (``frame``, a flag) 0.  A float
+    column that is float32 in one table and float64 in another stays
+    float32 -- numpy's promotion would double it for all of them -- unless it
+    is a time or an offset (`io.column_types.keeps_float64`).  Metadata
     comes from the first table.
     """
     from .ids import NONE, is_id
+    from .io.column_types import keeps_float64
     tables = [t for t in tables if len(t)]
     if not tables:
         return Localizations({}, {})
@@ -354,7 +358,12 @@ def concat(tables: "Sequence[Localizations]") -> Localizations:
     columns = {}
     for name in names:
         parts = []
-        dtype = np.result_type(*[np.asarray(t[name]).dtype for t in tables if name in t])
+        dtypes = [np.asarray(t[name]).dtype for t in tables if name in t]
+        dtype = np.result_type(*dtypes)
+        if dtype == np.float64 and np.dtype(np.float32) in dtypes \
+                and not any(keeps_float64(name, t[name]) for t in tables
+                            if name in t and np.asarray(t[name]).dtype == np.float64):
+            dtype = np.dtype(np.float32)
         fill = (NONE if is_id(name) else 0) if dtype.kind in "iu" else np.nan
         if fill == NONE and dtype.kind == "u":
             dtype = np.result_type(dtype, np.int64) if dtype.itemsize >= 4 else np.int32

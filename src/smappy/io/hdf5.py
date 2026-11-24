@@ -494,15 +494,22 @@ def _placed(image, placement: np.ndarray):
     return image
 
 
-def load_localizations(path) -> Localizations:
-    """Read a table written by :class:`LocalizationWriter`."""
+def load_localizations(path, columns=None) -> Localizations:
+    """Read a table written by :class:`LocalizationWriter`.
+
+    ``columns``, a test of a column's name, reads only those it passes.
+    Each is read as it was saved, never narrowed (`io.column_types`): smappy
+    wrote it so, and the region results signed against its values must find
+    them again."""
     with h5py.File(path, "r") as f:
         if not isinstance(f.get("locs"), h5py.Group):
             what = ("a table in one dataset, as Picasso writes"
                     if isinstance(f.get("locs"), h5py.Dataset) else "no /locs group")
             raise ValueError(f"{Path(path).name} is not a smappy localization "
                              f"file: it has {what}")
-        columns = {name: f["locs"][name][()] for name in f["locs"]}
+        keep = columns
+        columns = {name: f["locs"][name][()] for name in f["locs"]
+                   if keep is None or keep(name)}
         metadata = {}
         if "metadata" in f.attrs:
             metadata = json.loads(f.attrs["metadata"])

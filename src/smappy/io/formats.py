@@ -23,6 +23,7 @@ import numpy as np
 
 from ..locs import Localizations
 from ..metadata import pixel_sizes
+from .column_types import narrow, narrow_all, stored_itemsize
 
 
 # What a table's metadata says about the session rather than about the
@@ -86,12 +87,43 @@ class FileInfo:
 
 
 @dataclass
+class Column:
+    """One column of a file before it is read: what `Reader.catalog` lists
+    for the column dialog and the memory estimate."""
+    name: str                 # as the table will call it
+    rows: int
+    itemsize: int             # bytes per row once read (`column_types.stored_itemsize`)
+    standard: bool = True     # read by *standard*; False: one of the reader's `drop`
+
+    @property
+    def nbytes(self) -> int:
+        return self.rows * self.itemsize
+
+
+#: what a table cannot be without: never left out, whatever the choice
+REQUIRED = ("x_nm", "y_nm", "x_pix", "y_pix", "frame", "filenumber")
+
+
+@dataclass
 class Reader:
     name: str
     suffixes: Tuple[str, ...]
     load: Callable[..., Tuple[Localizations, FileInfo]]
     sniff: Optional[Callable[[Path], bool]] = None   # beyond the suffix
     needs: Tuple[str, ...] = ()       # extra arguments a GUI must ask for
+    # the file's columns without reading them (`Column`), for the column
+    # dialog and the memory estimate; None where the format cannot say
+    # cheaply (a csv must be parsed, a MATLAB v5 file read whole)
+    catalog: Optional[Callable[[Path], List["Column"]]] = None
+    # the columns *standard* leaves out: written by the format and read by
+    # nothing downstream (`SML_DROP`)
+    drop: Tuple[str, ...] = ()
+    # whether `load` takes ``columns`` and reads only those -- what lowers
+    # the peak; any other reader's table is cut after it is read
+    selects: bool = False
+    # whether its columns are narrowed (`column_types`); False for smappy's
+    # own files, which round-trip exactly as they were saved
+    narrows: bool = True
 
 
 READERS: List[Reader] = []
@@ -113,17 +145,78 @@ def reader_for(path) -> Reader:
                      + ", ".join(f"{r.name} ({' '.join(r.suffixes)})" for r in READERS))
 
 
-def load(path, reader: Optional[Reader] = None, **kwargs) -> Tuple[Localizations, FileInfo]:
+def load(path, reader: Optional[Reader] = None, columns="standard",
+         **kwargs) -> Tuple[Localizations, FileInfo]:
     """Read any known format.  ``kwargs`` go to the reader (a csv mapping, say).
 
     ``reader`` forces one instead of choosing by the file name, which is how a
     `File/Load/<format>` plugin means what it says: without it a `.hdf5` opened
     as SMAP would quietly be read as smappy.
+
+    ``columns`` says which columns to read: ``"standard"`` (the default) all
+    but the reader's `Reader.drop`, None or ``"all"`` every one, or a list of names as
+    the table calls them.  `REQUIRED` are read whatever it says.  A reader
+    that `selects` reads no others; any other is cut after reading, which
+    frees the memory but does not lower the peak.
     """
     reader = reader or reader_for(path)
+    keep = wanted_columns(reader, columns)
+    if keep is not None and reader.selects:
+        kwargs["columns"] = keep
     locs, info = reader.load(Path(path), **kwargs)
+    if keep is not None and not reader.selects:
+        locs = _only(locs, keep)
+    if reader.narrows:
+        # float32 but for time, offsets and integers (`column_types`); a
+        # selecting reader has done it column by column already
+        locs = Localizations(narrow_all(dict(locs.columns)), locs.metadata)
     info.n = len(locs)
     return with_nm(locs, info.pixelsize_nm), info
+
+
+def wanted_columns(reader: Reader, columns) -> Optional[Callable[[str], bool]]:
+    """``columns`` (see `load`) as a test of a column's name; None for all."""
+    if columns is None or columns == "all":
+        return None
+    if columns == "standard":
+        if not reader.drop:
+            return None
+        dropped = set(reader.drop) - set(REQUIRED)
+        return lambda name: name not in dropped
+    if isinstance(columns, str):
+        raise ValueError(f"columns: 'all', 'standard' or a list of names, not {columns!r}")
+    chosen = set(columns) | set(REQUIRED)
+    return lambda name: name in chosen
+
+
+def _only(locs: Localizations, keep: Callable[[str], bool]) -> Localizations:
+    return Localizations({c: v for c, v in locs.columns.items() if keep(c)}, locs.metadata)
+
+
+def catalog(path, reader: Optional[Reader] = None) -> Optional[List[Column]]:
+    """The file's columns before reading (`Column`), or None where its format
+    cannot list them cheaply or the file cannot be read."""
+    reader = reader or reader_for(path)
+    if reader.catalog is None:
+        return None
+    try:
+        found = reader.catalog(Path(path))
+    except (OSError, KeyError, ValueError):
+        return None
+    dropped = set(reader.drop) - set(REQUIRED)
+    for c in found:
+        c.standard = c.name not in dropped
+    return found
+
+
+def estimate_bytes(found: Sequence[Column], columns="standard") -> int:
+    """The memory the columns ``columns`` chooses (see `load`) take once read."""
+    if columns is None or columns == "all":
+        return sum(c.nbytes for c in found)
+    if columns == "standard":
+        return sum(c.nbytes for c in found if c.standard or c.name in REQUIRED)
+    chosen = set(columns) | set(REQUIRED)
+    return sum(c.nbytes for c in found if c.name in chosen)
 
 
 def with_nm(locs: Localizations, pixelsize_nm: Optional[float] = None
@@ -206,9 +299,9 @@ def reader_named(name: str) -> Optional[Reader]:
 
 
 # ------------------------------------------------------------------ smappy
-def _load_smappy(path: Path) -> Tuple[Localizations, FileInfo]:
+def _load_smappy(path: Path, columns=None) -> Tuple[Localizations, FileInfo]:
     from .hdf5 import load_localizations
-    locs = load_localizations(path)
+    locs = load_localizations(path, columns)
     cam = (locs.metadata.get("camera") or {})
     px = pixel_sizes(cam.get("pixelsize_um"))
     px = px and px[0]
@@ -226,7 +319,15 @@ def _is_smappy(path: Path) -> bool:
         return False
 
 
-register(Reader("smappy HDF5", (".hdf5", ".h5"), _load_smappy, _is_smappy))
+def _smappy_catalog(path: Path) -> List[Column]:
+    import h5py
+    with h5py.File(path, "r") as f:
+        return [Column(name, int(d.size), d.dtype.itemsize)
+                for name, d in f["locs"].items()]
+
+
+register(Reader("smappy HDF5", (".hdf5", ".h5"), _load_smappy, _is_smappy,
+                catalog=_smappy_catalog, selects=True, narrows=False))
 
 
 def _save_smappy(locs, path: Path, metadata=None) -> Path:
@@ -247,15 +348,13 @@ SML_COLUMNS = {
     "photerr": "photons_err", "iterations": "iterations",
     "xpix": "x_pix", "ypix": "y_pix", "PSFxpix": "sigma_pix",
 }
-# Columns to skip.  This is the wrong shape and is kept until the thing that
-# replaces it exists: a per-format set of columns to *keep*, chosen in a
-# settings dialog and remembered, rather than a hard-coded list of names to
-# drop.  It matters more than it looks -- of the 30 columns read from a real
-# `_sml.mat`, 13 are read by anything downstream, and opening a 57 M
-# localization one peaks at 20 GB, which is more memory than a microscope PC
-# has.  See "Loading only the columns that are used" in NOTES.md.
-SML_DROP = ("filenumber", "xnmf", "ynmf", "xpixf", "ypixf", "xpixerr", "ypixerr",
-            "PSFypix")
+# The columns *standard* leaves out of a SMAP file (`Reader.drop`), by the
+# names the table gives them: copies and pixel versions of what is kept, read
+# by nothing downstream.  Of the 30 columns of a real `_sml.mat` 13 are read
+# by anything; the rest stay in by default and are offered in the column
+# dialog when a file is too large (`gui.columns_dialog`).  ``filenumber`` is
+# never a column of its own here: it splits the table into its files.
+SML_DROP = ("xnmf", "ynmf", "xpixf", "ypixf", "xpixerr", "ypixerr", "PSFypix")
 
 
 def _h5_scalar(group, name):
@@ -332,9 +431,14 @@ def _superseded(name: str, names) -> bool:
     return name == "zerr" and "locprecznm" in names
 
 
-def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
+def _load_sml(path: Path, columns=None) -> Tuple[Localizations, FileInfo]:
+    """A SMAP ``_sml.mat``; ``columns`` a test of the table's names, which to
+    read (`formats.load`).  A v7.3 file is HDF5 and is read a column at a time,
+    each narrowed (`column_types`) before the next is read: read whole as
+    double first, a 57 M localization file peaked at twice its table."""
     import h5py
-    columns, entries, sites, filenumber = {}, [], None, None
+    keep, columns = columns, {}
+    entries, sites, filenumber = [], None, None
     try:
         f = h5py.File(path, "r")
     except OSError:
@@ -343,9 +447,12 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
         with f:
             loc = f["saveloc"]["loc"]
             for name in loc:
-                if name in SML_DROP or _superseded(name, loc):
+                if name == "filenumber" or _superseded(name, loc):
                     continue
-                columns[SML_COLUMNS.get(name, name)] = np.array(loc[name]).ravel()
+                target = SML_COLUMNS.get(name, name)
+                if keep is not None and not keep(target):
+                    continue
+                columns[target] = narrow(target, loc[name][()].ravel())
             if "filenumber" in loc:
                 filenumber = np.array(loc["filenumber"]).ravel()
             entries = _sml_entries_h5(f)
@@ -356,9 +463,12 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
         m = sio.loadmat(path, squeeze_me=True, struct_as_record=False)
         loc = m["saveloc"].loc
         for name in loc._fieldnames:
-            if name in SML_DROP or _superseded(name, loc._fieldnames):
+            if name == "filenumber" or _superseded(name, loc._fieldnames):
                 continue
-            columns[SML_COLUMNS.get(name, name)] = np.atleast_1d(getattr(loc, name))
+            target = SML_COLUMNS.get(name, name)
+            if keep is not None and not keep(target):
+                continue
+            columns[target] = narrow(target, np.atleast_1d(getattr(loc, name)))
         if "filenumber" in loc._fieldnames:
             filenumber = np.atleast_1d(loc.filenumber)
         try:
@@ -373,9 +483,6 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     for name in ("channel", "iterations"):
         if name in columns:
             columns[name] = np.asarray(columns[name]).astype(np.int32)
-    for name, values in columns.items():
-        if values.dtype == np.float64:
-            columns[name] = values.astype(np.float32)
     # the table's metadata is the first file's, as a session's is
     info = entries[0][1] if entries else {}
     metadata = _sml_metadata(path, info)
@@ -643,8 +750,25 @@ def _roi_function(entry) -> str:
     return ""
 
 
+def _sml_catalog(path: Path) -> List[Column]:
+    """A v7.3 file's columns from its HDF5 header; a v5 file is read whole by
+    scipy and is under MATLAB v5's 2 GB a variable anyway, so not listed."""
+    import h5py
+    with h5py.File(path, "r") as f:
+        loc = f["saveloc"]["loc"]
+        out = []
+        for name in loc:
+            if name == "filenumber" or _superseded(name, loc):
+                continue
+            target = SML_COLUMNS.get(name, name)
+            out.append(Column(target, int(loc[name].size),
+                              stored_itemsize(target, loc[name].dtype)))
+        return out
+
+
 register(Reader("SMAP", ("_sml.mat", ".mat"), _load_sml,
-                lambda p: p.name.endswith("_sml.mat") or _has_saveloc(p)))
+                lambda p: p.name.endswith("_sml.mat") or _has_saveloc(p),
+                catalog=_sml_catalog, drop=SML_DROP, selects=True))
 
 
 def _has_saveloc(path: Path) -> bool:

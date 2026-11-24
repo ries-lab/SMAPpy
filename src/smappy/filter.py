@@ -285,7 +285,16 @@ class LocFilter:
 def _in_range(values: np.ndarray, lo: Optional[float], hi: Optional[float],
               invert: bool = False) -> np.ndarray:
     """``lo <= values <= hi``, or -- inverted -- every value that fails it,
-    NaN included: what the range throws away, exactly."""
+    NaN included: what the range throws away, exactly.
+
+    A bound is compared in the column's own float type: a float32 column's
+    0.1 is 0.100000001, and a float64 bound of 0.1 -- a value read back from
+    the table, a NumPy scalar -- would put it outside a range it was typed
+    as the edge of.  (A plain Python float already compares as float32.)"""
+    if values.dtype.kind == "f":
+        with np.errstate(over="ignore"):      # past float32's range: inf, as meant
+            lo = None if lo is None else values.dtype.type(lo)
+            hi = None if hi is None else values.dtype.type(hi)
     mask = np.ones(values.shape[0], dtype=bool)
     if lo is not None:
         mask &= values >= lo
