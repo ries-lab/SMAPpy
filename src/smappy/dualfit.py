@@ -65,6 +65,9 @@ class PairedROIs:
     #: the read noise's variance per pixel of every ROI, as ``images``, with a
     #: noise map (`scmos`); None with one variance for the chip
     variance: Optional[np.ndarray] = None
+    #: (n, channels, 2) each channel's ROI centre in its own pixels (`channel_candidates`), for a
+    #: field-dependent model's chip positions; None where the caller does not keep them
+    positions: Optional[np.ndarray] = None
 
     def __len__(self) -> int:
         return self.images.shape[0]
@@ -210,4 +213,5 @@ def _concat_pairs(parts: List[PairedROIs]) -> PairedROIs:
                      for name in ("frame", "x", "y", "value"))),
         parts[0].roisize,
         np.concatenate([p.residual for p in parts]),
-        None if parts[0].variance is None else np.concatenate([p.variance for p in parts]))
+        None if parts[0].variance is None else np.concatenate([p.variance for p in parts]),
+        None if parts[0].positions is None else np.concatenate([p.positions for p in parts]))

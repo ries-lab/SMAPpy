@@ -356,7 +356,7 @@ class MultiChannelEngine:
             if noise is not None:
                 from .scmos import cut_channels
                 variance = cut_channels(noise.variance, positions, roisize)
-            self._pairs.append(PairedROIs(images, link, candidates, roisize, residual, variance))
+            self._pairs.append(PairedROIs(images, link, candidates, roisize, residual, variance, positions))
             self._buffered += len(candidates)
         if self._buffered >= self.settings.block_rois():
             return self.flush()
@@ -399,16 +399,24 @@ class MultiChannelEngine:
         pairs = _concat_pairs(self._pairs)
         self._pairs, self._buffered = [], 0
         started = time.perf_counter()
+        extra = {}
+        if getattr(self.model, "field_dependent", False):
+            # each channel's ROI centre on the camera chip, where its field splines are blended: its own
+            # pixels back on the frame (the flip undone) and the camera ROI's corner added, as the
+            # positions reported below and a one-channel fit's (`pipeline`) are
+            roi = np.array(self.camera.roi_offset, float)
+            extra["chip_xy"] = np.stack([self.layout.on_frame(c, pairs.positions[:, c]) + roi
+                                         for c in range(self.layout.n_channels)], 1)
         if pairs.variance is not None:
             # each pixel's own variance, in the data and, inside the fitter, the model
             result = self.model.fit(pairs.images + pairs.variance, pairs.link,
                                     iterations=self.settings.iterations,
-                                    n_threads=self.settings.n_threads, variance=pairs.variance)
+                                    n_threads=self.settings.n_threads, variance=pairs.variance, **extra)
         else:
             variance = self.camera.readout_variance
             result = self.model.fit(with_readout(pairs.images, variance), pairs.link,
                                     iterations=self.settings.iterations,
-                                    n_threads=self.settings.n_threads)
+                                    n_threads=self.settings.n_threads, **extra)
             without_readout(result, self.model, variance)
         self.stats["fit_seconds"] += time.perf_counter() - started
         self.stats["pairs"] += len(pairs)
@@ -467,7 +475,7 @@ class SplitEngine:
 
     ``finders`` is one per channel: a region drawn on the frame judges each channel's candidates
     where they lie there (`plugins.fit.ChannelRegionFinder`).  A field-dependent model reads each
-    ROI's place in the channel's own pixels, not on the chip.
+    ROI's place on the chip, its channel's pixels put back there as the positions are (`_on_chip`).
     """
 
     def __init__(self, camera, finders, model, layout: ChannelLayout, settings):
@@ -477,7 +485,10 @@ class SplitEngine:
         self.settings = settings
         self.chip = None                           # the layout on the chip, as the table records it
         own = replace(camera, roi=None)            # each channel's own pixels; the chip comes after
-        self.engines = [LocalizationEngine(own, finder, model, settings) for finder in finders]
+        roi = np.array(camera.roi_offset, float)
+        self.engines = [LocalizationEngine(own, finder, model, settings,
+                                           on_chip=lambda xy, c=c: layout.on_frame(c, xy) + roi)
+                        for c, finder in enumerate(finders)]
 
     @property
     def stats(self) -> dict:

@@ -314,6 +314,7 @@ class GlobalSplinePSF(_GlobalPSF):
                 raise ValueError("every channel's spline must share one z grid")
         self._coeff = np.ascontiguousarray(
             np.stack([c.coeff for c in self.calibrations]), np.float32)
+        self._nodes = None
 
     @property
     def is_3d(self) -> bool:
@@ -324,16 +325,62 @@ class GlobalSplinePSF(_GlobalPSF):
         return len(self.calibrations)
 
     @property
+    def field_dependent(self) -> bool:
+        """Whether a channel's PSF depends on where on the chip the spot is: then `fit` wants each
+        channel's ROI position on the chip (`smappy.field_splines`, a grid of its own per channel)."""
+        return any(getattr(c, "field_splines", None) is not None for c in self.calibrations)
+
+    def _field_nodes(self):
+        """(every channel's node coefficients one after another (G, 64, nz, ny, nx), each channel's first
+        node): a channel without a field is a grid of one node, its own spline."""
+        if self._nodes is None:
+            parts, first, at = [], [], 0
+            for c in self.calibrations:
+                fs = getattr(c, "field_splines", None)
+                part = c.coeff[None] if fs is None else fs.coeff
+                if part.shape[1:] != c.coeff.shape:
+                    raise ValueError("a channel's field splines differ in shape from its spline")
+                parts.append(part)
+                first.append(at)
+                at += len(part)
+            self._nodes = (np.ascontiguousarray(np.concatenate(parts), np.float32), first)
+        return self._nodes
+
+    @property
     def calibration(self):
         """The reference channel's, which sets the z scale for all of them."""
         return self.calibrations[0]
 
     def fit(self, rois: np.ndarray, link: np.ndarray = None, iterations: int = 50,
-            n_threads: int = 0, variance: Optional[np.ndarray] = None) -> FitResult:
-        """``variance`` (n, C, sz, sz) as `PSFModel.fit`'s, per channel."""
+            n_threads: int = 0, variance: Optional[np.ndarray] = None,
+            chip_xy: Optional[np.ndarray] = None) -> FitResult:
+        """``variance`` (n, C, sz, sz) as `PSFModel.fit`'s, per channel.  ``chip_xy`` (n, C, 2), each
+        channel's ROI centre on the camera chip in pixels: with a field-dependent channel each is fitted
+        with its splines blended there; without it, with their grids' centres."""
         if link is None:
             raise ValueError("a global fit needs the link between its channels")
         z_start = float(self.calibration.z_nm_to_index(self.z_start_nm))
+        if self.field_dependent and chip_xy is not None:
+            from .field_splines import bilinear
+            chip_xy = np.asarray(chip_xy, float)
+            n = len(rois)
+            if chip_xy.shape != (n, self.n_channels, 2):
+                raise ValueError(f"chip_xy must be (n, {self.n_channels}, 2): each channel's chip position")
+            coeff, first = self._field_nodes()
+            nodes = np.zeros((n, self.n_channels, 4), np.int32)
+            weights = np.zeros((n, self.n_channels, 4), np.float32)
+            for c, cal in enumerate(self.calibrations):
+                fs = getattr(cal, "field_splines", None)
+                if fs is None:
+                    nodes[:, c] = first[c]
+                    weights[:, c, 0] = 1.0
+                else:
+                    nd, w = bilinear(fs, chip_xy[:, c])
+                    nodes[:, c], weights[:, c] = nd + first[c], w
+            return FitResult(*_fit3d.fit_cspline_field_global(
+                np.ascontiguousarray(rois, np.float32), coeff, nodes, weights,
+                np.ascontiguousarray(link, np.float32), np.array(self.shared, np.int32), z_start,
+                int(iterations), int(n_threads), variance))
         return FitResult(*_fit3d.fit_cspline_global(
             np.ascontiguousarray(rois, np.float32), self._coeff,
             np.ascontiguousarray(link, np.float32),

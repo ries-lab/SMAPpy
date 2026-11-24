@@ -475,3 +475,41 @@ spline keeps ``focal_curvature_nm_at_50um``.
   each mode's change at the chip's corners within 0.04 rad (a second-order coefficient alone is weakly fixed
   by 44 µm: 0.1 rad of uv is 0.02 rad at a corner); the node splines fit spots near a corner with a fraction
   of the centre spline's z bias.
+
+### 12.2 Two channels of a split chip (beads, and molecules on the coverslip)
+
+**Per channel, not shared.**  Each channel learns its own `FieldPolynomial`, and both are polynomials of the
+*main* channel's chip position, which is the sample's position (`Batch.field_xy`), so the two fields share one
+frame and one centre.  Why not one field for both: the two colours cross the objective at different wavelengths
+(a misalignment's phase in radians scales as 1/λ, and the chromatic part does not scale at all), and after the
+dichroic each half passes its own mirrors, filters and, on some microscopes, its own cylindrical lens; a shared
+field would force their changes equal.  The model already gives each channel its own pupil and γ (the user's
+decision, `bead_model`), and the field follows the pupil.  The cost is 14 more coefficients, little beside 20
+or more beads of two channels, and nothing beside thousands of molecules.  Should the two fields come out
+alike on real data, a shared field with a per-channel scale would be the next thing to try.
+
+**Export: a grid per channel over its own chip.**  The main channel's grid is over its beads; the secondary's
+over the same beads where the model's transform puts them on its half (`pupil.field_extent(…, channel=1)`),
+each node drawn with the field at the main position the transform maps it to (`pupil.main_position`).  So each
+spline is right for a fit that knows only its own channel's chip position -- the split engine, fitting each half
+alone, as much as the joint fit -- and a mirror needs no special case: `dual.mirrored_spline` flips every node's
+cubic as it flips the centre's, and the nodes stay where they are on the chip, which the fitter names in the
+camera's own orientation.  Every node is normalised by the pair's joint factor (`common_normalization`), so the
+photon share each channel carries holds at every node.
+
+**Fitting: `fit_cspline_field_global`.**  The global fit (`run_global`) takes a per-fit setup now: each
+channel's four nodes and weights, indices into every channel's nodes laid one after another, so the channels may
+have grids of different sizes and a channel without a field is a grid of one.  `MultiChannelEngine.flush` gives
+each channel's ROI centre on the chip (its own pixels back on the frame, the camera ROI's corner added -- what
+it reports for positions).  4Pi has no field (its calibration is the IAB model, which the 4Pi bead scan does
+not learn with a field); DECODE's two-channel models are the netfit session's.
+
+**Measured, simulations** (`test_field_dual.py`):
+- 24 ratiometric bead pairs over a 400 × 200 px half (51 × 23 µm), each channel's astigmatism changing by up to
+  0.6 rad per 50 µm and its coma by 0.2-0.3, of different signs in the two channels: both fields come back within
+  0.05 rad at the beads' corners, and both reports call them significant.
+- A known pair on a 600 × 300 px mirrored split, its fields 1.2-1.6 rad per 50 µm: both channels' grids at 3 × 3
+  or more, the secondary's on its own half; saved and read back.  Seven emitters near the main half's corner,
+  −360 to +360 nm: Spline 3D 2C with the node splines puts them within a few nm of their z (the bias's rms
+  about its mean under 10 nm); with the centres' splines alone the z range came out compressed by about 40 %.
+- The same pair drawn for a focus 1.5 µm into the sample keeps both channels' grids.

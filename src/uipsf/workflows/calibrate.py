@@ -90,6 +90,8 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
     ``z_max_nm`` from aliasing.  ``held``: what each channel's pupil holds (`Held`).  ``settings.fit_tilt``
     learns the coverslip's tilt (`BeadStackGeometry`): seen by beads only through a coverslip of another index
     than the immersion's, a water or silicone objective's (`Optics.coverslip_matters`).
+    ``settings.field_dependence``: astigmatism and coma varying over the chip in every channel, each its own
+    `FieldPolynomial` of the main channel's chip position about ``field_centre_px``.
 
     Each channel learns its own γ (the user's decision, November 2026): two colours pass the objective at
     different angles near the edge.  To revisit: if the channels' γ come out alike, one shared γ is fewer
@@ -103,17 +105,19 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
         psf = make_psf(o, settings.psf, roi_shape, held=held, bead_radius_nm=settings.bead_diameter_nm / 2,
                        z_max_nm=z_max_nm, device=device, dtype=dtype)
         field = None
-        if settings.field_dependence and not channels:          # the main channel only, for now
+        if settings.field_dependence:
             if field_centre_px is None:
                 raise ValueError("a field-dependent model needs the field's centre (the beads' chip positions)")
-            field = FieldPolynomial(field_centre_px, o.pixel_size_nm)
+            # every channel its own polynomial of the main channel's chip position, which is the sample's
+            # (`Batch.field_xy`): docs/uipsf/field-dependence.md §12.2
+            field = FieldPolynomial(field_centre_px, optics[0].pixel_size_nm)
         channels.append(Channel(psf, transform=H, field=field))
     return ForwardModel(channels, geometry=BeadStackGeometry(drift=settings.drift, fit_tilt=settings.fit_tilt))
 
 
 def insitu_model(optics, spec: PSFModelSettings, roi_shape, focus_nm: float, z_max_nm: float = 1000.0,
                  device=None, dtype=torch.float32, held: Held | None = None, fit_focus: bool = True,
-                 fit_tilt: bool = False) -> ForwardModel:
+                 fit_tilt: bool = False, field_centre_px=None) -> ForwardModel:
     """The model in situ learning learns (plan §9, M5): one channel, the pupil and blur as ``spec``
     describes them for a point (`make_psf`; no bead's size, and no SAF damping, which is the beads': a
     molecule's light beyond the critical angle follows its own depth), molecules in the sample seen through
@@ -122,13 +126,20 @@ def insitu_model(optics, spec: PSFModelSettings, roi_shape, focus_nm: float, z_m
     orders (`held_from`).  The pupil sampling keeps defocus up to ``z_max_nm`` from aliasing: the
     molecules' distance from the plane in focus, not their depth, since the depth's and the focus's waves
     largely cancel there and the light beyond the critical angle decays rather than aliases.  ±1 µm needs
-    64 samples at NA 1.43; 2 µm asked for 96, 2.25 times the work."""
+    64 samples at NA 1.43; 2 µm asked for 96, 2.25 times the work.
+
+    ``field_centre_px``: astigmatism and coma varying over the chip about it (`FieldPolynomial`, as beads
+    learn them; `docs/uipsf/field-dependence.md` §12.3).  No focal surface: each molecule's height is free,
+    and takes a tilted or curved focus up as a bead's z does -- the coverslip's edge measured per region of the
+    field says how far the focus varies over it (`insitu_rounds.edge_over_field`)."""
     from dataclasses import replace as replaced
 
     from ..model import Bleaching, InSituGeometry
     psf = make_psf(optics, replaced(spec, saf_damping=False), roi_shape, held=held, z_max_nm=z_max_nm,
                    device=device, dtype=dtype)
-    return ForwardModel([Channel(psf)], geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
+    field = None if field_centre_px is None else FieldPolynomial(field_centre_px, optics.pixel_size_nm)
+    return ForwardModel([Channel(psf, field=field)],
+                        geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
                         intensity=Bleaching(order=0))
 
 
@@ -147,8 +158,8 @@ def molecule_stack_model(optics, spec: PSFModelSettings, roi_shape, sweeps: int,
     ``field_dependence``: astigmatism and coma varying over the chip (`FieldPolynomial`, centred at
     ``centre_px`` as the focal plane is) and the focal surface's curvature (`CoverslipStackGeometry`'s
     ``curvature``), as beads learn them.  Each molecule is at its own place, so thousands of them sample the
-    field far more densely than 20-50 beads.  In every channel, each its own polynomial: a split chip's two
-    halves see different parts of the objective's field (`docs/uipsf/field-dependence.md` §12)."""
+    field far more densely than 20-50 beads.  In every channel, each its own polynomial of the main
+    channel's chip position, as `bead_model`'s (`docs/uipsf/field-dependence.md` §12.2)."""
     from dataclasses import replace as replaced
 
     from ..model import Bleaching, CoverslipStackGeometry

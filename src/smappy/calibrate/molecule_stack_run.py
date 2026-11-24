@@ -72,7 +72,7 @@ def model_for(rois: MoleculeStackROIs, optics, model, stack: MoleculeStackSettin
     return molecule_stack_model(o if C > 1 else o[0], model.psf, (roi, roi), rois.sweeps, np.zeros(rois.sweeps),
                                 rois.field_centre(), height_nm=stack.height_nm, transforms=transforms,
                                 z_max_nm=span + 100.0, device=device, dtype=dtype or torch.float32,
-                                field_dependence=bool(model.field_dependence) and C == 1)
+                                field_dependence=bool(model.field_dependence))
 
 
 def _main_half(rois) -> Optional[str]:

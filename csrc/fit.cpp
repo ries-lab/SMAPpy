@@ -229,10 +229,18 @@ struct NoisePlanes {
 // The body every global fit shares: validate the link, plan the layout of the
 // global vector and drive the per-ROI loop.  `models` holds one PSF per
 // channel and is copied per thread, as in `run` -- the spline keeps scratch.
-template <class Model>
+// ``setup(models, i)`` prepares the thread's copies for ROI i (each channel's
+// field nodes and weights); by default nothing.
+struct NoGlobalSetup {
+    template <class Model>
+    void operator()(std::vector<Model>&, long long) const {}
+};
+
+template <class Model, class Setup = NoGlobalSetup>
 Output run_global(const std::vector<Model>& models, const Array& rois,
                   const Array& link, const IntArray& shared, int iterations,
-                  int n_threads, const py::object& variance = py::none()) {
+                  int n_threads, const py::object& variance = py::none(),
+                  Setup setup = Setup()) {
     constexpr int P = Model::NV;
     const GlobalDims dims = check_global_rois(rois);
     const py::ssize_t n = dims.n;
@@ -274,6 +282,7 @@ Output run_global(const std::vector<Model>& models, const Array& rois,
             NoisePlanes noise(var ? channels : 0, sz);
             smappy::Link mine = plan;
             for (long long i = begin; i < end; ++i) {
+                setup(local, i);
                 for (int c = 0; c < channels; ++c)
                     planes[c] = data + ((i * channels + c) * sz) * sz;
                 mine.offset = links + i * 2 * channels * P;
@@ -314,6 +323,45 @@ py::tuple fit_cspline_global(const Array& rois, const Array& coeff, const Array&
     for (int c = 0; c < channels; ++c)
         models.emplace_back(coeff.data() + c * plane, nx, ny, nz, z_start);
     return as_tuple(run_global(models, rois, link, shared, iterations, n_threads, variance));
+}
+
+// A field-dependent spline per channel (`fit_cspline_field`'s, `fit_cspline_global`'s
+// link): coeff (G, 64, nz, ny, nx) every channel's nodes one after another,
+// nodes and weights (n, C, 4) per fit and channel, the nodes indices into all G
+// -- so the channels may have grids of their own, each over its own part of the
+// chip; a channel with one spline is a grid of one node at weight 1.
+py::tuple fit_cspline_field_global(const Array& rois, const Array& coeff, const IntArray& nodes,
+                                   const Array& weights, const Array& link,
+                                   const IntArray& shared, float z_start, int iterations,
+                                   int n_threads, const py::object& variance) {
+    const GlobalDims dims = check_global_rois(rois);
+    const int channels = dims.channels;
+    if (coeff.ndim() != 5 || coeff.shape(1) != 64)
+        throw std::invalid_argument(
+            "field spline coefficients must have shape (G, 64, nz, ny, nx)");
+    if (nodes.ndim() != 3 || nodes.shape(0) != dims.n || nodes.shape(1) != channels ||
+        nodes.shape(2) != 4 || weights.ndim() != 3 || weights.shape(0) != dims.n ||
+        weights.shape(1) != channels || weights.shape(2) != 4)
+        throw std::invalid_argument(
+            "nodes and weights must have shape (n, channels, 4), one row per fit and channel");
+    const int G = static_cast<int>(coeff.shape(0));
+    const int* nd = nodes.data();
+    for (py::ssize_t i = 0; i < 4 * channels * dims.n; ++i)
+        if (nd[i] < 0 || nd[i] >= G)
+            throw std::invalid_argument("a node index is outside the spline grids");
+    const int nz = static_cast<int>(coeff.shape(2));
+    const int ny = static_cast<int>(coeff.shape(3));
+    const int nx = static_cast<int>(coeff.shape(4));
+    std::vector<smappy::CSplineField> models;
+    models.reserve(channels);
+    for (int c = 0; c < channels; ++c)
+        models.emplace_back(coeff.data(), nx, ny, nz, z_start);
+    const float* w = weights.data();
+    auto setup = [nd, w, channels](std::vector<smappy::CSplineField>& m, long long i) {
+        for (int c = 0; c < channels; ++c)
+            m[c].use(nd + (i * channels + c) * 4, w + (i * channels + c) * 4);
+    };
+    return as_tuple(run_global(models, rois, link, shared, iterations, n_threads, variance, setup));
 }
 
 // The 4Pi start.  For a fixed z the IAB model is linear in N, N cos(phase)
@@ -695,6 +743,12 @@ PYBIND11_MODULE(_fit3d, m) {
           py::arg("variance") = py::none(),
           "Fit one emitter across several channels with a spline PSF each, "
           "sharing the parameters marked in `shared`.");
+
+    m.def("fit_cspline_field_global", &fit_cspline_field_global, py::arg("rois"),
+          py::arg("coeff"), py::arg("nodes"), py::arg("weights"), py::arg("link"),
+          py::arg("shared"), py::arg("z_start"), py::arg("iterations") = 50,
+          py::arg("n_threads") = 0, py::arg("variance") = py::none(),
+          "fit_cspline_global with each channel's splines blended per fit over the field.");
 
     m.def("fit_cspline4pi_global", &fit_cspline4pi_global, py::arg("rois"),
           py::arg("coeff"), py::arg("link"), py::arg("shared"),

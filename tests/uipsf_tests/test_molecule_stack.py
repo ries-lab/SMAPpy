@@ -180,6 +180,9 @@ def test_the_window_offers_molecule_stacks_as_a_sample_and_detects_their_molecul
     assert form.row_layouts["field_dependence"].isRowVisible(form.fields["field_dependence"])
     form.set_values(dict(field_dependence=True))
     assert window._part("model").field_dependence
+    window.mode_box.setCurrentText("Dual colour")         # a field per channel: offered there too
+    assert form.row_layouts["field_dependence"].isRowVisible(form.fields["field_dependence"])
+    window.mode_box.setCurrentText("Single channel")
     form.set_values(dict(field_dependence=False))
     window.optics_form.set_values(dict(NA=1.45, wavelength_nm=680.0, n_immersion=1.518,
                                        pixel_x_nm=110.0, pixel_y_nm=110.0))

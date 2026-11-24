@@ -2982,8 +2982,17 @@ The study and the choices: `docs/uipsf/field-dependence.md`.  What is built:
   linearisations read it the same way, so the solver's field columns come from `pupil_linearisation`
   (`test_field.py` checks them against the Jacobian).  Beads and molecules on the coverslip in z sweeps
   (`molecule_stack_model(field_dependence=)`, which adds the focal surface's curvature,
-  `CoverslipStackGeometry(curvature=)`, model file version unchanged: an optional geometry entry); §12 of
-  the study.
+  `CoverslipStackGeometry(curvature=)`, model file version unchanged: an optional geometry entry), in one
+  channel or two: with two, every channel has its own polynomial of the main channel's chip position
+  (`bead_model`); §12 of the study.
+- **Two channels in SMAPpy**: `pupil.dual_calibration` gives each channel node splines over its own chip
+  (`pupil.field_extent(…, channel)`, a secondary node drawn where `pupil.main_position` puts it), normalised by
+  the pair's joint factor; the dual file keeps them per channel (``/main/field``, ``/secondary/field``);
+  `dual.mirrored_spline` mirrors every node; `depth.dual_depth_calibration` redraws them.  The fitter,
+  `fit_cspline_field_global` (`run_global` with a per-fit setup): nodes and weights per fit and channel into
+  every channel's nodes one after another; `GlobalSplinePSF.fit(…, chip_xy=(n, C, 2))`, which
+  `MultiChannelEngine.flush` fills from each channel's ROI centre on the chip.  `SplitEngine` passes each
+  channel's chip position too (`LocalizationEngine.on_chip`).
 - **The report**, `diagnostics.field_report`: per mode the largest change across the used beads with its
   CRLB, and a Wald test of the 14 coefficients against zero, ½ c·C⁻¹·c in nats against ½ χ²(10⁻⁶): no
   refit.  The PSF calibration window's summary prints it when *field dependence* is ticked.

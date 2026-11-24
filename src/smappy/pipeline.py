@@ -78,6 +78,10 @@ class LocalizationEngine:
     #: the camera's noise map cut to the frames (`scmos.FitNoise`): read on
     #: the first block when `FitSettings.per_pixel_noise` is on, or given
     noise: Optional["FitNoise"] = None
+    #: the ROIs' centres (n, 2) in these frames' pixels onto the camera chip, for a field-dependent
+    #: PSF: the camera ROI's corner added if None; a split chip's channel puts its own pixels back
+    #: where they lie (`multichannel.SplitEngine`)
+    on_chip: Optional[object] = None
 
     _rois: List[np.ndarray] = field(default_factory=list, init=False)
     _variances: List[np.ndarray] = field(default_factory=list, init=False)
@@ -143,8 +147,11 @@ class LocalizationEngine:
             stack = ROIStack(stack.images + per_pixel, candidates, self.settings.roisize)
         if getattr(self.model, "field_dependent", False):
             # each ROI's centre on the chip, for a PSF that varies over it
-            ox, oy = self.camera.roi_offset
-            extra["chip_xy"] = np.stack([stack.candidates.x + ox, stack.candidates.y + oy], 1)
+            centres = np.stack([stack.candidates.x, stack.candidates.y], 1).astype(float)
+            if self.on_chip is not None:
+                extra["chip_xy"] = self.on_chip(centres)
+            else:
+                extra["chip_xy"] = centres + np.asarray(self.camera.roi_offset, float)
         result = self.model.fit(with_readout(stack.images, variance),
                                 iterations=self.settings.iterations,
                                 n_threads=self.settings.n_threads, **extra)

@@ -819,15 +819,23 @@ class DualColorCalibration(_Mapping):
 def mirrored_spline(cal: SplineCalibration, axis: int) -> SplineCalibration:
     """``cal`` reflected along ``axis`` of its (z, y, x) grid, exactly: each cell's cubic read from its
     other end, c'_q = (−1)^q Σ_p C(p, q) c_p, and the cells reversed -- the spline of the flipped bead
-    stack, without fitting it again.  Its stack, if kept, is flipped too."""
+    stack, without fitting it again.  Its stack, if kept, is flipped too, and so is every node spline of a
+    field (`field_splines`), each alike; the nodes stay where they are on the chip, which a fit names in
+    the camera's own orientation (`MultiChannelEngine.flush`)."""
     from math import comb
-    coeff = np.asarray(cal.coeff, np.float64).reshape(4, 4, 4, *cal.coeff.shape[1:])   # pz, py, px, z, y, x
     power = {0: 0, 1: 1, 2: 2}[axis]
     reflect = np.array([[(-1) ** q * comb(p, q) if p >= q else 0 for p in range(4)] for q in range(4)], float)
-    coeff = np.moveaxis(np.tensordot(reflect, np.moveaxis(coeff, power, 0), axes=(1, 0)), 0, power)
-    coeff = np.flip(coeff, axis=3 + axis)
+
+    def flipped(c):
+        coeff = np.asarray(c, np.float64).reshape(4, 4, 4, *c.shape[1:])   # pz, py, px, z, y, x
+        coeff = np.moveaxis(np.tensordot(reflect, np.moveaxis(coeff, power, 0), axes=(1, 0)), 0, power)
+        return np.ascontiguousarray(np.flip(coeff, axis=3 + axis).reshape(c.shape), np.float32)
     psf = None if cal.psf is None else np.flip(cal.psf, axis=axis).copy()
-    return replace(cal, coeff=np.ascontiguousarray(coeff.reshape(cal.coeff.shape), np.float32), psf=psf)
+    field = getattr(cal, "field_splines", None)
+    if field is not None:
+        from ..field_splines import FieldSplines
+        field = FieldSplines(np.stack([flipped(c) for c in field.coeff]), field.xs, field.ys, field.blend_error)
+    return replace(cal, coeff=flipped(cal.coeff), psf=psf, field_splines=field)
 
 
 def with_registration(calibration: DualColorCalibration, transform) -> DualColorCalibration:
@@ -1200,6 +1208,14 @@ def save_dual_color_calibration(path, calibration, result=None, overwrite=False)
                 g['parameters_json'] = json.dumps(model.parameters)
                 g.create_dataset('coeff', data=model.coeff, compression='gzip')
                 g.create_dataset('psf', data=model.psf, compression='gzip')
+                fs = getattr(model, 'field_splines', None)
+                if fs is not None:
+                    # each channel's node splines over its own part of the chip, as a single
+                    # calibration keeps them (`io.calibration`): optional, so the version stays
+                    fg = g.create_group('field')
+                    fg.create_dataset('coeff', data=fs.coeff, compression='gzip')
+                    fg.create_dataset('xs', data=fs.xs)
+                    fg.create_dataset('ys', data=fs.ys)
             if result is not None:
                 g = f.create_group('diagnostics')
                 r = result.registration
@@ -1249,6 +1265,9 @@ def load_dual_color_calibration(path):
                     float(g.attrs['z0']), x0=float(g.attrs['x0']), psf=g['psf'][...],
                     source=Path(path), parameters=json.loads(g['parameters_json'][()]),
                     em_on=bool(g.attrs['em_on']) if 'em_on' in g.attrs else None)
+            if 'field' in g:
+                from ..field_splines import FieldSplines
+                model.field_splines = FieldSplines(g['field/coeff'][...], g['field/xs'][...], g['field/ys'][...])
             _validate_native_calibration(model)
             models.append(model)
         if models[0].z0 != models[1].z0 or models[0].dz != models[1].dz or models[0].shape != models[1].shape:

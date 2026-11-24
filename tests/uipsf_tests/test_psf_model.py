@@ -190,12 +190,13 @@ def test_the_form_shows_what_each_method_reads():
     assert not beads["fit_tilt"] and model_shown("beads", layered=True)["fit_tilt"]
     assert not model_shown("beads", "free")["psf.saf_damping"]                # a minimal magnitude's only
     assert not model_shown("beads", "minimal", ring=False)["psf.saf_damping"]  # nothing beyond the critical angle
-    assert not model_shown("beads", dual=True)["field_dependence"]
+    assert model_shown("beads", dual=True)["field_dependence"]                 # a field per channel
     assert model_shown("molecules")["field_dependence"]                       # molecules learn the field too
     assert all(model_shown(m)["psf.learn_n_med"] for m in ("beads", "insitu"))   # a diagnostic everywhere
     situ = model_shown("insitu")
     assert situ["fit_tilt"] and not any(situ[k] for k in ("psf.magnitude", "psf.saf_damping", "bead_diameter_nm",
-                                                           "drift", "field_dependence"))
+                                                           "drift"))
+    assert situ["field_dependence"]                                           # in situ learns the field too
 
 
 def test_the_form_keeps_the_blur_under_more_and_the_pixel_blur_out():

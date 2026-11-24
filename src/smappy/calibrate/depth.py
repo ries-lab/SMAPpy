@@ -266,7 +266,22 @@ def dual_depth_calibration(dual, focus_nm: float, n_med: Optional[float] = None)
                                                                            smooth_xy_px=0.0))
     record = {"focus_nm": float(focus_nm), "n_med": resolved_medium(learned, n_med),
               "in_focus_height_nm": focus, "heights_nm": [float(heights[-1]), float(high)], "method": "typed"}
-    for drawn, old in ((first, main), (second, dual.secondary)):
+    for c, (drawn, old) in enumerate(((first, main), (second, dual.secondary))):
+        field = getattr(old, "field_splines", None)
+        if field is not None:
+            # each channel's nodes where they were, drawn at this depth with the pair's joint normalisation;
+            # a secondary node's field is where the model's map puts it on the main channel (`pupil.field_splines`)
+            from ..field_splines import FieldSplines
+            from .core import spline_coefficients
+            from .pupil import main_position
+            norm = float(drawn.parameters["common_normalization"])
+            nodes = []
+            for y in field.ys:
+                for x in field.xs:
+                    where = tuple(float(v) for v in main_position(learned, c, [(x, y)])[0])
+                    node = np.maximum(draw(model, shared, focus_nm, heights, roi, field_xy=where, channel=c), 0)
+                    nodes.append(spline_coefficients((node / norm).astype(np.float32)))
+            drawn.field_splines = FieldSplines(np.stack(nodes), field.xs, field.ys)
         drawn.z0 = high / dz                       # plane 0 the highest: z the height above the coverslip
         drawn.source, drawn.em_on, drawn.pixelsize_um = old.source, old.em_on, old.pixelsize_um
         drawn.parameters = {**(old.parameters or {}), **(drawn.parameters or {}), "sample_depth": record,

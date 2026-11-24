@@ -206,7 +206,8 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     In situ decides the magnitude by its *hold* (a bead model's γ held, or γ learnt) and never learns the
     SAF damping, the bead's size or the stage's drift, which are the beads'.  *learn NA* is offered in every
     method for a minimal magnitude; in situ holding a bead model's γ holds its learnt NA too.  Field
-    dependence is learnt by beads and by molecules on the coverslip (docs/uipsf/field-dependence.md).  The tilt: always in
+    dependence is learnt by beads and by molecules on the coverslip, in one channel or two, and in situ
+    in one (docs/uipsf/field-dependence.md §12).  The tilt: always in
     situ, where molecules above the glass see it; for beads only through a coverslip of another index.
     Molecules on the coverslip in z sweeps choose the magnitude as beads do, but have no SAF damping of their
     own -- their common height damps the ring physically (`uipsf.model.CoverslipStackGeometry`) -- no bead,
@@ -214,12 +215,12 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     nothing held out; their field dependence adds the focal surface's curvature (`molecule_stack_run`)."""
     if method == "molecules":
         return {"psf.magnitude": True, "psf.saf_damping": False, "psf.learn_na": magnitude == "minimal",
-                "psf.learn_n_med": True, "bead_diameter_nm": False, "drift": False, "field_dependence": not dual,
+                "psf.learn_n_med": True, "bead_diameter_nm": False, "drift": False, "field_dependence": True,
                 "fit_tilt": False, "heldout": False, "max_dz_nm": False, "z_range_nm": False}
     beads = method != "insitu"
     return {"psf.magnitude": beads, "psf.saf_damping": beads and magnitude == "minimal" and ring,
             "psf.learn_na": magnitude == "minimal", "psf.learn_n_med": True,
-            "bead_diameter_nm": beads, "drift": beads, "field_dependence": beads and not dual,
+            "bead_diameter_nm": beads, "drift": beads, "field_dependence": True,
             "fit_tilt": not beads or layered, "heldout": True, "max_dz_nm": beads, "z_range_nm": beads}
 
 
@@ -566,29 +567,39 @@ def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int =
     psf = psf.astype(np.float32)
     if getattr(camera, "microscope", None):
         parameters["microscope"] = dict(camera.microscope)
-    if field is not None:
-        # ``psf`` is the field's centre, the middle of the beads' span and so of the grid: the spline a
-        # reader that ignores the field fits with
-        parameters["field_grid"] = list(field.shape)
-        parameters["field_blend_error"] = float(field.blend_error)
-        from ..field_splines import grids, limit_warning
-        warning = limit_warning(field.shape[0], field.blend_error, largest=grids(roi_size - 1)[-1])
-        if warning is not None:
-            # kept with the calibration, so the window's summary and a later reader see it too
-            parameters["field_warning"] = warning
-            import warnings
-            warnings.warn(warning, stacklevel=2)
-    return SplineCalibration(spline_coefficients(psf), float(dz_nm), z0, x0=(roi_size - 1) / 2, psf=psf,
-                             em_on=None if camera is None else bool(camera.is_em),
-                             pixelsize_um=None if camera is None or camera.pixelsize_um is None
-                             else np.atleast_1d(np.asarray(camera.pixelsize_um, float)),
-                             parameters=parameters, field_splines=field)
+    out = SplineCalibration(spline_coefficients(psf), float(dz_nm), z0, x0=(roi_size - 1) / 2, psf=psf,
+                            em_on=None if camera is None else bool(camera.is_em),
+                            pixelsize_um=None if camera is None or camera.pixelsize_um is None
+                            else np.atleast_1d(np.asarray(camera.pixelsize_um, float)),
+                            parameters=parameters)
+    # ``psf`` is the field's centre, the middle of the beads' span and so of the grid: the spline a reader
+    # that ignores the field fits with
+    _with_field(out, field)
+    return out
 
 
-def field_extent(learned):
-    """((x, y) lowest, (x, y) highest) chip pixels of the beads a field-dependent model was learnt on: where
-    its field is known, and so the span of its spline grid; None without a field or bead positions."""
-    if all(getattr(ch, "field", None) is None for ch in learned.model.channels):
+def _apply(h, xy) -> np.ndarray:
+    """Chip positions ``xy`` [N, 2] through the projective map ``h``."""
+    xy = np.asarray(xy, float).reshape(-1, 2)
+    p = np.c_[xy, np.ones(len(xy))] @ np.asarray(h, float).T
+    return p[:, :2] / p[:, 2:]
+
+
+def main_position(learned, channel: int, xy) -> np.ndarray:
+    """Channel ``channel``'s chip positions ``xy`` [N, 2] on the main channel's chip, where a field-dependent
+    model's field is a function of them (`uipsf.workflows.calibrate.bead_model`): the model's own transform,
+    secondary onto main."""
+    if channel == 0:
+        return np.asarray(xy, float).reshape(-1, 2)
+    return _apply(_transform(learned), xy)
+
+
+def field_extent(learned, channel: int = 0):
+    """((x, y) lowest, (x, y) highest) chip pixels of the beads a field-dependent model was learnt on, in
+    channel ``channel``'s own chip pixels (the main channel's positions through the model's transform): where
+    its field is known, and so the span of that channel's spline grid; None without a field or bead
+    positions."""
+    if getattr(learned.model.channels[channel], "field", None) is None:
         return None
     if callable(getattr(learned, "beads_field_xy", None)):
         xy = learned.beads_field_xy()
@@ -598,26 +609,36 @@ def field_extent(learned):
     if not xy:
         return None
     xy = np.asarray(xy, float)
+    if channel:
+        xy = _apply(np.linalg.inv(_transform(learned)), xy)
     return xy.min(0), xy.max(0)
 
 
 def field_splines(learned, dz_nm: float, z_range_nm: float, roi_size: int, upsample, scale: float,
                   depth_nm: float | None = None, channel: int = 0):
-    """The node splines of a field-dependent model (`smappy.field_splines.node_splines`), on the smallest
-    grid over the beads' span whose blend keeps to `field_splines.TOLERANCE`, every node normalised by the
-    centre's ``scale`` so that the blend is one; None without a field, or when one spline is enough.
-    ``depth_nm`` as `sample`'s (molecules on the coverslip: their height)."""
-    from ..field_splines import node_splines
-    extent = field_extent(learned)
+    """The node splines of a field-dependent model (`smappy.field_splines`), on the smallest grid over the
+    beads' span whose blend keeps to `field_splines.TOLERANCE`, every node normalised by the centre's
+    ``scale`` so that the blend is one; None without a field, or when one spline is enough.  ``depth_nm``
+    as `sample`'s (molecules on the coverslip: their height).  ``channel``: a two-channel model's, its grid
+    over its own chip pixels, each node drawn where the field puts it on the main channel's
+    (`main_position`), so the secondary's splines are right for a fit that knows only its own chip."""
+    extent = field_extent(learned, channel)
     if extent is None:
         return None
 
     def psf_at(x, y):
         # not cached: the grid search draws each PSF once, and keeping them held 3 GB for 13 × 13
-        return np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample, channel,
-                                 field_xy=(float(x), float(y)), depth_nm=depth_nm), 0) / scale
-
+        where = tuple(float(v) for v in main_position(learned, channel, [(x, y)])[0])
+        psf = sample(learned, dz_nm, z_range_nm, roi_size, upsample, channel, field_xy=where, depth_nm=depth_nm)
+        return np.maximum(psf, 0) / scale
     return node_splines(psf_at, *extent)
+
+
+def node_splines(psf_at, lo, hi):
+    """`smappy.field_splines.node_splines` (the grid, each node cut to `field_splines.node_cells`), for the
+    callers here that draw their own PSFs: the in situ spline, the molecules'."""
+    from ..field_splines import node_splines as nodes
+    return nodes(psf_at, lo, hi)
 
 
 def _transform(learned) -> np.ndarray:
@@ -644,9 +665,31 @@ def dual_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 2
     settings = CalibrationSettings(roi_size=roi_size, smooth_z_nm=0.0, smooth_xy_px=0.0)
     (main, secondary), _ = positive_pair_models(raw, dz_nm, settings)
     record = _record(learned, dz_nm, z_range_nm, roi_size, upsample)
-    for model in (main, secondary):
+    for c, model in enumerate((main, secondary)):
         model.parameters.update(record)
+        # each channel's node splines, normalised by the pair's joint factor as its centre is
+        _with_field(model, field_splines(learned, dz_nm, z_range_nm, roi_size, upsample,
+                                         float(model.parameters["common_normalization"]), depth_nm, c))
     return DualColorCalibration(main, secondary, _transform(learned), dict(learned.geometry), dict(record))
+
+
+def _with_field(calibration, field) -> None:
+    """``field`` (or None) onto ``calibration`` with its grid and blend error in the parameters, and the
+    largest grid's warning where it applies (`field_splines.limit_warning`)."""
+    calibration.field_splines = field
+    if field is None:
+        return
+    calibration.parameters["field_grid"] = list(field.shape)
+    calibration.parameters["field_blend_error"] = float(field.blend_error)
+    from ..field_splines import grids, limit_warning
+    psf = getattr(calibration, "psf", None)
+    largest = None if psf is None else grids(psf.shape[-1] - 1)[-1]   # the grids this box offers at most
+    warning = limit_warning(field.shape[0], field.blend_error, largest=largest)
+    if warning is not None:
+        # kept with the calibration, so the window's summary and a later reader see it too
+        calibration.parameters["field_warning"] = warning
+        import warnings
+        warnings.warn(warning, stacklevel=3)
 
 
 def objective_pupil(cal, source: str = "") -> dict:

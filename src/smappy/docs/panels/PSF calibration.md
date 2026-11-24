@@ -999,8 +999,12 @@ the chip, astigmatism up to the square of the distance, coma in proportion to
 it, as nodal aberration theory says an objective's aberrations vary.  The
 spline is then one per point of a grid over the beads' span, as fine as the
 learnt field needs (one spline when it is flat), and Spline 3D fits each spot
-with the splines around it blended.  Offered for beads of one channel and for
-molecules on the coverslip in z sweeps.  Molecules are thousands of points
+with the splines around it blended.  Offered for beads and for molecules on
+the coverslip in z sweeps, in one channel or two.  With two channels of a split
+chip each channel learns its own field -- the two colours cross the objective
+at different wavelengths and then each half passes its own optics -- and keeps
+its own grid of splines over its half of the chip; Spline 3D 2C blends each
+channel's where its spot is.  Molecules are thousands of points
 spread over the chip, so they sample the field more densely than tens of beads;
 but each molecule's z is the stage's, held to the focal plane, so with the
 field the plane learns its curvature too (field curvature: the focus a few

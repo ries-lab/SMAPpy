@@ -65,13 +65,15 @@ SPLIT_TRANSFORM = [[0.997 * 0.99997, -0.007, 3.2], [0.007, 0.997 * 0.99997, -255
 
 def two_channel_beads(optics, n=6, kind="biplane", dtype=torch.float64, seed=0, P=24, roi=(9, 9), K=9,
                       photons=8000.0, background=(10.0, 6.0), n_max=4, bead_radius_nm=0.0, mirrored=False,
-                      z_range=600.0, phase2=(-0.2, 0.25, 0.1), transform=None, **model_kw):
+                      z_range=600.0, phase2=(-0.2, 0.25, 0.1), transform=None, fields=None, **model_kw):
     """(model, truth Params, Batch) of beads seen in two channels of one chip.
 
     ``kind`` "biplane": the same optics, the second focal plane 350 nm off, half the light each;
     "ratiometric": the second channel 30 nm redder, a 40 nm chromatic focal shift, 30 % of the light.
     The secondary channel has its own aberrations (``phase2``).  ``mirrored`` flips the secondary half
-    across the split (y), SMAPpy's "up-down mirrored".  Beads lie over the upper half of the chip."""
+    across the split (y), SMAPpy's "up-down mirrored".  Beads lie over the upper half of the chip.  ``fields``
+    (one {(Noll, i, j): rad} per channel) gives each channel a `FieldPolynomial` of the main chip position,
+    centred on the beads' span, as `bead_model` builds it."""
     import numpy as np
 
     from uipsf.model import Channel
@@ -89,7 +91,11 @@ def two_channel_beads(optics, n=6, kind="biplane", dtype=torch.float64, seed=0, 
         grid = uipsf.PupilGrid.build(o, P, device="cpu", dtype=dtype)
         psf = uipsf.VectorPSF(grid, uipsf.ZernikePupil(grid, n_max=n_max), roi, sigma_nm=(30.0, 30.0),
                               bead_radius_nm=bead_radius_nm)
-        channels.append(Channel(psf, transform=H))
+        field = None
+        if fields is not None:
+            from uipsf.model import FieldPolynomial
+            field = FieldPolynomial((240.0, 140.0), optics.pixel_size_nm)
+        channels.append(Channel(psf, transform=H, field=field))
     model = uipsf.ForwardModel(channels, **model_kw)
     g = torch.Generator().manual_seed(seed)
     centre = torch.rand(n, 2, generator=g, dtype=torch.float64) * torch.tensor([400.0, 200.0]) + 40
@@ -109,5 +115,9 @@ def two_channel_beads(optics, n=6, kind="biplane", dtype=torch.float64, seed=0, 
     b0 = template(n, uipsf.Batch.z_from_objective(torch.linspace(-z_range, z_range, K)), roi, dtype=dtype,
                   channels=2)
     b0.roi_xy = torch.stack([centre, second], 1).to(dtype)
+    if fields is not None:
+        b0.field_xy = centre.to(dtype)
+        for c, (pre, f) in enumerate(zip(("", "ch1."), fields, strict=True)):
+            values[pre + "field.phase"] = torch.tensor([f.get(t, 0.0) for t in channels[c].field.layout])
     truth = parameters(model, b0, values, dtype=dtype)
     return model, truth, simulate(model, truth, b0, seed=seed + 1)
