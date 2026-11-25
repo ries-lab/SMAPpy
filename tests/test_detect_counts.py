@@ -6,7 +6,14 @@ import numpy as np
 import pytest
 
 import smappy.pipeline
-from smappy.detect import (AbsoluteCutoff, Counts, DoGFilter, DynamicCutoff, GaussFilter, PeakFinder)
+from smappy.detect import (
+    AbsoluteCutoff,
+    Counts,
+    DoGFilter,
+    DynamicCutoff,
+    GaussFilter,
+    PeakFinder,
+)
 from smappy.fit_rois import cut_rois
 from smappy.metadata import CameraMetadata
 from smappy.pipeline import FitSettings, LocalizationEngine, raw_counts

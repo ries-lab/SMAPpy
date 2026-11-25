@@ -208,7 +208,7 @@ def test_candidates_are_thread_independent(n_threads):
 def _numpy_route(monkeypatch, function, *args, **kwargs):
     """``function`` as it ran before the fused kernel: the maxima, then the
     cutoffs in numpy."""
-    import smappy.detect as detect
+    from smappy import detect
     with monkeypatch.context() as m:
         m.setattr(detect, "_fused", lambda *a, **k: None)
         return getattr(detect, function)(*args, **kwargs)

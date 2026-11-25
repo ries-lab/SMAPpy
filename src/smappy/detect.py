@@ -402,8 +402,7 @@ def _fused(filtered: np.ndarray, cutoff, n_threads: int = 0, split=None, affine=
     cutoffs = cutoffs.astype(np.float64)
     if dframe.size:
         side = _halves(dy, dx, split)
-        groups, first, which = np.unique(dframe.astype(np.int64) * 2 + side,
-                                         return_index=True, return_inverse=True)
+        groups, which = np.unique(dframe.astype(np.int64) * 2 + side, return_inverse=True)
         applied = np.empty(groups.size, np.float32)
         for g, key in enumerate(groups):
             applied[g] = np.float32(cutoff(dvalue[which == g]))
