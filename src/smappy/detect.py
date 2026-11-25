@@ -246,9 +246,10 @@ def local_maxima(images: np.ndarray, threshold: float = -np.inf,
     only a speed-up: pass ``-inf`` (the default) when the cutoff still has to be
     derived from the distribution of all maxima.
 
-    Uses the C++ single-pass search when the extension is available -- it beats
-    a neighbourhood filter because short-circuit evaluation rejects almost every
-    pixel after one or two comparisons.  The numpy path is kept as a reference
+    Uses the C++ search when the extension is available: eight pixels at a
+    time compared with all eight neighbours without a branch
+    (``csrc/maxima.hpp``), since without a threshold the scalar search's
+    early exits mispredicted on noise.  The numpy path is kept as a reference
     implementation and produces identical results.
     """
     images = np.ascontiguousarray(images, dtype=np.float32)

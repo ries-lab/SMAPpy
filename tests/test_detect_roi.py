@@ -36,6 +36,21 @@ def test_extension_and_numpy_maxima_agree():
         assert np.array_equal(np.asarray(a), np.asarray(b))
 
 
+@pytest.mark.parametrize("threshold", [-np.inf, 0.5])
+def test_the_vector_search_finds_the_scalar_maxima_at_row_ends_ties_and_nans(threshold):
+    """Eight pixels at a time and the scalar tail: widths around multiples of
+    eight, a NaN, and a row of ties (plateaus) give the numpy search's answer."""
+    rng = np.random.default_rng(3)
+    for nx in (3, 9, 10, 11, 17, 18, 26, 67):
+        img = rng.normal(0, 1, (3, 12, nx)).astype(np.float32)
+        img[0, 2, min(2, nx - 1)] = np.nan
+        img[:, 5] = np.round(img[:, 5])
+        fast = local_maxima(img, threshold, use_extension=True)
+        reference = local_maxima(img, threshold, use_extension=False)
+        for a, b in zip(fast, reference):
+            assert np.array_equal(np.asarray(a), np.asarray(b)), nx
+
+
 def test_dog_backends_agree():
     """The C++ filter must match the scipy reference to float precision."""
     rng = np.random.default_rng(1)
