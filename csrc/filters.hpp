@@ -7,6 +7,11 @@
 //
 // Borders replicate the edge pixel, which is what keeps a bright background
 // from producing a spurious step at the image edge.
+//
+// The input is float32 photons or a camera's raw uint16 counts (`T`), read as
+// float: peak finding filters the raw frames, the offset cancelling in a
+// difference of Gaussians and the gain scaling the result
+// (`smappy.detect.Counts`), so no frame is converted to photons whole.
 #pragma once
 
 #include <algorithm>
@@ -29,7 +34,8 @@ inline std::vector<float> gauss_kernel(float sigma, int radius) {
 }
 
 // One-dimensional convolution along x (contiguous) of a single row.
-inline void convolve_row(const float* in, float* out, int nx,
+template <class T>
+inline void convolve_row(const T* in, float* out, int nx,
                          const float* k, int radius) {
     for (int x = 0; x < nx; ++x) {
         float acc = 0.0f;
@@ -44,7 +50,8 @@ inline void convolve_row(const float* in, float* out, int nx,
 
 // Difference of two Gaussians of one frame (ny x nx, row major).
 // `tmp` must hold 2 * ny * nx floats.
-inline void dog_frame(const float* img, float* out, int ny, int nx,
+template <class T>
+inline void dog_frame(const T* img, float* out, int ny, int nx,
                       const float* k_narrow, const float* k_wide, int radius,
                       float* tmp) {
     float* ax = tmp;                 // narrow, x-filtered
@@ -52,7 +59,7 @@ inline void dog_frame(const float* img, float* out, int ny, int nx,
 
     // x-pass: both kernels, one traversal of the input
     for (int y = 0; y < ny; ++y) {
-        const float* row = img + y * nx;
+        const T* row = img + y * nx;
         float* a = ax + y * nx;
         float* b = bx + y * nx;
         for (int x = 0; x < nx; ++x) {
@@ -115,7 +122,8 @@ inline std::vector<float> dog_kernel_2d(float sigma, float sigma_wide,
     return k;
 }
 
-inline void dog2d_frame(const float* img, float* out, int ny, int nx,
+template <class T>
+inline void dog2d_frame(const T* img, float* out, int ny, int nx,
                         const float* kernel, int radius) {
     const int n = 2 * radius + 1;
     std::vector<float> row(nx);
@@ -126,7 +134,7 @@ inline void dog2d_frame(const float* img, float* out, int ny, int nx,
 
         for (int ty = -radius; ty <= radius; ++ty) {
             const int yy = std::min(std::max(y + ty, 0), ny - 1);
-            const float* src = img + yy * nx;
+            const T* src = img + yy * nx;
             const float* krow = kernel + (ty + radius) * n;
 
             for (int tx = -radius; tx <= radius; ++tx) {
@@ -143,7 +151,8 @@ inline void dog2d_frame(const float* img, float* out, int ny, int nx,
 }
 
 // Single Gaussian of one frame; `tmp` must hold ny * nx floats.
-inline void gauss_frame(const float* img, float* out, int ny, int nx,
+template <class T>
+inline void gauss_frame(const T* img, float* out, int ny, int nx,
                         const float* k, int radius, float* tmp) {
     for (int y = 0; y < ny; ++y)
         convolve_row(img + y * nx, tmp + y * nx, nx, k, radius);

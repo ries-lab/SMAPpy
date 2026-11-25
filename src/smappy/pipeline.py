@@ -114,13 +114,21 @@ class LocalizationEngine:
         """A block of raw frames converted, searched and cut into the buffer, not fitted."""
         t0 = time.perf_counter()
         noise = self._noise(frames)
-        photons = fit_photons(frames, self.camera, noise, n_threads=self.settings.n_threads)
-        candidates, _ = self.finder(photons, first_frame=first_frame,
-                                    n_threads=self.settings.n_threads)
-        rois = cut_rois(photons, candidates, self.settings.roisize,
-                        first_frame=first_frame)
+        counts = raw_counts(frames, self.camera, noise)
+        if counts is not None:
+            # the raw frames searched, and only the boxes in photons (`detect.Counts`)
+            candidates, _ = self.finder(frames, first_frame=first_frame,
+                                        n_threads=self.settings.n_threads, counts=counts)
+            rois = cut_rois(frames, candidates, self.settings.roisize,
+                            first_frame=first_frame, counts=counts)
+        else:
+            photons = fit_photons(frames, self.camera, noise, n_threads=self.settings.n_threads)
+            candidates, _ = self.finder(photons, first_frame=first_frame,
+                                        n_threads=self.settings.n_threads)
+            rois = cut_rois(photons, candidates, self.settings.roisize,
+                            first_frame=first_frame)
         self.stats["detect_seconds"] += time.perf_counter() - t0
-        self.stats["frames"] += len(photons)
+        self.stats["frames"] += len(frames)
         self.stats["candidates"] += len(candidates)
         self.stats["dropped_at_border"] += len(candidates) - len(rois)
 
@@ -226,6 +234,20 @@ class LocalizationEngine:
         return (f"{s['localizations']} localizations from {s['frames']} frames "
                 f"({s['detect_seconds']:.1f} s detection, "
                 f"{s['fit_seconds']:.1f} s fitting)")
+
+
+def raw_counts(frames: np.ndarray, camera: CameraMetadata, noise=None):
+    """How ``frames`` become photons, for peak finding on the raw frames
+    (`detect.Counts`); None where they are searched in photons: a noise map's
+    per-pixel offsets, an offset per pixel, or frames that are not numbers."""
+    if noise is not None:
+        return None
+    camera.require("conversion", "offset")
+    frames = np.asarray(frames)
+    if np.ndim(camera.offset) != 0 or frames.dtype.kind not in "uif":
+        return None
+    from .detect import Counts
+    return Counts(float(camera.offset), float(camera.adu_to_photons), float(camera.excess_noise))
 
 
 #: Two fits of one frame closer than this (pixels) are one molecule's (`one_per_molecule`).

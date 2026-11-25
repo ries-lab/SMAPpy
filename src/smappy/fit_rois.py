@@ -34,7 +34,7 @@ class ROIStack:
 
 
 def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
-             first_frame: int = 0) -> ROIStack:
+             first_frame: int = 0, counts=None) -> ROIStack:
     """Cut ``roisize`` x ``roisize`` ROIs centred on each candidate.
 
     Candidates whose ROI would extend past the image border are dropped -- as
@@ -45,11 +45,15 @@ def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
     ``first_frame`` is the absolute frame number of ``photons[0]``, so that the
     absolute frame numbers carried by the candidates can be mapped onto this
     block.
+
+    With ``counts`` (`detect.Counts`) the frames are raw counts, and only the
+    boxes are converted to photons -- the same photons, to the last bit, as
+    converting the frames whole.
     """
     if roisize % 2 == 0:
         raise ValueError(f"roisize must be odd, got {roisize}")
 
-    photons = np.asarray(photons, dtype=np.float32)
+    photons = np.asarray(photons) if counts is not None else np.asarray(photons, dtype=np.float32)
     if photons.ndim == 2:
         photons = photons[None]
     n_frames, height, width = photons.shape
@@ -68,6 +72,8 @@ def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
     frame_index = _block_index(kept.frame, first_frame, n_frames)
 
     images = photons[frame_index[:, None, None], rows[:, :, None], cols[:, None, :]]
+    if counts is not None:
+        images = counts.photons(images)
     return ROIStack(np.ascontiguousarray(images, dtype=np.float32), kept, roisize)
 
 

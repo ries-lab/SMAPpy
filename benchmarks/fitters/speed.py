@@ -358,21 +358,24 @@ def cmd_plugin(args):
 
 
 # ------------------------------------------------------------------------------------------ peak finding
-def _steps(finder, photons_of, raw, threads, repeat):
-    """ms per frame of each step, ``repeat`` times."""
+def _steps(finder, photons_of, raw, threads, repeat, counts=None):
+    """ms per frame of each step, ``repeat`` times.  With ``counts`` (`detect.Counts`) the route the
+    single-channel engine takes since 2026-11-25: the raw frames filtered, only the boxes in photons
+    (`pipeline.raw_counts`); *photons* is then nothing, and *boxes* includes converting them."""
     from smappy.detect import find_candidates
     from smappy.fit_rois import cut_rois
     times = {k: [] for k in ("photons", "filter", "maxima+cutoff", "boxes")}
     n = len(raw)
+    affine = None if counts is None else (counts.offset * finder.filter.constant_response, counts.scale)
     for _ in range(repeat):
         t0 = time.perf_counter()
-        photons = photons_of(raw, threads)
+        photons = photons_of(raw, threads) if counts is None else raw
         t1 = time.perf_counter()
         filtered = finder.filter(photons, n_threads=threads)
         t2 = time.perf_counter()
-        candidates = find_candidates(filtered, finder.cutoff, n_threads=threads)
+        candidates = find_candidates(filtered, finder.cutoff, n_threads=threads, affine=affine)
         t3 = time.perf_counter()
-        cut_rois(photons, candidates, ROI)
+        cut_rois(photons, candidates, ROI, counts=counts)
         t4 = time.perf_counter()
         for k, a, b in (("photons", t0, t1), ("filter", t1, t2), ("maxima+cutoff", t2, t3), ("boxes", t3, t4)):
             times[k].append((b - a) / n * 1e3)
@@ -418,15 +421,23 @@ def cmd_detect(args):
     small = tifffile.imread(movie_path("spline", 30), key=range(200))
     big = np.stack([np.block([[small[(i + 8 * r + c) % 200] for c in range(8)] for r in range(8)])
                     for i in range(10)])
+    try:
+        from smappy.pipeline import raw_counts
+        counts = raw_counts(small, camera)
+    except ImportError:                        # the code before it, for a comparison
+        counts = None
     cases = [("256 x 256, 30 molecules", small, plain), ("2048 x 2048 (tiled), 1920 molecules", big, plain)]
     try:
         raw, photons_of = _fourpi_channels()
         cases.append((f"4Pi tubulin channel sum, {raw.shape[-1]} x {raw.shape[-2]} x 4 channels", raw, photons_of))
     except Exception as e:                     # noqa: BLE001  (no 4Pi data here)
         print(f"4Pi tubulin skipped: {e}")
-    for label, raw, photons_of in cases:
+    routes = [(label, raw, photons_of, None) for label, raw, photons_of in cases]
+    if counts is not None:
+        routes[2:2] = [(f"{label}, raw counts", raw, photons_of, counts) for label, raw, photons_of in cases[:2]]
+    for label, raw, photons_of, route in routes:
         for threads in (1, 0):
-            times, per_frame = _steps(finder, photons_of, raw, threads, args.repeat)
+            times, per_frame = _steps(finder, photons_of, raw, threads, args.repeat, route)
             total = [sum(v) for v in zip(*times.values())]
             print(f"{label}, {'one thread' if threads == 1 else 'all cores'}: {spread(total, '{:.3f}')} ms/frame; "
                   + ", ".join(f"{k} {spread(v, '{:.3f}')}" for k, v in times.items())

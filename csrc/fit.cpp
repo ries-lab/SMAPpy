@@ -582,19 +582,11 @@ py::tuple fit_gauss_global(const Array& rois, const Array& sigma, const Array& l
     return as_tuple(run_global(models, rois, link, shared, iterations, n_threads, variance));
 }
 
-// Difference-of-Gaussians / Gaussian filtering of a block of images.
-Array filter_images(const Array& images, float sigma, float sigma_wide,
-                    int radius, bool separable, int n_threads) {
-    if (images.ndim() != 3)
-        throw std::invalid_argument("images must have shape (n, ny, nx)");
-    const py::ssize_t n = images.shape(0);
-    const int ny = static_cast<int>(images.shape(1));
-    const int nx = static_cast<int>(images.shape(2));
-
-    Array out({n, py::ssize_t(ny), py::ssize_t(nx)});
-    const float* in = images.data();
-    float* dst = out.mutable_data();
-
+// Difference-of-Gaussians / Gaussian filtering of a block of images, float32
+// or raw uint16 counts (T), into float32.
+template <class T>
+void filter_typed(const T* in, float* dst, py::ssize_t n, int ny, int nx, float sigma,
+                  float sigma_wide, int radius, bool separable, int n_threads) {
     const bool dog = sigma_wide > 0.0f;
     const std::vector<float> kn = smappy::gauss_kernel(sigma, radius);
     const std::vector<float> kw =
@@ -603,25 +595,43 @@ Array filter_images(const Array& images, float sigma, float sigma_wide,
     std::vector<float> k2d;
     if (!separable) k2d = smappy::dog_kernel_2d(sigma, sigma_wide, radius);
 
-    {
-        py::gil_scoped_release release;
-        smappy::parallel_ranges(n, n_threads, [&](long long begin, long long end, int) {
-            // scratch space is per thread, so the passes never share memory
-            std::vector<float> tmp(static_cast<size_t>(ny) * nx * (dog ? 2 : 1));
-            for (long long f = begin; f < end; ++f) {
-                const float* src = in + f * ny * nx;
-                float* d = dst + f * ny * nx;
-                if (!separable)
-                    smappy::dog2d_frame(src, d, ny, nx, k2d.data(), radius);
-                else if (dog)
-                    smappy::dog_frame(src, d, ny, nx, kn.data(), kw.data(),
-                                       radius, tmp.data());
-                else
-                    smappy::gauss_frame(src, d, ny, nx, kn.data(), radius,
-                                         tmp.data());
-            }
-        });
+    py::gil_scoped_release release;
+    smappy::parallel_ranges(n, n_threads, [&](long long begin, long long end, int) {
+        // scratch space is per thread, so the passes never share memory
+        std::vector<float> tmp(static_cast<size_t>(ny) * nx * (dog ? 2 : 1));
+        for (long long f = begin; f < end; ++f) {
+            const T* src = in + f * ny * nx;
+            float* d = dst + f * ny * nx;
+            if (!separable)
+                smappy::dog2d_frame(src, d, ny, nx, k2d.data(), radius);
+            else if (dog)
+                smappy::dog_frame(src, d, ny, nx, kn.data(), kw.data(),
+                                   radius, tmp.data());
+            else
+                smappy::gauss_frame(src, d, ny, nx, kn.data(), radius,
+                                     tmp.data());
+        }
+    });
+}
+
+Array filter_images(const py::array& images, float sigma, float sigma_wide,
+                    int radius, bool separable, int n_threads) {
+    if (images.ndim() != 3)
+        throw std::invalid_argument("images must have shape (n, ny, nx)");
+    const py::ssize_t n = images.shape(0);
+    const int ny = static_cast<int>(images.shape(1));
+    const int nx = static_cast<int>(images.shape(2));
+    Array out({n, py::ssize_t(ny), py::ssize_t(nx)});
+    float* dst = out.mutable_data();
+    // raw counts read as they are, without a float32 copy of the block first
+    if (py::isinstance<py::array_t<uint16_t>>(images) &&
+        (images.flags() & py::array::c_style)) {
+        filter_typed(static_cast<const uint16_t*>(images.data()), dst, n, ny, nx, sigma,
+                     sigma_wide, radius, separable, n_threads);
+        return out;
     }
+    const Array data = Array::ensure(images);
+    filter_typed(data.data(), dst, n, ny, nx, sigma, sigma_wide, radius, separable, n_threads);
     return out;
 }
 

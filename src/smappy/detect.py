@@ -44,6 +44,9 @@ class GaussFilter:
     sigma: float = 1.2
     use_extension: bool = True
 
+    #: what a constant image becomes: itself (`Counts`)
+    constant_response = 1.0
+
     def __call__(self, images: np.ndarray, n_threads: int = 0) -> np.ndarray:
         if self.sigma <= 0:
             return np.asarray(images, dtype=np.float32)
@@ -69,6 +72,9 @@ class DoGFilter:
     sigma: float = 1.2
     use_extension: bool = True
 
+    #: what a constant image becomes: nothing, the kernel sums to zero (`Counts`)
+    constant_response = 0.0
+
     @property
     def sigma_wide(self) -> float:
         return max(1.0, 2.5 * self.sigma)
@@ -92,8 +98,11 @@ class DoGFilter:
 
 
 def _as_block(images: np.ndarray) -> np.ndarray:
-    """A C-contiguous float32 block ``(n, y, x)``, as the extension expects."""
-    out = np.ascontiguousarray(images, dtype=np.float32)
+    """A C-contiguous block ``(n, y, x)``, as the extension expects: float32,
+    or raw uint16 counts, which it reads as they are (`Counts`)."""
+    images = np.asarray(images)
+    out = np.ascontiguousarray(images, dtype=np.uint16 if images.dtype == np.uint16
+                               else np.float32)
     return out[None] if out.ndim == 2 else out
 
 
@@ -124,6 +133,41 @@ def _gaussian(images: np.ndarray, sigma: float, radius: int) -> np.ndarray:
         out = ndimage.gaussian_filter1d(out, sigma, axis=axis, mode="nearest",
                                         radius=radius, output=np.float32)
     return out
+
+
+# ----------------------------------------------------------------- raw counts
+@dataclass(frozen=True)
+class Counts:
+    """How a block's raw camera counts become photons, ``((counts - offset) *
+    gain) / excess`` (`camera.convert`), for peak finding on the raw frames.
+
+    Converting every pixel of every frame to photons was a quarter of peak
+    finding's time on one core, and is needed only for the boxes that are
+    fitted.  A filter is linear: what it makes of the counts is ``scale``
+    times what it makes of the photons, plus the offset times its response to
+    a constant -- none for a difference of Gaussians, whose kernel sums to
+    zero, the offset itself for a Gaussian.  So the filter reads the counts, an
+    absolute cutoff in photons is moved into counts, and the values that come
+    back are moved into photons; the dynamic cutoff, a median and a quantile
+    range, moves with the values and needs nothing.  The candidates are the
+    photons' but for float rounding: a maximum within a few ulp of the cutoff
+    may fall on the other side.  Only for one offset for all pixels; a noise
+    map's per-pixel offsets go through the photons as before.
+    """
+
+    offset: float
+    gain: float
+    excess: float = 1.0
+
+    @property
+    def scale(self) -> float:
+        """Photons per count, after the excess noise."""
+        return float(np.float32(self.gain) / np.float32(self.excess))
+
+    def photons(self, frames: np.ndarray, n_threads: int = 0) -> np.ndarray:
+        """``frames`` converted, as `camera.convert` does."""
+        from .camera import convert
+        return convert(frames, self.offset, self.gain, self.excess, n_threads=n_threads)
 
 
 # --------------------------------------------------------------------- cutoffs
@@ -275,7 +319,7 @@ def local_maxima(images: np.ndarray, threshold: float = -np.inf,
 
 
 def find_candidates(filtered: np.ndarray, cutoff,
-                    n_threads: int = 0, split=None) -> Candidates:
+                    n_threads: int = 0, split=None, affine=None) -> Candidates:
     """All local maxima of ``filtered`` above the cutoff.
 
     The cutoff is evaluated per frame, from that frame's maxima, which is what
@@ -289,13 +333,19 @@ def find_candidates(filtered: np.ndarray, cutoff,
     never reach, and the fainter partner of every pair is simply not found.
     That is the difference between a two-colour dataset and a one-colour one
     with extra steps, so the two-channel engine always passes this.
+
+    ``affine`` is ``(shift, scale)`` when ``filtered`` is a filter of raw
+    counts (`Counts`): ``(filtered - shift) * scale`` is the filter of the
+    photons.  The cutoff is in photons, and so are the values returned.
     """
     filtered = np.asarray(filtered, dtype=np.float32)
     if filtered.ndim == 2:
         filtered = filtered[None]
-    fused = _fused(filtered, cutoff, n_threads, split)
+    fused = _fused(filtered, cutoff, n_threads, split, affine)
     if fused is not None:
         return fused[0]
+    if affine is not None:
+        filtered = (filtered - np.float32(affine[0])) * np.float32(affine[1])
 
     # an absolute cutoff can be applied during the search, which is cheaper
     fixed = cutoff(np.empty(0)) if isinstance(cutoff, AbsoluteCutoff) else -np.inf
@@ -317,7 +367,7 @@ def find_candidates(filtered: np.ndarray, cutoff,
                       value=values[keep])
 
 
-def _fused(filtered: np.ndarray, cutoff, n_threads: int = 0, split=None):
+def _fused(filtered: np.ndarray, cutoff, n_threads: int = 0, split=None, affine=None):
     """``(candidates, cutoffs)`` of a filtered block in the extension's one
     pass (`csrc/detect.hpp`), or None where it cannot: no extension, or a
     cutoff that is neither absolute nor dynamic.
@@ -328,20 +378,29 @@ def _fused(filtered: np.ndarray, cutoff, n_threads: int = 0, split=None):
     maxima stay in a buffer of its thread and only the candidates come back.
     A half with fewer than ten maxima comes back whole, its cutoff
     `DynamicCutoff.__call__`'s mean rule here, so the candidates and cutoffs
-    are the numpy route's, bit for bit (tested).
+    are the numpy route's, bit for bit (tested).  With ``affine``
+    (`find_candidates`) an absolute cutoff is moved into the filter's units
+    and the values and cutoffs back into photons.
     """
     kernel = getattr(_fit3d, "detect_candidates", None)
     if kernel is None or not isinstance(cutoff, (AbsoluteCutoff, DynamicCutoff)):
         return None
     dynamic = isinstance(cutoff, DynamicCutoff)
+    threshold = 0.0 if dynamic else float(cutoff(np.empty(0)))
+    if affine is not None and not dynamic:
+        threshold = threshold / affine[1] + affine[0]
     axis, position = (-1, 0) if split is None else (int(split[0]), int(split[1]))
     found, cutoffs, deferred = kernel(
-        filtered, dynamic, float(np.float32(cutoff(np.empty(0)))) if not dynamic else 0.0,
+        filtered, dynamic, float(np.float32(threshold)),
         float(cutoff.factor) if dynamic else 0.0, axis, position, 10, int(n_threads))
     frame, y, x, value = found
+    dframe, dy, dx, dvalue = deferred
+    if affine is not None:
+        shift, scale = np.float32(affine[0]), np.float32(affine[1])
+        value, dvalue = (value - shift) * scale, (dvalue - shift) * scale
+        cutoffs = (cutoffs - shift) * scale
     cutoffs = cutoffs.astype(np.float64)
-    if deferred[0].size:
-        dframe, dy, dx, dvalue = deferred
+    if dframe.size:
         side = _halves(dy, dx, split)
         groups, first, which = np.unique(dframe.astype(np.int64) * 2 + side,
                                          return_index=True, return_inverse=True)
@@ -433,14 +492,28 @@ class PeakFinder:
     split: Optional[tuple] = None
 
     def __call__(self, photons: np.ndarray, first_frame: int = 0,
-                 n_threads: Optional[int] = None):
-        """Returns ``(candidates, filtered)``; frame indices are absolute."""
+                 n_threads: Optional[int] = None, counts: Optional[Counts] = None):
+        """Returns ``(candidates, filtered)``; frame indices are absolute.
+
+        With ``counts`` the frames are the camera's raw counts and are filtered
+        as they are (`Counts`); the candidates are in photons all the same, and
+        ``filtered`` is None: the filter of the counts is not the image a
+        preview shows.
+        """
         threads = self.n_threads if n_threads is None else n_threads
+        affine = None
+        if counts is not None:
+            response = getattr(self.filter, "constant_response", None)
+            if response is None:
+                # a filter that does not say what it makes of an offset: photons first
+                photons, counts = counts.photons(photons, threads), None
+            else:
+                affine = (float(counts.offset) * response, counts.scale)
         filtered = self.filter(photons, n_threads=threads)
         candidates = find_candidates(filtered, self.cutoff, n_threads=threads,
-                                     split=self.split)
+                                     split=self.split, affine=affine)
         candidates.frame = candidates.frame + first_frame
-        return candidates, filtered
+        return candidates, (None if affine is not None else filtered)
 
     def __str__(self) -> str:
         halves = "" if self.split is None else ", each half on its own"

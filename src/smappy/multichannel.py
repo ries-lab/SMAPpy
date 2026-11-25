@@ -206,9 +206,10 @@ def build_link(candidates: Candidates, residual: np.ndarray, layout: ChannelLayo
 
 
 def cut_channel_rois(channels: np.ndarray, candidates: Candidates, positions: np.ndarray,
-                     roisize: int, first_frame: int = 0) -> np.ndarray:
+                     roisize: int, first_frame: int = 0, counts=None) -> np.ndarray:
     """(n, C, roisize, roisize): every candidate's ROI in every channel, each
-    at its own integer pixel."""
+    at its own integer pixel; with ``counts`` (`detect.Counts`) cut from raw
+    counts and converted to photons, the boxes alone."""
     from .fit_rois import _block_index
     half = (roisize - 1) // 2
     span = np.arange(-half, half + 1)
@@ -218,7 +219,10 @@ def cut_channel_rois(channels: np.ndarray, candidates: Candidates, positions: np
         rows = positions[:, c, 1][:, None] + span
         cols = positions[:, c, 0][:, None] + span
         out.append(channels[index[:, None, None], c, rows[:, :, None], cols[:, None, :]])
-    return np.ascontiguousarray(np.stack(out, axis=1), np.float32)
+    boxes = np.stack(out, axis=1)
+    if counts is not None:
+        boxes = counts.photons(boxes)
+    return np.ascontiguousarray(boxes, np.float32)
 
 
 @dataclass
@@ -428,6 +432,7 @@ class MultiChannelEngine:
     def push(self, frames: np.ndarray, first_frame: int = 0):
         import time
         from .camera import fit_photons
+        from .pipeline import raw_counts
 
         started = time.perf_counter()
         frames = np.asarray(frames)
@@ -436,13 +441,21 @@ class MultiChannelEngine:
             raise ValueError(f"expected blocks of {self.layout.n_channels} channels of {w} x {h} "
                              f"(a ChannelSource's), got {frames.shape}")
         noise = self._noise()
-        channels = fit_photons(frames, self.camera, noise, n_threads=self.settings.n_threads)
-        candidates = self.find(channels, first_frame)
+        # each channel searched in its raw counts and only the boxes in photons (`detect.Counts`);
+        # not the channels' sum, whose lookups leave the pixels outside a channel at zero, so an
+        # offset would not cancel there
+        counts = raw_counts(frames, self.camera, noise) if self.detection == "pairs" else None
+        if counts is not None:
+            channels = frames
+            candidates = self.find(channels, first_frame, counts)
+        else:
+            channels = fit_photons(frames, self.camera, noise, n_threads=self.settings.n_threads)
+            candidates = self.find(channels, first_frame)
         roisize = self.settings.roisize
         positions, residual, keep = channel_candidates(candidates, self.layout, roisize,
                                                        self.drift)
         candidates, positions, residual = candidates[keep], positions[keep], residual[keep]
-        images = cut_channel_rois(channels, candidates, positions, roisize, first_frame)
+        images = cut_channel_rois(channels, candidates, positions, roisize, first_frame, counts)
         link = build_link(candidates, residual, self.layout, roisize,
                           len(self.model.parameters), self.photon_factors)
         self.stats["detect_seconds"] += time.perf_counter() - started
@@ -468,13 +481,16 @@ class MultiChannelEngine:
             self.stats["noise_map"] = self.noise.path
         return self.noise
 
-    def find(self, channels: np.ndarray, first_frame: int = 0) -> Candidates:
-        """The molecules of a block of channels in photons, on channel 0's pixels (`detection`)."""
+    def find(self, channels: np.ndarray, first_frame: int = 0, counts=None) -> Candidates:
+        """The molecules of a block of channels in photons, on channel 0's pixels (`detection`);
+        with ``counts`` the channels are raw counts (`detect.Counts`, "pairs" only)."""
         if self.detection == "pairs":
             found = []
+            extra = {} if counts is None else {"counts": counts}
             for c, (w, h) in enumerate(self.layout.sizes):
                 own = np.ascontiguousarray(channels[:, c, :h, :w])
-                found.append(self.finder(own, first_frame=first_frame, n_threads=self.settings.n_threads)[0])
+                found.append(self.finder(own, first_frame=first_frame, n_threads=self.settings.n_threads,
+                                         **extra)[0])
             candidates, matched = paired_candidates(found, self.layout, drift=self.drift)
             self.stats["matched"] += matched
             if self.select is not None:
