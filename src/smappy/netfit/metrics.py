@@ -51,8 +51,9 @@ def position_covariance(renderer, photons, background, z_nm, offsets, roi: int =
         d = [N * (spot(dx=h) - spot(dx=-h)) / (2 * h), N * (spot(dy=h) - spot(dy=-h)) / (2 * h),
              N * (spot(dz=hz) - spot(dz=-hz)) / (2 * hz), s0, torch.ones_like(s0)]
         mu = (N * s0 + bg).clamp_min(1e-6)
-        J = torch.stack([v.reshape(m, -1) for v in d], -1).double()          # (m, pixels, 5)
-        fisher = torch.einsum("mpi,mpj,mp->mij", J, J, 1 / mu.reshape(m, -1).double())
+        # in float64 on the CPU: Apple's GPU (MPS) has no float64, and the Fisher matrix needs it
+        J = torch.stack([v.reshape(m, -1) for v in d], -1).cpu().double()    # (m, pixels, 5)
+        fisher = torch.einsum("mpi,mpj,mp->mij", J, J, 1 / mu.reshape(m, -1).cpu().double())
         out[s] = torch.linalg.inv(fisher)[:, :3, :3].cpu().numpy()
     return out
 
