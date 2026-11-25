@@ -86,6 +86,9 @@ def _values(v, lay, k: int = 0) -> dict:
         out["background"] = out["background_c"][:, 0]
     if P > 1:
         out.update(photons_c=phot, photons_c_err=sig_p)
+    if lay.phase:                             # 4Pi: the slot's mean direction and its sigma
+        f = lay.ph(k)
+        out.update(phase_rad=torch.atan2(v[:, f + 1], v[:, f]), phase_err_rad=v[:, f + 2])
     return out
 
 
@@ -100,7 +103,7 @@ def by_threshold(y, threshold: float, layout=None) -> dict:
     v = y[:, :lay.bg].reshape(b, k, ps, h, w)
     f, s, i, j = (v[:, :, 0] >= threshold).nonzero(as_tuple=True)
     u = v[f, s, :, i, j]                                                     # (m, per slot)
-    one = Layout(photons=lay.photons, backgrounds=lay.backgrounds)          # a slot's values as slot 0's
+    one = Layout(photons=lay.photons, backgrounds=lay.backgrounds, phase=lay.phase)   # a slot's values as slot 0's
     cell = torch.cat([u, y[f, lay.bg:lay.bg + lay.backgrounds, i, j]], 1)
     x0 = one.xyz()
     return {"frame": f, "x": u[:, x0], "y": u[:, x0 + 1], "z_nm": u[:, x0 + 2], "prob": u[:, 0],

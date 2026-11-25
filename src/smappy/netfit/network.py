@@ -27,6 +27,13 @@ colour -- so a slot is p, the P photons, x, y, z and their ``P + 3`` uncertainti
 channels, and the background is one map per channel.  `Layout` says where each is; one channel and
 one count is the table above, so a C = 1 model's output is read as it was saved.
 
+**The phase** (``phase``, a 4Pi network, docs/4pi.md §30): three more channels at the end of each slot --
+the mean direction of the slot's interference phase as a point on the circle, ``cos`` and ``sin`` (a
+unit vector: the head's two outputs normalised), and the phase's sigma, ``kappa^-1/2`` of the von Mises
+distribution the loss reads (`loss.terms`), from a log-concentration clamped to [-4, 14].  A phase as one
+number through tanh, as DECODE_Internal's 4Pi branch had it, has an edge at +-pi where two nearly equal
+phases are the output's opposite ends; the point on the circle has none.
+
 **Slots** (``slots`` K > 1; step 4, close molecules): each cell holds K molecules, not one -- channels
 ``9 k`` to ``9 k + 8`` are slot k's p, photons, offsets, z and their four uncertainties, channel ``9 K``
 the background (one slot is the table above).  Trained by the matched loss (`loss.matched_terms`),
@@ -336,7 +343,7 @@ class TwoStageUNet(nn.Module):
                  blur: bool = False, block: str = "plain", offset_range: float = 1.0, sigma_rep: bool = False,
                  slots: int = 1, time_model: str = "frame_stack", time_settings: dict | None = None,
                  channels: int = 1, photons: int = 1, aux: int = 0, two_time: str = "channel",
-                 two_fuse: str = "late", two_aux: str = "every", photon_share: bool = False):
+                 two_fuse: str = "late", two_aux: str = "every", photon_share: bool = False, phase: bool = False):
         """``upsample_kernel``, ``pool_act``, ``out_conv`` (`UNet`), ``init`` "kaiming" (every convolution
         Kaiming-normal, fan in, as DECODE's ``init_custom``; "default" PyTorch's, about 2.4 times smaller)
         and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details; ``out_scale`` the output
@@ -417,8 +424,11 @@ class TwoStageUNet(nn.Module):
         self.photon_share = bool(photon_share)
         if self.photon_share and self.photons != 2:
             raise ValueError("photon_share: two photon outputs, a colour network's")
+        self.phase = bool(phase)
+        if self.phase:
+            self.heads["phase"] = Head(features, 3 * k, act)
         self.layout = Layout(slots=k, photons=self.photons, backgrounds=self.channels, reported=self.sigma_rep,
-                             share=self.photon_share)
+                             share=self.photon_share, phase=self.phase)
         if self.sigma_rep:
             self.heads["sigma_rep"] = Head(features, 3, act)
         self.fold = 2 ** max(depth_frame, depth_union)        # frames must be a multiple of this
@@ -475,7 +485,9 @@ class TwoStageUNet(nn.Module):
             aux = aux.to(x.dtype).expand(n, self.aux, h, w)
             frame_aux = aux if self.two_aux == "every" else None
             if self.two_fuse == "early":
-                both = torch.stack([x[:, 0], self._resampled(x[:, 1], aux)], 2)       # (n, L, C, h, w)
+                # every channel beyond the first read where its offset maps put each pixel's partner
+                both = torch.stack([x[:, 0]] + [self._resampled(x[:, c], aux[:, 2 * c - 2:2 * c])
+                                                for c in range(1, C)], 2)            # (n, L, C, h, w)
                 time = self.times[0] if self.times is not None else None
                 per = [self._channel(self.frames[0], time, both, None, windows)]
             else:
@@ -546,12 +558,19 @@ class TwoStageUNet(nn.Module):
         maps = []
         P = self.photons
         n = P + 3
+        phase = self.heads["phase"](u) if self.phase else None
         for k in range(self.slots):
             v = values[:, n * k:n * k + n]
             xyz = torch.tanh(v[:, P:])
             if reach != 1:
                 xyz = torch.cat([xyz[:, :2] * reach, xyz[:, 2:]], 1)
             maps += [torch.sigmoid(logit[:, k:k + 1]), torch.sigmoid(v[:, :P]), xyz, sigma[:, n * k:n * k + n]]
+            if phase is not None:
+                cs = phase[:, 3 * k:3 * k + 2]
+                # the zero-initialised head points at phase 0 (1, 0) at first, not at the undefined (0, 0)
+                cs = cs + torch.tensor([1.0, 0.0], device=cs.device, dtype=cs.dtype)[None, :, None, None]
+                cs = cs / torch.linalg.vector_norm(cs, dim=1, keepdim=True).clamp_min(1e-6)
+                maps += [cs, torch.exp(-0.5 * phase[:, 3 * k + 2:3 * k + 3].clamp(-4.0, 14.0))]
         maps.append(torch.sigmoid(self.heads["bg"](u)))
         if self.sigma_rep:
             maps.append(torch.sigmoid(self.heads["sigma_rep"](u.detach())) * SIGMA_SCALE + SIGMA_FLOOR)
@@ -569,10 +588,16 @@ class Layout:
     reported: bool = False
     # colour's two photon outputs as the total and the share in channel 1, not a count per channel
     share: bool = False
+    # 4Pi: each slot ends in its phase's cos, sin and sigma (`TwoStageUNet`'s ``phase``)
+    phase: bool = False
 
     @property
     def per_slot(self) -> int:
-        return 2 * self.photons + 7
+        return 2 * self.photons + 7 + 3 * self.phase
+
+    def ph(self, k: int = 0) -> int:
+        """Slot ``k``'s phase: cos, then sin, then its sigma (``phase`` only)."""
+        return k * self.per_slot + 2 * self.photons + 7
 
     def p(self, k: int = 0) -> int:
         return k * self.per_slot
@@ -631,8 +656,11 @@ def build(parts, window: int, channels=None, field: bool = False) -> nn.Module:
     maps and its photon counts.  ``field``: one channel with its u, v maps (a field-dependent PSF)."""
     tm = parts.time_model
     extra = {k: v for k, v in (tm.settings or {}).items() if k != "frames"}
-    two = ({"channels": 2, "photons": channels.photons, "aux": 2, "photon_share": channels.photon_out == "share"}
-           if channels is not None and channels.kind else {})
+    if channels is not None and channels.kind == "4pi":
+        two = {"channels": channels.n, "photons": 1, "aux": 2 * (channels.n - 1), "phase": True}
+    else:
+        two = ({"channels": 2, "photons": channels.photons, "aux": 2, "photon_share": channels.photon_out == "share"}
+               if channels is not None and channels.kind else {})
     if field:
         if two:
             raise ValueError("a field-dependent PSF is drawn for one channel only")

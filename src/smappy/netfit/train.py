@@ -11,6 +11,11 @@ settings, scaling, parameters and training time: what the predictor and the benc
 dual one (a ``_2ct.h5``), the batches `simulate.draw_batch_2c`'s, the network reads the offset maps
 beside the frames, and the test set's molecules carry no bound yet.
 
+**4Pi** (``channels.kind`` "4pi", docs/4pi.md §30): the calibration is a 4Pi model with its layout and
+maps (`fourpi.FourPiCalibration`), the batches `netfit.fourpi.draw_batch`'s, drawn with the IAB model;
+the network reads the six offset maps and puts out each molecule's phase too, and the test set's bound
+is the IAB model's (`netfit.fourpi.crlb`), the phase's scored beside x, y and z.
+
 **The test set** is drawn once from the seed, ``test_samples`` samples, and the CRLB of each of its
 molecules computed once (`metrics.crlbs_torch`); every epoch the network localizes it at the schedule's ``threshold`` and
 `metrics.evaluate` scores it.
@@ -227,7 +232,22 @@ class Drawer:
         whole = sim.spots == "whole"
         self.field = None                 # a field-dependent drawing's `field.FieldRecord`
         self.calibration_field = False
-        if ch.kind:
+        self.fourpi = None
+        if ch.kind == "4pi":
+            if sim.field == "on" or settings.test_set:
+                raise ValueError("a 4Pi training draws its own test set, without a field-dependent PSF")
+            from ..fourpi import load_fourpi_calibration
+            from . import channels, fourpi
+            from .render_4pi import IABRenderer
+            cal = load_fourpi_calibration(settings.calibration)
+            if ch.count != cal.n_channels:
+                raise ValueError(f"channels.count is {ch.count}, the 4Pi model has {cal.n_channels} channels")
+            self.cal = cal
+            self.two = fourpi.FourChannels.from_calibration(cal)
+            self.grid = channels.Grid(self.two, device)
+            self.fourpi = IABRenderer(cal, device)
+            self.renderer = None
+        elif ch.kind:
             if sim.field == "on":
                 raise ValueError("a field-dependent PSF is drawn for one channel only")
             from ..calibrate.dual import load_dual_color_calibration
@@ -259,6 +279,9 @@ class Drawer:
                 self.renderer = SplineRenderer(drawn, device, whole=whole)
 
     def __call__(self, batch: int, g):
+        if self.fourpi is not None:
+            from .fourpi import draw_batch as draw_4pi
+            return draw_4pi(self.fourpi, self.grid, self.sim, self.cam, self.channels, batch, g)
         if self.channels.kind:
             return draw_batch_2c(self.renderers, self.grid, self.sim, self.cam, self.channels, batch, g)
         return draw_batch(self.renderer, self.sim, self.cam, batch, g, field=self.field)
@@ -275,8 +298,11 @@ def run(model, x, batch, windows: int = 1):
 def _found(out, scaling, threshold, how, pixel_nm, scale=1, layout=None):
     e = extract.extract(out, scaling, threshold, how, scale, layout=layout)
     to = lambda v: v.detach().cpu().numpy().astype(np.float64)
-    return {"frame": to(e["frame"]).astype(np.int64), "xyz": np.c_[to(e["x"]), to(e["y"]), to(e["z_nm"])],
-            "err": np.c_[to(e["x_err"]) * pixel_nm[0], to(e["y_err"]) * pixel_nm[1], to(e["z_err_nm"])]}
+    found = {"frame": to(e["frame"]).astype(np.int64), "xyz": np.c_[to(e["x"]), to(e["y"]), to(e["z_nm"])],
+             "err": np.c_[to(e["x_err"]) * pixel_nm[0], to(e["y_err"]) * pixel_nm[1], to(e["z_err_nm"])]}
+    if "phase_rad" in e:
+        found.update(phase=to(e["phase_rad"]), phase_err=to(e["phase_err_rad"]))
+    return found
 
 
 def warm_start(model, path) -> None:
@@ -350,7 +376,18 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
             ph = ph.sum(1)
         # the bound of the PSF as drawn (a mirror changes no bound), in torch: no compiled SMAPpy needed;
         # two channels' from both spots as drawn, x, y and z shared (`bounds.drawn_crlb`)
-        if renderer is not None:
+        bound_phase = None
+        if drawer.fourpi is not None:
+            from .fourpi import crlb as crlb_4pi
+            bgs = np.stack([local_background(test, frame, xyz, c) for c in range(drawer.channels.n)], 1)
+            b4 = np.concatenate([crlb_4pi(drawer.cal, xyz[a:a + 512, 0], xyz[a:a + 512, 1],
+                                          test.shift.cpu().numpy()[m][a:a + 512], xyz[a:a + 512, 2],
+                                          test.phase.cpu().numpy()[m][a:a + 512], ph[a:a + 512], bgs[a:a + 512],
+                                          bool(cam.em_gain)) for a in range(0, len(xyz), 512)]) \
+                if len(xyz) else np.zeros((0, 4))
+            bound = np.c_[b4[:, 0] * cam.pixel_nm[0], b4[:, 1] * cam.pixel_nm[1], b4[:, 2]]
+            bound_phase = b4[:, 3]
+        elif renderer is not None:
             # a field-dependent drawing's bound with each molecule's own PSF, where it is on the chip
             chip = None if test.origin is None else xyz[:, :2] + test.origin.cpu().numpy()[frame]
             bound = metrics.crlbs_torch(renderer, ph, local_background(test, frame, xyz), xyz[:, 2], cam.pixel_nm,
@@ -364,6 +401,8 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         else:
             bound = None
         truth = {"frame": frame, "xyz": xyz, "photons": ph, "crlb": bound}
+        if test.phase is not None:
+            truth.update(phase=test.phase.cpu().numpy()[m].astype(np.float64), crlb_phase=bound_phase)
     start, seconds = 0, 0.0
     ckpt = folder / "checkpoint.pt"
     if ckpt.exists():
@@ -496,6 +535,9 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, tru
         found = _found(out, scaling, sch["threshold"], parts.extraction.name, cam.pixel_nm,
                        getattr(model, "out_scale", 1), model.layout)
         score = metrics.evaluate(truth, found, cam.pixel_nm)
+        if "phase" in truth:
+            from .fourpi import phase_scores
+            score.update(phase_scores(truth, found, cam.pixel_nm))
         score.update({f"loss_{k}": v / steps for k, v in parts_sum.items()})
         dt = time.perf_counter() - t0
         seconds += dt
@@ -503,7 +545,8 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, tru
                         lr=sched.get_last_lr()[0], seconds=round(dt, 3), metrics=score)
         log(f"epoch {epoch}: loss {total / steps:.2f} / {test_loss / len(test.frames):.2f}  J {score['jaccard']:.3f}  "
             f"lat {score.get('rmse_lat_nm', float('nan')):.1f}  ax {score.get('rmse_ax_nm', float('nan')):.1f}  "
-            f"KS {score.get('pixel_ks') or float('nan'):.3f}  mod {score['pixel_mod'] if score.get('pixel_mod') is not None else float('nan'):.3f}  ({dt:.0f} s)")
+            f"KS {score.get('pixel_ks') or float('nan'):.3f}  mod {score['pixel_mod'] if score.get('pixel_mod') is not None else float('nan'):.3f}"
+            + (f"  phase {score['rmse_phase_rad']:.3f} rad" if "rmse_phase_rad" in score else "") + f"  ({dt:.0f} s)")
         torch.save({"epoch": epoch, "model": model.state_dict(), "optimizer": opt.state_dict(),
                     "scheduler": sched.state_dict(), "seconds": seconds, "rng": torch.get_rng_state(),
                     **({"ema": ema.state_dict()} if ema is not None else {})}, ckpt)
@@ -565,7 +608,8 @@ def _slice(batch, a, b):
                  aux=None if batch.aux is None else batch.aux[a:b],
                  origin=None if batch.origin is None else batch.origin[a:b],
                  background_map=None if batch.background_map is None else batch.background_map[a:b],
-                 shift=None if batch.shift is None else batch.shift[a:b])
+                 shift=None if batch.shift is None else batch.shift[a:b],
+                 phase=None if batch.phase is None else batch.phase[a:b])
 
 
 def main(argv=None):

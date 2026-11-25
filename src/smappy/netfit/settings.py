@@ -61,8 +61,9 @@ class SimulationSettings:
 @dataclass
 class ChannelSettings:
     """A split camera's two halves read as one molecule (`docs/decode/plex-plan.md` §16), from a dual
-    calibration (`channels.TwoChannels`).  ``kind`` "" is one channel (C = 1)."""
-    kind: str = ""                            # "", "biplane" or "colour"
+    calibration (`channels.TwoChannels`).  ``kind`` "" is one channel (C = 1); "4pi" a 4Pi microscope's
+    phase channels, from a 4Pi model with its layout and maps (`netfit.fourpi`, docs/4pi.md §30)."""
+    kind: str = ""                            # "", "biplane", "colour" or "4pi"
     # colour: the share of a molecule's light in channel 1, uniform between the two (one network for
     # any pair of dyes); biplane's shares are in its splines
     share: tuple = (0.0, 1.0)
@@ -83,9 +84,18 @@ class ChannelSettings:
     # biplane: each plane's photons a count of its own (a molecule's count times 2 (1 - s) and 2 s, s
     # uniform over ``share``), as DECODE-Plex draws them -- a test of what linking the planes is worth
     unlinked: bool = False
+    # 4Pi: the cavity's phase in each movie, uniform on the circle at its start, then a steady drift of up
+    # to +-``cavity_rate_rad`` a frame (uniform per movie) and a random walk of ``cavity_walk_rad`` a frame
+    # (`fourpi.cavity_drift`'s two parts); the prefit measures both on the data
+    cavity_rate_rad: float = 0.002
+    cavity_walk_rad: float = 0.005
+    # 4Pi: the number of phase channels, the model's (set by the training from the calibration)
+    count: int = 4
 
     @property
     def n(self) -> int:
+        if self.kind == "4pi":
+            return self.count
         return 2 if self.kind else 1
 
     @property

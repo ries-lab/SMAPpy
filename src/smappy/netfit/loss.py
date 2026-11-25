@@ -41,6 +41,12 @@ With more than one channel (`network.Layout`) a molecule is the photons a slot h
 or one per channel -- and x, y, z, so the mixture and the matched loss are over ``P + 3`` dimensions,
 and the background term is summed over the channels' maps.
 
+**The phase** (a 4Pi network, ``Layout.phase``, docs/4pi.md §30) is one more factor of each component:
+Normal(photons, x, y, z) times von Mises(phi; mu, kappa), ``kappa cos(phi - mu) - log(2 pi I_0(kappa))``,
+with ``log I_0(kappa) = log i0e(kappa) + kappa`` (torch's ``i0e``, stable at any kappa).  One mixture, so
+a molecule's phase is explained by the same component as its position -- not a second mixture beside
+the first with weights set by hand, as DECODE_Internal's 4Pi branch had it.
+
 Each frame's loss is the sum; the batch's the mean over frames.  The part ``loss`` names the terms
 (``terms``) and their weights (``weights``), so that step 4 can change one.
 """
@@ -115,7 +121,7 @@ def _slot_maps(out, h, w, scale, layout=None):
     x0 = 1 + P
     mu = torch.cat([v[:, :, 1:x0], (v[:, :, x0] + cols)[:, :, None], (v[:, :, x0 + 1] + rows)[:, :, None],
                     v[:, :, x0 + 2:x0 + 3]], 2).permute(0, 1, 3, 4, 2)                 # (b, K, h, w, P + 3)
-    sig = v[:, :, x0 + 3:].permute(0, 1, 3, 4, 2)
+    sig = v[:, :, x0 + 3:x0 + 6 + P].permute(0, 1, 3, 4, 2)                 # a 4Pi slot's phase after them
     return v[:, :, 0], mu, sig, k
 
 
@@ -135,6 +141,13 @@ def terms(out, batch, scaling, chunk: int = 64, names=("count", "mixture", "back
     mu, sig = mu5.reshape(b, -1, D), sig5.reshape(b, -1, D)
     tgt = targets_scaled(batch, scaling, lay)                                     # (b, n, D)
     mask = batch.mask
+    vm = None
+    if lay.phase and getattr(batch, "phase", None) is not None:
+        ph = out[:, :lay.bg].reshape(b, lay.slots, lay.per_slot, h, w)[:, :, lay.ph() - lay.p():]
+        ph = ph.permute(0, 1, 3, 4, 2).reshape(b, -1, 3)                        # (b, Khw): cos, sin, sigma
+        kappa = ph[..., 2].clamp_min(1e-3) ** -2
+        # kappa (cos mu, sin mu), and each component's log normaliser
+        vm = (kappa[..., None] * ph[..., :2], -LOG_2PI - (torch.log(torch.special.i0e(kappa)) + kappa))
     n = mask.sum(1).to(out.dtype)
     out_terms = {}
     if "mixture" in names:
@@ -145,7 +158,12 @@ def terms(out, batch, scaling, chunk: int = 64, names=("count", "mixture", "back
         for s in range(0, tgt.shape[1], chunk):
             t = tgt[:, s:s + chunk]                                               # (b, c, D)
             z = (t[:, :, None] - mu[:, None]) / sig[:, None]                     # (b, c, Khw, D)
-            lp = torch.logsumexp(log_w[:, None] + norm[:, None] - 0.5 * (z ** 2).sum(-1), -1)   # (b, c)
+            comp = log_w[:, None] + norm[:, None] - 0.5 * (z ** 2).sum(-1)       # (b, c, Khw)
+            if vm is not None:
+                t_phi = batch.phase[:, s:s + chunk]
+                cs = torch.stack([torch.cos(t_phi), torch.sin(t_phi)], -1)       # (b, c, 2)
+                comp = comp + torch.einsum("bcd,bkd->bck", cs, vm[0]) + vm[1][:, None]
+            lp = torch.logsumexp(comp, -1)                                        # (b, c)
             mix = mix - (lp * mask[:, s:s + chunk]).sum(1)
         out_terms["mixture"] = mix
     if "count" in names:

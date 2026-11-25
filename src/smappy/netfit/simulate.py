@@ -67,6 +67,8 @@ class Batch:
     # a field-dependent drawing: each sample's corner on the chip, (b, 2) x, y pixels -- a target's chip
     # position is its column and row plus it
     origin: torch.Tensor | None = None
+    # 4Pi (`fourpi.draw_batch`): each target's interference phase in the middle frame, wrapped, (b, k)
+    phase: torch.Tensor | None = None
 
 
 def _uniform(lo, hi, n, g, device):
