@@ -14,13 +14,13 @@ from dataclasses import replace
 
 import numpy as np
 import torch
+from evaluate import SETS
+
 from smappy import fourpi
 from smappy.netfit import fourpi as NF
 from smappy.netfit import train
 from smappy.netfit.metrics import robust_width
 from smappy.psf import Global4PiPSF
-
-from evaluate import SETS
 
 HALF = 6
 
