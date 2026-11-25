@@ -206,14 +206,24 @@ def build_link(candidates: Candidates, residual: np.ndarray, layout: ChannelLayo
 
 
 def cut_channel_rois(channels: np.ndarray, candidates: Candidates, positions: np.ndarray,
-                     roisize: int, first_frame: int = 0, counts=None) -> np.ndarray:
+                     roisize: int, first_frame: int = 0, counts=None,
+                     n_threads: int = 0) -> np.ndarray:
     """(n, C, roisize, roisize): every candidate's ROI in every channel, each
     at its own integer pixel; with ``counts`` (`detect.Counts`) cut from raw
     counts and converted to photons, the boxes alone."""
-    from .fit_rois import _block_index
+    from .fit_rois import _block_index, cut_boxes
     half = (roisize - 1) // 2
-    span = np.arange(-half, half + 1)
     index = _block_index(candidates.frame, first_frame, len(channels))
+    if channels.ndim == 4 and channels.flags.c_contiguous:
+        # the channels as one block of frames (n C, h, w): candidate i's box in channel c is cut
+        # from frame index[i] C + c
+        n, C, h, w = channels.shape
+        block = channels.reshape(n * C, h, w)
+        many = (index[:, None] * C + np.arange(C)).ravel()
+        boxes = cut_boxes(block, many, (positions[:, :, 1] - half).ravel(),
+                          (positions[:, :, 0] - half).ravel(), roisize, counts, n_threads)
+        return boxes.reshape(len(index), C, roisize, roisize)
+    span = np.arange(-half, half + 1)
     out = []
     for c in range(channels.shape[1]):
         rows = positions[:, c, 1][:, None] + span
@@ -455,7 +465,8 @@ class MultiChannelEngine:
         positions, residual, keep = channel_candidates(candidates, self.layout, roisize,
                                                        self.drift)
         candidates, positions, residual = candidates[keep], positions[keep], residual[keep]
-        images = cut_channel_rois(channels, candidates, positions, roisize, first_frame, counts)
+        images = cut_channel_rois(channels, candidates, positions, roisize, first_frame, counts,
+                                  self.settings.n_threads)
         link = build_link(candidates, residual, self.layout, roisize,
                           len(self.model.parameters), self.photon_factors)
         self.stats["detect_seconds"] += time.perf_counter() - started

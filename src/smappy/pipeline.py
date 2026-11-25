@@ -120,13 +120,14 @@ class LocalizationEngine:
             candidates, _ = self.finder(frames, first_frame=first_frame,
                                         n_threads=self.settings.n_threads, counts=counts)
             rois = cut_rois(frames, candidates, self.settings.roisize,
-                            first_frame=first_frame, counts=counts)
+                            first_frame=first_frame, counts=counts,
+                            n_threads=self.settings.n_threads)
         else:
             photons = fit_photons(frames, self.camera, noise, n_threads=self.settings.n_threads)
             candidates, _ = self.finder(photons, first_frame=first_frame,
                                         n_threads=self.settings.n_threads)
             rois = cut_rois(photons, candidates, self.settings.roisize,
-                            first_frame=first_frame)
+                            first_frame=first_frame, n_threads=self.settings.n_threads)
         self.stats["detect_seconds"] += time.perf_counter() - t0
         self.stats["frames"] += len(frames)
         self.stats["candidates"] += len(candidates)

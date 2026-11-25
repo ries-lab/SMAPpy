@@ -125,3 +125,27 @@ def test_the_paired_two_colour_engine_finds_and_fits_the_same_on_the_counts(monk
     assert len(photons) > 60 and len(counted) == len(photons)
     for name in photons.columns:
         assert np.array_equal(np.asarray(counted[name]), np.asarray(photons[name]), equal_nan=True), name
+
+
+@pytest.mark.parametrize("threads", [1, 4])
+def test_the_threaded_box_cutter_cuts_numpys_boxes(threads):
+    """`fit_rois.cut_boxes` in C++ against numpy's fancy indexing: photons as they are, counts
+    converted, and a two-channel block cut by `multichannel.cut_channel_rois`."""
+    from smappy import detect
+    from smappy.fit_rois import cut_boxes
+    rng = np.random.default_rng(5)
+    raw = rng.integers(90, 3000, (6, 40, 50)).astype(np.uint16)
+    index, top, left = rng.integers(0, 6, 200), rng.integers(0, 31, 200), rng.integers(0, 41, 200)
+    counts = Counts(100.3, 0.4917, 1.3)
+    photons = counts.photons(raw)
+    kernel = detect._fit3d.cut_boxes
+    for frames, c in ((photons, None), (raw, counts)):
+        fast = cut_boxes(frames, index, top, left, 9, c, threads)
+        detect._fit3d.cut_boxes = None
+        try:
+            slow = cut_boxes(frames, index, top, left, 9, c, threads)
+        finally:
+            detect._fit3d.cut_boxes = kernel
+        assert fast.dtype == np.float32 and np.array_equal(fast.view(np.uint32), slow.view(np.uint32))
+    with pytest.raises(IndexError):
+        cut_boxes(photons, index, top + 2, left, 9)

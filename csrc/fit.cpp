@@ -791,6 +791,58 @@ void photons_typed(const py::array& frames, float* out, const float* offset, std
     });
 }
 
+// Square boxes of side `size` cut from a block of frames (n, ny, nx) at
+// (frame index, top-left corner) per box, into float32 -- and with `convert`
+// from raw counts into photons as `to_photons` converts them, the same
+// arithmetic per pixel, so the same photons as converting the frames whole.
+// numpy's fancy indexing was 2 ms a 2048 x 2048 frame of 1920 boxes, on one
+// core.  The caller checks that every box lies inside its frame.
+template <class T>
+void cut_typed(const T* frames, py::ssize_t ny, py::ssize_t nx, const int64_t* index,
+               const int32_t* top, const int32_t* left, py::ssize_t boxes, int size,
+               bool convert, float offset, float gain, float excess, float* out, int n_threads) {
+    py::gil_scoped_release release;
+    smappy::parallel_ranges(boxes, smappy::resolve_threads(n_threads, boxes / 64 + 1),
+                            [&](long long begin, long long end, int) {
+        for (long long b = begin; b < end; ++b) {
+            const T* src = frames + (index[b] * ny + top[b]) * nx + left[b];
+            float* dst = out + b * size * size;
+            for (int r = 0; r < size; ++r) {
+                const T* row = src + r * nx;
+                float* d = dst + r * size;
+                if (convert)
+                    smappy::photons_range(row, d, 0, static_cast<std::size_t>(size), &offset, 1, gain,
+                                          excess);
+                else
+                    for (int c = 0; c < size; ++c) d[c] = static_cast<float>(row[c]);
+            }
+        }
+    });
+}
+
+py::array_t<float> cut_boxes(const py::array& frames, const py::array_t<int64_t>& index,
+                             const py::array_t<int32_t>& top, const py::array_t<int32_t>& left,
+                             int size, bool convert, float offset, float gain, float excess,
+                             int n_threads) {
+    if (frames.ndim() != 3 || !(frames.flags() & py::array::c_style))
+        throw std::invalid_argument("frames must be a C-contiguous block (n, ny, nx)");
+    const py::ssize_t boxes = index.size();
+    if (top.size() != boxes || left.size() != boxes)
+        throw std::invalid_argument("index, top and left must have one entry per box");
+    py::array_t<float> out({boxes, py::ssize_t(size), py::ssize_t(size)});
+    const py::ssize_t ny = frames.shape(1), nx = frames.shape(2);
+    const auto dtype = frames.dtype();
+    if (dtype.kind() == 'u' && dtype.itemsize() == 2)
+        cut_typed(static_cast<const uint16_t*>(frames.data()), ny, nx, index.data(), top.data(),
+                  left.data(), boxes, size, convert, offset, gain, excess, out.mutable_data(), n_threads);
+    else if (dtype.kind() == 'f' && dtype.itemsize() == 4)
+        cut_typed(static_cast<const float*>(frames.data()), ny, nx, index.data(), top.data(),
+                  left.data(), boxes, size, convert, offset, gain, excess, out.mutable_data(), n_threads);
+    else
+        throw std::invalid_argument("cut_boxes reads uint16 or float32 frames");
+    return out;
+}
+
 py::array_t<float> to_photons(const py::array& frames, const Array& offset, float gain,
                               float excess, int n_threads) {
     if (!(frames.flags() & py::array::c_style))
@@ -887,6 +939,11 @@ PYBIND11_MODULE(_fit3d, m) {
           py::arg("threshold") = -std::numeric_limits<float>::infinity(),
           py::arg("n_threads") = 0,
           "Strict 3x3 local maxima of an image block -> (frame, y, x, value).");
+    m.def("cut_boxes", &cut_boxes, py::arg("frames"), py::arg("index"), py::arg("top"),
+          py::arg("left"), py::arg("size"), py::arg("convert") = false, py::arg("offset") = 0.0f,
+          py::arg("gain") = 1.0f, py::arg("excess") = 1.0f, py::arg("n_threads") = 0,
+          "Square boxes cut from a block of uint16 or float32 frames into float32, converted "
+          "from counts into photons on request.");
     m.def("to_photons", &to_photons, py::arg("frames"), py::arg("offset"), py::arg("gain"),
           py::arg("excess") = 1.0f, py::arg("n_threads") = 0,
           "Raw counts into float32 photons, ((raw - offset) * gain) / excess, as numpy computes "

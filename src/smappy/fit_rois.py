@@ -34,7 +34,7 @@ class ROIStack:
 
 
 def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
-             first_frame: int = 0, counts=None) -> ROIStack:
+             first_frame: int = 0, counts=None, n_threads: int = 0) -> ROIStack:
     """Cut ``roisize`` x ``roisize`` ROIs centred on each candidate.
 
     Candidates whose ROI would extend past the image border are dropped -- as
@@ -53,7 +53,9 @@ def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
     if roisize % 2 == 0:
         raise ValueError(f"roisize must be odd, got {roisize}")
 
-    photons = np.asarray(photons) if counts is not None else np.asarray(photons, dtype=np.float32)
+    photons = np.asarray(photons)
+    if counts is None and photons.dtype != np.float32:
+        photons = photons.astype(np.float32)
     if photons.ndim == 2:
         photons = photons[None]
     n_frames, height, width = photons.shape
@@ -66,15 +68,48 @@ def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
     if len(kept) == 0:
         return ROIStack(np.empty((0, roisize, roisize), np.float32), kept, roisize)
 
-    span = np.arange(-half, half + 1)
-    rows = kept.y[:, None] + span  # (n, roisize)
-    cols = kept.x[:, None] + span
     frame_index = _block_index(kept.frame, first_frame, n_frames)
+    images = cut_boxes(photons, frame_index, kept.y - half, kept.x - half, roisize, counts,
+                       n_threads)
+    return ROIStack(images, kept, roisize)
 
-    images = photons[frame_index[:, None, None], rows[:, :, None], cols[:, None, :]]
+
+def cut_boxes(frames: np.ndarray, index: np.ndarray, top: np.ndarray, left: np.ndarray,
+              size: int, counts=None, n_threads: int = 0) -> np.ndarray:
+    """(n, size, size) float32 boxes of ``frames[index]`` from (``top``,
+    ``left``), every box inside its frame; converted to photons by ``counts``
+    (`detect.Counts`) if given.
+
+    In the extension's threaded kernel for uint16 and float32 frames: numpy's
+    fancy indexing was 2 ms a 2048 x 2048 frame (1920 boxes) on one core.  The
+    conversion is `camera.convert`'s arithmetic, so the photons are the same to
+    the last bit either way (tested).
+    """
+    from .detect import _fit3d
+    kernel = getattr(_fit3d, "cut_boxes", None)
+    frames = np.asarray(frames)
+    if (kernel is not None and frames.ndim == 3 and frames.flags.c_contiguous
+            and frames.dtype in (np.uint16, np.float32)
+            and (counts is not None or frames.dtype == np.float32)
+            and (counts is None or np.ndim(counts.offset) == 0)):
+        index, top, left = (np.ascontiguousarray(a, t) for a, t in
+                            ((index, np.int64), (top, np.int32), (left, np.int32)))
+        n, h, w = frames.shape
+        if index.size and (index.min() < 0 or index.max() >= n or top.min() < 0 or left.min() < 0
+                           or top.max() + size > h or left.max() + size > w):
+            raise IndexError("a box lies outside its frame")
+        convert = counts is not None
+        return kernel(frames, index, top, left, int(size), convert,
+                      float(np.float32(counts.offset)) if convert else 0.0,
+                      float(np.float32(counts.gain)) if convert else 1.0,
+                      float(np.float32(counts.excess)) if convert else 1.0, int(n_threads))
+    span = np.arange(size)
+    rows = np.asarray(top)[:, None] + span  # (n, size)
+    cols = np.asarray(left)[:, None] + span
+    images = frames[np.asarray(index)[:, None, None], rows[:, :, None], cols[:, None, :]]
     if counts is not None:
         images = counts.photons(images)
-    return ROIStack(np.ascontiguousarray(images, dtype=np.float32), kept, roisize)
+    return np.ascontiguousarray(images, dtype=np.float32)
 
 
 def _block_index(frame: np.ndarray, first_frame: int, n_frames: int) -> np.ndarray:
