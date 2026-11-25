@@ -840,12 +840,11 @@ class ControlWindow(QMainWindow):
         for tab, widget in zip(self.workspace.tabs, self._tab_widgets()):
             if not isinstance(widget, PluginTab):
                 continue
+            # a tab nobody has opened a section of starts with all folded:
+            # *Load*'s Open and Add are in its title bar
+            # (`Plugin.buttons_in_title`), and unfolded it showed only its
+            # *columns*, which few need before a file is open
             opened = saved.get(tab.name)
-            if not opened and tab.name not in saved:
-                # a tab nobody has opened a section of opens on *Load*, if it
-                # has one: the program starts on File, one click from a file
-                opened = next((i.id for i in tab.instances
-                               if i.plugin == "File/Load/Load"), None)
             if opened:
                 widget.open_section(opened)
 

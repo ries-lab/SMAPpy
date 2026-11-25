@@ -131,8 +131,8 @@ def make(d) -> None:
            spot=[_menu_item(d, menu, "Open...")], zoom=d.around(menu, 700))
     menu.close()
     file_tab = _show_tab(d, "File")
-    d.shot("The File tab opens on Load, the same Open in one click. Below it, "
-           "saving images and simulating data.",
+    d.shot("The File tab has Open in Load's title bar, the same Open in one "
+           "click. Below it, saving images and simulating data.",
            spot=[_tab_button(d, "File")], point=_tab_button(d, "File"), click=True)
     section, panel = _open(d, file_tab, "Simulate")
     d.shot("To practise, Simulate makes a dataset with a known structure: "
