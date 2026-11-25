@@ -98,14 +98,24 @@ class FourChannels:
 
     def cut(self, frames, box=None) -> np.ndarray:
         """Frames (n, H, W) as the camera wrote them -> (n, C, rows, columns) on channel 0's grid."""
+        return self.on_grid(self.layout.cut(frames), box)
+
+    def on_grid(self, each, box=None) -> np.ndarray:
+        """Channel images (n, C, h, w), cut and unflipped as `channels.ChannelSource` reads them -> (n, C,
+        rows, columns) on channel 0's grid over ``box``: each channel moved by its whole-pixel shift."""
         r0, r1, c0, c1 = box or self.box
-        each = self.layout.cut(frames)                                      # (n, C, h, w), the flips done
         return np.stack([each[:, c, r0 + sy:r1 + sy, c0 + sx:c1 + sx]
                          for c, (sx, sy) in enumerate(self.shifts)], 1)
 
     def on_frame(self, xy) -> np.ndarray:
-        """Channel-0 positions back on the frame the camera wrote."""
+        """Channel-0 positions (n, 2) back on the frame the camera wrote."""
         return self.layout.on_frame(0, xy)
+
+    def grid_to_frame(self, xy) -> np.ndarray:
+        """Positions on the grid (columns, rows from the box's corner) on the frame the camera wrote, as
+        Spline 4Pi reports a molecule: where channel 0 saw it."""
+        r0, _, c0, _ = self.box
+        return self.on_frame(np.asarray(xy, float).reshape(-1, 2) + [c0, r0])
 
     def to_dict(self) -> dict:
         return {"shifts": [list(s) for s in self.shifts], "box": list(self.box)}
@@ -284,3 +294,98 @@ def phase_scores(truth: dict, found: dict, pixel_nm, phase_per_nm: float | None 
             if (core & ~wrong).sum() >= 10:
                 out["core_rmse_z_phase_nm"] = float(np.sqrt(np.mean((zp - z)[core & ~wrong] ** 2)))
     return out
+
+
+def localize(predictor, four: FourChannels, channels, first_frame: int = 0, block: int = 256) -> dict:
+    """A 4Pi movie's molecules by a 4Pi netfit model (`predict.Predictor`): ``channels`` (n, C, h, w) the
+    channel images in photons, as `channels.ChannelSource` reads them (cut, unflipped), put on the grid
+    (`FourChannels.on_grid`) and read in blocks of ``block`` frames with the window's context on either
+    side -- at the movie's ends its first and last frames repeated.  Positions on the frame the camera
+    wrote (`FourChannels.grid_to_frame`), pixels; z the envelope's; the phase as Spline 4Pi reports it."""
+    k = predictor.window
+    n = len(channels)
+    aux = four.offsets()
+    parts = []
+    for a in range(0, n, block):
+        b = min(a + block, n)
+        idx = np.clip(np.arange(a - k, b + k), 0, n - 1)
+        grid = four.on_grid(np.asarray(channels[idx], np.float32))
+        parts.append(predictor(grid, first_frame + a, aux=aux))
+    out = {key: np.concatenate([p[key] for p in parts]) for key in parts[0] if key != "background_map"}
+    xy = four.grid_to_frame(np.c_[out.pop("x_pix"), out.pop("y_pix")])
+    out["x_pix"], out["y_pix"] = xy[:, 0], xy[:, 1]
+    return out
+
+
+# ---------------------------------------------------------------- the prefit
+
+#: the cavity's phase is read in windows of this many frames for its drift: a window a tenth of *4Pi z*'s
+#: default, so that a drift of up to pi a window is unwrapped right.  The real ones are far slower: 3e-5 rad
+#: a frame on the Nup96 and the tubulin movies, a walk of 0.0006 -- 0.002 rad a frame depending on the
+#: window (`cavity_phase_rad` is *4Pi z*'s smoothed estimate, so the walk is a rough measure)
+CAVITY_WINDOW = 100
+
+
+def cavity_motion(frame, cavity_phase_rad, window: int = CAVITY_WINDOW) -> tuple:
+    """(rate, walk) of the cavity's phase, radians a frame, from *4Pi z*'s ``cavity_phase_rad`` per
+    localization: its circular mean in windows of ``window`` frames, unwrapped; the rate the line's slope
+    through them, the walk the spread of the steps between windows about it, per sqrt(frame) -- the two
+    parts of `smappy.fourpi.cavity_drift`."""
+    frame = np.asarray(frame, float)
+    phase = np.asarray(cavity_phase_rad, float)
+    ok = np.isfinite(phase)
+    bins = (frame[ok] // window).astype(int)
+    if bins.max(initial=0) < 2:
+        return 0.0, 0.0
+    sums = np.bincount(bins, np.exp(1j * phase[ok]).real) + 1j * np.bincount(bins, np.exp(1j * phase[ok]).imag)
+    have = np.abs(sums) > 0
+    t = (np.flatnonzero(have) + 0.5) * window
+    mean = np.unwrap(np.angle(sums[have]))
+    rate = float(np.polyfit(t, mean, 1)[0])
+    steps = np.diff(mean - rate * t)
+    walk = float(1.4826 * np.median(np.abs(steps - np.median(steps))) / np.sqrt(window)) if len(steps) > 2 else 0.0
+    return rate, walk
+
+
+def prefit(columns: dict, window: int = CAVITY_WINDOW) -> dict:
+    """What a 4Pi training draws, from a Spline 4Pi table of the movie after *4Pi z* (``columns``: photons,
+    background_ch0 ..., z_env_nm, frame, cavity_phase_rad): the photons uniform over the fits' range as
+    `decode_smlm.prefit.photon_range` takes it (every fit counted: the 4Pi table is not grouped into
+    blinks), each channel's background range (`decode_smlm.prefit.background_range`), z over the
+    envelopes' 1st -- 99th percentile, symmetric, and the cavity's rate and walk (`cavity_motion`), the
+    rate's magnitude as the range a training draws from, at least 0.002 a frame."""
+    from decode_smlm.prefit import background_range, photon_range
+    ph = np.asarray(columns["photons"], float)
+    ok = np.isfinite(ph) & (ph > 0)
+    channels = sorted(k for k in columns if k.startswith("background_ch"))
+    bg = [background_range(np.asarray(columns[k], float)[ok]) for k in channels]
+    z = np.asarray(columns["z_env_nm"], float)
+    reach = float(np.nanpercentile(np.abs(z[ok]), 99))
+    rate, walk = cavity_motion(columns["frame"], columns["cavity_phase_rad"], window) \
+        if "cavity_phase_rad" in columns else (0.0, 0.0)
+    return {"photons_range": photon_range(ph, ok), "background": bg, "z_nm": (-reach, reach),
+            "cavity_rate_rad": max(abs(rate), 0.002), "cavity_walk_rad": max(walk, 0.001), "rate_measured": rate,
+            "walk_measured": walk}
+
+
+def settings_from_prefit(pre: dict, camera, calibration: str, density: float = 25.0, seed: int = 0):
+    """A 4Pi training's settings (`settings.TrainingSettings`) from `prefit`'s estimates and the movie's
+    camera (`settings.CameraModel`): the stage-2 trainings' recipe (docs/4pi.md §30) -- netfit's default
+    parts, early fusion, a 3-frame window, on-time 1 -- 3 frames, ``density`` per 40 x 40 px -- with the
+    photons, backgrounds, z and the cavity's motion measured."""
+    from .settings import ChannelSettings, SimulationSettings, TrainingSettings
+    s = TrainingSettings()
+    s.simulation = SimulationSettings(frame_px=40, window=3, density_per_40px=float(density), lifetime_frames=1.0,
+                                      lifetime_max_frames=3.0, photons_range=tuple(pre["photons_range"]),
+                                      background=(min(b[0] for b in pre["background"]),
+                                                  max(b[1] for b in pre["background"])),
+                                      z_nm=tuple(pre["z_nm"]))
+    s.camera = camera
+    s.channels = ChannelSettings(kind="4pi", count=len(pre["background"]),
+                                 background=[tuple(b) for b in pre["background"]],
+                                 cavity_rate_rad=float(pre["cavity_rate_rad"]),
+                                 cavity_walk_rad=float(pre["cavity_walk_rad"]))
+    s.parts.backbone.settings["two_fuse"] = "early"
+    s.calibration = calibration
+    s.seed = int(seed)
+    return s

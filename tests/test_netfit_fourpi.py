@@ -216,3 +216,28 @@ def test_z_from_the_phase_takes_the_fringe_nearest_the_envelope_and_counts_the_w
     found = {"frame": np.arange(400), "xyz": np.c_[np.full(400, 5.0), np.full(400, 5.0), z + off], "phase": phase}
     s = NF.phase_scores(truth, found, (100.0, 100.0), k)
     assert s["wrong_fringe_share"] == pytest.approx(0.25) and s["rmse_z_phase_nm"] < 1e-6
+
+
+def test_the_prefit_reads_the_cavitys_drift_and_each_channels_background_from_a_spline_4pi_table():
+    """A table as *4Pi z* leaves it: the cavity drifting 0.004 rad a frame with a walk, backgrounds of
+    their own per channel.  The prefit gives back the rate, ranges covering each channel's background,
+    and a training's settings with them."""
+    rng = np.random.default_rng(0)
+    n_frames, per = 20000, 5
+    frame = np.repeat(np.arange(n_frames), per)
+    cav = fourpi.cavity_drift(n_frames, rate_rad=0.004, wander_rad=0.003, start_rad=0.5, seed=1)
+    cols = {"frame": frame, "photons": rng.lognormal(np.log(1500), 0.5, len(frame)),
+            "z_env_nm": rng.uniform(-500, 500, len(frame)),
+            "cavity_phase_rad": np.angle(np.exp(1j * (cav[frame] + 0.05 * rng.normal(size=len(frame)))))}
+    for c, level in enumerate((10, 12, 9, 11)):
+        cols[f"background_ch{c}"] = rng.normal(level, 1.0, len(frame))
+    pre = NF.prefit(cols)
+    assert pre["rate_measured"] == pytest.approx(0.004, rel=0.05)
+    for c, level in enumerate((10, 12, 9, 11)):
+        lo, hi = pre["background"][c]
+        assert lo < level - 1.5 and hi > level + 1.5
+    assert pre["z_nm"][1] == pytest.approx(495, abs=10)
+    s = NF.settings_from_prefit(pre, CAM, "model.h5")
+    assert s.channels.kind == "4pi" and s.channels.cavity_rate_rad == pytest.approx(pre["rate_measured"], rel=1e-6)
+    lo, hi = s.simulation.photons_range
+    assert lo < 500 and hi > 5000

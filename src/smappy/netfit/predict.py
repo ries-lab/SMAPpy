@@ -11,6 +11,10 @@ rows, columns)``, and their offset maps ``aux`` ``(2, rows, columns)`` -- `chann
 ``offsets`` -- and gives positions on channel 0's grid, with each channel's photons (colour) and
 background beside them.
 
+A 4Pi model (``channels.kind`` "4pi", docs/4pi.md §30) takes its C channels on its grid the same way, ``(n, C,
+rows, columns)`` and ``2 (C - 1)`` offset maps (`fourpi.FourChannels.on_grid`, ``offsets``), and gives each
+molecule's phase, ``phase_rad`` and ``phase_err_rad``, and each channel's background (`fourpi.localize`).
+
 A model trained on a field-dependent PSF (its header's ``field``, `field.FieldRecord`) reads u, v maps
 beside the frames: made here from ``corner``, the frames' corner on the chip (the camera ROI's offset),
 and the crop.  Its frames are never mirrored: the field was learnt on the chip as the beads saw it.
@@ -124,7 +128,7 @@ class Predictor:
         photons = np.asarray(photons, np.float32)
         two = self.channels.kind != ""
         if two and (photons.ndim != 4 or aux is None):
-            raise ValueError("a two-channel model takes frames (n, 2, rows, columns) and their offset maps")
+            raise ValueError("a model of several channels takes frames (n, C, rows, columns) and their offset maps")
         if two and self.frames_mirrored:
             raise ValueError("a two-channel model takes the channels as its calibration has them")
         k = self.window
@@ -135,14 +139,14 @@ class Predictor:
             x = torch.flip(x, (-1,))
         x = (x - self.scaling.input_offset) / self.scaling.input_scale
         if two:
-            x = x.transpose(0, 1)                                            # (2, n, h, w)
+            x = x.transpose(0, 1)                                            # (C, n, h, w)
             maps = torch.as_tensor(np.asarray(aux, np.float32)[:, r0:r0 + hh, c0:c0 + ww]).to(self.device)
         elif self.field is not None:
             corner = (self.corner[0] + c0, self.corner[1] + r0)
             maps = torch.as_tensor(self.field.maps(corner, hh, ww)).to(self.device)
         layout = self.model.layout
         parts, maps_bg = [], []
-        size = self.batch or auto_batch(self.device, hh * self.scale, ww * self.scale) // (2 if two else 1)
+        size = self.batch or auto_batch(self.device, hh * self.scale, ww * self.scale) // (self.channels.n if two else 1)
         size = max(1, size)
         with torch.no_grad():
             for a in range(0, n, size):
@@ -160,7 +164,8 @@ class Predictor:
                 e["frame"] = e["frame"] + a
                 parts.append(e)
         names = ("frame", "x", "y", "z_nm", "photons", "prob", "photons_err", "x_err", "y_err", "z_err_nm", "background")
-        names += tuple(c for c in ("photons_c", "photons_c_err", "background_c") if parts and c in parts[0])
+        names += tuple(c for c in ("photons_c", "photons_c_err", "background_c", "phase_rad", "phase_err_rad")
+                       if parts and c in parts[0])
         # a model with the reporting head reports its sigma; the mixture's is kept beside it, to compare
         mix = ("x_err_mix", "y_err_mix", "z_err_mix_nm") if parts and "x_err_mix" in parts[0] else ()
         cols = {name: np.concatenate([p[name] for p in parts]) if parts else np.zeros(0) for name in names + mix}
@@ -172,6 +177,7 @@ class Predictor:
                 "z_nm": cols["z_nm"], "photons": cols["photons"], "background": cols["background"], "prob": cols["prob"],
                 "x_err_pix": cols["x_err"], "y_err_pix": cols["y_err"], "z_err_nm": cols["z_err_nm"],
                 "photons_err": cols["photons_err"],
-                **{c: cols[c] for c in ("photons_c", "photons_c_err", "background_c") if c in cols},
+                **{c: cols[c] for c in ("photons_c", "photons_c_err", "background_c", "phase_rad", "phase_err_rad")
+                   if c in cols},
                 **({"x_err_mix_pix": cols["x_err_mix"], "y_err_mix_pix": cols["y_err_mix"],
                     "z_err_mix_nm": cols["z_err_mix_nm"]} if mix else {})}
