@@ -26,6 +26,8 @@ def describe(meta: dict) -> str:
     """What a model is, in the GUI's words: DECODE, whatever trained it (docs/decode/gui-plan.md §1)."""
     method = meta.get("method")
     if method == NETFIT:
+        if fourpi(meta):
+            return "DECODE, 4Pi"
         if not (meta.get("channels") or {}):
             return "DECODE, optimised"
         # two channels: read together from the first layer (early fusion) or apart, joined later
@@ -37,9 +39,15 @@ def describe(meta: dict) -> str:
     return "DECODE"
 
 
+def fourpi(meta: dict) -> bool:
+    """Whether a model reads a 4Pi microscope's phase channels and puts out the phase (docs/4pi.md §30)."""
+    return ((meta.get("settings") or {}).get("channels") or {}).get("kind") == "4pi"
+
+
 def two_channel(meta: dict) -> bool:
-    """Whether a model reads a split camera's two channels (plex-plan §16)."""
-    return bool(meta.get("channels"))
+    """Whether a model reads a split camera's two channels (plex-plan §16); a 4Pi model's grid is in
+    ``channels`` too, but it is `fourpi`'s."""
+    return bool(meta.get("channels")) and not fourpi(meta)
 
 
 def field_dependent(meta: dict) -> bool:
@@ -62,6 +70,9 @@ def load(path, device=None, *, frames_mirrored: bool = False, threshold: float |
         return load_predictor(path, device, frames_mirrored=frames_mirrored,
                               raw_th=RAW_TH if threshold is None else threshold, batch_size=batch)
     if method == NETFIT:
+        if fourpi(meta):
+            raise ValueError(f"{Path(path).name} reads a 4Pi microscope's channels: its frames are cut into them "
+                             f"first (the DECODE fitter's 4Pi part, `netfit.fourpi.FourPiPredictor`)")
         if two_channel(meta):
             raise ValueError(f"{Path(path).name} reads two channels: its frames are cut into them first "
                              f"(the DECODE fitter's two channels, `netfit.fit_two`); this loads one-channel models")

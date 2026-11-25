@@ -118,7 +118,9 @@ class WindowEngine:
                           else np.asarray(values, np.float32))
         self.stats["localizations"] += n
         sizes, assumed = self.camera.pixelsize_nm_or_default
-        return to_nm(Localizations(cols, {"units": "pixel"}), sizes, assumed=assumed, keep_pixels=False)
+        # what the predictor says the table needs (a 4Pi model: the phase's slope for *4Pi z*, its layout)
+        metadata = {"units": "pixel", **dict(getattr(self.predictor, "table_metadata", None) or {})}
+        return to_nm(Localizations(cols, metadata), sizes, assumed=assumed, keep_pixels=False)
 
     def __str__(self) -> str:
         s = self.stats

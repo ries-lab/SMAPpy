@@ -42,6 +42,7 @@ from typing import Optional
 
 import numpy as np
 
+from ..channels import FourPiChannelsSettings
 from . import Context, FormState, Notice, Plot, Result, param, register
 from .fit import (
     CameraMetadata,
@@ -54,6 +55,7 @@ from .fit import (
     _open,
     move_shown,
 )
+from .fit_4pi import FourPiRegistrationSettings
 
 MODEL_FILTER = ("DECODE models (*.safetensors *.ckpt *.pt);;SMAPpy's models (*.safetensors);;"
                 "DECODE-Plex runs (*.ckpt);;DECODE's own models (*.pt);;All files (*)")
@@ -110,6 +112,22 @@ class DecodeChannelSettings:
                              "on a GPU, 9 s on a CPU")
 
 
+FOURPI_FILTER = "4Pi models (*.h5);;All files (*)"
+
+
+@dataclass
+class DecodeFourPiSettings:
+    """A model that reads a 4Pi microscope's phase channels (docs/4pi.md §30): where the channels are on the
+    frame and how they map onto the first, as *Spline 4Pi* takes them (`fit_4pi.layout_of`).  Shown for
+    such a model only."""
+    calibration: str = param("", label="4Pi model", kind="open_file", file_filter=FOURPI_FILTER,
+                             help="the 4Pi model the network was trained on, for its geometry, maps and phase "
+                                  "slope; empty: the one the model names, where it is on this computer")
+    channels: FourPiChannelsSettings = param(default_factory=FourPiChannelsSettings, label="channels", collapsed=True)
+    registration: FourPiRegistrationSettings = param(default_factory=FourPiRegistrationSettings,
+                                                     label="registration", collapsed=True)
+
+
 @dataclass
 class DecodeFitSettings:
     """The other fitters' parts under the same names (`fit._Reading`, `_Writing`, `_Finishing`),
@@ -120,6 +138,7 @@ class DecodeFitSettings:
     model: DecodeModelSettings = field(default_factory=DecodeModelSettings)
     # not ``channels``: `_FitPlugin` reads a part of that name as the spline fitters' split camera
     two_channels: DecodeChannelSettings = param(default_factory=DecodeChannelSettings, label="two channels")
+    fourpi: DecodeFourPiSettings = param(default_factory=DecodeFourPiSettings, label="4Pi")
     output: OutputSettings = field(default_factory=OutputSettings)
     finish: FinishSettings = param(default_factory=FinishSettings, label="after the fit", collapsed=True)
 
@@ -259,6 +278,16 @@ def two_channel_calibration(settings, meta: dict) -> Path:
 #: in the shipped GUI; the form and *Model info...* need none, nor a run on a training host
 NO_TORCH = ("DECODE's network needs PyTorch, which this Python does not have: install it with "
             "pip install \"smappy-smlm[decode]\", or set run on to a training host")
+
+
+def fourpi_calibration(settings, meta: dict) -> Path:
+    """The 4Pi model a 4Pi network reads its channels with: the one typed, else the one it was trained on."""
+    typed = settings.fourpi.calibration
+    path = Path(typed or meta.get("calibration_source") or "")
+    if not str(path) or not path.exists():
+        raise ValueError(f"the 4Pi model the network was trained on ({path.name or 'not named'}) is not on this "
+                         f"computer: choose it under 4Pi")
+    return path
 
 
 def torch_here() -> bool:
@@ -444,9 +473,11 @@ class DecodeFit(_FitPlugin):
         return None                       # the network finds the molecules
 
     def model(self, settings, camera: CameraMetadata):
-        from ..training.predictors import two_channel
+        from ..training.predictors import fourpi, two_channel
         meta = read_model(settings.model.path)
         device = settings.model.device
+        if fourpi(meta):
+            return self.fourpi_model(settings, meta, camera)
         if two_channel(meta):
             return self.two_channel_model(settings, meta, camera)
         path = model_file(settings.model.path)
@@ -490,6 +521,31 @@ class DecodeFit(_FitPlugin):
         self._two = model                  # for the run's text: the move used (`checks`)
         return model
 
+    def fourpi_model(self, settings, meta: dict, camera: CameraMetadata):
+        """A 4Pi model (docs/4pi.md §30): the frames cut into the channels by the layout and maps Spline 4Pi
+        would take (`fit_4pi.layout_of` on the *4Pi* part), on the network's grid, the phase out
+        (`netfit.fourpi.FourPiPredictor`); its network here or on the training host *run on* names."""
+        from types import SimpleNamespace
+        from ..fourpi import load_fourpi_calibration
+        from ..netfit.fourpi import FourPiPredictor
+        from .fit_4pi import layout_of
+        part = settings.fourpi
+        cal = load_fourpi_calibration(fourpi_calibration(settings, meta))
+        base = _open(settings.source, watch=False)
+        resolution = self.resolution(settings)
+        layout = layout_of(SimpleNamespace(channels=part.channels, model=SimpleNamespace(registration=part.registration)),
+                           base, cal, camera, resolution)
+        device = settings.model.device
+        if settings.model.run_on != "here":
+            predictor = remote_predictor(settings, meta, camera)
+        else:
+            if not torch_here():
+                raise ValueError(NO_TORCH)
+            from ..netfit.predict import Predictor
+            predictor = Predictor(model_file(settings.model.path), None if device == "auto" else device,
+                                  threshold=settings.model.threshold, batch=settings.model.batch)
+        return FourPiPredictor(predictor, layout, cal)
+
     def engine(self, settings, camera, finder, model, source=None):
         from ..window_engine import WindowEngine
         return WindowEngine(camera, model)
@@ -526,6 +582,14 @@ class DecodeFit(_FitPlugin):
         state = super().describe(ctx, settings)
         # the two channels' part for a model that reads them, nothing for one that does not
         state.shown["two_channels"] = self._two_channel(settings)
+        fourpi = self._fourpi(settings)
+        state.shown["fourpi"] = fourpi
+        if fourpi and getattr(settings, "finish", None) is not None:
+            # a 4Pi model's table has the phase: *4Pi z* after the fit, as after Spline 4Pi
+            from .after_fit import shown
+            state.shown.update({f"finish.{name}": on for name, on in shown(
+                settings.finish, two_channel=False, widths=False, phase=True, split=False,
+                field=self.field_dependent(settings)).items()})
         state.shown.update(move_shown("two_channels.move", settings.two_channels.move))
         if settings.model.run_on == "here" and not torch_here():
             state.notice = Notice(NO_TORCH)        # said before the run, not after it
@@ -558,6 +622,14 @@ class DecodeFit(_FitPlugin):
                                        model=DualModelSettings(calibration=str(two_channel_calibration(settings, meta)),
                                                                registration=calibration_map(m)))
         return DualSplineFit().channel_move(spline, report)
+
+    @staticmethod
+    def _fourpi(settings) -> bool:
+        from ..training.predictors import fourpi
+        try:
+            return fourpi(read_model(settings.model.path))
+        except Exception:                   # no model yet, a path being typed: nothing to show
+            return False
 
     @staticmethod
     def _two_channel(settings) -> bool:

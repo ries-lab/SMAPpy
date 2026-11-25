@@ -402,3 +402,49 @@ def settings_from_prefit(pre: dict, camera, calibration: str, density: float = 2
     s.calibration = calibration
     s.seed = int(seed)
     return s
+
+
+# ---------------------------------------------------------------- in the DECODE fitter
+
+class FourPiPredictor:
+    """A 4Pi `predict.Predictor` as the DECODE fitter's `window_engine.WindowEngine` drives a one-channel one:
+    handed whole camera frames, it cuts them into the channels by ``layout`` (`channels.ChannelLayout` on the
+    frames, with its maps: Spline 4Pi's, `plugins.fit_4pi.layout_of`), puts them on the network's grid
+    (`FourChannels`, built at the first frames), and gives the engine Spline 4Pi's columns: positions where
+    channel 0 saw the molecule on the frame, z (and ``z_env_nm``, the same: the envelope's), the phase and its
+    error, each channel's background.  ``table_metadata`` holds what *4Pi z* reads, the model's phase slope,
+    and the layout, as Spline 4Pi's tables do."""
+
+    frames_mirrored = False
+
+    def __init__(self, predictor, layout, cal):
+        self.predictor = predictor
+        self.layout = layout
+        self.four = None
+        self.table_metadata = {"fourpi": {"phase_per_nm": float(cal.phase_per_nm), "period_nm": float(cal.period_nm),
+                                          "calibration": str(cal.source)},
+                               "channel_layout": layout.to_dict()}
+
+    window = property(lambda self: self.predictor.window)
+    device = property(lambda self: self.predictor.device)
+    raw_th = property(lambda self: self.predictor.raw_th)
+    metadata = property(lambda self: self.predictor.metadata)
+
+    def grid(self) -> FourChannels:
+        if self.four is None:
+            self.four = FourChannels.from_layout(self.layout)
+        return self.four
+
+    def __call__(self, photons, first_frame: int = 0) -> dict:
+        four = self.grid()
+        r = self.predictor(four.cut(np.asarray(photons, np.float32)), 0, aux=four.offsets())
+        xy = four.grid_to_frame(np.c_[r["x_pix"], r["y_pix"]])
+        out = {"frame": np.asarray(r["frame"], np.int64) + int(first_frame), "x_pix": xy[:, 0], "y_pix": xy[:, 1],
+               "z_nm": r["z_nm"], "z_env_nm": r["z_nm"], "z_err_nm": r["z_err_nm"], "z_env_err_nm": r["z_err_nm"],
+               "x_err_pix": r["x_err_pix"], "y_err_pix": r["y_err_pix"], "phase_rad": r["phase_rad"],
+               "phase_err_rad": r["phase_err_rad"], "photons": r["photons"], "photons_err": r["photons_err"],
+               "prob": r["prob"], "background": r["background"]}
+        bg = np.asarray(r.get("background_c", np.zeros((len(out["frame"]), 0))))
+        for c in range(bg.shape[1]):
+            out[f"background_ch{c}"] = bg[:, c]
+        return {name: np.asarray(v) for name, v in out.items()}

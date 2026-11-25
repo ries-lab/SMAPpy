@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.plugins.fit_decode.field_warnings, smappy.netfit.field.FieldRecord, smappy.plugins.fit_decode.DecodeFit, smappy.netfit.fit_two.TwoChannelPredictor, smappy.plugins.fit_decode.DecodeFit.channel_move, smappy.channel_move.ChannelMove, smappy.plugins.fit._TwoChannelFit.measure_move, smappy.netfit.fit_two.moved_calibration, smappy.plugins.fit_decode.two_channel_calibration, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
+covers: [smappy.plugins.fit_decode.field_warnings, smappy.plugins.fit_decode.DecodeFit.fourpi_model, smappy.netfit.fourpi.FourPiPredictor, smappy.plugins.fit_decode.fourpi_calibration, smappy.training.predictors.fourpi, smappy.netfit.field.FieldRecord, smappy.plugins.fit_decode.DecodeFit, smappy.netfit.fit_two.TwoChannelPredictor, smappy.plugins.fit_decode.DecodeFit.channel_move, smappy.channel_move.ChannelMove, smappy.plugins.fit._TwoChannelFit.measure_move, smappy.netfit.fit_two.moved_calibration, smappy.plugins.fit_decode.two_channel_calibration, smappy.training.predictors.load, smappy.netfit.predict.Predictor, smappy.netfit.predict.auto_batch, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
 ## What it does
@@ -80,6 +80,21 @@ calibration's main half, as [Spline 3D 2C](plugin:Localize/Spline 3D 2C)
 does, with each channel's photons and background.  For two colours,
 [Assign colours](plugin:Analysis/After fit/Assign colours) then tells the
 dyes apart from the two counts, as *after the fit* does by default.
+
+**4Pi.**  An optimised model can also read a 4Pi microscope's four phase
+channels at once and give each molecule's interference phase beside x, y
+and z.  It is trained on a 4Pi model -- the one
+[Spline 4Pi](plugin:Localize/Spline 4Pi) fits with -- and its *4Pi* part
+appears in the form.  The fitter cuts each frame into the channels exactly
+as Spline 4Pi does, with the same *channels* and *registration* choices, and
+reports what Spline 4Pi reports: positions where channel 0 saw the molecule,
+z from the PSF's envelope (`z_nm` and `z_env_nm`), the phase and its error
+(`phase_rad`, `phase_err_rad`), each channel's background.  *After the fit*
+then runs [4Pi z](plugin:Analysis/After fit/4Pi z), which turns the phase into
+z, as after Spline 4Pi.  On simulations the network reaches the phase's
+CRLB and finds a third more molecules than Spline 4Pi where its fitting
+boxes overlap; on the Ries-lab Nup96 it found a third more pores, the two
+rings as far apart.
 
 ## How it works
 
@@ -383,6 +398,22 @@ could reach.  A reported sigma well above it marks a position outlier.  On
 simulated data it found the outliers better than goodness did
 (plex-plan §16).
 
+### fourpi.calibration
+
+The 4Pi model the network was trained on gives the channels' geometry and
+maps, and the phase's slope in z that *4Pi z* needs.  Empty takes the file the
+model names, where it is on this computer.
+
+### fourpi.channels
+
+Where the four channels are on the frame, as in Spline 4Pi: on *auto* the
+microscope's entry, else the 4Pi model's own rectangles.
+
+### fourpi.registration
+
+How the channels map onto the first, as in Spline 4Pi: by default the maps
+kept with the 4Pi model, which is what the network was trained with.
+
 ### model
 
 *Train a model...* opens the [training window](plugin:Panels/DECODE training)
@@ -408,6 +439,11 @@ and `background_ch1`; `background` is the main channel's.  With its checks
 it adds `goodness` and `crlb_x_nm`, `crlb_y_nm`, `crlb_z_nm`.  The move used,
 typed or measured, is in the run's file, and a measured one is also in the
 run's text.
+
+A 4Pi model writes Spline 4Pi's columns: `phase_rad` and `phase_err_rad`,
+`z_env_nm` and `z_env_err_nm` (the envelope's z, which `z_nm` is until *4Pi
+z* replaces it with z from the phase), and `background_ch0` to
+`background_ch3`; the table keeps the model's phase slope for *4Pi z*.
 
 An optimised model also writes `x_err_mix_pix`, `y_err_mix_pix` (pixels)
 and `z_err_mix_nm`: the uncertainty its probability maps imply, kept beside
