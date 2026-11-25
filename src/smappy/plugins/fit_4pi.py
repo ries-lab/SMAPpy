@@ -204,6 +204,67 @@ def layout_of(settings: FourPiFitSettings, base=None, calibration=None, camera=N
     return layout
 
 
+def brightest_molecule(model, rois, camera, candidates: int = 300):
+    """The brightest molecule of a block's ROIs (`MultiChannelEngine.rois`) that the fit describes,
+    fitted again and drawn by the model: (data, model, the fit's numbers), each (C, h, w) in photons --
+    for the Preview's *molecule* figure; None when no fit ended inside the model's z grid.
+
+    Up to ``candidates`` ROIs are fitted (a frame has fewer).  Of the fits inside the model's z grid,
+    the brightest is taken whose residual is no worse than the typical one -- a mean squared Pearson
+    residual within 10 % of their median -- so a model that misses the data everywhere still shows it,
+    but a box holding two molecules does not stand for the fit: the brightest boxes are the
+    overlapping pairs, and on a simulation the brightest was two molecules fitted at the end of the
+    grid.  One frame's fits: milliseconds."""
+    from ..fourpi import molecule_model
+    from ..pipeline import with_readout
+    images = np.asarray(rois.images, float)[:candidates]
+    link = np.ascontiguousarray(rois.link[:candidates])
+    data = np.asarray(with_readout(images, camera.readout_variance), np.float32)
+    theta = np.asarray(model.fit(data, link).theta, float)
+    cal = model.calibration
+    nz = cal.shape[0]
+    z = theta[:, model.slot(4)]
+    good = np.flatnonzero(np.all(np.isfinite(theta), axis=1) & (z > 0.5) & (z < nz - 1.5))
+    if not len(good):
+        return None
+    fitted = molecule_model(cal, model, theta[good], link[good], rois.roisize)
+    chi = np.mean((data[good] - fitted) ** 2 / np.clip(fitted, 1e-3, None), axis=(1, 2, 3))
+    usual = np.flatnonzero(chi <= 1.1 * np.median(chi))
+    pick = usual[np.argmax(theta[good[usual], model.slot(2)])]
+    k, row = good[pick], theta[good[pick]]
+    numbers = {"photons": float(row[model.slot(2)]),
+               "z_nm": float(cal.z_index_to_nm(row[model.slot(4)])),
+               "phase_rad": float(np.angle(np.exp(1j * row[model.slot(5)])))}
+    return np.asarray(data[k], float), fitted[pick], numbers
+
+
+def draw_molecule(figure, data, fitted, numbers):
+    """One molecule in every channel: the data (top), the model the fit found (middle), on one grey
+    scale per channel, and the residual (bottom) in units of the noise, (data - model) / sqrt(model),
+    from -4 (blue) to 4 (red) -- a plain difference took its scale from the one brightest pixel.  A good
+    fit leaves noise; a ring or a lobe in the residual is a model that does not match the PSF there,
+    and a channel whose residual has the spot's shape has the wrong share of the light, or the wrong
+    phase offset."""
+    from ..fourpi import in_pi
+    C = data.shape[0]
+    axes = np.asarray(figure.subplots(3, C)).reshape(3, C)
+    residual = (data - fitted) / np.sqrt(np.clip(fitted, 1e-3, None))
+    limit = 4.0
+    for c in range(C):
+        lo, hi = float(min(data[c].min(), fitted[c].min())), float(max(data[c].max(), fitted[c].max()))
+        axes[0, c].imshow(data[c], cmap="gray", vmin=lo, vmax=hi)
+        axes[1, c].imshow(fitted[c], cmap="gray", vmin=lo, vmax=hi)
+        axes[2, c].imshow(residual[c], cmap="RdBu_r", vmin=-limit, vmax=limit)
+        axes[0, c].set_title(f"channel {c + 1}", fontsize="small")
+    for row, name in enumerate(("data", "model", "residual")):
+        axes[row, 0].set_ylabel(name)
+        for ax in axes[row]:
+            ax.set_xticks([])
+            ax.set_yticks([])
+    figure.suptitle(f"{numbers['photons']:.0f} photons, z {numbers['z_nm']:.0f} nm, "
+                    f"phase {in_pi(numbers['phase_rad'])}", fontsize="small")
+
+
 @register("Localize/Spline 4Pi")
 class FourPiFit(_FitPlugin):
     """Fit 4Pi data: each molecule in every phase channel at once, with the IAB spline model, for x, y, the envelope's z and the interference phase."""
@@ -426,17 +487,21 @@ class FourPiFit(_FitPlugin):
         candidates, _ = finder(summed, first_frame=index)
         text = (f"frame {index}: {len(candidates)} molecules found on the sum of "
                 f"{layout.n_channels} channels")
-        fitted = None
+        fitted = molecule = None
         try:
             model = self.model(settings, camera)
         except Exception as error:
             text += f"; not fitted -- {error}"
         else:
             engine = MultiChannelEngine(camera, finder, model, layout, settings.fit,
-                                        frame_shape=source.base.shape[-2:])
+                                        frame_shape=source.base.shape[-2:], keep_rois=True)
             engine.push(raw[None], index)
             fitted = engine.flush()
             text += f", {0 if fitted is None else len(fitted)} fitted"
+            if engine.rois is not None and len(engine.rois):
+                molecule = brightest_molecule(model, engine.rois, camera)
+                if molecule is not None:
+                    text += "; the brightest molecule's data, model and residual in the figure molecule"
         (px, py), _ = camera.pixelsize_nm_or_default
         roi = np.array(camera.roi_offset, float)
         shapes = list(settings.region.shapes)
@@ -465,7 +530,11 @@ class FourPiFit(_FitPlugin):
             for ax in panels:
                 ax.set_xticks([])
                 ax.set_yticks([])
-        return Result(text=text, settings=settings,
+        plots = {}
+        if molecule is not None:
+            plots["molecule"] = Plot(lambda figure: draw_molecule(figure, *molecule),
+                                     panels=3 * layout.n_channels, size=(2.2 * layout.n_channels, 6.4))
+        return Result(text=text, settings=settings, plots=plots,
                       plot=Plot(draw, panels=layout.n_channels + 1,
                                 size=(3 * (layout.n_channels + 1), 3.2),
                                 edit=ShapeEdit("region.shapes", panel=0, shapes=shapes)))

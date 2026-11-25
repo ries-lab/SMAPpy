@@ -72,26 +72,144 @@ def envelope_of(locs: Localizations):
     return np.asarray(locs[name], float), np.asarray(locs[err], float)
 
 
+def _wrapped_line(ax, grid, values, **style):
+    """A line of phases wrapped to (-pi, pi], broken where it wraps."""
+    line = np.angle(np.exp(1j * values))
+    line[np.abs(np.diff(line, prepend=line[0])) > np.pi] = np.nan
+    ax.plot(grid, line, **style)
+
+
 def draw_fringes(ax, phase, z_env_nm, phase0, phase_per_nm, limit: int = 50000):
     """The phase with the cavity's taken off against the envelope's z: the
     localizations lie on stripes of slope k, one per fringe, and the stripe
-    each one is put on is the one its z_env is nearest."""
+    each one is put on is the one its z_env is nearest -- the dashed lines,
+    half a period from the stripe on either side, are where that choice flips."""
     rel = np.angle(np.exp(1j * (np.asarray(phase, float) - np.asarray(phase0, float))))
     z = np.asarray(z_env_nm, float)
     keep = np.flatnonzero(np.isfinite(rel) & np.isfinite(z))
     if len(keep) > limit:
         keep = np.random.default_rng(0).choice(keep, limit, replace=False)
     lo, hi = np.percentile(z[keep], [1, 99]) if len(keep) else (-500, 500)
-    ax.hist2d(z[keep], rel[keep], bins=[120, 60], range=[[lo, hi], [-np.pi, np.pi]],
-              cmap="Greys")
-    grid = np.linspace(lo, hi, 400)
-    line = np.angle(np.exp(1j * phase_per_nm * grid))
-    line[np.abs(np.diff(line, prepend=line[0])) > np.pi] = np.nan
-    ax.plot(grid, line, color="C3", lw=1)
+    counts, xe, ye = np.histogram2d(z[keep], rel[keep], bins=[120, 60],
+                                    range=[[lo, hi], [-np.pi, np.pi]])
+    # the grey scale from the bins' 99.5th percentile: fits clamped at an end of the model's z grid
+    # pile into a few bins (on the Nup96 movie a hundred times the stripes'), which set the scale
+    # otherwise and leave the stripes white
+    top = np.percentile(counts[counts > 0], 99.5) if (counts > 0).any() else 1.0
+    ax.pcolormesh(xe, ye, counts.T, cmap="Greys", vmin=0, vmax=max(top, 1.0), rasterized=True)
+    grid = np.linspace(lo, hi, 800)
+    _wrapped_line(ax, grid, phase_per_nm * grid, color="C3", lw=1)
+    # a localization above the dashed line is put on the next fringe: the line is the stripe's
+    # half a period on, where the stripes of the two fringes are equally far
+    _wrapped_line(ax, grid, phase_per_nm * grid + np.pi, color="C3", lw=1, ls="--")
+    ax.set_xlim(lo, hi)
     ax.set_xlabel("envelope z (nm)")
     ax.set_ylabel("phase − cavity phase")
     from ..fourpi import pi_axis
     pi_axis(ax)
+
+
+def draw_risk(ax, z_env_nm, probability):
+    """The wrong-fringe risk along the envelope's z: the expected share of
+    wrong fringes and the share below 90 % sure, per bin of z_env
+    (`fourpi.fringe_risk`)."""
+    from ..fourpi import fringe_risk
+    centres, expected, unsure, _ = fringe_risk(z_env_nm, probability)
+    ax.plot(centres, 100 * unsure, color="C1", label="below 90 % sure")
+    ax.plot(centres, 100 * expected, color="C0", label="expected wrong")
+    ax.set_xlabel("envelope z (nm)")
+    ax.set_ylabel("localizations (%)")
+    ax.set_ylim(bottom=0)
+    ax.legend(frameon=False, fontsize="small")
+
+
+def draw_z_by_fringe(ax, z_nm, fringe, bins: int = 200, most: int = 6):
+    """The final z, each fringe's localizations in a colour of their own: a
+    ghost -- a molecule put a fringe off -- is a copy of a structure one
+    period away, in the neighbouring fringe's colour.  The ``most`` fringes
+    with the most localizations are drawn; on a log scale, so a copy of a
+    few per cent shows."""
+    z = np.asarray(z_nm, float)
+    n = np.asarray(fringe)
+    ok = np.isfinite(z)
+    z, n = z[ok], n[ok]
+    if not len(z):
+        return
+    lo, hi = np.percentile(z, [0.5, 99.5])
+    edges = np.linspace(lo, hi, bins + 1)
+    ax.hist(z, edges, histtype="stepfilled", color="0.5", alpha=0.35, label="all")
+    values, counts = np.unique(n, return_counts=True)
+    for k in np.sort(values[np.argsort(counts)[::-1][:most]]):
+        ax.hist(z[n == k], edges, histtype="step", lw=1.2, color=f"C{int(k) % 10}",
+                label=f"fringe {int(k):+d}")
+    ax.set_yscale("log")
+    ax.set_xlabel("z (nm)")
+    ax.set_ylabel("localizations")
+    ax.legend(frameon=False, fontsize="small", ncol=2)
+
+
+def draw_channel_shares(ax, binned, labels=None):
+    """Each channel's share of the ROIs' photons against the phase
+    (`fourpi.channel_shares`): the data's median as dots with their
+    quartiles, and the model's prediction for the same localizations as a
+    line in the channel's colour.  Four sinusoids, a quarter turn apart in
+    a good 4Pi; the model's line through the dots says its phase offsets
+    and modulation are the data's."""
+    centres = binned["centres"]
+    C = binned["median"].shape[1]
+    for c in range(C):
+        colour = f"C{c}"
+        name = labels[c] if labels else f"channel {c + 1}"
+        ax.fill_between(centres, binned["lower"][:, c], binned["upper"][:, c], color=colour,
+                        alpha=0.15, lw=0)
+        ax.plot(centres, binned["median"][:, c], "o", ms=3, color=colour, label=name)
+        if binned.get("model") is not None:
+            ax.plot(centres, binned["model"][:, c], "-", lw=1.2, color=colour)
+    ax.set_xlabel("phase")
+    ax.set_ylabel("share of the photons")
+    ax.set_xlim(-np.pi, np.pi)
+    from ..fourpi import pi_axis
+    pi_axis(ax, "x")
+    ax.legend(frameon=False, fontsize="small", ncol=2)
+
+
+def model_for(locs: Localizations, settings: FourPiZSettings):
+    """The 4Pi model the table was fitted with -- the file named here, or the
+    one the fit recorded -- or None where neither can be read."""
+    from ..fourpi import load_fourpi_calibration
+    path = settings.path if settings.slope == "file" and settings.path else \
+        ((locs.metadata or {}).get("fourpi") or {}).get("calibration")
+    if not path:
+        return None
+    try:
+        return load_fourpi_calibration(path)
+    except (OSError, ValueError, KeyError):
+        return None                # moved or gone: the split is drawn without the model's line
+
+
+def shares_of(locs: Localizations, settings: FourPiZSettings, z_env_nm):
+    """The channels' split against the phase (`fourpi.channel_shares`), with
+    the model's where the model can be read, or None for a table without
+    the ROIs' photons per channel (`roi_photons_ch*`, which the 4Pi fit
+    writes; a table fitted before it wrote them has none)."""
+    from ..fourpi import channel_shares, model_shares
+    names = sorted((c for c in locs.keys() if c.startswith("roi_photons_ch")),
+                   key=lambda c: int(c[len("roi_photons_ch"):]))
+    if not names:
+        return None
+    sums = np.stack([np.asarray(locs[c], float) for c in names], 1)
+    phase = np.asarray(locs["phase_rad"], float)
+    cal = model_for(locs, settings)
+    roisize = ((locs.metadata or {}).get("fourpi") or {}).get("roisize")
+    predicted = None
+    if cal is not None and roisize and cal.n_channels == len(names):
+        # fits clamped at an end of the model's z grid are left out: their z is not where the
+        # molecule is, and the model's split there is the grid's end's (`Global4PiPSF.unpack`)
+        ends = np.sort(cal.z_index_to_nm(np.array([1.0, cal.shape[0] - 2.0])))
+        inside = (z_env_nm > ends[0]) & (z_env_nm < ends[1])
+        sums, phase, z_env_nm = sums[inside], phase[inside], np.asarray(z_env_nm)[inside]
+        predicted = model_shares(cal, z_env_nm, phase, int(roisize))
+    return channel_shares(sums, phase, model=predicted)
 
 
 def draw_cavity(ax, cavity, frame=None, truth=None):
@@ -191,10 +309,19 @@ class FourPiZ(Plugin):
                 "cavity": {f: {"frame": c.centres.tolist(), "phase_rad": c.phase0.tolist(),
                                "error_rad": c.error.tolist()} for f, c in cavities.items()}}
         first = cavities[min(cavities)]
+        z_out, fringe, probability = found.z_nm * scale, found.fringe, found.probability
+        shares = shares_of(locs, settings, z_env)
 
         def draw(figure):
-            left, right = figure.subplots(1, 2)
-            draw_fringes(left, phase, z_env, phase0, k_found)
-            draw_cavity(right, first)
+            panels = figure.subplots(2, 2).ravel()
+            draw_fringes(panels[0], phase, z_env, phase0, k_found)
+            draw_risk(panels[1], z_env, probability)
+            draw_cavity(panels[2], first)
+            draw_z_by_fringe(panels[3], z_out, fringe)
+        plots = {}
+        if shares is not None:
+            data["channel_shares"] = {k: (v.tolist() if v is not None else None)
+                                      for k, v in shares.items()}
+            plots["channels"] = Plot(lambda ax: draw_channel_shares(ax, shares), size=(6, 3.6))
         return Result(locs=out, text=text, data=data, settings=settings,
-                      plot=Plot(draw, panels=2, size=(9, 3.6)))
+                      plot=Plot(draw, panels=4, size=(9, 6.4)), plots=plots)

@@ -3126,3 +3126,36 @@ drift on all of them (COMET 15 -- 19 s, RCC 10 -- 16 s):
 does.  A blink merged across fringes averages a ghost into its z
 (`group`'s z is a mean); with the sure fringes taken first the estimate does not see it, but a merged picture
 would.
+
+## 32. The output figures (2026-11-25)
+
+Chosen by Jonas on 2026-11-25; drawn by module-level functions (`fourpi.fringe_risk`, `roi_photons`,
+`model_channel_sums`, `model_shares`, `channel_shares`, `molecule_model`) and the plugins' `draw_*`.
+
+- ***4Pi z*'s main figure, four panels**: the stripes with the fringe boundaries dashed (half a period from each
+  stripe, where the choice of fringe flips; no colour coding of points); the wrong-fringe risk along the
+  envelope's z (expected wrong, share below 90 % sure, per z bin); the cavity's phase; and z by fringe on a log
+  scale.  The stripes' grey scale now ends at the bins' 99.5th percentile: on the first 10 000 Nup96 frames a
+  fiducial bead (13 % of the localizations within 50 nm, at z_env ≈ 470 nm) took the scale and left the stripes
+  white.
+- **z by fringe was tried and kept.**  On the 2017 tubulin (6000 frames, in situ model) the filaments' layer
+  shows its ghosts as peaks exactly ±1 and ±2 periods (282 nm) away, each in its fringe's colour, about a tenth
+  of the main peak -- the result line's 13.6 % expected wrong fringes, seen.  On Nup96, where the nucleus fills
+  z, the fringes are bands side by side and show nothing; not misleading, and the page says to read the risk
+  panel there.  A fringe's edges move with the cavity, so one structure can be split between colours.
+- **The channels' split against the phase**, *4Pi z*'s figure *channels* (and so with every Spline 4Pi fit,
+  whose *after the fit* runs *4Pi z*): each channel's share of the photons in bins of the fitted phase, against
+  the model's prediction for the same localizations.  The per-channel photons are **ROI sums less the fitted
+  background**, `roi_photons_ch0..3`, written by the 4Pi engine -- not a refit with photons free per channel,
+  which absorbs the interference into the photons and leaves the phase undetermined (`psf.Global4PiPSF`), and
+  would be a second fit of every molecule.  The model's split is summed over the same box (the table keeps
+  `metadata["fourpi"]["roisize"]`).  It lives in *4Pi z* because the figure is about the phase and *4Pi z*
+  already reads the model; the fit itself only writes the columns.  On Nup96 (in situ v2b) the four sinusoids
+  follow the model to about 0.01 except where the bead's localizations fill one phase bin, where model and data
+  bend together; on the tubulin (in situ) channel 3 sits about 0.02 above the model near ±π and channel 2's
+  minimum is a little late -- the kind of offset the figure is for.  Spline 4Pi's version stays 5: the new columns
+  move no number.
+- **Spline 4Pi's Preview, figure *molecule***: the frame's brightest molecule whose fit is typical (a mean squared
+  Pearson residual within 10 % of the frame's median; the brightest boxes are overlapping pairs), its data,
+  model and residual in noise units in all four channels.  0.4 -- 0.6 s for the whole Preview on both sets.
+  Nup96's residual is noise; the tubulin's shows lobes in channels 1 and 3, the model's shape off there.

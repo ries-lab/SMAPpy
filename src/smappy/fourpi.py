@@ -727,6 +727,124 @@ def refine_period(phase, phase_err, z_env_nm, z_env_err_nm, frame, phase_per_nm:
     return float(trials[best])
 
 
+def molecule_model(cal: FourPiCalibration, model, theta, link, roisize: int) -> np.ndarray:
+    """What a 4Pi fit says molecules' ROIs hold: (n, C, roisize, roisize), N times each channel's spot
+    plus its background, every channel evaluated where the link puts it (``factor * value + offset``,
+    in its own ROI's pixels, as the fitter does) -- to set beside the data and see the residual.
+    ``model`` is the `psf.Global4PiPSF` that fitted ``theta`` (n, values) with ``link`` (n, 2, C, P);
+    one molecule's (values,) and (2, C, P) give (C, roisize, roisize)."""
+    theta, link = np.asarray(theta, float), np.asarray(link, float)
+    single = theta.ndim == 1
+    theta, link = np.atleast_2d(theta), (link[None] if single else link)
+    out = np.empty((len(theta), cal.n_channels, roisize, roisize))
+    for c in range(cal.n_channels):
+        x, y, n, bg, z, phase = (link[:, 1, c, p] * theta[:, model.slot(p, c)] + link[:, 0, c, p]
+                                 for p in range(6))
+        out[:, c] = n[:, None, None] * spots(cal, x, y, z, phase, roisize)[:, c] + bg[:, None, None]
+    return out[0] if single else out
+
+
+def fringe_risk(z_env_nm, probability, bins: int = 30, min_count: int = 20):
+    """How sure the fringes are along the envelope's z: in each of ``bins`` bins of z_env between its 1st
+    and 99th percentile, the expected share of wrong fringes (the mean of 1 - probability) and the share
+    below 90 % sure.  Bins with fewer than ``min_count`` localizations are NaN.  Returns (centres,
+    expected, unsure, counts); the risk grows where the envelope's z is poor, at its ends."""
+    z, p = np.asarray(z_env_nm, float), np.asarray(probability, float)
+    ok = np.isfinite(z) & np.isfinite(p)
+    z, p = z[ok], p[ok]
+    if not len(z):
+        empty = np.zeros(0)
+        return empty, empty, empty, np.zeros(0, int)
+    lo, hi = np.percentile(z, [1, 99])
+    edges = np.linspace(lo, hi if hi > lo else lo + 1, bins + 1)
+    index = np.clip(np.searchsorted(edges, z, side="right") - 1, 0, bins - 1)
+    inside = (z >= edges[0]) & (z <= edges[-1])
+    counts = np.bincount(index[inside], minlength=bins)
+    wrong = np.bincount(index[inside], 1 - p[inside], minlength=bins)
+    unsure = np.bincount(index[inside], (p[inside] < 0.9).astype(float), minlength=bins)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        expected = np.where(counts >= min_count, wrong / counts, np.nan)
+        below = np.where(counts >= min_count, unsure / counts, np.nan)
+    return 0.5 * (edges[1:] + edges[:-1]), expected, below, counts
+
+
+def roi_photons(images, background) -> np.ndarray:
+    """Each channel's photons as its ROI holds them: the sum of the ROI less the fitted background on each
+    of its pixels, (n, C), from ``images`` (n, C, h, w) and ``background`` one array of n per channel.
+
+    Not a fit: a fit with photons free per channel absorbs the interference into them and leaves the phase
+    undetermined (`psf.Global4PiPSF`), and one with the phase held is a second fit of every molecule.  The
+    sum is the data as they are, which is what a check of the model wants; it is the model's split only
+    within the ROI, so `model_channel_sums` sums the model over the same pixels."""
+    images = np.asarray(images, float)
+    area = images.shape[-1] * images.shape[-2]
+    bg = np.stack([np.asarray(b, float) for b in background], 1)
+    return images.sum(axis=(-2, -1)) - area * bg
+
+
+def model_channel_sums(cal: FourPiCalibration, roisize: int, z_nm=None, points: int = 61):
+    """The model's I, A and B of every channel summed over a ``roisize`` ROI centred on the molecule, on a
+    grid of z: (z_nm, sums) with sums (3, C, len(z)).  A molecule at height z and phase phi puts
+    I + A cos phi + B sin phi of its light into a channel (one photon in all at the focus)."""
+    nz = cal.shape[0]
+    if z_nm is None:
+        z_nm = cal.z_index_to_nm(np.linspace(0.5, nz - 1.5, points))
+    z_nm = np.sort(np.atleast_1d(np.asarray(z_nm, float)))
+    zi = cal.z_nm_to_index(z_nm)
+    centre = np.full(len(zi), roisize / 2.0 - 0.5)
+    sums = {}
+    for name, phase in (("0", 0.0), ("pi", np.pi), ("half", np.pi / 2)):
+        sums[name] = spots(cal, centre, centre, zi, np.full(len(zi), phase), roisize).sum(axis=(-2, -1)).T
+    I = 0.5 * (sums["0"] + sums["pi"])
+    A = 0.5 * (sums["0"] - sums["pi"])
+    B = sums["half"] - I
+    return z_nm, np.stack([I, A, B]).astype(float)
+
+
+def model_shares(cal: FourPiCalibration, z_nm, phase, roisize: int) -> np.ndarray:
+    """Each channel's share of the ROIs' photons the model predicts for a molecule at ``z_nm`` with phase
+    ``phase``: (n, C), summing to one -- what `roi_photons` over their sum measures."""
+    grid, (I, A, B) = model_channel_sums(cal, roisize)
+    z, phase = np.asarray(z_nm, float), np.asarray(phase, float)
+    zc = np.clip(np.nan_to_num(z, nan=0.0), grid[0], grid[-1])
+    parts = [np.stack([np.interp(zc, grid, v[c]) for c in range(len(v))], 1) for v in (I, A, B)]
+    light = parts[0] + parts[1] * np.cos(phase)[:, None] + parts[2] * np.sin(phase)[:, None]
+    total = light.sum(axis=1, keepdims=True)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return light / total
+
+
+def channel_shares(sums, phase, bins: int = 24, min_count: int = 10, model=None):
+    """The channels' split of the light against the phase, binned: in each of ``bins`` bins of the phase
+    over (-pi, pi], the median share of every channel (each ROI's `roi_photons` over their sum) and its
+    quartiles, and -- given ``model``, the predicted shares of the same localizations (`model_shares`) --
+    the model's mean in the same bins.  Localizations whose ROIs hold too little light to split (a sum
+    at or below zero) are left out.  Returns a dict of centres, median, lower, upper, model (bins, C)
+    and counts."""
+    sums, phase = np.asarray(sums, float), np.asarray(phase, float)
+    total = sums.sum(axis=1)
+    ok = np.isfinite(phase) & np.isfinite(total) & (total > 0)
+    share = sums[ok] / total[ok, None]
+    edges = np.linspace(-np.pi, np.pi, bins + 1)
+    index = np.clip(np.searchsorted(edges, np.angle(np.exp(1j * phase[ok])), side="right") - 1, 0, bins - 1)
+    C = sums.shape[1]
+    median, lower, upper = (np.full((bins, C), np.nan) for _ in range(3))
+    predicted = np.full((bins, C), np.nan)
+    counts = np.bincount(index, minlength=bins)
+    order = np.argsort(index, kind="stable")
+    starts = np.r_[0, np.cumsum(counts)]
+    m = None if model is None else np.asarray(model, float)[ok]
+    for b in range(bins):
+        if counts[b] < min_count:
+            continue
+        rows = order[starts[b]:starts[b + 1]]
+        lower[b], median[b], upper[b] = np.percentile(share[rows], [25, 50, 75], axis=0)
+        if m is not None:
+            predicted[b] = np.nanmean(m[rows], axis=0)
+    return {"centres": 0.5 * (edges[1:] + edges[:-1]), "median": median, "lower": lower,
+            "upper": upper, "model": predicted if m is not None else None, "counts": counts}
+
+
 def modulation(cal: FourPiCalibration, z_nm: float = 0.0, radius_px: float = 4.0) -> np.ndarray:
     """Each channel's modulation at height ``z_nm``: Σ|A, B| / Σ I over the pixels within ``radius_px`` of
     the spot's centre, the photon-weighted fraction of the light that swings with the phase.  Of a bead

@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.fourpi.cavity_phase, smappy.fourpi.unwrap, smappy.fourpi.refine_period, smappy.fourpi._weights, smappy.fourpi._interpolate, smappy.fourpi.cavity_drift, smappy.fourpi.simulate_rois, smappy.plugins.fourpi_z.FourPiZ, smappy.plugins.fourpi_z.slope_of, smappy.plugins.fourpi_z.envelope_of, smappy.plugins.fourpi_z.draw_fringes, smappy.plugins.fourpi_z.draw_cavity]
+covers: [smappy.fourpi.cavity_phase, smappy.fourpi.unwrap, smappy.fourpi.refine_period, smappy.fourpi._weights, smappy.fourpi._interpolate, smappy.fourpi.cavity_drift, smappy.fourpi.simulate_rois, smappy.plugins.fourpi_z.FourPiZ, smappy.plugins.fourpi_z.slope_of, smappy.plugins.fourpi_z.envelope_of, smappy.plugins.fourpi_z.draw_fringes, smappy.plugins.fourpi_z.draw_cavity, smappy.plugins.fourpi_z.draw_risk, smappy.plugins.fourpi_z.draw_z_by_fringe, smappy.plugins.fourpi_z.draw_channel_shares, smappy.plugins.fourpi_z.shares_of, smappy.plugins.fourpi_z.model_for, smappy.fourpi.fringe_risk, smappy.fourpi.roi_photons, smappy.fourpi.model_channel_sums, smappy.fourpi.model_shares, smappy.fourpi.channel_shares]
 ---
 
 ## What it does
@@ -47,7 +47,8 @@ in z, which comes from the 4Pi model.
 ```figure-setup
 from smappy import fourpi
 from smappy.psf import Global4PiPSF
-from smappy.plugins.fourpi_z import draw_fringes, draw_cavity
+from smappy.plugins.fourpi_z import (draw_fringes, draw_cavity, draw_risk, draw_channel_shares,
+                                    draw_z_by_fringe)
 cal = fourpi.model_calibration()
 rng = np.random.default_rng(0)
 n, frames = 5000, 5000
@@ -63,6 +64,9 @@ cav = fourpi.cavity_phase(fit["phase_rad"], fit["phase_err_rad"], fit["z_env_nm"
                           fit["z_env_err_nm"], frame, k, window_frames=500)
 found = fourpi.unwrap(fit["phase_rad"], fit["phase_err_rad"], fit["z_env_nm"],
                       fit["z_env_err_nm"], cav.at, k)
+sums = fourpi.roi_photons(rois, [fit[f"background_ch{c}"] for c in range(4)])
+shares = fourpi.channel_shares(sums, fit["phase_rad"],
+                               model=fourpi.model_shares(cal, fit["z_env_nm"], fit["phase_rad"], 13))
 ```
 
 **1. The cavity's phase.**  A molecule at height z has the phase
@@ -83,7 +87,7 @@ phase allows a ladder of heights, one per fringe, a period apart.  The
 plugin takes the one nearest the envelope's z.  How near, compared with the
 envelope's error, says how probable that fringe is against its neighbours.
 
-```figure The phase with the cavity's phase taken off, against the envelope's z, for the same simulation.  The molecules lie on stripes: one turn of phase per fringe period, with the slope of the model (red).  The envelope's z decides which stripe a molecule is on.
+```figure The phase with the cavity's phase taken off, against the envelope's z, for the same simulation.  The molecules lie on stripes: one turn of phase per fringe period, with the slope of the model (red).  The envelope's z decides which stripe a molecule is on: the dashed lines, half a period from the stripes, are where the choice turns to the next fringe.  The few molecules on the faint stripes beside the main one are ghosts.
 fig.set_size_inches(6, 3.2)
 draw_fringes(fig.subplots(), fit["phase_rad"], fit["z_env_nm"], cav.at, k)
 ```
@@ -104,6 +108,45 @@ right.hist(d, bins, color="C0", label="phase")
 right.set_xlabel("z - true z (nm)")
 right.set_ylabel("localizations")
 right.legend(frameon=False, fontsize="small")
+```
+
+A wrong fringe puts a copy of a structure a whole period above or below it.
+In a histogram of z on a log scale, with each fringe's localizations in a
+colour of their own, such copies stand out: peaks one period from the
+structure, in the neighbouring fringes' colours.
+
+```figure The final z of a simulated layer 50 nm thick, from dim molecules (500 photons) whose envelope z is poor: the layer in the middle, its ghosts one period above and below, each fringe in its colour.  The grey is all of them.
+fig.set_size_inches(6, 3)
+layer, layer_truth = fourpi.simulate_rois(cal, 3000, photons=500, background=10,
+                                          z_nm=rng.uniform(-25, 25, 3000), phase0=1.0, seed=3)
+lf = model.unpack(model.fit(layer))
+lz = fourpi.unwrap(lf["phase_rad"], lf["phase_err_rad"], lf["z_env_nm"], lf["z_env_err_nm"],
+                   np.full(3000, 1.0), k)
+draw_z_by_fringe(fig.subplots(), lz.z_nm, lz.fringe)
+```
+
+**4. How sure, along z.**  The envelope's z is sharpest near the focus and
+blurs away from it.  So the chance of a wrong fringe is not the same at every
+height.  The plugin bins the localizations by their envelope z and draws, in
+each bin, the expected share of wrong fringes and the share of localizations
+below 90 % sure.
+
+```figure The risk of a wrong fringe along the envelope's z, on the same simulation: low near the focus, where the envelope's z is sharp, and rising away from it, where it blurs.  Filtering at 90 % sure costs the localizations of the orange line.
+fig.set_size_inches(6, 3)
+draw_risk(fig.subplots(), fit["z_env_nm"], found.probability)
+```
+
+**5. The channels' split.**  The phase is how a molecule's light is split
+between the four channels.  So the split, measured against the fitted phase,
+checks the model: each channel's share should follow a sinusoid, the four a
+quarter turn apart, and the model's curve should run through the data.  A
+channel's share is its fit box's photons less the fitted background, over
+the four boxes' sum.  This needs the 4Pi fit's `roi_photons_ch0` to
+`roi_photons_ch3`; a table without them gets no such figure.
+
+```figure Each channel's share of the photons against the fitted phase, on the same simulation: the median in bins of the phase (dots), the middle half of the localizations (band), and the share the model predicts for the same localizations (line).  Here the data were drawn with the model, so the lines run through the dots.
+fig.set_size_inches(6, 3.2)
+draw_channel_shares(fig.subplots(), shares)
 ```
 
 ## In detail
@@ -162,6 +205,29 @@ $|k| \delta_z < 1$ take part.  The answer is only as good as the envelope's
 z scale, since that is what the phases are compared with.  The z it gives is
 $\phi / k'$, so a z that is right needs a right envelope.
 
+**The risk along z.**  The envelope's z between its 1st and 99th
+percentile is cut into 30 bins.  In each, the expected share of wrong
+fringes is the mean of $1 - p$, with $p$ the fringe probability, and the
+other line the share with $p < 0.9$.  Bins with fewer than 20 localizations
+are left out.
+
+**The channels' split.**  The 4Pi fit shares one photon number between the
+channels: the split is what the phase says.  Fitting a photon number per
+channel would not measure it, because free photons absorb the interference
+and leave the phase undetermined.  So the split is measured from the data
+directly.  For each molecule and channel, the fit writes the sum of the fit
+box less the fitted background on each of its pixels, `roi_photons_ch<c>`.
+The model's split is summed over the same box: each channel's I, A and B,
+evaluated at the molecule's envelope z, centred in a box of the fit's size.
+A molecule at phase $\phi$ puts $I_c + A_c \cos\phi + B_c \sin\phi$ of its
+light into channel $c$.  The figure bins the phase into 24 bins and shows,
+per bin, the median and quartiles of the data's shares and the mean of the
+model's for the same localizations.  Because the model's split depends on z,
+a bin full of molecules at one height (a fiducial bead, a flat structure) can
+bend the model's line; the data should bend with it.  Fits at either end of
+the model's z grid are left out.  The model is the one named here, or the
+one the fit recorded with the table.
+
 **Which table.**  The localizations, whatever the layer shows.  The plugin
 reads `z_env_nm` and its error.  On a table that has not been through it, it
 reads `z_nm` and `z_err_nm`, which the 4Pi fit writes as the envelope's.
@@ -207,12 +273,41 @@ of the Ries-lab 4Pi need 1.
 - `z_env_nm`, `z_env_err_nm`: the envelope's z, as the fit gave it.
 - `cavity_phase_rad`: the cavity's phase in the localization's frame.
 
-The figure on the left is the stripes of the second figure above.  Clean,
-separate stripes mean a good result.  Stripes smeared sideways mean an
-envelope z too poor to choose between fringes.  Stripes that bend away from
-the red line mean a wrong period: try *refine period*.  On the right is the
-cavity's phase in each window.  It should be smooth.  A window that jumps
-away from its neighbours had too few localizations.
+The main figure has four panels.
+
+- **Top left: the stripes** of the second figure above, with the fringe
+  boundaries dashed.  Clean, separate stripes, well inside their dashed
+  lines, mean a good result.  Stripes smeared sideways, reaching the dashed
+  lines, mean an envelope z too poor to choose between fringes: the
+  localizations beyond a dashed line are put on the next fringe.  A faint
+  copy of a stripe beside it is ghosts.  Stripes that bend away from the
+  red line mean a wrong period: try *refine period*.  A dense spot is a
+  fiducial bead or another bright object that stays in place.
+- **Top right: the risk along z** (fourth figure above).  It should be low
+  over the z range of the sample.  Where it is high, filter on
+  `fringe_probability` or expect ghosts there.  A risk high everywhere means
+  an envelope z worse than the model promises; the result line's scatter
+  factor says by how much.
+- **Bottom left: the cavity's phase** in each window.  It should be smooth.
+  A window that jumps away from its neighbours had too few localizations.
+- **Bottom right: z by fringe**, on a log scale (the figure after step 3).
+  For a structure thinner than a period, such as a layer of filaments or
+  a cell's base, the ghosts are copies of its peak one period away, in the
+  neighbouring fringes' colours; their height against the main peak is the
+  share of wrong fringes.  Where the sample fills z continuously, as a
+  whole nucleus does, the fringes are only bands side by side and the
+  ghosts hide in them: read the risk panel instead.  The fringes are
+  counted from the one through z = 0, and their edges move with the
+  cavity's phase, so one structure can be split between two colours: a
+  colour is a fringe, not a structure.
+
+The second figure, *channels*, is the channels' split against the phase
+(fifth figure above).  Good: four sinusoids, the model's lines through the
+dots.  A channel whose dots are shifted along the phase from its line has
+a phase offset the model does not; dots that swing more or less than the
+line are a modulation the model has wrong; a channel above or below its
+line all along gets a share of the light the model does not give it.  Any
+of these biases the phase, and with it z.
 
 The result line gives the expected fraction of wrong fringes, the mean of
 1 - `fringe_probability`.  It also gives how much more the envelope's z

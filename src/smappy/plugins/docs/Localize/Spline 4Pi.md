@@ -1,6 +1,6 @@
 ---
 version: "5"
-covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.channels.detection_lookup, smappy.channels.onto_reference, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.multichannel.cached_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.plugins.fit_4pi.model_geometry, smappy.microscope_db.Microscope.channel_layout, smappy.io.dcimg.DcimgSource.watch, smappy.plugins.fit_4pi.FourPiFit.watch_blocks]
+covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.channels.detection_lookup, smappy.channels.onto_reference, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.multichannel.cached_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.plugins.fit_4pi.model_geometry, smappy.microscope_db.Microscope.channel_layout, smappy.io.dcimg.DcimgSource.watch, smappy.plugins.fit_4pi.FourPiFit.watch_blocks, smappy.plugins.fit_4pi.brightest_molecule, smappy.plugins.fit_4pi.draw_molecule, smappy.fourpi.molecule_model, smappy.fourpi.roi_photons]
 ---
 
 ## What it does
@@ -68,7 +68,7 @@ frames = fourpi.render_frames(cal, layout, frame, x, y, z, 3000, phase0=0.7,
                               n_frames=n_frames, background=10)
 camera = CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=0.1)
 engine = MultiChannelEngine(camera, DetectionSettings().finder(), Global4PiPSF(cal),
-                            layout, FitSettings(roisize=13))
+                            layout, FitSettings(roisize=13), keep_rois=True)
 engine.push(layout.cut(frames), 0)
 locs = engine.flush()
 lx, ly = np.asarray(locs["x_nm"]) / 100, np.asarray(locs["y_nm"]) / 100
@@ -356,10 +356,31 @@ attributes:
 - `z_env_nm`, `z_env_err_nm`: the envelope's z, kept.
 - `phase_rad`, `phase_err_rad`: the interference phase, between -pi and pi.
 - `background_ch0` to `background_ch3`: each channel's background.
+- `roi_photons_ch0` to `roi_photons_ch3`: each channel's photons as its fit
+  box holds them, the box's sum less the fitted background.  The fit itself
+  shares one photon number between the channels; these say how the light
+  was split, which [4Pi z](plugin:Analysis/After fit/4Pi z) draws against
+  the phase to check the model.
 
 The table's metadata keeps the phase's slope in z and the channel layout.
 A good fit has a phase error of a few hundredths of a radian for a bright
 molecule.  The envelope's z then spreads about as far as its error says.
+
+The Preview draws the frame's channels with the molecules found and fitted,
+and, as a second figure, *molecule*: the brightest molecule of the frame
+fitted again on its own, its data, the model the fit found and the
+residual in every channel.  The residual is in units of the noise,
+(data - model) / sqrt(model), from -4 to 4.  A good fit leaves noise.  A ring
+or lobes that repeat from molecule to molecule are a model whose shape is
+not the data's; a channel whose residual has the shape of the spot, all red
+or all blue, has a share of the light or a phase offset the model does not.
+The title gives the fit's photons, z and phase.
+
+```figure The Preview's *molecule* figure on the simulation: the data of one molecule in the four channels (top), the model the fit found (middle) and the residual (bottom).  The data were drawn with the model, so the residual is noise.
+from smappy.plugins.fit_4pi import brightest_molecule, draw_molecule
+fig.set_size_inches(8, 6)
+draw_molecule(fig, *brightest_molecule(Global4PiPSF(cal), engine.rois, camera))
+```
 
 ## Differences from SMAP
 

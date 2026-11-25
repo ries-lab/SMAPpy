@@ -367,6 +367,9 @@ class MultiChannelEngine:
     #: `flush` then handing back the block before -- for a whole file driven by `pipeline.drive`,
     #: which takes the last one from `end`; a live fit or a preview wants each block's at once
     overlap: bool = False
+    #: keep the last block's ROIs and link in `rois` (a preview draws a molecule's data and model)
+    keep_rois: bool = False
+    rois: Optional[PairedROIs] = field(default=None, init=False)
 
     _pairs: List[PairedROIs] = field(default_factory=list, init=False)
     _buffered: int = field(default=0, init=False)
@@ -464,6 +467,8 @@ class MultiChannelEngine:
             return self.end() if self.overlap else None
         pairs = _concat_pairs(self._pairs)
         self._pairs, self._buffered = [], 0
+        if self.keep_rois:
+            self.rois = pairs
         if not self.overlap:
             return self._fitted(pairs)
         # Detection runs in this thread, single-threaded, and the C++ fit on every core with the
@@ -518,6 +523,16 @@ class MultiChannelEngine:
         self.stats["pairs"] += len(pairs)
 
         locs = paired_to_localizations(result, pairs, self.model, self.camera)
+        cal = getattr(self.model, "calibration", None)
+        if hasattr(cal, "phase_per_nm"):
+            # each channel's photons as the ROI holds them, less the fitted background: the
+            # shared photon number hides how the light splits, and the split against the phase
+            # is the check of the model's channel phases and modulation (`fourpi.channel_shares`)
+            from .fourpi import roi_photons
+            sums = roi_photons(pairs.images, [np.asarray(locs[f"background_ch{c}"]) / self.camera.excess_noise
+                                              for c in range(self.model.n_channels)])
+            for c in range(self.model.n_channels):
+                locs.columns[f"roi_photons_ch{c}"] = (sums[:, c] * self.camera.excess_noise).astype(np.float32)
         # On the camera chip, as every fitter reports positions (docs/microscope-database.md,
         # "the coordinates"): the main channel's own pixels put back where they lie on the frame,
         # its flip undone, and the camera ROI's corner added -- so a two-channel fit and a
@@ -540,12 +555,13 @@ class MultiChannelEngine:
         self.stats["duplicates"] += int((~once).sum())
         locs = locs[once]
         self.stats["localizations"] += len(locs)
-        cal = getattr(self.model, "calibration", None)
         if hasattr(cal, "phase_per_nm"):
-            # what 4Pi z needs to turn the phase into z (`plugins/fourpi_z.py`)
+            # what 4Pi z needs to turn the phase into z (`plugins/fourpi_z.py`), and the ROI the
+            # channels' photons were summed over, to draw the model's split on the same pixels
             locs.metadata["fourpi"] = {"phase_per_nm": float(cal.phase_per_nm),
                                        "period_nm": float(cal.period_nm),
-                                       "calibration": str(cal.source)}
+                                       "calibration": str(cal.source),
+                                       "roisize": int(pairs.roisize)}
         locs.metadata["channel_layout"] = self.layout.to_dict()
         if self.drift is not None:
             locs.metadata["channel_drift"] = self.drift.to_dict()
