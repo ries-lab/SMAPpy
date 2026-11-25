@@ -1,4 +1,4 @@
-"""A two-channel model in the DECODE fitter (*aligned channels*; docs/decode/gui-plan.md, step 3).
+"""A two-channel model in the DECODE fitter (*transformed channels*; docs/decode/gui-plan.md, step 3).
 
 The fitter cuts the camera's frames into the network's two channels by the registration -- moved by
 how far the splitter moved since the beads, typed or measured -- and puts the localizations back on

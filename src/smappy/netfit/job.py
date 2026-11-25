@@ -70,20 +70,24 @@ def two_channel_settings(two, *, main="auto", dyes="independent", typed=(), spre
 
 
 def settings_from_estimates(est, camera_section: dict, density, calibration: str = "calibration.h5",
-                            window: int = 3, seed: int = 0, channels=None, fuse: str = "early",
-                            uneven: bool = True) -> TrainingSettings:
+                            window: int | None = None, seed: int = 0, channels=None, fuse: str = "early",
+                            uneven: bool = True, lifetime: tuple | None = None,
+                            max_samples: float | None = None) -> TrainingSettings:
     """A training's settings from the prefit's estimates (`decode_smlm.prefit.Estimates`) and the
     movie's camera (`decode_smlm.prefit.camera`'s section); everything else netfit's defaults.  With
     ``channels`` (`two_channel_settings`) a two-channel training: the calibration a two-channel one, the
-    channels read together from the first layer (``fuse`` "early", *aligned channels*) or apart and
+    channels read together from the first layer (``fuse`` "early", *transformed channels*) or apart and
     joined later ("late", *DECODE-Plex-like*).  ``uneven``: `UNEVEN_SHARE` of the movies with an uneven
-    background (*uneven backgrounds*), else all flat."""
+    background (*uneven backgrounds*), else all flat.  ``window``: the frames the network reads (None:
+    `GMN7C_WINDOW` for one channel, 3 for two, the studies'); ``lifetime``: the (shortest, longest) mean
+    on-time each sample is drawn with (None: one channel 1 -- 3, two channels 1); ``max_samples``: the
+    samples it trains on at most (None: netfit's 6 M)."""
     from decode_smlm.prefit import density_per_frame
     per_40px = density_per_frame(density)          # a name (LD, HD, UHD) or emitters in 40 x 40 typed
     s = TrainingSettings()
     mean, sd = (float(v) for v in est.intensity_mu_sig)
     py, px = camera_section["px_size"]                  # DECODE's order: rows, then columns
-    s.simulation = SimulationSettings(**{**s.simulation.__dict__, "window": int(window), "photons_mean": mean,
+    s.simulation = SimulationSettings(**{**s.simulation.__dict__, "window": int(window or 3), "photons_mean": mean,
                                          "photons_sd": sd, "background": tuple(float(v) for v in est.background),
                                          "z_nm": tuple(float(v) for v in est.z_nm),
                                          "lifetime_frames": float(est.lifetime_frames),
@@ -114,8 +118,9 @@ def settings_from_estimates(est, camera_section: dict, density, calibration: str
         # frames (one network for brief and long blinks, within 2 % of either specialist), streamed.
         # `settings.Parts` keeps version 1's frame stack, so a model saved before is built as it was.
         # Not yet here: its fine-tune to the on-time the prefit measured (1 -- 2 M samples at lr 1e-4)
-        s.parts.time_model = Part("convgru", {"frames": GMN7C_WINDOW, "norm": True})
-        s.simulation = SimulationSettings(**{**s.simulation.__dict__, "window": GMN7C_WINDOW,
+        frames = int(window or GMN7C_WINDOW)
+        s.parts.time_model = Part("convgru", {"frames": frames, "norm": True})
+        s.simulation = SimulationSettings(**{**s.simulation.__dict__, "window": frames,
                                              "lifetime_frames": 1.0, "lifetime_max_frames": 3.0,
                                              "movie_windows": 8})
     if channels is not None:
@@ -126,11 +131,18 @@ def settings_from_estimates(est, camera_section: dict, density, calibration: str
         # unstreamed (plex-plan §16, "The C runs so far"), being tested with more seeds before deciding
         s.channels = channels
         s.parts.backbone.settings.update(two_fuse=fuse, features=64)
-        s.parts.time_model = Part("convgru", {"frames": int(window), "norm": True})
+        s.parts.time_model = Part("convgru", {"frames": int(window or 3), "norm": True})
         # on-time 1: at C = 2 it tied mixed on-times 1 -- 3 on molecules on for 3 frames and beat them on
         # the brief dim ones (plex-plan §16, "The time model"); the prefit's on-time is not used
         s.simulation = SimulationSettings(**{**s.simulation.__dict__, "movie_windows": 8, "spots": "whole",
                                              "lifetime_frames": 1.0, "lifetime_max_frames": 0.0})
+    if lifetime is not None:
+        # the window's *on-time* range: one on-time where both ends are the same
+        lo, hi = sorted(float(v) for v in lifetime)
+        s.simulation = SimulationSettings(**{**s.simulation.__dict__, "lifetime_frames": lo,
+                                             "lifetime_max_frames": hi if hi > lo else 0.0})
+    if max_samples:
+        s.parts.schedule.settings["max_samples"] = float(max_samples)
     return s
 
 

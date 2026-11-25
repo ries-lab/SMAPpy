@@ -75,7 +75,7 @@ channels as one molecule: two colours, or two focal planes (biplane).  It
 is trained on a two-channel calibration, and its *two channels* part
 appears in the form.  The fitter cuts each frame into the two channels
 through the calibration's registration, the second channel resampled onto
-the first's pixels (*aligned channels*).  It reports positions on the
+the first's pixels (*transformed channels*).  It reports positions on the
 calibration's main half, as [Spline 3D 2C](plugin:Localize/Spline 3D 2C)
 does, with each channel's photons and background.  For two colours,
 [Assign colours](plugin:Analysis/After fit/Assign colours) then tells the

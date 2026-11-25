@@ -116,3 +116,24 @@ def test_the_report_counts_outliers_beyond_five_bounds_and_the_rest_s_rmse_over_
     assert r["outliers"] == pytest.approx(0.05, abs=0.002)
     assert r["inlier_rmse_crlb_lat"] == pytest.approx(1.2, abs=0.03)
     assert r["inlier_rmse_crlb_ax"] == pytest.approx(1.2, abs=0.03)
+
+
+def test_the_on_time_range_is_one_to_three_frames_widened_to_take_in_the_prefits():
+    from types import SimpleNamespace
+
+    from smappy.gui.train_window import on_time_range
+    # the prefit's on-time is frames seen; the range DECODE's lifetime, a frame less
+    assert on_time_range(SimpleNamespace(on_time_frames=2.5)) == (1.0, 3.0)
+    assert on_time_range(SimpleNamespace(on_time_frames=6.0)) == (1.0, 5.0)
+    assert on_time_range(SimpleNamespace(on_time_frames=6.0), channels=2) == (1.0, 5.0)
+    assert on_time_range(SimpleNamespace(on_time_frames=1.5), channels=2) == (1.0, 1.0)
+
+
+def test_a_two_channel_model_is_named_by_how_it_joins_its_channels():
+    from smappy.training.predictors import describe
+    meta = {"method": "netfit-v1", "channels": {"kind": "colour"}, "settings": {"parts": {"backbone": {
+        "settings": {"two_fuse": "late"}}}}}
+    assert describe(meta) == "DECODE-Plex-like"
+    meta["settings"]["parts"]["backbone"]["settings"]["two_fuse"] = "early"
+    assert describe(meta) == "DECODE, transformed channels"
+    assert describe({"method": "netfit-v1"}) == "DECODE, optimised"

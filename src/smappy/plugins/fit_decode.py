@@ -87,7 +87,7 @@ DUAL_FILTER = "Two-channel calibrations (*_2ct.h5 *.h5);;All files (*)"
 
 @dataclass
 class DecodeChannelSettings:
-    """A model that reads a split camera's two channels (*aligned channels*): where they are, and
+    """A model that reads a split camera's two channels (*transformed channels*): where they are, and
     the checks (docs/decode/gui-plan.md, step 3).  Shown for such a model only."""
     calibration: str = param("", label="calibration", kind="open_file", file_filter=DUAL_FILTER,
                              help="the two-channel calibration the model was trained on, for its registration; "

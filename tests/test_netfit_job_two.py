@@ -58,7 +58,7 @@ def movie(tmp_path):
 def _settings(movie, cal, **two):
     from smappy.gui.train_window import PrepareSettings, TwoChannelPrepare
     from smappy.plugins.fit import CameraSettings
-    return PrepareSettings(movie=str(movie), calibration=str(cal), density="HD", blocks=1, block_frames=20,
+    return PrepareSettings(movie=str(movie), calibration=str(cal), density="HD", prefit_frames=20,
                            model=two.pop("model", "optimised"), two_channels=TwoChannelPrepare(**two),
                            camera=CameraSettings(conversion=1.0, offset=0.0, pixelsize_um=0.1, em_on=False))
 
@@ -105,7 +105,11 @@ def test_a_two_channel_job_without_a_prefit_trains_through_the_decode_command(mo
     meta = model_file.read_metadata(folder / "model.safetensors")
     assert meta["channels"]["main"] == 1 and meta["calibration_sha256"] == jobfile.file_sha256(cal)
     # *Try*: the model on the movie's first frames, cut into its channels as the fitter cuts them
-    from smappy.gui.train_window import channels_side_by_side, simulated_frames_two, try_on_data
+    from smappy.gui.train_window import (
+        channels_side_by_side,
+        simulated_frames_two,
+        try_on_data,
+    )
     frame, locs, found, trained = try_on_data(folder, frames=6)
     assert found >= 0 and trained > 0
     assert frame.shape == SHAPE and locs.ndim == 2 and locs.shape[1] == 2
@@ -155,3 +159,53 @@ def test_a_biplane_training_s_photon_total_needs_no_compiled_fitter(tmp_path):
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, check=False)
     assert out.returncode == 0, out.stderr
     assert float(out.stdout) > 0
+
+
+def test_the_window_names_the_psf_and_offers_the_two_channel_models_for_a_dual_calibration(movie, tmp_path):
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from test_train_window import _calibration
+
+    from smappy.gui import train_window
+    _, cal = movie
+    one = _calibration(tmp_path / "one.h5")
+    assert train_window.psf_kind(cal) == (2, "two channels, two colours: the two-channel models")
+    assert train_window.psf_kind(one)[0] == 1 and train_window.psf_kind(one)[1].startswith("one channel, a bead")
+    assert train_window.psf_kind("") == (None, "")
+    w = train_window.TrainWindow()
+    try:
+        w.prepare_form.set_values({"calibration": str(one), "model": "decode"})
+        w._prepare_changed()
+        assert w.psf_note.text().startswith("one channel")
+        # a dual calibration: its models only, the choice moved to its default
+        w.prepare_form.set_values({"calibration": str(cal)})
+        w._prepare_changed()
+        combo = w.prepare_form.fields["model"].widget
+        assert [combo.itemText(i) for i in range(combo.count())] == ["DECODE, transformed channels",
+                                                                     "DECODE-Plex-like"]
+        assert w.prepare_form.value().model == "optimised" and w.psf_note.text().startswith("two channels")
+    finally:
+        w.close()
+        w.timer.stop()
+
+
+def test_a_two_channel_job_trains_at_on_time_1_over_3_frames_unless_told_otherwise(movie):
+    from dataclasses import replace
+
+    from smappy.gui.train_window import (
+        EstimateSettings,
+        estimate_settings,
+        netfit_params,
+        prepared_by_hand,
+    )
+    path, cal = movie
+    prepared = prepared_by_hand(_settings(path, cal), EstimateSettings(on_time_frames=2.0))
+    sim = netfit_params(prepared, prepared.estimates)["simulation"]
+    assert (sim["window"], sim["lifetime_frames"], sim["lifetime_max_frames"]) == (3, 1.0, 0.0)
+    assert estimate_settings(prepared.estimates, 2).on_time_max == 1.0
+    # the form's range and frames read go into the job
+    wide = replace(prepared, settings=replace(prepared.settings, frames_read="5", samples_m=2.0))
+    params = netfit_params(wide, prepared.estimates, on_time=(1.0, 3.0))
+    assert (params["simulation"]["lifetime_frames"], params["simulation"]["lifetime_max_frames"]) == (1.0, 3.0)
+    assert params["parts"]["time_model"]["settings"]["frames"] == params["simulation"]["window"] == 5
+    assert params["parts"]["schedule"]["settings"]["max_samples"] == 2e6

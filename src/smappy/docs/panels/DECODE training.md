@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.run_prefit_two, smappy.netfit.prefit_two.prefit_two, smappy.netfit.prefit_two.dye_shares, smappy.netfit.prefit_two.kind_of, smappy.netfit.job.two_channel_settings, smappy.gui.train_window.two_channel_problem, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.gui.train_window.simulated_frames_two, smappy.gui.train_window.channels_side_by_side, smappy.netfit.bounds.drawn_crlb, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.run_prefit_two, smappy.netfit.prefit_two.prefit_two, smappy.netfit.prefit_two.dye_shares, smappy.netfit.prefit_two.kind_of, smappy.netfit.job.two_channel_settings, smappy.gui.train_window.two_channel_problem, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.gui.train_window.simulated_frames_two, smappy.gui.train_window.channels_side_by_side, smappy.netfit.bounds.drawn_crlb, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample, smappy.gui.train_window.psf_kind, smappy.gui.train_window.model_choices, smappy.gui.train_window.on_time_range, smappy.gui.train_window.prefit_blocks, smappy.gui.train_window.frames_read]
 ---
 
 ## What it does
@@ -14,9 +14,13 @@ calibration's [PSF](plugin:Panels/Glossary), as bright, as dense and over the
 same background and z range as in the data, with the camera's noise.  This
 window sets that up from a movie, trains it, and lets you watch it learn.
 
-Two networks can be trained, chosen as *model* under the form's *more*:
-*DECODE, optimised*, SMAPpy's own, by default, and *DECODE*, the
-original's.  Both are trained from the same estimates, in the same job
+The calibration decides which networks can be trained, chosen as *model*
+under the form's *more*; a line under *PSF calibration* says what kind it
+is.  For one channel: *DECODE, optimised*, SMAPpy's own, by default, and
+*DECODE*, the original's.  For two channels (a split camera, biplane or two
+colours): *DECODE, transformed channels* by default, and
+*DECODE-Plex-like*.  A 4Pi calibration is recognised, but no network trains
+on it yet.  All are trained from the same estimates, in the same kind of job
 folder, and fitted by the same [DECODE](plugin:Localize/DECODE) fitter; what
 differs is the network and how it learns (the fitter's page compares them).
 
@@ -27,7 +31,8 @@ the training draws its own frames, so the movie stays here.
 ## How it works
 
 **Prepare.**  Choose the movie the model is for and its *PSF calibration* (from beads).
-*Prefit* fits a few blocks spread over the movie with
+*Prefit* fits blocks of 50 frames spread over the movie (*prefit frames*,
+500 in all) with
 [Spline 3D](plugin:Localize/Spline 3D) and links the localizations into
 blinks.  From them come the training's ranges: the photons of a molecule in
 a frame it is fully on in, the background, the z range and how many frames a
@@ -49,7 +54,10 @@ SMAPpy is closed, and is listed again when it opens.  *Stop* stops it after
 the epoch it is in, with its checkpoint written; *Start* again goes on from
 there.
 
-**It stops when it no longer improves.**  *epochs* is the most it trains.
+**It stops when it no longer improves.**  An optimised model trains on at
+most *samples* simulated samples (6 million: about 180 epochs of 32,768),
+set when its job is prepared; *DECODE*'s most is *epochs*, which the Train
+tab shows for a DECODE job only.
 With *stop when it no longer improves* on, it finishes earlier once nothing
 the test set measures has improved over the last 100 epochs, and never
 before epoch 150:
@@ -222,15 +230,27 @@ running goes on.
 The movie, its PSF calibration, the density to train at, the *model* to train
 and a model to *start from*.
 
-*model* (under *more*): *DECODE, optimised* trains SMAPpy's own network,
-*DECODE* the original's.  For one channel the optimised network reads 7
-frames through a ConvGRU and is trained on blinks lasting 1 to 3 frames on
-average.  That one network served brief and long blinks within 2 % of a
-network trained for either.  The prefit's *on-time* is therefore not used
-for it yet; a short fine-tune to the measured on-time is to come.  For two
-channels it reads 3 frames, and is trained on blinks of 1 frame on average,
-which on simulated data did as well as mixed on-times on molecules on for 3
-frames and better on brief dim ones.  The optimised one's job holds `settings.json` in
+The line under *PSF calibration* says what the file is: one channel (a
+bead average, or a pupil model drawn at the focus in the sample, and whether
+it varies over the chip), two channels (two focal planes or two colours,
+told by whether the two PSFs come into focus 200 nm or more apart), or 4Pi.
+
+*model* (under *more*) offers what the calibration trains.  One channel:
+*DECODE, optimised* trains SMAPpy's own network, *DECODE* the original's.
+Two channels: *DECODE, transformed channels* (the second channel resampled
+onto the first's pixels through the calibration's registration, both read
+together from the network's first layer) or *DECODE-Plex-like* (each
+channel read apart and joined later).  A choice the new calibration does
+not offer moves to its default.
+
+*frames read* (under *more*, the optimised models only) is how many frames
+the network reads around the one it fits, through a ConvGRU.  On *auto* it
+is 7 for one channel and 3 for two.  For one channel 7 frames were 1.6 nm
+better than 5 on blinks lasting 3 frames, and 3 frames lost 1.3 nm on blinks
+of 1; a shorter window trains and fits faster.  *samples* is how many
+simulated samples it trains on at most: 6 million, past which the studies
+saw the Jaccard no longer change and the error over CRLB fall by under 2 %.
+The optimised one's job holds `settings.json` in
 place of DECODE's `method.yaml`: the same photons, background, z range,
 on-time, density and camera, SMAPpy's settings for the rest.  Its *Follow*
 draws two more curves: the share of the test set's molecules more than 5
@@ -306,10 +326,8 @@ at another depth want a network of their own.  The DECODE fitter's
 A two-channel calibration (a `_2ct.h5`, from the PSF calibration window's
 dual mode or converted from SMAP's) trains a network that reads a split
 camera's two halves as one molecule.  This part appears for such a
-calibration only.  *model* is then *DECODE, optimised* (its *aligned
-channels*: the second channel resampled onto the first's pixels and read
-together from the network's first layer) or *DECODE-Plex-like* (each
-channel read apart and joined later); DECODE's original reads one channel.
+calibration only.  *model* is then *DECODE, transformed channels* or
+*DECODE-Plex-like* (above); DECODE's original reads one channel.
 
 *Prefit* fits the blocks with [Spline 3D 2C](plugin:Localize/Spline 3D 2C)
 instead.  The estimates are of each molecule's total photons, as one
@@ -349,7 +367,9 @@ the network reads them (the main half on the left), beside the same two as
 the training draws them.
 
 ### Prefit
-Fits the blocks and fills *Estimates*, with the calibration drawn in the
+Fits *prefit frames* of the movie (under the form's *more*: 500 by default,
+in blocks of 50 consecutive frames spread from its start to its end) and
+fills *Estimates*, with the calibration drawn in the
 sample where *in the sample* says so; the status line then names the focus.  It takes as long as Spline 3D takes
 on those frames, seconds to a minute.  A sparse movie, where too few molecules were
 seen fully on in a frame (fewer than 200 such frames), is fitted further,
@@ -374,6 +394,18 @@ fits them worse; on a live cell, a network trained over the range was as
 precise as DECODE-Plex's, one trained from the mean and spread half as
 precise again.
 
+*DECODE* trains at one *on-time*: the frames a blink is seen in, on
+average, as the prefit measured it.  SMAPpy's networks draw each training
+sample's mean on-time over a range instead, *on-time* ... *to*: one network
+for every dye whose mean lies in it.  This on-time is an exponential's mean,
+so a blink is seen in about one frame more.  For one channel the range starts
+at 1 to 3 frames: one network trained over it served brief and long blinks
+within 2 % of a network trained for either.  For two channels it starts at 1,
+which on simulated data did as well as 1 to 3 on molecules on for 3 frames
+and better on brief dim ones.  Either is widened to take in the prefit's
+on-time where it lies outside.  The same number at both ends trains one
+on-time.
+
 The z range is the 2nd to 98th percentile of the localizations' z, of the
 fits that pass the same likelihood cut as the fully-on frames, widened by
 15 % of that range on either side, never narrower than -500 to 500 nm --
@@ -395,7 +427,8 @@ or, with no prefit, from those typed in, the camera read from the movie and
 
 ### Train
 Where it trains (*run on*: this computer, or a training host), the most
-epochs, and whether it may stop before them.
+epochs (for a *DECODE* job; an optimised one trains to its *samples*), and
+whether it may stop before them.
 
 ### Start
 Starts the chosen job where *run on* says, or goes on with it from its last

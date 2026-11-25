@@ -50,7 +50,7 @@ def _prepare_settings(movie, cal_path, model="decode"):
     tests/test_netfit_job.py."""
     from smappy.gui.train_window import PrepareSettings
     from smappy.plugins.fit import CameraSettings
-    return PrepareSettings(movie=str(movie), calibration=str(cal_path), density="HD", blocks=3, block_frames=50,
+    return PrepareSettings(movie=str(movie), calibration=str(cal_path), density="HD", prefit_frames=150,
                            model=model,
                            camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1, em_on=False))
 
@@ -152,7 +152,7 @@ def test_a_sparse_movie_is_prefitted_further_until_molecules_were_fully_on_often
     from smappy.gui.train_window import run_prefit
     path, cal_path = movie
     settings = _prepare_settings(path, cal_path)
-    settings.blocks, settings.block_frames = 1, 10
+    settings.prefit_frames = 10
     messages = []
     prepared = run_prefit(settings, report=messages.append)
     assert any("too few" in m["message"] for m in messages)

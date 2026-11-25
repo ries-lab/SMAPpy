@@ -26,7 +26,12 @@ def describe(meta: dict) -> str:
     """What a model is, in the GUI's words: DECODE, whatever trained it (docs/decode/gui-plan.md §1)."""
     method = meta.get("method")
     if method == NETFIT:
-        return "DECODE, aligned channels" if (meta.get("channels") or {}) else "DECODE, optimised"
+        if not (meta.get("channels") or {}):
+            return "DECODE, optimised"
+        # two channels: read together from the first layer (early fusion) or apart, joined later
+        backbone = ((meta.get("settings") or {}).get("parts") or {}).get("backbone") or {}
+        late = (backbone.get("settings") or {}).get("two_fuse") == "late"
+        return "DECODE-Plex-like" if late else "DECODE, transformed channels"
     if method == PLEX:
         return "DECODE-Plex"
     return "DECODE"

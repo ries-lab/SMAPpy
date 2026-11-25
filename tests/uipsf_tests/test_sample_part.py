@@ -171,7 +171,7 @@ def test_a_decode_job_learns_the_psf_drawn_in_the_sample_and_records_where(files
         frames[f, y - half:y + half + 1, x - half:x + half + 1] += spot
     movie = tmp_path / "cells.tif"
     tifffile.imwrite(movie, (frames + 100).astype(np.uint16))
-    settings = PrepareSettings(movie=str(movie), calibration=str(pupil.source), blocks=2, block_frames=30,
+    settings = PrepareSettings(movie=str(movie), calibration=str(pupil.source), prefit_frames=60,
                                camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.11, em_on=False),
                                sample=SampleSettings(focus="typed", focus_nm=600.0))
     prepared = run_prefit(settings)

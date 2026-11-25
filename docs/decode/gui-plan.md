@@ -17,7 +17,7 @@ calibration (one channel or a dual one):
 | 1 | *DECODE, optimised* | ``netfit-v1``, `settings.Parts`' defaults (poc-plan, "netfit's settings decided") | yes (`smappy.netfit.train`) | ✓ |
 | 2 | *DECODE-Plex* | the published models, inference only | no: an exported model is fitted, not trained | |
 | 2 | *DECODE-Plex-like* | ``netfit-v1``, two channels, late fusion (``two_fuse`` "late", offset maps) | yes | |
-| 2 | *aligned channels* | ``netfit-v1``, two channels, early fusion, the bright channel main | yes | ✓ |
+| 2 | *transformed channels* | ``netfit-v1``, two channels, early fusion, the bright channel main | yes | ✓ |
 
 The fitter has no model choice: it reads the method and the channels from the model file's header
 (`model_file.read_metadata`, numpy alone) and shows what that model needs.  *DECODE-Plex* is not a
@@ -219,7 +219,8 @@ typed move or none, and after a move pair nothing.
 
 - **One channel's default is netfit** (*DECODE, optimised*); *DECODE* under *more*.
 - **No "netfit" in the GUI's names**: the method's name is in *Model info...* and the file only.
-- **Early fusion's label is *aligned channels*.**  What it is: channel 1 resampled onto channel 0's
+- **Early fusion's label is *transformed channels*** (*aligned channels* until 2026-11-25, renamed with
+  the models offered by the calibration's channels and the on-time as a range; Jonas).  What it is: channel 1 resampled onto channel 0's
   pixels through the registration, both read as one two-colour image from the first layer; late
   fusion gives each channel its own first layers and joins them later, *DECODE-Plex-like*.
 - **The channels' move since the beads: measured by the goodness, reported as a move.**  A scan over
