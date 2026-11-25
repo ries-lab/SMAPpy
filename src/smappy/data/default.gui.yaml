@@ -28,6 +28,7 @@ tabs:
 - name: Render
   kind: render
 - name: Analysis
+  header: analysis
   instances:
   - plugin: Analysis/Measure/Line Profile
   - plugin: Analysis/Measure/Localization Statistics

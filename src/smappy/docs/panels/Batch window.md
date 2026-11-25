@@ -36,7 +36,7 @@ page in the output folder shows every file with its figures and numbers, and
 plots chosen numbers across the files in the order they were taken, so a
 change in the instrument shows as a trend.
 
-It opens from **Plugins > Batch...**, or on its own as `smappy-batch-gui`.  It
+It opens from *Batch processing...* at the top of the Analysis tab, from **Plugins > Batch...**, or on its own as `smappy-batch-gui`.  It
 is a front end to the job file and the command `smappy-batch`: everything it
 does can be repeated from a terminal with the file it writes.  The **?** at
 its top right (or F1) opens this page.

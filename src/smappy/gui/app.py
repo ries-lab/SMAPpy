@@ -721,6 +721,14 @@ class ControlWindow(QMainWindow):
         if name == "roi":
             self.roi_tab = ROIHeader(self.session, self.render_window.view)
             return self.roi_tab
+        if name == "analysis":
+            # the batch window, where an analysis is looked for: under Plugins
+            # alone it was hard to find
+            button = QPushButton("Batch processing...")
+            button.setToolTip("run a chain of plugins over many files, headless, "
+                              "from a window of its own (also Plugins > Batch...)")
+            button.clicked.connect(self.open_batch)
+            return button
         # the Localize tab has no header: the camera is part of each fitter's microscope
         # control (`gui.microscope_form`), the camera editor a button of the microscope manager
         return None
@@ -826,7 +834,9 @@ class ControlWindow(QMainWindow):
             if tab.kind == "render":
                 widget = RenderTab(self.session, self.render_window.view)
             else:
-                widget = PluginTab(tab, self.session, header=self.header_for(tab.header))
+                # a GUI saved before the Analysis tab had its header gets it too
+                header = tab.header or ("analysis" if tab.name == "Analysis" else "")
+                widget = PluginTab(tab, self.session, header=self.header_for(header))
                 self.plugin_tabs.append(widget)
             self.tabs.addTab(widget, tab.name)
         # a rebuild keeps the tab one is on; a start is on File, whatever
