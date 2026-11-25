@@ -2824,7 +2824,7 @@ SMAPpy's fits every one of the ROIs better, and only it gives back the steps and
 channels' offsets twice (`docs/decode.md` §2, "4Pi", item 2).  The renderer, the fitter and the training share
 SMAPpy's.
 
-### Stage 2: the network (proposed)
+### Stage 2: the network (built 2026-11-25)
 
 **How Hao's network outputs the phase, and why ours differs.**  The branch's `loss.py` (`_vmmm_core_loss`) has a
 phase head with ``tanh``, read as ``phase = (pi t + pi) mod 2 pi``, and a sigma head read as the concentration
@@ -2869,9 +2869,80 @@ model of the Ries-lab Nup96 (`~/.cache/uipsf/p2/bead_v2_4pi.h5`, with its maps) 
 microscope (`smappy_p1/pupil_680_100_held_4pi.h5`).  The prefit -- backgrounds, photons, the phase's drift rate --
 by Spline 4Pi on the movie, as the two-channel job is prefitted by Spline 3D 2C (`netfit/prefit_two.py`).
 
-**Where.**  `netfit/channels.py` (C channels), `netfit/simulate.py` (a 4Pi batch), `netfit/network.py`'s `Layout`
-(a phase head), `netfit/loss.py` (the von Mises factor), `netfit/extract.py` (the phase and its error), the job's
-prefit and `fit_decode.py` reading a 4Pi model; trainings on gpuvm or decodebox.
+**Where, as built.**  `netfit/fourpi.py`: `FourChannels` (the C-channel grid, `TwoChannels`' generalisation, its
+offsets read by `channels.Grid` unchanged), `draw_batch` (frames (b, C, window, s, s), the targets' wrapped phase in
+`Batch.phase`, each target's remainders in `Batch.shift`), `cavity`, `crlb` (the IAB bound, x, y, N, z and the
+phase shared and a background per channel free, by central differences in float64 -- equal to the C++ fitter's
+CRLB to 0.15 %), `unwrap_known` and `phase_scores`.  `settings.ChannelSettings` kind "4pi" (``count``, the cavity's
+``cavity_rate_rad`` and ``cavity_walk_rad``); `network.TwoStageUNet`'s ``phase`` and `Layout.phase` (three
+channels at a slot's end; early fusion now resamples every channel beyond the first by its own offset maps);
+`loss.terms`' von Mises factor; `extract`'s ``phase_rad`` and ``phase_err_rad``; `train.Drawer` and the test
+set's bound and scores.  `tests/test_netfit_fourpi.py`: the grid puts a spot at p + d_c; a batch's targets are what
+Spline 4Pi fits from its frames (isolated molecules: mean error 0.07 of the CRLB, median |error| 0.68, a
+Gaussian's); the bound is the C++ fitter's; the mixture prefers the right phase and, at it, a sharper one; a
+training runs and scores the phase.  Not yet: the prefit, the predictor on a real movie and `fit_decode.py`
+reading a 4Pi model -- stage 3.
+
+### Stage 2: the first trainings (2026-11-25)
+
+**Two networks**, one per microscope, each trained on its own 4Pi model with netfit's default parts and early fusion
+(2.25 M parameters, 3-frame window, on-time 1 -- 3 frames log-uniform, 25 molecules per 40 × 40 px, 6 M samples, bf16;
+settings in `benchmarks/decode/netfit_4pi/`):
+
+| | model | photons (all channels) | background / px / channel | camera | trained on |
+| --- | --- | --- | --- | --- | --- |
+| A, Nup96 | v2 bead model (§27) | 1000 ± 800, from 100 | 1.5 -- 6 | sCMOS, 129 nm | gpuvm, 1.2 h |
+| B, tubulin | P1's pupil model (§26) | 6000 ± 5000, from 300 | 20 -- 60 | sCMOS 0.5 e/ADU, 128 nm | decodebox, 1.0 h |
+
+The ranges are those of the data's Spline 4Pi fits: Nup96's photons 150 -- 2200 (5th -- 99th percentile, median 480),
+backgrounds about 3; tubulin's 1100 -- 28 000 (median 4400), backgrounds about 35.  (The two times are from two machines
+and are not a comparison.)
+
+**Scored** by `benchmarks/decode/netfit_4pi/evaluate.py` on fixed sets drawn as the training draws, 1024 samples
+each, at 5 and 25 molecules per 40 × 40 px and mean on-times of 1 and 3 frames (3-frame window); near focus,
+|z| < 300 nm; the widths are robust widths of the error over the single-frame CRLB of the IAB model, which is Spline
+4Pi's (`results/*_scores.json`):
+
+| net | set | Jaccard | lat. RMSE / width | z RMSE / width | phase RMSE / width | claimed phase width | wrong fringe | z from phase |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A | d5, on 1 | 0.885 | 25.2 nm / 0.86 | 65.9 nm / 0.93 | 0.275 rad / 0.81 | 1.05 | 6.6 % | 9.2 nm |
+| A | d25, on 1 | 0.852 | 28.2 nm / 0.97 | 75.2 nm / 1.08 | 0.305 rad / 0.90 | 1.07 | 7.8 % | 10.3 nm |
+| A | d5, on 3 | 0.914 | 20.5 nm / 0.77 | 52.5 nm / 0.79 | 0.223 rad / 0.80 | 1.07 | 3.8 % | 7.9 nm |
+| A | d25, on 3 | 0.882 | 23.8 nm / 0.90 | 63.6 nm / 0.98 | 0.255 rad / 0.84 | 1.06 | 5.5 % | 8.4 nm |
+| B | d5, on 1 | 0.813 | 28.9 nm / 0.76 | 59.6 nm / 0.74 | 0.283 rad / 0.72 | 1.03 | 4.6 % | 11.4 nm |
+| B | d25, on 1 | 0.775 | 30.1 nm / 0.92 | 66.7 nm / 0.97 | 0.306 rad / 0.87 | 1.06 | 5.1 % | 10.6 nm |
+| B | d5, on 3 | 0.874 | 26.5 nm / 0.75 | 51.4 nm / 0.74 | 0.265 rad / 0.74 | 1.01 | 3.4 % | 9.5 nm |
+| B | d25, on 3 | 0.826 | 25.4 nm / 0.92 | 51.4 nm / 0.96 | 0.234 rad / 0.85 | 1.04 | 2.7 % | 8.2 nm |
+
+"Wrong fringe" and "z from phase" unwrap the network's phase at its envelope z with the cavity's phase known
+(`fourpi.unwrap_known`): the share more than half a fringe from the truth, and the RMSE of the rest -- what *4Pi z*
+can do at best with these localizations.  Over the whole z range the numbers are within a few hundredths of these
+(the JSON files: widths up to 0.06 higher, wrong fringes up to 1 point lower).
+
+**The phase is learnt as precisely as x, y and z.**  Its error is at its CRLB or below it, at both densities, and
+the network's own sigma for it is right: the error over the claimed sigma has a width of 1.01 -- 1.07.  Widths
+below 1 are not a breach of the bound: the bound is one frame's, and the network reads three (a molecule on in its
+neighbours is pooled, which on-time 3 shows most), and it knows the ranges it was trained on.
+
+**Against Spline 4Pi** (`benchmarks/decode/netfit_4pi/fitter_reference.py`, `results/fitter_reference.txt`): the
+fitter on sets drawn the same way (on the CPU, so other samples), each molecule of the middle frame fitted *at its
+true position* -- perfect detection, which favours it -- in 13-px ROIs in every channel, linked as the plugin links
+them.  Near focus:
+
+| model | set | failed fits | lat. width | z width | phase width | wrong fringe | alone: lat / z / phase width, wrong fringe |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Nup96 | d5, on 1 | 28 % | 1.41 | 1.63 | 1.42 | 15.7 % | 1.04 / 1.36 / 1.00, 6.2 % |
+| Nup96 | d25, on 1 | 34 % | 3.10 | 3.51 | 1.96 | 35.6 % | (1 % alone) |
+| tubulin | d5, on 1 | 15 % | 1.65 | 1.46 | 1.41 | 22.8 % | 1.06 / 1.07 / 1.22, 10.4 % |
+| tubulin | d25, on 1 | 27 % | 7.18 | 5.28 | 2.99 | 45.6 % | (1 % alone) |
+
+("Alone": no other molecule on in the middle frame within 10 px.)  On molecules alone the fitter is at its CRLB, as
+it must be; the rest is neighbours inside its ROIs, which at 5 per 40 × 40 px -- the tubulin movie's density --
+already concern most molecules, and at 25 nearly all.  Its failed fits are Nup96's dimmest molecules (median 140
+photons, which return NaN) and, for tubulin, neighbours.  The network, on the same kind of sets, is at 0.7 -- 1.1 of
+the bound at both densities and puts 3 -- 8 % on a wrong fringe where the fitter puts 16 -- 46 %: what P5 set out to
+show on simulations.  Not shown yet: the network on real movies (a predictor for the 4Pi grid, the prefit), and a
+comparison on the *same* frames with the fitter's own detection -- stage 3.
 
 ### Stage 3: judged (planned)
 
