@@ -3159,3 +3159,133 @@ Chosen by Jonas on 2026-11-25; drawn by module-level functions (`fourpi.fringe_r
   Pearson residual within 10 % of the frame's median; the brightest boxes are overlapping pairs), its data,
   model and residual in noise units in all four channels.  0.4 -- 0.6 s for the whole Preview on both sets.
   Nup96's residual is noise; the tubulin's shows lobes in channels 1 and 3, the model's shape off there.
+
+## 33. Does 4Pi tolerate higher densities than astigmatism? (2026-11-25)
+
+Jonas's hypothesis: a 4Pi image tolerates denser emitters than a single-objective astigmatic one, because a
+molecule's light is split over the four channels by its phase -- two overlapping molecules at different phases
+are bright in different channels, so in some channel each is much dimmer than its neighbour, and the pair
+separates.  A simulation study, in `benchmarks/decode/density_4pi/`.
+
+### Design
+
+**The same molecules for both.**  One truth per movie -- positions, z, photons, blinking, the cavity's phase --
+drawn as `netfit_4pi/movie_compare.py` draws it (§30, stage 3): molecules switching on at a rate that keeps
+*d* on per 40 × 40 px, an exponential on-time of mean 1 or 3 frames, x, y uniform over the region all four
+channels see, z uniform in ±500 nm, the cavity drifting.  It is drawn twice: as a 4Pi movie
+(`fourpi.render_frames`, the model's own layout and maps) and as a single-channel astigmatic movie of channel 0's
+pixels (`simulate.camera._draw_spline`).  Densities 0.5, 1, 2, 5, 10, 25 and 50 per 40 × 40 px; with 129-nm
+pixels 40 × 40 px is 26.6 µm², so 0.019, 0.038, 0.075, 0.19, 0.38, 0.94 and 1.9 per µm².  Scored where both
+read (the box less 8 px), near the focus (|z| < 300 nm) first, then over the whole ±500 nm.
+
+**Fair photons.**  The default: the same molecule has the same total detected photons in both images (1000 ±
+800, from 100 -- network A's range, Nup96's), and the same background summed over the 4Pi channels as the
+single-channel image has per pixel (3.75 a channel, 15 in the astigmatic image).  The 4Pi image has four times the
+pixels, and each its quarter of the background: per molecule the same light and the same background, only how it
+is spread differs.  The variant: the astigmatic image with half the photons and half the background (one objective
+of the two), the same molecules; there the floor below which a molecule counts neither way is 50 photons, not 100,
+so that the same molecules are judged.
+
+**The PSFs.**  4Pi: the Nup96 v2 bead model (§27).  Astigmatic: the v2 model's *first objective's* pupil alone,
+as it was learnt -- every phase mode, γ, the blur -- drawn by uiPSF at the model's NA (1.35), emission (600 nm),
+immersion (1.406) and pixel, and sampled into a Spline 3D calibration (`make_astig.py`).  Not the 4Pi channels'
+incoherent part, Σ_c I_c: the two objectives' astigmatism is opposite (Noll 6, +46 nm and -32 nm), so their sum is
+nearly round and would be a poor astigmatic microscope.  The first pupil is the same optics and aberrations, minus
+the second objective and the interference.  The bounds at 1000 photons, background as above: lateral 5.7 -- 26 nm
+astigmatic against 5.8 -- 13 nm for 4Pi over ±500 nm (the second objective's opposite astigmatism keeps the 4Pi
+spot compact out of focus); z 20 -- 32 nm astigmatic, the 4Pi envelope's 19 -- 23 nm and its phase's 4.2 -- 5.7 nm.
+
+**Methods, each with its own detection.**  netfit: the 4Pi network A of §30 (25 per 40 × 40 px, on-time 1 -- 3,
+3-frame window, frame stack, early fusion) and two single-channel astigmatic networks trained the same way -- the
+same parts, window, density, on-time and photon range, the background four times A's (6 -- 24) -- one at the
+default photons and one at half (500 ± 400 from 50, background 3 -- 12); `jobs/astig_*.json`, trained on
+decodebox.  Fitters: Spline 4Pi and Spline 3D with the plugins' default detection and fit (*focus* as
+calibrated).
+
+**Metrics against density**: recall, precision and Jaccard; lateral and z RMSE, absolute and as the robust width
+of the error over each mode's own single-frame CRLB; for 4Pi the envelope z and z from the phase with the cavity
+known (`fourpi.unwrap_known`), and the wrong-fringe share.  One axis per metric, both modes on it.
+
+**The mechanism.**  (1) For two molecules of equal brightness at the same place, each channel's share of each
+molecule's light, from the model, against their phase difference Δφ: the largest ratio between the two over the
+channels.  (2) From the density runs, the recall of molecules with a neighbour on in the same frame within
+250 nm laterally, binned by |Δφ| -- for 4Pi it should rise with |Δφ|, for astigmatism (binned by the same Δφ,
+which there means nothing but Δz modulo the fringe period) it should not.
+
+### Results (2026-11-25)
+
+**Yes, but by little: the 4Pi network holds its numbers to about 1.2 times the density the astigmatic one does,
+and the reason is the one Jonas proposed.**  The runs: `sweep.sh` on gpuvm (molecules per row: ~15 000 at the
+sparse end, up to 90 000 at 50 per 40 × 40 px), the astigmatic networks trained on decodebox (`run.sh`, ~40 min
+each), scored by `plot.py` from every molecule (`results/summary.json`, `metrics_vs_density.png`,
+`mechanism.png`; the per-molecule `.npz` files, 170 MB, stay on gpuvm in `~/netfit/smappy_density/bench/
+density_4pi/results`).  Near the focus, |z| < 300 nm, unless the column says otherwise; lateral and z errors over
+each mode's own single-frame CRLB as robust widths:
+
+| per 40² px (per µm²) | | netfit 4Pi | netfit astig. | netfit astig., half | Spline 4Pi | Spline 3D |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0.5 (0.02) | recall / Jaccard (all z) | 0.988 / 0.923 | 0.990 / 0.872 | 0.955 / 0.766 | 0.908 / 0.818 | 0.917 / 0.818 |
+| | lat. RMSE, width | 18.7 nm, 0.71 | 21.0 nm, 0.67 | 26.7 nm, 0.67 | 21.7 nm, 1.04 | 25.5 nm, 1.01 |
+| | z RMSE, width | 52.7 nm, 0.69; phase: 7.6 nm, 3.9 % wrong | 48.2 nm, 0.64 | 57.5 nm, 0.63 | 61.9 nm, 1.05; phase: 9.3 nm, 4.8 % | 58.5 nm, 1.00 |
+| 5 (0.19) | recall / Jaccard | 0.981 / 0.935 | 0.982 / 0.929 | 0.938 / 0.791 | 0.807 / 0.711 | 0.811 / 0.702 |
+| | lat. RMSE, width | 20.0 nm, 0.73 | 24.0 nm, 0.69 | 28.1 nm, 0.70 | 29.7 nm, 1.14 | 36.1 nm, 1.13 |
+| 25 (0.94) | recall / Jaccard | 0.945 / 0.888 | 0.942 / 0.875 | 0.890 / 0.731 | 0.323 / 0.229 | 0.305 / 0.212 |
+| | lat. RMSE, width | 24.5 nm, 0.83 | 29.5 nm, 0.83 | 34.9 nm, 0.81 | 46.0 nm, 2.01 | 57.0 nm, 2.07 |
+| 50 (1.9) | recall / Jaccard | 0.898 / 0.827 | 0.885 / 0.797 | 0.826 / 0.654 | 0.043 / 0.027 | 0.043 / 0.027 |
+| | lat. RMSE, width | 29.5 nm, 0.99 | 35.7 nm, 1.03 | 41.1 nm, 0.99 | 49.5 nm, 3.83 | 61.8 nm, 3.85 |
+| | z RMSE, width | 75.6 nm, 1.09; phase: 10.4 nm, 7.6 % wrong | 75.7 nm, 1.07 | 86.7 nm, 1.02 | 134 nm, 5.07; phase: 9.4 nm, 21.5 % | 144 nm, 5.26 |
+
+(On-time 1 frame, 3-frame window; on-time 3 is the same picture, every network 5 -- 15 % more precise; all in
+`summary.json`.)
+
+**The networks.**  The two full-photon networks lose recall and precision with density almost alike.  From 5 to
+50 per 40² px recall near the focus falls 0.981 → 0.898 (4Pi) and 0.982 → 0.885 (astigmatic), Jaccard over all z
+0.935 → 0.827 and 0.929 → 0.797; the lateral error over the CRLB grows 0.73 → 0.99 and 0.69 → 1.03, z 0.74 →
+1.09 and 0.66 → 1.07.  Read as density at equal quality: a Jaccard of 0.85 at 38 per 40² px for 4Pi and 31 for
+astigmatism, recall near the focus of 0.90 at 49 and 42 -- 1.2 times, at both on-times.  In nm the 4Pi network is
+ahead by its smaller bound, not its handling of neighbours: lateral 18.7 → 29.5 nm (×1.58) against 21.0 → 35.7 nm
+(×1.70).  Over the whole ±500 nm 4Pi's lateral lead is larger (34.5 against 46.5 nm at 50), because its spot stays
+compact out of focus -- the two objectives' astigmatism is opposite -- which is optics, at every density.  The
+envelope's z is no better than astigmatism's (the bounds are alike, 19 -- 23 nm against 20 -- 32 at 1000 photons);
+the phase's z is 6 -- 7 times better at every density, 7.6 → 10.4 nm with 3.9 → 7.6 % on a wrong fringe.  At the
+sparse end both networks are less precise than at 2 -- 5 per 40² px (Jaccard 0.92 and 0.87 at 0.5, recall 0.99):
+they were trained at 25, and invent molecules where there are few.
+
+**Half the photons** (one objective) costs more than any density here: at 0.5 per 40² px the half-photon network
+recalls 0.955 near the focus, what the full-photon networks still recall at 25.  Against that baseline 4Pi's
+advantage is large at every density, but it is the second objective's photons, not the phase.
+
+**The fitters do not see the difference.**  Spline 4Pi and Spline 3D lose molecules identically -- recall 0.81
+and 0.81 at 5 per 40² px, 0.32 and 0.31 at 25, 0.04 at 50 -- because Spline 4Pi's detection finds candidates on
+the channels' sum, which carries no phase; past detection both fits suffer the neighbours in their ROIs alike
+(2× the CRLB at 25, 4× at 50).  Spline 4Pi's phase z keeps 7 -- 9 nm where it fits, but its wrong-fringe share
+rises 4.8 → 21.5 %, the network's 3.9 → 7.6 %.  Only a method that reads the channels apart can use the phase
+for density.
+
+**The mechanism, shown directly** (`mechanism.png`).  *From the model* (`contrast.py`): a molecule's channel
+shares swing between 0.15 and 0.36 with its phase (the modulation over a 4-px disc is 0.45 -- 0.47, less than the
+bead model's coherence of 0.8, because A and B vary across the spot); for two equal molecules at one place the
+channel where one is dimmest against the other has a ratio of 1.38 at Δφ = π/4, 1.8 at π/2 and 2.2 at π (1.6 at
+-300 nm), and 1 in an astigmatic image.  *From the runs*: molecules near the focus with a neighbour on in the same
+frame within 250 nm, densities 5 -- 50 pooled (~20 000 molecules each on-time), recall by |Δφ|:
+
+| \|Δφ\| (rad) | 0 -- 0.5 | 0.5 -- 1.0 | 1.0 -- 1.6 | 1.6 -- 2.1 | 2.1 -- 2.6 | 2.6 -- 3.1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| netfit 4Pi, on 1 | 0.767 | 0.772 | 0.804 | 0.816 | 0.831 | 0.848 |
+| netfit astig., on 1 | 0.783 | 0.779 | 0.794 | 0.797 | 0.800 | 0.791 |
+| netfit 4Pi, on 3 | 0.750 | 0.758 | 0.790 | 0.816 | 0.804 | 0.838 |
+| netfit astig., on 3 | 0.773 | 0.776 | 0.790 | 0.792 | 0.776 | 0.794 |
+| Spline 4Pi / 3D, on 1 | 0.17 / 0.17 | 0.16 / 0.16 | 0.16 / 0.16 | 0.17 / 0.16 | 0.16 / 0.16 | 0.16 / 0.15 |
+
+The 4Pi network separates pairs better the more their phases differ, by 8 -- 9 points from Δφ ≈ 0 to π; the
+astigmatic network, binned by the same Δφ (for it, Δz modulo the fringe period), is flat within 2 points.  At
+Δφ ≈ 0 the 4Pi image is slightly *worse* (0.767 against 0.783): with the phases equal the channels split both
+molecules alike, and what is left is a less astigmatic spot spread over four times the pixels.  So the phase is
+the whole of 4Pi's gain at density, and it is a modest one, because the channel contrast it gives -- at most a
+factor of 2.2 -- is far from the factor that would make a neighbour vanish in a channel.
+
+**What this does not cover.**  One 4Pi model (Nup96's; a model with higher modulation should do better -- the
+contrast grows as (1 + m) / (1 - m)) and one astigmatic counterpart (its first objective's 46 nm of Noll 6;
+stronger astigmatism trades lateral for z precision); networks trained at one density (25 per 40² px); the
+network A of §30 as it was, not retrained beside the astigmatic ones.  Real data adds what neither simulation has
+(uneven background, the cavity's drift on a real model).
