@@ -123,7 +123,7 @@ the 2C chip), never the limit:
 
 What overlapping detection with the fit would give -- the fit of a block in a
 worker while the next is found, as `MultiChannelEngine.overlap` does for 4Pi,
-which `LocalizationEngine` does not -- is rest + writing + max(detection, fit)
+which `LocalizationEngine` did not then (it does now: "After" below) -- is rest + writing + max(detection, fit)
 of the loop: **1.2-1.4x at 10 a frame, 1.5-1.7x at 30** (Gaussian 2D 1.22 /
 1.63, elliptical 1.40 / 1.59, Spline 3D 1.31 / 1.74, Spline 3D 2C 1.34 / 1.46).
 An upper bound: detection's filter and maxima are themselves threaded and would
@@ -132,7 +132,7 @@ would gain at most the same 1.2-2x on these frames: at 256 x 256 the fitters
 are detection's, and the fit is under half the loop even at 30 a frame.
 
 **Peak finding alone**, ms per frame by step (`detect`): *photons* is the
-camera conversion (numpy, one thread whatever the setting), *filter* the
+camera conversion (then numpy, one thread whatever the setting), *filter* the
 difference of Gaussians, *maxima + cutoff* the local maxima and the dynamic
 cutoff, *boxes* cutting the 13-px boxes.  The 2048 x 2048 frames are the 256
 frames tiled 8 x 8 (1920 molecules); the 4Pi strip is the 2017-11-28 tubulin
@@ -156,6 +156,53 @@ the boxes; maxima + cutoff is still the largest threaded step, 0.11 ms of 0.27
 at 256 x 256.  In the whole plugin detection costs what it costs here on all
 cores: 0.23-0.25 ms a frame at 256 x 256 (Gaussian 2D at 10 a frame: 67 % of
 the loop's 0.35 ms).
+
+**After: detection overlapped with the fit, the photons threaded** (2026-11-25,
+`d60301c8`).  Every fitter now fits a block in a worker while the next is
+converted, searched and cut (`LocalizationEngine.overlap`, as
+`MultiChannelEngine.overlap` did for 4Pi alone), on for a whole file, off for a
+live fit and a preview; the photon conversion and the 4Pi channel sum are
+threaded C++ (`csrc/photons.hpp`).  Not a number moved: the whole-plugin tables
+of all four fitters on both movies are bit-identical to before, every column in
+the same order.  Measured the same afternoon, before (`3363cece`) and after one
+right after the other, each step started at a 1-min load below 3 (2.6-3.0; it
+rose to 4-7 during the 2C and part of the elliptical runs, alike in both):
+
+| | whole, before | whole, after | | loop, before | loop, after | |
+| --- | --- | --- | --- | --- | --- | --- |
+| Gaussian 2D, 10/frame | 2 740 (2 740-2 750) | 3 370 (3 360-3 420) | 1.23x | 2 850 | 3 540 | 1.24x |
+| Gaussian 2D, 30/frame | 1 800 (1 760-1 840) | 2 120 (1 970-2 190) | 1.18x | 1 840 | 2 260 | 1.23x |
+| elliptical, 10/frame | 2 380 (2 370-2 380) | 2 890 (2 590-2 920) | 1.22x | 2 460 | 3 010 | 1.23x |
+| elliptical, 30/frame | 1 380 (1 360-1 430) | 1 810 (1 800-1 890) | 1.31x | 1 410 | 1 860 | 1.32x |
+| Spline 3D, 10/frame | 1 740 (1 680-1 780) | 2 060 (2 040-2 060) | 1.19x | 2 530 | 3 280 | 1.30x |
+| Spline 3D, 30/frame | 1 300 (1 270-1 300) | 1 500 (1 480-1 530) | 1.15x | 1 690 | 2 090 | 1.24x |
+| Spline 3D 2C, 10/frame | 838 (838-857) | 989 (989-989) | 1.18x | 1 020 | 1 240 | 1.22x |
+| Spline 3D 2C, 30/frame | 510 (507-541) | 675 (659-680) | 1.32x | 577 | 791 | 1.37x |
+
+frames/s, median of three (range).  **1.2-1.4x on the loop**, the lower half of
+what the table above predicted (1.2-1.7x): the prediction was an upper bound,
+and so it turned out -- the filter and the maxima are themselves threaded, and
+while the fit runs they share the cores with it.  Spline 3D's whole plugin gains
+less than its loop because opening its calibration (0.37 s) is a fifth of a
+2000-frame run; on a long movie the loop is what counts.
+
+Peak finding alone after (`detect`, ms per frame, the photons now on the
+threads the finder is given):
+
+| | | in all, before | in all, after | photons, before | photons, after |
+| --- | --- | --- | --- | --- | --- |
+| 256 x 256 | one thread | 0.82 (0.80-0.83) | 0.76 (0.76-0.77) | 0.075 | 0.028 |
+| | ten cores | 0.26 (0.26-0.27) | 0.20 (0.20-0.22) | 0.071 | 0.011 |
+| 2048 x 2048 | one thread | 51.3 (51.3-52.8) | 48.5 (47.7-49.0) | 5.2 | 1.6 |
+| | ten cores | 16.2 (16.1-17.1) | 12.6 (12.2-12.9) | 4.6 | 0.6 |
+| 4Pi tubulin | one thread | 0.70 (0.68-0.72) | 0.48 (0.47-0.48) | 0.327 | 0.103 |
+| | ten cores | 0.46 (0.45-0.48) | 0.17 (0.17-0.17) | 0.326 | 0.032 |
+
+The conversion is 3x faster even on one thread (one pass in C++ where numpy
+made three) and 7-10x on all cores; the 4Pi channel sum, conversion and the
+four channels' gather together, is 10x.  What is left on all cores is the
+maxima and cutoff (half of it), the filter, and cutting the boxes, which is
+still one thread.
 
 ## Rendering
 

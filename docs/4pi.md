@@ -2723,6 +2723,20 @@ frame on one thread and 0.47 on all, of which 0.32 ms is turning the four channe
 on one thread (`docs/performance.md`, "The fitters' speed on a quiet machine").  So a GPU fit would take tubulin
 from 84 towards detection's ~800 frames/s (about 10×) and gain Nup96 nothing measurable.
 
+**After the photons and the channel sum were threaded (2026-11-25, `d60301c8`)**: the four channels' conversion to
+photons and their sum onto channel 0 are C++ on every core (`csrc/photons.hpp`, `multichannel.detection_image`),
+the same image to the last bit; every other fitter now overlaps its fit with detection as this engine already did
+(`docs/performance.md`, "After").  The channel sum alone (`benchmarks/fitters/speed.py detect`, quiet): 0.46 →
+**0.17 ms a frame** on all cores, 0.70 → 0.48 on one; its photons-and-sum part 0.33 → 0.03 ms.  In the engine
+(`benchmarks/fourpi/speed.py --kept --repeat 3`, before at `3363cece` and after one right after the other): both
+data sets' localizations are **identical** to before (all 129 440 and 13 575, every column, max |d| 0); tubulin's
+whole plugin is 84 (84-84) frames/s before and after, as it must be -- the fit's 11 ms a frame was never waiting
+on detection; Nup96's detection in the engine is 0.96 → **0.41 ms a frame** and the engine alone 813 → **1 118
+frames/s**, past the `.mat` reader's 1 000, which is now all that bounds its whole plugin.  These two Nup96
+numbers were measured with another session's work on the machine (1-min load 15-20, alike before and after), so
+their ratio holds better than their values; the tubulin engine-alone timing after could not be taken quietly
+(the load rose to 150) and is left out.
+
 ## 29. In situ on the 2017-11-28 tubulin: no better than the beads, and why (2026-11-25)
 
 §27's in situ run on Gabin's tubulin (Cell01's first 6000 frames), started from P1's bead model (§26: the pupil
