@@ -204,6 +204,41 @@ inline void compute_delta3d(float dx, float dy, float dz, float* f, float* dfx,
     }
 }
 
+// The four sums of a spline at one pixel: out[j] = sum_i delta4[4 i + j] c(i),
+// the value and its three derivatives, delta4 the four monomial arrays
+// interleaved (delta4[4 i + j] is (f, dx, dy, dz)[j][i]).  One 4-wide vector
+// operation per coefficient, and the 64 split into two halves of 32 added at
+// the end: two independent chains of 4-wide multiply-adds where the plain loop
+// was four scalar chains of 64, each waiting on the latency of the one before.
+// The halves change the order of the sums, so a fit differs from the plain
+// loop's in the last bits of a float (docs/performance.md, "The spline's sums").
+// CSpline4Pi does the same for three splines at once.
+template <class Coeff>
+inline void spline_sums(const float* delta4, const Coeff& c, float* out) {
+#if defined(__GNUC__) || defined(__clang__)
+    typedef float f4 __attribute__((vector_size(16)));
+    f4 lo = {0.0f, 0.0f, 0.0f, 0.0f}, hi = lo;
+    const f4* d4 = reinterpret_cast<const f4*>(delta4);
+    for (int i = 0; i < 32; ++i) {
+        lo += d4[i] * c(i);
+        hi += d4[i + 32] * c(i + 32);
+    }
+    const f4 t = lo + hi;
+    for (int j = 0; j < 4; ++j) out[j] = t[j];
+#else
+    // the same sums in the same order, without the vector type
+    float lo[4] = {}, hi[4] = {};
+    for (int i = 0; i < 32; ++i) {
+        const float a = c(i), b = c(i + 32);
+        for (int j = 0; j < 4; ++j) {
+            lo[j] += delta4[4 * i + j] * a;
+            hi[j] += delta4[4 * (i + 32) + j] * b;
+        }
+    }
+    for (int j = 0; j < 4; ++j) out[j] = lo[j] + hi[j];
+#endif
+}
+
 // Cubic spline PSF.  theta = (x, y, N, bg, z)
 // Coefficients are (64, nz, ny, nx) C-contiguous, x fastest; see
 // smappy.io.calibration for how the SMAP calibration is converted.
@@ -214,8 +249,9 @@ struct CSpline {
     int nx, ny, nz;
     float z_start;
 
-    // per-fit state, refreshed by prepare()
-    mutable float delta_f[64], delta_dx[64], delta_dy[64], delta_dz[64];
+    // per-fit state, refreshed by prepare(): the monomials, interleaved as
+    // spline_sums reads them
+    alignas(16) mutable float delta4[256];
     mutable int xstart, ystart, zstart, off_x, off_y;
 
     CSpline(const float* c, int nx_, int ny_, int nz_, float z0)
@@ -243,31 +279,40 @@ struct CSpline {
         xstart = static_cast<int>(std::floor(xc));
         ystart = static_cast<int>(std::floor(yc));
         zstart = static_cast<int>(std::floor(theta[4]));
-        compute_delta3d(xc - xstart, yc - ystart, theta[4] - zstart, delta_f,
-                        delta_dx, delta_dy, delta_dz);
+        float f[64], dfx[64], dfy[64], dfz[64];
+        compute_delta3d(xc - xstart, yc - ystart, theta[4] - zstart, f, dfx, dfy, dfz);
+        for (int i = 0; i < 64; ++i) {
+            delta4[4 * i] = f[i];
+            delta4[4 * i + 1] = dfx[i];
+            delta4[4 * i + 2] = dfy[i];
+            delta4[4 * i + 3] = dfz[i];
+        }
+    }
+
+    // The voxel of pixel (ix, iy) as an offset into a (64, nz, ny, nx) plane.
+    int voxel(int ix, int iy) const {
+        const int xc = std::min(std::max(ix + xstart + off_x, 0), nx - 1);
+        const int yc = std::min(std::max(iy + ystart + off_y, 0), ny - 1);
+        const int zc = std::min(std::max(zstart, 0), nz - 1);
+        return (zc * ny + yc) * nx + xc;
+    }
+
+    // value, d/dx, d/dy, d/dz of the spline into dudt and model
+    void finish(const float* s, const float* theta, float* dudt, float* model) const {
+        dudt[0] = -theta[2] * s[1];
+        dudt[1] = -theta[2] * s[2];
+        dudt[4] = theta[2] * s[3];
+        dudt[2] = s[0];
+        dudt[3] = 1.0f;
+        *model = theta[3] + theta[2] * s[0];
     }
 
     void value(int ix, int iy, const float* theta, float* dudt, float* model) const {
-        int xc = std::min(std::max(ix + xstart + off_x, 0), nx - 1);
-        int yc = std::min(std::max(iy + ystart + off_y, 0), ny - 1);
-        int zc = std::min(std::max(zstart, 0), nz - 1);
-
-        const int base = (zc * ny + yc) * nx + xc;
-        const int stride = nx * ny * nz;
-        float temp = 0.0f, dx = 0.0f, dy = 0.0f, dz = 0.0f;
-        for (int i = 0; i < 64; ++i) {
-            const float c = coeff[i * stride + base];
-            temp += delta_f[i] * c;
-            dx += delta_dx[i] * c;
-            dy += delta_dy[i] * c;
-            dz += delta_dz[i] * c;
-        }
-        dudt[0] = -theta[2] * dx;
-        dudt[1] = -theta[2] * dy;
-        dudt[4] = theta[2] * dz;
-        dudt[2] = temp;
-        dudt[3] = 1.0f;
-        *model = theta[3] + theta[2] * temp;
+        const float* c = coeff + voxel(ix, iy);
+        const std::ptrdiff_t stride = static_cast<std::ptrdiff_t>(nx) * ny * nz;
+        float s[4];
+        spline_sums(delta4, [c, stride](int i) { return c[i * stride]; }, s);
+        finish(s, theta, dudt, model);
     }
 
     void clamp(float* theta, int) const {
@@ -310,27 +355,18 @@ struct CSplineField : CSpline {
     }
 
     void value(int ix, int iy, const float* theta, float* dudt, float* model) const {
-        int xc = std::min(std::max(ix + xstart + off_x, 0), nx - 1);
-        int yc = std::min(std::max(iy + ystart + off_y, 0), ny - 1);
-        int zc = std::min(std::max(zstart, 0), nz - 1);
-
-        const int base = (zc * ny + yc) * nx + xc;
-        const int stride = nx * ny * nz;
-        float temp = 0.0f, dx = 0.0f, dy = 0.0f, dz = 0.0f;
-        for (int i = 0; i < 64; ++i) {
+        const int base = voxel(ix, iy);
+        const std::ptrdiff_t stride = static_cast<std::ptrdiff_t>(nx) * ny * nz;
+        const int n = n_used;
+        const float* const* u = used;
+        const float* wt = weight;
+        float s[4];
+        spline_sums(delta4, [=](int i) {
             float c = 0.0f;
-            for (int k = 0; k < n_used; ++k) c += weight[k] * used[k][i * stride + base];
-            temp += delta_f[i] * c;
-            dx += delta_dx[i] * c;
-            dy += delta_dy[i] * c;
-            dz += delta_dz[i] * c;
-        }
-        dudt[0] = -theta[2] * dx;
-        dudt[1] = -theta[2] * dy;
-        dudt[4] = theta[2] * dz;
-        dudt[2] = temp;
-        dudt[3] = 1.0f;
-        *model = theta[3] + theta[2] * temp;
+            for (int k = 0; k < n; ++k) c += wt[k] * u[k][i * stride + base];
+            return c;
+        }, s);
+        finish(s, theta, dudt, model);
     }
 };
 

@@ -30,6 +30,46 @@ Findings worth keeping:
   kernel that has to match a reference bit for bit must prevent it
   (`cutoff.hpp`).
 
+### The spline's sums (2026-11-25)
+
+`CSpline::value` (Spline 3D, Spline 3D 2C, and `CSplineField` for field-dependent
+calibrations) sums 64 products for each of four quantities per pixel: the
+spline's value and its x, y and z derivatives.  As four scalar loops over i they
+were four dependent chains of 64 multiply-adds, each waiting on the latency of
+the one before -- the arithmetic, not memory, was the cost, as `CSpline4Pi`'s
+was (`docs/4pi.md` section 28).  The four monomial arrays are now interleaved in
+`prepare` (`delta4[4 i + j]`) and summed as one 4-wide vector, split into two
+halves of 32 added at the end (`spline_sums` in `csrc/models.hpp`; GCC and
+Clang's vector type, the same sums in the same order in plain loops for MSVC).
+
+Measured on the M1 Max with a real calibration (`spline_calibration_3dcal.mat`,
+197 planes of 26 x 26), 2000 simulated ROIs of 13 px at 1000-5000 photons,
+CPU time per fit, the old and new builds alternating, the Mac otherwise loaded:
+
+| | before | after | |
+| --- | --- | --- | --- |
+| Spline 3D, one thread | 9 300 fits/s | 18 500 fits/s | 2.0x |
+| Spline 3D 2C (global, two channels), one thread | 3 650 fits/s | 6 200 fits/s | 1.7x |
+| field splines (four nodes blended), one thread | 2 550 fits/s | 2 690 fits/s | 1.06x |
+| Spline 3D, all ten cores (per CPU second) | 7 900 fits/s | 14 400 fits/s | 1.8x |
+
+The halves change the order of the sums, so the numbers move in the last bits
+of a float.  Against the old fit on the same ROIs: x and y differ by at most
+0.005 px (99th percentile 1e-4), z by at most 0.04 planes (0.4 nm here;
+99th percentile 0.004), photons by at most 1.8 of thousands, logL by at most
+1e-5 of itself; no fit ended in another optimum.
+
+**A voxel-major copy of the coefficients** -- (nz, ny, nx, 64), each voxel's
+64 floats in a row, as `FourPiCalibration.fit_coeff` keeps 4Pi's -- was tried
+and not kept.  For one spline it gained nothing on one thread and 7 % on all
+cores: a 13-px ROI's voxels at one z plane are 169 x 64 floats, which the
+cache holds whatever their layout.  For field splines it gained **1.8x**
+(2 690 -> 4 800 fits/s, one thread; 2 250 -> 4 170 on all cores): four nodes'
+coefficients, each a stride of nz ny nx floats from the last, are 256 lines
+and as many pages per pixel.  It would need a second copy of every node's
+coefficients kept for the fit (a 9-node grid of this calibration is 300 MB),
+so it is left for when field-dependent fits are slow enough to matter.
+
 ## Rendering
 
 M1 Pro, 5M localizations into 2000x2000:

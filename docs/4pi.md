@@ -2656,7 +2656,8 @@ in z; 0.07 % of fits (tubulin's poor ones) end in another optimum, as often bett
 Per core, measured in CPU time with the old and new build alternating: **2.4× (tubulin), 2.8× (Nup96)**.  On all
 ten cores the old layout lost more -- ten cores' working sets of 8 MB each do not share a cache -- 2.6× and
 up to 5×.  `CSpline` (Spline 3D, 2C) has the same scalar chain and would gain from the same vectors; not done
-here, since it moves every 3D fit's last bits.
+here, since it moves every 3D fit's last bits -- done since, 2.0x per core (`docs/performance.md`, "The
+spline's sums").
 
 **2. Each block fitted while the next is found** (`MultiChannelEngine.overlap`).  The fit of a block goes to a
 worker thread, and `flush` hands back the block before; `pipeline.drive` takes the last from `end`.  The same
