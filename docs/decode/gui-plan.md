@@ -263,6 +263,40 @@ narrower than +-15 % of the median) or typed.
   second ``ratio`` times as wide at every z (`gaussian_psf.dual_calibration`; the ratio the median of the
   molecules', `width_ratio`), both on one grid, with that registration; always two colours.
 
-To do: the benchmark: simulated with a real (vector pupil) PSF, Gaussian-trained netfit against Gaussian 2D MLE
-and against netfit trained on the true PSF, densities 50 and 15 per 40 x 40 px, Jaccard, lateral
-RMSE / CRLB, photon bias; then real 2D data.
+**The benchmark (2026-11-25, `benchmarks/decode/gaussian_psf/`).**  The data drawn with a realistic PSF: a
+vector pupil, NA 1.45, oil, water sample, 670 nm, 100 nm pixels, mild aberrations (astigmatism and coma
+10 -- 12 nm, spherical 25 nm) and a 40 nm blur -- its core sigma about 85 nm, a quarter of its light more than
+3.5 pixels out, in rings and the supercritical light.  Molecules blinking (mean on-time 2 frames), z within
++-300 nm, 500 -- 5000 photons a frame, background 40, sCMOS noise; 600 frames at 15 per 40 x 40 px and 300 at
+50.  Both networks *DECODE, optimised*, prefitted on the sparse movie by the window's functions, trained at
+50 per 40 x 40 px (3.1 per um^2), 150 epochs on gpuvm.  Scored one-to-one per frame within 100 nm, 4 pixels
+from the edges.  The likelihood fitters with an absolute cutoff of 4, the best of 4 -- 30 (their dynamic
+cutoff rises with the crowding and found 3 molecules at 50).
+
+| density | method | Jaccard | recall | precision | lateral RMSE | photons / true |
+| --- | --- | --- | --- | --- | --- | --- |
+| 15 | Gaussian 2D | 0.47 | 0.52 | 0.84 | 30 nm | 0.52 |
+| 15 | Spline 3D, true PSF | 0.42 | 0.47 | 0.78 | 34 nm | 0.89 |
+| 15 | DECODE, Gaussians | 0.50 | 0.97 | 0.50 | 23 nm | 0.56 |
+| 15 | DECODE, Gaussians, sigma <= 180 nm | 0.84 | 0.91 | 0.91 | 20 nm | |
+| 15 | DECODE, true PSF | 0.93 | 0.98 | 0.95 | 15 nm | 1.00 |
+| 50 | Gaussian 2D | 0.24 | 0.27 | 0.71 | 44 nm | 0.42 |
+| 50 | Spline 3D, true PSF | 0.20 | 0.23 | 0.61 | 50 nm | 0.86 |
+| 50 | DECODE, Gaussians | 0.59 | 0.88 | 0.65 | 31 nm | 0.59 |
+| 50 | DECODE, Gaussians, sigma <= 180 nm | 0.73 | 0.82 | 0.87 | 27 nm | |
+| 50 | DECODE, true PSF | 0.83 | 0.90 | 0.92 | 24 nm | 1.01 |
+
+* **The Gaussian network finds the molecules** (recall 0.97 and 0.88) **and the PSF's rings as more.**  Its false
+  positives are dim (median 625 photons against 1280), 150 -- 370 nm from a true molecule, and wide: sigma 240 nm
+  against 127.  A bound on `sigma_nm` (180 nm) keeps 91 % of the molecules and lifts Jaccard to 0.84 and 0.73;
+  *prob* alone does not separate them (0.70 at prob >= 0.99).
+* **Then it is well ahead of Gaussian 2D** (0.84 against 0.47; 0.73 against 0.24, at 20 and 27 nm against 30
+  and 44) **and behind a network trained on the true PSF** (0.93, 0.83; 15, 24 nm).
+* **A constant shift of (-2, +3.7) nm** that the true-PSF network has not: the Gaussian cannot follow the
+  coma, and the network centres the Gaussian it sees.  Photons are Gaussian 2D's, about half the PSF's.
+* So: worth having where there are no beads, with a bound on the width; a bead calibration (or the
+  microscope's kept pupil) stays better by 0.1 in Jaccard and a third in RMSE.
+
+Next: train the Gaussians with something of the tails -- a faint wide second Gaussian, or the rings of an ideal
+pupil (*PSF* from NA and wavelength, no beads) -- so the network does not take them for molecules; and real 2D
+data, where the width bound is chosen by the user.
