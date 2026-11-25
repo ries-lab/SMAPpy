@@ -11,7 +11,10 @@ M1 Pro, 46,005 frames of 200x200, spline fit, ROI 13: **35.9 s** (1283 frames/s,
 Findings worth keeping:
 
 * the C++ single-pass maximum search beats `scipy.ndimage.maximum_filter` 5.2x
-  (short-circuit evaluation rejects most pixels after one comparison)
+  (short-circuit evaluation rejects most pixels after one comparison) -- with
+  a threshold.  Without one (the dynamic cutoff needs every maximum) its early
+  exits mispredict on noise; eight pixels at a time without branches is 3x
+  faster (2026-11-25, "Peak finding without the detours" below)
 * the 2-D DoG kernel has **rank 2**, so it is not separable -- subtracting the
   1-D kernels is wrong.  Subtracting the 2-D kernels and doing one convolution
   is exact and, below radius 4, faster than the fused separable passes
@@ -203,6 +206,45 @@ made three) and 7-10x on all cores; the 4Pi channel sum, conversion and the
 four channels' gather together, is 10x.  What is left on all cores is the
 maxima and cutoff (half of it), the filter, and cutting the boxes, which is
 still one thread.
+
+### Peak finding without the detours (2026-11-25)
+
+Four changes to peak finding, each keeping the candidates: the 3x3 maxima
+eight pixels at a time without branches (`csrc/maxima.hpp`); the maxima, the
+dynamic cutoff and the selection in one C++ pass per block, each frame's maxima
+kept in its thread's buffer and only the candidates returned
+(`csrc/detect.hpp`, `detect._fused`; a half with fewer than ten maxima goes to
+Python for the mean rule); the raw counts filtered as they are, only the boxes
+converted to photons (`detect.Counts`: the DoG's kernel sums to zero, so the
+offset cancels, the gain scales; the single-channel and the paired two-colour
+engines, not a noise map's per-pixel offsets nor the 4Pi channel sum); and the
+boxes cut in threaded C++ (`fit_rois.cut_boxes`).  The candidates on the
+speed-bench movies are the photons' but one in 117 000 (`dual_30`), a maximum
+whose neighbour came level within an ulp in the filter of the counts; the
+fitted tables are the same (`tests/test_detect_counts.py`).
+
+`benchmarks/fitters/speed.py detect`, ms per frame, median of three, main at
+`d60301c8` against this branch run back to back, 1-min load 2.5-2.7 (Word,
+`mediaanalysisd` running).  *before* is main after the overlap (the table
+above's *after*, measured again); *photons route* this branch searching photons,
+as the 4Pi channel sum still does; *raw counts* the route the single-channel and
+the paired two-colour engines take now:
+
+| | | before | photons route | raw counts |
+| --- | --- | --- | --- | --- |
+| 256 x 256 | one thread | 0.75 | 0.45 | 0.42 |
+| | ten cores | 0.21 | 0.09 | 0.08 |
+| 2048 x 2048 | one thread | 47.9 | 27.9 | 25.4 |
+| | ten cores | 12.5 | 5.8 | 5.3-6.0 |
+| 4Pi tubulin (sum) | one thread | 0.47 | 0.30 | -- |
+| | ten cores | 0.18 | 0.07-0.085 | -- |
+
+By step on ten cores at 256 x 256: maxima + cutoff 0.110 -> 0.023 ms, boxes
+0.033 -> 0.004, photons 0.010 -> none; the filter, 0.052, is now two thirds of
+what is left, so a cheaper estimate of the cutoff would not pay.  The whole
+plugin's before and after, and 4Pi's localizations compared molecule by
+molecule, are still to be measured on a quiet machine: the runs on this day
+were taken by other sessions' load.
 
 ## Rendering
 
