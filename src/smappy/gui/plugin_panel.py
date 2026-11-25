@@ -303,6 +303,11 @@ class PluginPanel(QWidget):
                                   if nothing or self.title_unfolds else [])
             for button in self.title_buttons if self.title_unfolds else ():
                 button.setToolTip(self.plugin.description)
+            if self.title_unfolds and self.about is not None:
+                # the summary is the title buttons' tooltip: what unfolds is
+                # the settings alone (*Load*'s *columns*), not a grey line
+                # about the buttons above it
+                self.about.hide()
             if nothing:
                 # nothing to set: the buttons are the panel, one row, and the
                 # summary is their tooltip rather than lines above them
