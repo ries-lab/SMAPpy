@@ -241,10 +241,38 @@ the paired two-colour engines take now:
 
 By step on ten cores at 256 x 256: maxima + cutoff 0.110 -> 0.023 ms, boxes
 0.033 -> 0.004, photons 0.010 -> none; the filter, 0.052, is now two thirds of
-what is left, so a cheaper estimate of the cutoff would not pay.  The whole
-plugin's before and after, and 4Pi's localizations compared molecule by
-molecule, are still to be measured on a quiet machine: the runs on this day
-were taken by other sessions' load.
+what is left, so a cheaper estimate of the cutoff would not pay.
+
+**The whole plugin** (`speed.py plugin`), frames/s, median of three (range),
+`632dcf5a` (after the overlap) against `5e16c791`, one right after the other,
+each started at a 1-min load below 3 (2.6-2.7; the runs themselves raise it to
+4-7, alike in both), Word running:
+
+| | whole, before | whole, after | | loop, before | loop, after | |
+| --- | --- | --- | --- | --- | --- | --- |
+| Gaussian 2D, 10/frame | 3 420 (3 340-3 530) | 5 090 (4 930-5 160) | 1.49x | 3 580 | 5 460 | 1.52x |
+| Gaussian 2D, 30/frame | 2 350 (2 310-2 370) | 3 110 (3 030-3 130) | 1.32x | 2 430 | 3 240 | 1.34x |
+| elliptical, 10/frame | 2 870 (2 830-2 900) | 3 920 (3 870-4 100) | 1.37x | 3 020 | 4 140 | 1.37x |
+| elliptical, 30/frame | 1 800 (1 790-1 840) | 2 010 (2 000-2 040) | 1.11x | 1 850 | 2 060 | 1.11x |
+| Spline 3D, 10/frame | 2 060 (2 060-2 100) | 2 600 (2 570-2 640) | 1.26x | 3 280 | 4 760 | 1.45x |
+| Spline 3D, 30/frame | 1 610 (1 560-1 610) | 1 900 (1 870-1 900) | 1.18x | 2 220 | 2 830 | 1.27x |
+| Spline 3D 2C, 10/frame | 1 000 (983-1 010) | 1 270 (1 260-1 280) | 1.27x | 1 250 | 1 700 | 1.36x |
+| Spline 3D 2C, 30/frame | 687 (676-695) | 807 (805-821) | 1.17x | 813 | 975 | 1.20x |
+
+(The before column is faster than the overlap's own *after* above: that table
+was measured earlier in the day on a busier machine.)  1.3-1.5x at 10 a frame,
+1.1-1.3x at 30, where the fit in its worker is now what the loop waits for:
+the fit is 83-90 % of the loop's time at 30 a frame, so with detection
+overlapped, only a faster fit would help there.  At 10 a frame the filter is
+the largest part of detection (35-40 % of the loop).
+
+**4Pi** (`benchmarks/fourpi/speed.py --repeat 3`, `--save` before and
+`--compare` after): the engine's detection 0.77 -> 0.33 ms a frame on the
+tubulin and 0.44 -> 0.33 on Nup96; the whole plugin does not move (87 and 649
+frames/s), its fit being 99 % (tubulin) and half (Nup96) of the loop with
+detection overlapped.  Every localization is the same: 129 478 of the tubulin
+and 13 591 of Nup96 matched by frame and peak, x, y, z, phase, photons and logL
+all identical to the last bit.
 
 ## Rendering
 
