@@ -531,7 +531,8 @@ misalignment.
 these movies with that model), or, if none, a fit made here of the first
 *frames fitted* frames with the section's *channels*.  Of these, molecules
 brighter than *min photons* (the brighter half on 0), inside the model's z
-range less *z margin*, and alone in their frame are taken, spread evenly over
+range less *z margin*, and alone -- no other localization within *alone within*
+boxes, in their frame and *alone over* frames beside it -- are taken, spread evenly over
 z in *z bins* bins, up to *molecules*.  Each is cut in every channel where the
 fit's layout puts it, in boxes of *box* pixels.
 
@@ -541,7 +542,8 @@ backgrounds) from its fitted z and from a fringe period above and below, since
 a molecule's z has an optimum on every fringe; those whose fit is poor are
 left out; then both objectives' pupils, the coherence, the arms' balance, the
 channels' shares, phase offsets and maps, the blur and the misalignment along
-z are learnt together with every molecule.  This is done *rounds* times.  The
+z are learnt together with every molecule (*learn*: everything, or only the
+maps, the misalignment and each channel's interference).  This is done *rounds* times.  The
 objectives' apodisation and the buffer's index are kept from the bead model,
 and so is the lateral misalignment, by a tight prior.  While learning, each
 molecule's interference phase is held near the cavity's -- the phase all
@@ -579,7 +581,10 @@ three one-bead scans (docs/4pi.md §29), in situ explained held-out molecules
 better by 97 nats each and still measured no better than the beads: it widened
 the PSF and lowered the coherence to take up neighbours' light in the boxes.
 Fit the movie with both models and compare *4Pi z*'s uncertain fringes before
-keeping it.
+keeping it.  Learnt from molecules alone within 1.5 boxes and a frame either side,
+with *learn* set to *maps, misalignment, channels* (§34), the same movie's misfits
+in *4Pi z*'s *channels* figure and Spline 4Pi's Preview mostly went, and z
+measured as well as with the beads.
 
 ## Molecules on the coverslip
 
@@ -1169,6 +1174,26 @@ model alone.
 ### seed
 Draws other molecules where there are more than *molecules*: two seeds that
 learn different models say the molecules were too few.
+
+### alone within
+1 box keeps a neighbour's spot half inside a box.  On a dense sample (filaments)
+1.5 boxes with *alone over* 1 frame is better: of the 2017 tubulin's 2 million
+localizations it left 30 000 bright ones to choose from, against 300 000 at 1
+box in the frame alone -- still ten times *molecules*.
+
+### alone over
+A molecule blinking beside this one in the frame before or after is often
+there in this frame too, too dim to be found.  The molecule's own blink
+going on (within a pixel) does not count.  0 looks at the frame alone.
+
+### learn
+*maps, misalignment, channels* learns only the channels' maps, where the two
+objectives' foci sit against each other, and each channel's coherence,
+balance, phase offset and share; the pupils, the blur and the index stay the
+bead model's.  Use it where the bead model's spot is right but the alignment
+moved, and on dense samples, where the pupils and the blur take up neighbours'
+light.  The model it saves keeps its learnt maps: fit with Spline 4Pi's
+*registration* set to the model's.
 
 ### elliptical Gaussian
 The elliptical Gaussian method's own settings (*Elliptical Gaussian*).

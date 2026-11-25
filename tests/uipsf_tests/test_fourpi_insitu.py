@@ -164,3 +164,20 @@ def test_tied_to_the_cavity_the_molecules_still_bring_back_the_sample_and_keep_t
     assert period == pytest.approx(calibration((model, truth), z_range_nm=300, dz_nm=50).period_nm, rel=0.01)
     dz = res.found["xyz"][:, 2] - xyz[:, 2]
     assert np.mean(np.abs(dz) > PERIOD_NM / 2) == 0 and np.median(np.abs(dz)) < 15
+
+
+def test_with_a_free_set_only_those_parameters_are_learnt_and_a_wrong_name_is_refused(bead_model):
+    """The smallest set that removes a misfit (docs/4pi.md §34): the maps alone free, the rest of the shared
+    parameters held, the molecules' own free as ever."""
+    model = fi.molecule_model(bead_model, (R, R))
+    batch = fi.molecule_batch(np.zeros((3, C, R, R)), np.zeros((3, C, 2)))
+    start = {"xyz": np.zeros((3, 3)), "photons": np.ones(3), "background": np.ones((3, C)), "phase": np.zeros(3)}
+    p = fi.params_for(model, batch, _shared(bead_model, **TRUTH), start)
+    maps = ("ch1.transform", "ch2.transform", "ch3.transform")
+    learnt = fi.learning_params(p, fi.InSituSettings(free=maps))
+    assert set(learnt._free("shared")) == set(maps)
+    assert {"emitter.xyz", "emitter.phase", "emitter.photons"} <= set(learnt._free("emitter"))
+    everything = set(fi.learning_params(p, fi.InSituSettings())._free("shared"))
+    assert {"pupil.phase", "fourpi.coherence", "psf.sigma"} <= everything
+    with pytest.raises(ValueError, match="no shared parameter fourpi.cohrence"):
+        fi.learning_params(p, fi.InSituSettings(free=("fourpi.cohrence",)))

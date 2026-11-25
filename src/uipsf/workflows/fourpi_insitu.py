@@ -72,6 +72,11 @@ class InSituSettings:
     offset_sigma_nm: tuple = OFFSET_SIGMA_NM
     #: also held, by name: e.g. ``ch1.transform`` where the channels' registration is trusted
     held: tuple = ()
+    #: only these shared parameters learnt, by name, every other held (``held`` and `HELD` still apply); None:
+    #: all but those.  The smallest set that removes a misfit is the one to learn: what the molecules cannot
+    #: tell apart from their neighbours' light -- the blur, the coherence, the pupils -- is then not taken up
+    #: by it (docs/4pi.md §34)
+    free: tuple | None = None
     #: each molecule's phase held near the cavity's by a prior of this σ (rad) while learning; None: each its own
     #: (module docstring).  Needs the molecules' frames (`molecule_batch`'s ``frame``).
     cavity_sigma_rad: float | None = None
@@ -231,8 +236,14 @@ def learning_params(params: Params, settings: InSituSettings, offset=None, cavit
         specs["emitter.phase"] = replace(specs["emitter.phase"], prior=Gaussian(mean, float(settings.cavity_sigma_rad)))
     out = Params(list(specs.values()), params.n_emitters, dtype=phys["emitter.xyz"].dtype,
                  device=phys["emitter.xyz"].device, values=phys)
-    return out.free(*[n for n, s in out.specs.items() if s.scope == "shared"]).fix(
-        *[n for n in HELD + tuple(settings.held) if n in out.specs])
+    shared = [n for n, s in out.specs.items() if s.scope == "shared"]
+    if settings.free is not None:
+        unknown = sorted(set(settings.free) - set(shared))
+        if unknown:
+            raise ValueError(f"no shared parameter {', '.join(unknown)}; the model's: {', '.join(shared)}")
+    held = HELD + tuple(settings.held) + (() if settings.free is None else
+                                          tuple(n for n in shared if n not in settings.free))
+    return out.free(*shared).fix(*[n for n in held if n in out.specs])
 
 
 def learn_insitu(bead_model: FourPiModel, bead_shared: dict, batch: Batch, start: dict, period_nm: float,

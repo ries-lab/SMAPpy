@@ -32,3 +32,26 @@ it (`TUBULIN_OUT` moves P1's scripts' outputs there, never over `smappy_p1/`).  
 
 The bead model's fit was renamed `cell01_bead.hdf5` after `tubulin_fit.py`.  Each learning is ~20 min on a Mac's
 GPU and its held-out judging as long again; each movie fit 1 -- 3 min.
+
+## The tubulin model refined in situ (docs/4pi.md §34)
+
+Outputs in `smappy_refine/` beside the data (`O` below); P1's bead model with its recipe copied there as
+`bead_4pi.h5`.  The learning on a GPU box (gpuvm), the rest on the Mac.  Fits of in-situ models use the model's own
+maps (`TUBULIN_MAPS=model`): P1's registration file would put the bead fields' back.
+
+    TUBULIN_OUT=$O python benchmarks/fourpi/tubulin_fit.py $O/bead_4pi.h5              # the whole movie, ~7 min
+    TUBULIN_OUT=$O python benchmarks/fourpi/tubulin_fit.py $O/bead_4pi.h5 6000         # the measures' 6000 frames
+    python benchmarks/fourpi/insitu/tubulin_misfit.py $O/cell01_bead_6000.hdf5 - 300   # the figures' misfit
+    python benchmarks/fourpi/insitu/tubulin_channel_drift.py $O/bead_4pi.h5            # each channel's offset
+    python benchmarks/fourpi/insitu/tubulin_share_check.py $O/bead_4pi.h5              # the figure on a simulation
+    python benchmarks/fourpi/insitu/tubulin_refine.py cut $O/cell01_bead.hdf5 $O       # learn.npz, held.npz
+    python benchmarks/fourpi/insitu/tubulin_refine.py learn $O $O/bead_4pi.h5 maps_offset_channels   # GPU, ~1.5 min
+    python benchmarks/fourpi/insitu/tubulin_refine.py judge $O $O/bead_4pi.h5 $O/maps_offset_channels.pkl ...
+    TUBULIN_MAPS=model TUBULIN_OUT=$O python benchmarks/fourpi/tubulin_fit.py $O/maps_offset_channels_4pi.h5 6000
+    TUBULIN_MAPS=model python benchmarks/fourpi/insitu/tubulin_misfit.py $O/cell01_maps_offset_channels_6000.hdf5
+    python benchmarks/fourpi/insitu/tubulin_evaluate.py bead=... maps_offset_channels=...
+    TUBULIN_OUT=$O python benchmarks/fourpi/tubulin_compare.py $O/cell01_bead_6000.hdf5 ...
+    python benchmarks/fourpi/insitu/tubulin_blinks.py bead=$O/cell01_bead_6000.hdf5 ...
+
+The sets are `tubulin_refine.SETS` (``maps``, ``maps_offset``, ``maps_offset_channels``, ``channels_sigma``,
+``all``); a fifth argument to ``learn`` is the cavity tie in rad (0: untied).

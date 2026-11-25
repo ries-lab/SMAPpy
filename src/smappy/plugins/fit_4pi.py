@@ -37,6 +37,18 @@ REGISTRATIONS = (("model", "the model's"), ("beads", "from beads"),
                  ("file", "from a registration file"), ("none", "none"))
 
 
+def maps_learnt_in_situ(calibration) -> bool:
+    """Whether ``calibration`` is an in-situ model whose channel maps were learnt from the movie: its maps are
+    then part of the model -- moved where the molecules put each channel, 0.14 px on the 2017 tubulin's
+    second channel -- and a registration from a file or beads would silently put the bead fields' back
+    (docs/4pi.md §34)."""
+    parameters = getattr(calibration, "parameters", None) or {}
+    if "in-situ" not in str(parameters.get("method", "")):
+        return False
+    free = parameters.get("free")
+    return free is None or any(str(n).endswith(".transform") for n in free)
+
+
 @dataclass
 class FourPiRegistrationSettings:
     """How the channels map onto the first: the maps kept with the model, measured on beads, a
@@ -461,6 +473,16 @@ class FourPiFit(_FitPlugin):
             state.notice = Notice("x and y fitted per channel: the table's dx_nm_ch*, "
                                   "dy_nm_ch* are each channel's offset from where the "
                                   "registration puts it")
+        elif registration.source != "model" and settings.model.calibration:
+            try:
+                learnt = maps_learnt_in_situ(self._calibration(settings))
+            except (OSError, ValueError, KeyError):
+                learnt = False
+            if learnt:
+                label = dict(REGISTRATIONS).get(registration.source, registration.source)
+                state.notice = Notice("this model learnt the channels' maps from the movie in situ, "
+                                      f"and the registration '{label}' is used instead: set it to "
+                                      "'the model's'")
         return state
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:

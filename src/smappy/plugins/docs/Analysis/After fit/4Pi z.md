@@ -221,8 +221,11 @@ The model's split is summed over the same box: each channel's I, A and B,
 evaluated at the molecule's envelope z, centred in a box of the fit's size.
 A molecule at phase $\phi$ puts $I_c + A_c \cos\phi + B_c \sin\phi$ of its
 light into channel $c$.  The figure bins the phase into 24 bins and shows,
-per bin, the median and quartiles of the data's shares and the mean of the
-model's for the same localizations.  Because the model's split depends on z,
+per bin, the median and quartiles of the data's shares and the median of the
+model's for the same localizations -- the same statistic on both sides: a bin
+holds molecules at every z, whose shares swing far near the focus and little
+away from it, so within a bin they are skewed, and their mean swings about a
+fifth less than their median.  Because the model's split depends on z,
 a bin full of molecules at one height (a fiducial bead, a flat structure) can
 bend the model's line; the data should bend with it.  Fits at either end of
 the model's z grid are left out.  The model is the one named here, or the

@@ -38,6 +38,14 @@ def test_a_molecule_with_a_neighbour_in_its_frame_is_not_alone():
     assert alone(x, np.zeros(4), frame, 1000.0).tolist() == [False, False, True, True]
 
 
+def test_a_neighbour_in_the_frame_beside_counts_but_the_molecules_own_blink_going_on_does_not():
+    x = np.array([0.0, 30.0, 600.0, 5000.0, 5020.0])
+    frame = np.array([10, 11, 12, 20, 21])
+    # 0 and 1 are one blink over two frames; 2 blinks beside 1 a frame later; 3 and 4 another blink, far off
+    assert alone(x, np.zeros(5), frame, 1000.0, frames=1, same=100.0).tolist() == [True, False, False, True, True]
+    assert alone(x, np.zeros(5), frame, 1000.0).all()          # in its own frame alone, each is
+
+
 class _Frames(ImageSource):
     def frame(self, index):
         return self.stack[index]
@@ -112,3 +120,41 @@ def test_a_better_held_out_likelihood_with_z_on_other_fringes_or_a_moved_period_
     text = " ".join(warnings_of(tubulin))
     assert "another fringe" in text and "period moved" in text and "no better" not in text
     assert "no better" in " ".join(warnings_of(run(z, 1000.0, 294.2)))
+
+
+def test_spline_4pi_says_when_a_registration_would_replace_the_maps_an_in_situ_model_learnt(tmp_path):
+    from smappy.fourpi import model_calibration, save_fourpi_calibration
+    from smappy.plugins.fit_4pi import (
+        FourPiFit,
+        FourPiFitSettings,
+        FourPiModelSettings,
+        FourPiRegistrationSettings,
+    )
+
+    def notice(parameters, source):
+        cal = model_calibration()
+        cal.parameters = parameters
+        path = tmp_path / f"{len(list(tmp_path.iterdir()))}_4pi.h5"
+        save_fourpi_calibration(path, cal)
+        settings = FourPiFitSettings(model=FourPiModelSettings(
+            calibration=str(path), registration=FourPiRegistrationSettings(source=source, path="maps.json")))
+        state = FourPiFit().describe(None, settings)
+        return state.notice.text if state.notice is not None else ""
+
+    in_situ = {"method": "uiPSF v2 4Pi in-situ model", "free": ["ch1.transform", "fourpi.offset"]}
+    assert "learnt the channels' maps" in notice(in_situ, "file")
+    assert "learnt the channels' maps" in notice({"method": "uiPSF v2 4Pi in-situ model"}, "beads")
+    assert "learnt the channels' maps" not in notice(in_situ, "model")
+    assert "learnt the channels' maps" not in notice({"method": "uiPSF v2 4Pi in-situ model",
+                                                      "free": ["fourpi.coherence"]}, "file")
+    assert "learnt the channels' maps" not in notice({"method": "uiPSF v2 4Pi pupil model"}, "file")
+
+
+def test_learning_the_channels_only_frees_every_maps_the_misalignment_and_the_interference():
+    from smappy.calibrate.fourpi_insitu import OFFSET_LOOSE_NM, learnt
+    shared = dict.fromkeys(["pupil.phase", "psf.sigma", "fourpi.offset", "fourpi.coherence", "fourpi.balance",
+                            "fourpi.delta", "fourpi.share", "ch1.transform", "ch2.transform", "ch3.transform"])
+    assert learnt(FourPiInSituSettings(), shared) == {}
+    out = learnt(FourPiInSituSettings(learn="channels"), shared)
+    assert set(out["free"]) == set(shared) - {"pupil.phase", "psf.sigma"}
+    assert out["offset_sigma_nm"] == OFFSET_LOOSE_NM

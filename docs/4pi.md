@@ -3318,3 +3318,116 @@ contrast grows as (1 + m) / (1 - m)) and one astigmatic counterpart (its first o
 stronger astigmatism trades lateral for z precision); networks trained at one density (25 per 40² px); the
 network A of §30 as it was, not retrained beside the astigmatic ones.  Real data adds what neither simulation has
 (uneven background, the cavity's drift on a real model).
+
+## 34. The tubulin model refined in situ, judged by the figures (2026-11-25)
+
+§32's figures showed P1's bead model (§26: three one-bead scans, 680 nm, 100 nm beads, maps held from the bead
+fields) off on Gabin's tubulin: in *4Pi z*'s *channels* figure channel 3 about 0.02 above the model near ±π, in
+Spline 4Pi's Preview residual lobes in channels 1 and 3.  The task: refine the model in situ until they go, with
+the fewest parameters, and judge it by them.  Scripts in `benchmarks/fourpi/insitu/` (`tubulin_misfit.py`,
+`tubulin_channel_drift.py`, `tubulin_refine.py`, `tubulin_share_check.py`, `tubulin_blinks.py`; the README's
+order), outputs in `smappy_refine/` beside the data.  Cell01 now has 45 000 frames; the molecules come from all
+of them, the measures from the first 6000 as in §26 and §29, everything judged on the even blocks of 500 frames
+and learnt from the odd ones.  Learning ran on gpuvm's H100: 1 -- 1.5 minutes a model.
+
+**Most of the *channels* misfit was the figure's own.**  `fourpi.channel_shares` set the data's *median* share in
+a phase bin against the model's *mean* share of the same localizations.  A bin holds molecules at every z, whose
+shares swing far near the focus and little away from it, so they are skewed within a bin, and their mean swings
+less than their median.  Frames drawn with P1's model itself at the tubulin's brightness and background (5500
+photons, 34 a pixel), fitted by the 4Pi engine (`tubulin_share_check.py`), showed the data swinging 1.20 times the
+model's line and channel 3 +0.011 near ±π, channel 1 −0.010 -- with the model the truth; even noise-free shares
+equal to the model's swung 1.20 times.  The line is now the model's median too: the same simulation's residual
+is below 0.001 in every channel, the swing 1.00 (`test_noise_free_data_equal_to_the_model_lie_on_its_line_...`).
+
+**What is left of the misfit with P1's model** (`tubulin_misfit.py`; on the even blocks, the split in 24 phase
+bins; the residual over the ROIs of 300 even frames, the half with the smaller χ² of those above 2000 photons --
+the dense filaments put neighbours in the rest -- binned in 3 z × 4 phase cells, *systematic* the mean residual
+image's n · mean² − 1 per pixel, 0 for noise):
+- *The split*: rms 0.0038, 0.0024, 0.0035, 0.0034 about the model per channel; channel 3 +0.005 near ±π; channels 1
+  and 3 swing 7 % more than the model, in phase with their own swing (coherence too low); the means within 0.003.
+- *The residual*: χ² per pixel 1.32, 1.29, 1.29, 1.24; systematic 16.5, 15.8, 12.8, 9.1 per pixel.  Channel 2
+  shows one dipole, up and down, in every cell of z and phase: a shift.  Channels 1 and 3 show dipoles that turn
+  with the phase, opposite in the two -- what a lateral misalignment of the arms' foci does to the interference
+  term -- and, beneath, a peak at the centre with a dark ring.
+- Spline 4Pi's *channel drift* (x and y free per channel) puts channel 2 at 0.21 px (27 nm) in y and 0.07 px in x
+  from where the registration has it, steadily over the movie, and channels 3 and 4 wandering by 0.16 -- 0.19 px.
+  P1's maps came from the bead fields Cell06 -- 12 (§26), which the movie's alignment no longer is.
+
+**In situ, a few parameters at a time.**  `tubulin_refine.py`: from P1's model (relearnt with its recipe, §29),
+2935 molecules of the odd blocks, 1950 of the even held out, each alone within 1.5 boxes in its frame and the
+frames beside it (`fourpi_insitu.alone`, new: §29's boxes held their neighbours' light), above the median photons
+(5500); two rounds, tied to the cavity (§29, σ 0.2 rad).  The sets, smallest first; *held out* is the gain in
+nats per held-out molecule over the bead model, first on these isolated molecules, then on §29's dense held-out set
+(1900, deviance 2.8 a pixel); *split rms* the four channels'; *systematic* per pixel per channel:
+
+| learnt | held out: isolated / §29's | split rms | ch 3 near ±π | systematic | uncertain fringes | z env vs phase (nm) | z vs their final; other fringe | env. z vs their final | x, y vs theirs (nm) | blink pairs x, y, z (nm) | period (nm) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| beads (P1) | -- | .0038 .0024 .0035 .0034 | +.0053 | 16.5 15.8 12.8 9.1 | 7.17 % | 44.5 | 4.4 nm; 0.1 % | 26.9 | −1.9, +0.5 | 13.5, 15.3, 7.5 | 294.2 |
+| maps | 5.8 / 3.7 | .0039 .0025 .0035 .0037 | +.0054 | 13.9 6.6 9.7 8.6 | 7.24 % | 44.7 | 4.4 nm; 0.1 % | 27.2 | −4.6, −4.7 | 13.5, 15.3, 7.5 | 294.2 |
+| + misalignment Δ | 6.4 / 2.2 | .0038 .0025 .0033 .0036 | +.0050 | 12.4 6.2 8.9 7.7 | 7.19 % | 44.6 | 4.3 nm; 0.1 % | 26.9 | −4.9, −6.1 | 13.4, 15.2, 7.5 | 295.1 |
+| **+ each channel's interference** | **8.5 / −2.0** | **.0022 .0017 .0025 .0021** | **+.0016** | **10.1 5.4 8.5 4.0** | **6.91 %** | **43.8** | **4.4 nm; 0.0 %** | **26.5** | −5.2, −7.9 | 13.4, 15.3, 7.4 | 294.9 |
+| + blur | 4.9 / −20.8 | .0024 .0017 .0025 .0019 | +.0018 | 6.9 4.2 6.5 3.6 | 6.94 % | 44.2 | 4.4 nm; 0.0 % | 26.6 | −5.8, −8.8 | 13.3, 15.2, 7.5 | 296.5 |
+| + pupils (everything) | 5.2 / −21.6 | .0021 .0017 .0026 .0024 | +.0028 | 4.9 3.9 5.3 2.8 | 6.95 % | 44.7 | 4.5 nm; 0.1 % | 26.9 | −6.1, −0.4 | 13.4, 15.2, 7.5 | 296.4 |
+
+*Each channel's interference* is the coherence, the arms' balance, the phase offset and the share; *blink pairs*
+the robust sd of the differences between one blink's fits in consecutive frames (`tubulin_blinks.py`, both sure of
+their fringe), which needs no reference; the measures as `tubulin_evaluate.py` and `tubulin_compare.py` give them.
+
+- **The maps remove channel 2's dipole** (systematic 15.8 → 6.6): its map moved 0.19 px in y and 0.11 px in x,
+  channel 4's 0.16 px in y, the shift the channel drift measured.  But only once Spline 4Pi reads them: with P1's
+  registration file, as P1's script set it, the fitter put the bead fields' maps back and the maps model gave the
+  bead model's numbers to the last digit.  Spline 4Pi now says so (below).
+- **The misalignment and each channel's interference take most of the rest**: Δ (x, y, z) from 28, 70, 106 to
+  5, 48, 133 nm -- a 23 nm lateral misalignment less, which makes the dipoles that turn with the phase -- the
+  coherence 0.985, 0.874, 0.992, 0.824 → 1.00, 0.93, 1.00, 0.89, the balance 0.44, 0.56, 0.36, 0.52 → 0.50, 0.51,
+  0.45, 0.46, the phase offsets by 0.03 rad, the shares by 0.01.  The split's rms falls by 30 -- 40 %,
+  channel 3 near ±π from 0.005 to 0.0016; the held-out molecules are explained 8.5 nats each better, the most of
+  any set.  The tie does not matter here: untied and at σ 0.7 rad, 8.5 and 8.4 nats, the same values.
+- **The blur and the pupils make the Preview cleaner and the model worse.**  The blur from 84 to 74 nm takes the
+  centre peak and its ring out of channels 1 and 3 (systematic 10.1 → 6.9, 8.5 → 6.5), but explains the held-out
+  isolated molecules worse than the channels alone (4.9 against 8.5 nats; untied 4.8: not the tie) and §29's dense
+  ones 21 nats each worse than the beads, and moves the period 0.8 %.  So a narrower core fits the bright typical
+  molecules of the Preview and not the rest: one Gaussian blur cannot do both.
+- **No set changes what is measured.**  The uncertain fringes 7.2 → 6.9 %, the envelope against the phase 44.5 →
+  43.8 nm, z against the authors' final 4.4 nm and 0.0 -- 0.1 % on another fringe for every model, the envelope
+  against it 26.5 -- 27.2 nm, and a blink's two fits differ by 13.4, 15.3 and 7.5 nm in x, y and z under every
+  model (1.7 -- 1.9 times their errors: the dense filaments' neighbours, not the model).  The learnt maps move x, y
+  against the authors' by 5 -- 8 nm and widen y's spread from 8.4 to 9.3 nm; since the blinks' agreement does not
+  change, that is the maps' new origin against the authors' registration (theirs, like P1's, from the bead
+  fields), not lost precision.
+- **What is left is a model-class limit, two of them.**  Channels 1 and 3 still swing 4 % more than the model
+  (the split's first harmonic 0.0026 against a swing of 0.065), with their coherence at its bound of 1: the model
+  cannot make them interfere more.  The light lost to the interference may be the 100 nm bead's blur of the
+  fringe, which P1 deconvolved with an assumed size (§26: coherences 0.82 -- 0.99 at 100 nm, near the bound
+  already), or the arms' pupils overlapping better on the molecules than on the beads -- the pupils, learnt here,
+  did not find it.  And the core: one blur for every z and brightness (above).  Neither moves z.
+
+**Compared with §29.**  §29's in situ learnt everything from molecules alone in their frame only and gained 93
+nats per held-out molecule on §29's dense set by taking the neighbours' light up as blur and low coherence; it
+measured z worse.  Learnt from isolated molecules, the same parameters lose 21.6 nats there and the channels'
+set 2.0: they no longer describe the neighbours.  The dense set's deviance, 2.8 a pixel against 1.5 for the
+isolated, is the neighbours'.
+
+**The model** is kept beside P1's: `smappy_p1/pupil_680_100_held_insitu_channels_4pi.h5` (in situ, the maps, the
+misalignment and each channel's interference).  It improves both figures and worsens no measure, and it is the
+one to use for this movie with Spline 4Pi's *registration* on *the model's*.  In the PSF window: sample *in situ*,
+mode *4Pi*, *bead model* P1's pupil model (saved with its recipe, `smappy_insitu/pupil_680_100_held_4pi.h5`),
+*localizations* a Spline 4Pi fit of the movie with it, and under *more* *alone within* 1.5 boxes, *alone over* 1
+frame, *learn* *maps, misalignment, channels*.  Run through `run_insitu` on the same molecules (a fifth held out at
+random) it took 86 s on the H100, gained 9.4 nats per held-out molecule, raised no warning and learnt the same
+values (Δ 5, 47, 131 nm; coherence 1.00, 0.93, 1.00, 0.89; the blur held at 84 nm).
+
+**What changed.**
+- `fourpi.channel_shares`: the model's line is its median (above); *4Pi z*'s page says why.
+- *Spline 4Pi* says, as a notice, when its model learnt the channels' maps in situ and the *registration* is
+  from a file or beads, which would replace them (`fit_4pi.maps_learnt_in_situ`).
+- *4Pi in situ* (the PSF window): *alone within* (boxes) and *alone over* (frames beside, the molecule's own blink
+  within a pixel not counted; `fourpi_insitu.alone`), defaults as before, 1 box and 0 frames; *learn*:
+  *everything* (default, §27's set) or *maps, misalignment, channels* (`fourpi_insitu.learnt`, the misalignment
+  loose in x and y too).  uiPSF's `InSituSettings.free` learns only the named shared parameters.
+- The tubulin scripts: `TUBULIN_MAPS=model` fits with the model's maps (`tubulin_common.registration_settings`).
+
+**Not done.**  Whether *maps, misalignment, channels* should be the window's default (here it was better; on
+Nup96 everything was learnt and was fine, §27), and the isolation's; a blur that depends on z or brightness, or a
+coherence that may exceed what the beads' size allows, for the 4 % of modulation and the core; the remaining
+1.7× scatter of a blink's fits, which is the neighbours'; Nup96 with this set.

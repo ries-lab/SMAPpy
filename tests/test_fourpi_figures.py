@@ -141,3 +141,17 @@ def test_a_table_fitted_without_the_channels_photons_gets_no_split_figure(cal, e
         del old.columns[f"roi_photons_ch{c}"]
     result = FourPiZ().run(Context(locs=old), FourPiZSettings(window_frames=100))
     assert [f.name for f in result.figures()] == [""]
+
+
+def test_noise_free_data_equal_to_the_model_lie_on_its_line_though_the_shares_are_skewed_within_a_bin(cal):
+    """The model's line is the median of its shares, as the dots are the data's: a bin holds molecules at
+    every z, whose shares swing far near the focus and little away from it.  The mean against the median drew
+    data equal to the model swinging 1.2 times its line on the 2017 tubulin's model (docs/4pi.md §34)."""
+    rng = np.random.default_rng(0)
+    z, phase = rng.uniform(-500, 500, 20000), rng.uniform(-np.pi, np.pi, 20000)
+    shares = fourpi.model_shares(cal, z, phase, 13)
+    binned = fourpi.channel_shares(shares * 5000.0, phase, model=shares)
+    assert np.nanmax(np.abs(binned["median"] - binned["model"])) < 1e-9
+    means = np.array([shares[np.digitize(phase, np.linspace(-np.pi, np.pi, 25)) - 1 == b].mean(0)
+                      for b in range(24)])
+    assert np.nanmax(np.abs(binned["median"] - means)) > 5e-4          # what the mean would have drawn

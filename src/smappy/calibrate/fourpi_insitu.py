@@ -24,6 +24,16 @@ from ..plugins import param
 
 MODEL_FILTER = "4Pi models (*.h5)"
 LOCS_FILTER = "Localizations (*.hdf5 *.h5)"
+#: what in situ may change: everything §27 learnt, or only the channels' maps, the arms' misalignment and each
+#: channel's interference (coherence, balance, phase offset, share) -- on the 2017 tubulin the smaller set
+#: explained held-out molecules better (8.5 against 5.2 nats each) and removed the misfits the figures show
+#: no worse; the pupils and the blur took up the neighbours' light (docs/4pi.md §34)
+LEARN_CHOICES = (("everything", "everything"), ("channels", "maps, misalignment, channels"))
+#: the shared parameters of *learn*'s "channels", besides every channel's map (``ch<c>.transform``)
+CHANNEL_PARAMETERS = ("fourpi.offset", "fourpi.coherence", "fourpi.balance", "fourpi.delta", "fourpi.share")
+#: the misalignment's prior σ (nm) where it is learnt with the maps: loose in x and y too, which the maps and the
+#: interference's lobes tell apart (§34: Δx, Δy moved from 28, 70 to 5, 48 nm)
+OFFSET_LOOSE_NM = (100.0, 100.0, 100.0)
 
 
 @dataclass
@@ -55,6 +65,12 @@ class FourPiInSituSettings:
                             help="this share of the molecules is not learnt from, and judges the in-situ "
                                  "model against the bead model")
     seed: int = param(0, label="seed", advanced=True, help="which molecules are drawn, where there are more")
+    isolation: float = param(1.0, label="alone within", unit="boxes", min=0.5, advanced=True,
+                             help="a molecule is taken only with no other localization within this many boxes")
+    isolation_frames: int = param(0, label="alone over", unit="frames", min=0, advanced=True,
+                                  help="... in its own frame and this many frames before and after it")
+    learn: str = param("everything", label="learn", choices=LEARN_CHOICES, advanced=True,
+                       help="which of the model's parameters the molecules may change")
     cavity_sigma_rad: float = param(0.2, label="cavity tie", unit="rad", min=0.0, advanced=True,
                                     help="while learning, each molecule's phase is held this near the cavity's "
                                          "phase at its frame; 0: each its own")
@@ -67,7 +83,8 @@ def _column(locs, name):
 def choose(locs, z_range_nm: float, settings: FourPiInSituSettings, frames=None) -> np.ndarray:
     """Indices of the molecules to learn from (module docstring): fitted to a finite position and phase,
     at least *min photons* (the median on 0), inside ±(``z_range_nm`` − *z margin*), with no other
-    localization within a box in the same frame; then *molecules* of them spread over *z bins* equal bins.
+    localization within *alone within* boxes in its frame and *alone over* frames beside it; then *molecules*
+    of them spread over *z bins* equal bins.
     ``frames`` limits them to those frames (a set or a boolean function of the frame numbers)."""
     z = _column(locs, "z_env_nm" if "z_env_nm" in locs else "z_nm")
     x, y = _column(locs, "x_nm"), _column(locs, "y_nm")
@@ -82,7 +99,8 @@ def choose(locs, z_range_nm: float, settings: FourPiInSituSettings, frames=None)
     ok &= np.abs(z) <= limit
     if frames is not None:
         ok &= frames(frame) if callable(frames) else np.isin(frame, list(frames))
-    ok &= alone(x, y, frame, settings.roi_size * _pixel_nm(locs))
+    px = _pixel_nm(locs)
+    ok &= alone(x, y, frame, settings.isolation * settings.roi_size * px, settings.isolation_frames, px)
     index = np.flatnonzero(ok)
     rng = np.random.default_rng(settings.seed)
     if len(index) <= settings.molecules:
@@ -110,19 +128,29 @@ def _pixel_nm(locs) -> float:
     return float(np.mean(px))
 
 
-def alone(x, y, frame, distance) -> np.ndarray:
-    """Which localizations have no other within ``distance`` (the same units) in their frame."""
+def alone(x, y, frame, distance, frames: int = 0, same: float = 0.0) -> np.ndarray:
+    """Which localizations have no other within ``distance`` (the same units) in their frame and the
+    ``frames`` frames before and after it; in those, one closer than ``same`` is the molecule itself, its
+    blink going on.  On a dense sample a box of one frame is not enough: a neighbour a box away still spills
+    into it, and one blinking in the frame before or after is often there in this frame too, too dim to be
+    found (docs/4pi.md §34)."""
     from scipy.spatial import cKDTree
-    x, y, frame = np.asarray(x, float), np.asarray(y, float), np.asarray(frame)
+    x, y, frame = np.asarray(x, float), np.asarray(y, float), np.asarray(frame, np.int64)
     out = np.ones(len(x), bool)
     order = np.argsort(frame, kind="stable")
     bounds = np.flatnonzero(np.diff(frame[order])) + 1
-    for group in np.split(order, bounds):
-        if len(group) < 2:
-            continue
-        tree = cKDTree(np.c_[x[group], y[group]])
-        n = np.array([len(v) for v in tree.query_ball_point(np.c_[x[group], y[group]], distance)])
-        out[group[n > 1]] = False
+    groups = {int(frame[g[0]]): g for g in np.split(order, bounds) if len(g)}
+    trees = {f: cKDTree(np.c_[x[g], y[g]]) for f, g in groups.items()}
+    for f, group in groups.items():
+        points = np.c_[x[group], y[group]]
+        for d in range(-int(frames), int(frames) + 1):
+            tree = trees.get(f + d)
+            if tree is None:
+                continue
+            n = np.array([len(v) for v in tree.query_ball_point(points, distance)])
+            if d:
+                n -= np.array([len(v) for v in tree.query_ball_point(points, same)]) if same > 0 else 0
+            out[group[n > (1 if d == 0 else 0)]] = False
     return out
 
 
@@ -306,6 +334,18 @@ def fit_movie(paths, settings: FourPiInSituSettings, camera, out_path, progress=
     return FourPiFit().run(ctx, fit).locs
 
 
+def learnt(settings: FourPiInSituSettings, shared) -> dict:
+    """uiPSF's `InSituSettings` fields for *learn*: nothing for "everything" (§27's set and priors); for
+    "channels" the maps of every channel ``shared`` (the bead model's values, by name) has, the misalignment and
+    each channel's interference free, the rest held, and the misalignment loose (`OFFSET_LOOSE_NM`)."""
+    if settings.learn == "everything":
+        return {}
+    if settings.learn != "channels":
+        raise ValueError(f"learn: {settings.learn!r} is not one of {[k for k, _ in LEARN_CHOICES]}")
+    maps = tuple(sorted(n for n in shared if n.endswith(".transform")))
+    return {"free": maps + tuple(n for n in CHANNEL_PARAMETERS if n in shared), "offset_sigma_nm": OFFSET_LOOSE_NM}
+
+
 def run_insitu(paths, settings: FourPiInSituSettings, camera, save_to=None, progress=None, cancel=None,
                device=None, molecules: InSituMolecules | None = None, layout=None) -> FourPiInSituRun:
     """In situ from the movie ``paths`` (module docstring; docs/4pi.md §27): the molecules (``molecules``, a
@@ -331,7 +371,8 @@ def run_insitu(paths, settings: FourPiInSituSettings, camera, save_to=None, prog
     sub, sub_start = part(learn)
     fit = fi.learn_insitu(bead_model, bead_shared, sub, sub_start, cal.period_nm,
                           settings=fi.InSituSettings(rounds=settings.rounds,
-                                                     cavity_sigma_rad=settings.cavity_sigma_rad or None),
+                                                     cavity_sigma_rad=settings.cavity_sigma_rad or None,
+                                                     **learnt(settings, bead_shared)),
                           progress=tell, cancel=cancel)
     heldout, held_z = {}, {}
     if len(held) and fit.result is not None and fit.result.stop_reason != "cancelled":

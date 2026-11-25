@@ -818,9 +818,15 @@ def channel_shares(sums, phase, bins: int = 24, min_count: int = 10, model=None)
     """The channels' split of the light against the phase, binned: in each of ``bins`` bins of the phase
     over (-pi, pi], the median share of every channel (each ROI's `roi_photons` over their sum) and its
     quartiles, and -- given ``model``, the predicted shares of the same localizations (`model_shares`) --
-    the model's mean in the same bins.  Localizations whose ROIs hold too little light to split (a sum
+    the model's median in the same bins.  Localizations whose ROIs hold too little light to split (a sum
     at or below zero) are left out.  Returns a dict of centres, median, lower, upper, model (bins, C)
-    and counts."""
+    and counts.
+
+    The model's statistic is the data's, the median: a bin holds molecules at every z, whose swing with
+    the phase is large near the focus and small away from it, so the shares are skewed within a bin and
+    their mean swings less than their median.  The mean set against the data's median made noise-free
+    data equal to the model swing 1.2 times its line on the 2017 tubulin's model, and drew a misfit of
+    0.01 near +-pi that was the figure's own (docs/4pi.md §34)."""
     sums, phase = np.asarray(sums, float), np.asarray(phase, float)
     total = sums.sum(axis=1)
     ok = np.isfinite(phase) & np.isfinite(total) & (total > 0)
@@ -840,7 +846,7 @@ def channel_shares(sums, phase, bins: int = 24, min_count: int = 10, model=None)
         rows = order[starts[b]:starts[b + 1]]
         lower[b], median[b], upper[b] = np.percentile(share[rows], [25, 50, 75], axis=0)
         if m is not None:
-            predicted[b] = np.nanmean(m[rows], axis=0)
+            predicted[b] = np.nanmedian(m[rows], axis=0)
     return {"centres": 0.5 * (edges[1:] + edges[:-1]), "median": median, "lower": lower,
             "upper": upper, "model": predicted if m is not None else None, "counts": counts}
 

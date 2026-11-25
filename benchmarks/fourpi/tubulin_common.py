@@ -27,3 +27,13 @@ def camera():
 def layout():
     from smappy.channels import YALE_4PI
     return YALE_4PI
+
+
+def registration_settings():
+    """Spline 4Pi's *registration*: P1's file (the bead fields Cell06 -- 12), or with ``TUBULIN_MAPS=model`` the
+    maps kept with the model -- an in-situ model's own, learnt from the movie (docs/4pi.md §34), which the file
+    would silently replace."""
+    from smappy.plugins.fit_4pi import FourPiRegistrationSettings
+    if os.environ.get("TUBULIN_MAPS") == "model":
+        return FourPiRegistrationSettings(source="model")
+    return FourPiRegistrationSettings(source="file", path=str(REGISTRATION))

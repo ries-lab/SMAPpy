@@ -10,7 +10,14 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from tubulin_common import CONVERSION, MOVIE, OFFSET, OUT, PIXEL_UM, REGISTRATION
+from tubulin_common import (
+                                    CONVERSION,
+                                    MOVIE,
+                                    OFFSET,
+                                    OUT,
+                                    PIXEL_UM,
+                                    registration_settings,
+)
 
 from smappy.channels import FourPiChannelsSettings
 from smappy.plugins import Context
@@ -19,7 +26,6 @@ from smappy.plugins.fit_4pi import (
                                     FourPiFit,
                                     FourPiFitSettings,
                                     FourPiModelSettings,
-                                    FourPiRegistrationSettings,
 )
 
 model = Path(sys.argv[1])
@@ -31,7 +37,7 @@ settings = FourPiFitSettings(
     camera=CameraSettings(conversion=CONVERSION, offset=OFFSET, pixelsize_um=PIXEL_UM),
     channels=FourPiChannelsSettings(layout="yale"),
     model=FourPiModelSettings(calibration=str(model), channel_drift=drift,
-                              registration=FourPiRegistrationSettings(source="file", path=str(REGISTRATION))),
+                              registration=registration_settings()),
     output=OutputSettings(path=str(OUT / f"cell01_{name}.hdf5")))
 t0 = time.time()
 result = FourPiFit().run(Context(), settings)
