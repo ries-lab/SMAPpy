@@ -30,7 +30,7 @@ from smappy.training import model_file
 SCALING = Scaling(input_offset=100.0, input_scale=100.0, phot_max=10000.0, z_max=1000.0, bg_max=200.0)
 
 
-def _write(path, channels=None):
+def _write(path, channels=None, psf=None):
     s = TrainingSettings()
     s.parts.backbone.settings["features"] = 8
     torch.manual_seed(0)
@@ -41,6 +41,8 @@ def _write(path, channels=None):
             "trained_on": trained_on(sim)}
     if channels:
         meta["channels"] = channels
+    if psf:
+        meta["psf"] = psf
     model_file.write(path, {k: v.numpy() for k, v in model.state_dict().items()}, meta)
     return path
 
@@ -122,3 +124,21 @@ def test_the_automatic_batch_fills_the_memory_it_is_given_and_is_fixed_on_a_cpu(
     # half of 8 GB over 5 000 bytes a pixel of 256 x 256 frames
     assert predict.auto_batch("cuda:0", 256, 256) == int(4e9 // (predict.BYTES_PER_PIXEL * 256 * 256))
     assert predict.auto_batch("cuda:0", 4096, 4096) == 1
+
+
+def test_a_model_trained_on_gaussians_reports_their_width_where_another_reports_z(files):
+    from smappy.plugins.fit_decode import summary_line
+    psf = {"sigma_nm": [110.0, 170.0], "sigma_ref_nm": 140.0, "step_nm": 5.0, "pixel_nm": [100.0, 100.0]}
+    model = _write(files["root"] / "gauss.safetensors", psf=psf)
+    plain = plugins.get("Localize/DECODE")().run(Context(), _settings(files)).locs
+    locs = plugins.get("Localize/DECODE")().run(Context(), _settings(files, **{"model.path": str(model)})).locs
+    assert "z_nm" not in locs and "z_err_nm" not in locs
+    # the same network: its z is the width less the range's middle
+    np.testing.assert_allclose(np.sort(np.asarray(locs["sigma_nm"])), np.sort(np.asarray(plain["z_nm"]) + 140.0),
+                               rtol=1e-5)
+    np.testing.assert_allclose(np.sort(np.asarray(locs["sigma_err_nm"])), np.sort(np.asarray(plain["z_err_nm"])),
+                               rtol=1e-5)
+    meta = read_model(model)
+    assert "Gaussians 110 -- 170 nm wide" in summary_line(meta)
+    rows = dict(model_summary(meta))
+    assert rows["width (sigma)"] == "110 to 170 nm" and "z" not in rows and rows["PSF calibration"] == "none: Gaussians"

@@ -237,3 +237,32 @@ typed move or none, and after a move pair nothing.
   uneven background.  The model training now (R_biplane_early_bg1000) answers that for this movie.
 - **DECODE-Plex training** (porting its Lightning loop): not planned; *DECODE-Plex-like* trains the
   architecture here.
+
+
+## 6. Gaussians without beads (Jonas, 2026-11-25)
+
+2D data rarely have a bead calibration.  The training window's *PSF* is a calibration file (a bead
+average or a pupil model, whichever it holds) or *Gaussian*: the network learns pixel-integrated
+Gaussians over the widths the data's spots have, the range from a Gaussian 2D prefit
+(`gaussian_psf.sigma_range`: 2nd -- 98th percentile of the fully-on fits, widened by 15 %, never
+narrower than +-15 % of the median) or typed.
+
+* **A spline, not a renderer.**  The Gaussians are a `SplineCalibration` (`calibrate/gaussian_psf.py`),
+  so the job folder, the sha256 check, both renderers and both networks take them unchanged -- SMAP's
+  ``make2Dastig`` did the same.  The spline is exact on pixel centres and follows a 1.2-pixel Gaussian
+  to 1 % of its peak between them: the format's limit, a bead spline's too.
+* **The third axis is the width, not z.**  A Gaussian widens alike above and below focus, so a z axis
+  would be ambiguous and the mixture would smear or split it.  Plane ``k`` has ``sigma = sigma_ref + z``
+  (``sigma_ref`` the range's middle); the network's z is that offset; the fitter writes ``sigma_nm`` and
+  ``sigma_err_nm`` in place of ``z_nm`` and ``z_err_nm`` (`as_widths`), from the model file's ``psf``.
+* **Photons are Gaussian 2D's**: each plane sums to one.
+
+* **Two channels** (the form's *channels*, the fitters' part): Gaussian 2D 2C prefits
+  (`prefit_two.prefit_two_gaussian`), its *channel registration* from this movie (measured once, then
+  the blocks fitted on it) or a file.  The calibration is two Gaussian splines on one width axis, the
+  second ``ratio`` times as wide at every z (`gaussian_psf.dual_calibration`; the ratio the median of the
+  molecules', `width_ratio`), both on one grid, with that registration; always two colours.
+
+To do: the benchmark: simulated with a real (vector pupil) PSF, Gaussian-trained netfit against Gaussian 2D MLE
+and against netfit trained on the true PSF, densities 50 and 15 per 40 x 40 px, Jaccard, lateral
+RMSE / CRLB, photon bias; then real 2D data.

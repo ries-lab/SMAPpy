@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.run_prefit_two, smappy.netfit.prefit_two.prefit_two, smappy.netfit.prefit_two.dye_shares, smappy.netfit.prefit_two.kind_of, smappy.netfit.job.two_channel_settings, smappy.gui.train_window.two_channel_problem, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.gui.train_window.simulated_frames_two, smappy.gui.train_window.channels_side_by_side, smappy.netfit.bounds.drawn_crlb, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample, smappy.gui.train_window.psf_kind, smappy.gui.train_window.model_choices, smappy.gui.train_window.on_time_range, smappy.gui.train_window.prefit_blocks, smappy.gui.train_window.frames_read, smappy.gui.train_window.run_prefit_4pi, smappy.gui.train_window.fourpi_params, smappy.gui.train_window.fourpi_job_calibration, smappy.gui.train_window.simulated_frames_4pi, smappy.gui.train_window.fourpi_side_by_side, smappy.netfit.fourpi.prefit, smappy.netfit.fourpi.cavity_motion, smappy.netfit.fourpi.settings_from_prefit]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.run_prefit_two, smappy.netfit.prefit_two.prefit_two, smappy.netfit.prefit_two.dye_shares, smappy.netfit.prefit_two.kind_of, smappy.netfit.job.two_channel_settings, smappy.gui.train_window.two_channel_problem, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.gui.train_window.simulated_frames_two, smappy.gui.train_window.channels_side_by_side, smappy.netfit.bounds.drawn_crlb, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample, smappy.gui.train_window.psf_kind, smappy.gui.train_window.model_choices, smappy.gui.train_window.on_time_range, smappy.gui.train_window.prefit_blocks, smappy.gui.train_window.frames_read, smappy.gui.train_window.run_prefit_4pi, smappy.gui.train_window.fourpi_params, smappy.gui.train_window.fourpi_job_calibration, smappy.gui.train_window.simulated_frames_4pi, smappy.gui.train_window.fourpi_side_by_side, smappy.netfit.fourpi.prefit, smappy.netfit.fourpi.cavity_motion, smappy.netfit.fourpi.settings_from_prefit, smappy.gui.train_window.run_prefit_gaussian, smappy.gui.train_window.gaussian_drawn, smappy.calibrate.gaussian_psf.gaussian_calibration, smappy.calibrate.gaussian_psf.sigma_range, smappy.calibrate.gaussian_psf.as_widths, smappy.calibrate.gaussian_psf.dual_calibration, smappy.calibrate.gaussian_psf.width_ratio, smappy.netfit.prefit_two.prefit_two_gaussian, smappy.gui.train_window.run_prefit_gaussian_two, smappy.gui.train_window.gaussian_transform]
 ---
 
 ## What it does
@@ -21,9 +21,16 @@ is.  For one channel: *DECODE, optimised*, SMAPpy's own, by default, and
 colours): *DECODE, transformed channels* by default, and
 *DECODE-Plex-like*.  For a 4Pi model (the four phase channels of a 4Pi
 microscope): *DECODE, 4Pi*, which also gives each molecule's interference
-phase.  All are trained from the same estimates, in the same kind of job
+phase.  With *PSF* *Gaussian* there is no file: the *channels* part
+decides, one channel or two.  All are trained from the same estimates, in the same kind of job
 folder, and fitted by the same [DECODE](plugin:Localize/DECODE) fitter; what
 differs is the network and how it learns (the fitter's page compares them).
+
+**Without beads.**  2D data rarely have a bead calibration.  With *PSF* set
+to *Gaussian*, the network learns Gaussian spots instead, as wide as the
+data's spots are: the PSF that [Gaussian 2D](plugin:Localize/Gaussian 2D)
+fits.  It then reports each spot's width, `sigma_nm`, where a network
+trained on a calibration reports z.
 
 A training takes hours, on a GPU; a computer without one trains on a
 workstation, over ssh.  Nothing is copied there but a folder of a few files:
@@ -47,6 +54,10 @@ their pixel values: the spots should look as bright and as wide, the
 background as grey and as grainy.  It is drawn again a moment after an
 estimate is changed.  *Write job* writes the job folder beside the movie, in
 `<movie>_decode/`, and lists it on the left.
+
+**With Gaussians**, the prefit is [Gaussian 2D](plugin:Localize/Gaussian 2D)
+with a free width, and the estimates hold the range of widths the training
+draws (*width* ... *to*) in place of z.
 
 **Train.**  Choose a job in the list, where it trains (*run on*), and
 *Start*.  The
@@ -226,6 +237,47 @@ not chosen here but under *Prepare*.
 ### Remove from list
 Takes the job off the list; its folder stays where it is, and a training
 running goes on.
+
+### PSF
+What the network learns the PSF from.  *PSF calibration* is a calibration
+file: a bead average or a pupil model, whichever the file holds (the window
+reads which, and offers *in the sample* for a pupil model).  *Gaussian* needs
+no file: the training draws Gaussian spots over a range of widths, for 2D
+data taken without beads.
+
+A molecule out of focus is wider, and a Gaussian widens alike above and below
+focus, so z would be ambiguous: a network cannot learn whether a wide spot
+was above or below.  The Gaussians are therefore drawn by their width, not
+by z, and the network reports the width.  Each spot is the Gaussian
+integrated over the pixels and holds all its photons, so the network's
+photons are Gaussian 2D's.  Behind the scenes the Gaussians are written as an
+ordinary spline file, `calibration.h5` in the job folder, with the width
+where a bead spline has z; both networks train on it unchanged.
+
+What a Gaussian leaves out is the real PSF's rings and tails.  The positions
+suffer least from that, because the error is symmetric; at high photon counts
+some of the tails go into the background, and the photons come out a little
+low, as they do with Gaussian 2D.
+
+### channels
+With *PSF* *Gaussian*: the chip read whole, or a split camera's *two
+channels*, with the same fields as the fitters' *channels* part.  For two
+channels the prefit is [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C), and
+the training draws each molecule in both channels as two colours.  Both
+channels' spots come from one width axis: a molecule out of focus is wider in
+both.  The second channel's spot is a fixed number of times as wide as the
+main channel's.  That ratio is the median of the molecules' width ratios
+(the estimates' *second channel's width*).  The job's calibration is then a
+two-channel file of two Gaussian splines, with the registration below; it
+trains *DECODE, transformed channels* or *DECODE-Plex-like*, which read two
+channels.
+
+### channel registration
+With two Gaussian channels: where the second channel lies on the chip, as
+Gaussian 2D 2C finds it.  *from this movie* measures it once before the
+prefit, from Gaussian fits of frames spread over the movie, as the fitter
+does.  *file* reads one from *Calibrate transform* or an earlier run.  The
+fitter later moves it, typed or measured, as for a bead calibration.
 
 ### Prepare
 The movie, its PSF calibration, the density to train at, the *model* to train
@@ -442,6 +494,18 @@ the calibration's.  Type a wider range for a model to serve other samples.  Poor
 fits are mostly molecules far out of focus.  With them included, a live
 cell's range reached the calibration's limits, and the network was
 trained for z where there were hardly any molecules.
+
+With *PSF* *Gaussian* the widths take the place of z: *width* ... *to*, the
+Gaussian's sigma in the sample, in nm.  The prefit's range is the 2nd to
+98th percentile of the widths Gaussian 2D fitted in frames a molecule was
+fully on in, widened by 15 % of that range on either side, and never
+narrower than 15 % below and above their median, so that a model serves spots
+a little sharper or wider than one movie's.  The partly-on first and last
+frames of a blink are left out because they are dim and their widths
+scatter.  Type the range instead where no prefit was run, or for a model to
+serve other data: about 1 to 1.6 pixels' worth at focus, more for a thick
+sample.  With two Gaussian channels *width* is the main channel's, and
+*second channel's width* how many times as wide the other channel's spot is.
 
 ### Advanced: method.yaml
 DECODE's whole parameter file, as it will be written, to edit by hand.  Used

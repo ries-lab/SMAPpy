@@ -41,7 +41,9 @@ class Prefit:
         b = {k: np.asarray(self.blinks[k]) for k in ("photons", "n_in_group", "frame") if k in self.blinks}
         if "z_nm" in self.blinks:
             b["z_nm"] = np.asarray(self.blinks["z_nm"])
-        names = ("photons", "background", "group_id", "frame", "n_in_group", "logl_rel", "z_nm", "iterations")
+        # sigma_nm: a Gaussian 2D prefit's widths, which a Gaussian PSF's training draws (`calibrate.gaussian_psf`)
+        names = ("photons", "background", "group_id", "frame", "n_in_group", "logl_rel", "z_nm", "iterations",
+                 "sigma_nm")
         return b, {k: np.asarray(self.localizations[k]) for k in names if k in self.localizations}
 
 

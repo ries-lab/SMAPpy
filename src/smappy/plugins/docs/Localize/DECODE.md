@@ -450,6 +450,13 @@ and `z_err_mix_nm`: the uncertainty its probability maps imply, kept beside
 the reported one for comparison.  The reported `x_err_nm` and so on are the
 ones to use.
 
+A model trained on Gaussians (the training window's *PSF* *Gaussian*, for 2D
+data without beads) has no z: it writes `sigma_nm`, each spot's width (the
+Gaussian's sigma, in the sample) as [Gaussian 2D](plugin:Localize/Gaussian 2D)
+writes it, and its uncertainty `sigma_err_nm`, in place of `z_nm` and
+`z_err_nm`.  A wide spot is out of focus, or two molecules on top of each
+other; a bound on `sigma_nm` cuts both away.
+
 No `logl` or `iterations` is written: nothing is fitted.  The file records
 the model, the device, the threshold, whether the frames were flipped and the
 model's own metadata.

@@ -213,6 +213,12 @@ def _calibration(path, em: bool):
     return cal, matched_to_em(cal, em)
 
 
+def _gaussian(path):
+    """The Gaussian record of a calibration file, one channel's or two (`gaussian_psf.record_of_file`), or None."""
+    from ..calibrate.gaussian_psf import record_of_file
+    return record_of_file(path)
+
+
 def _sha256(path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -430,7 +436,9 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
                  **({"field": drawer.field.to_dict()} if drawer.field is not None else {}),
                  # the calibration varies over the chip, whether or not the training drew it so
                  # (`fit_decode.field_warnings`)
-                 **({"calibration_field": True} if drawer.calibration_field else {})}
+                 **({"calibration_field": True} if drawer.calibration_field else {}),
+                 # trained on Gaussians, its z their width (`calibrate.gaussian_psf`): the fitter reports sigma_nm
+                 **({"psf": _gaussian(settings.calibration)} if _gaussian(settings.calibration) else {})}
     # on a CPU the thread would only take cores from the network
     feed = _Prefetch(lambda: drawer(batch_size, g), device) \
         if sch.get("prefetch", True) and str(device).startswith("cuda") else None

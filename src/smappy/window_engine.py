@@ -18,6 +18,9 @@ numbers is an end and a new start.
 what is left are the last ``window`` frames, which need frames not yet written.  `end` is the
 source's end (`drive` calls it), and localizes them.
 
+A model trained on Gaussians (`calibrate.gaussian_psf`) has the spot's width where another has z:
+its ``z_nm`` is written as ``sigma_nm`` and its error as ``sigma_err_nm``.
+
 The positions go on the camera chip, the acquisition's ROI added, and into nm as every fitter's
 do (`locs.to_nm`).  The photons are ``(counts - offset) * e/ADU / EM gain``, without the
 excess-noise factor a likelihood fit divides by: the network was trained on frames simulated
@@ -110,7 +113,9 @@ class WindowEngine:
         if not n:
             return None
         ox, oy = self.camera.roi_offset
-        cols = dict(cols)
+        # a model trained on Gaussians reports their width where another reports z (`calibrate.gaussian_psf`)
+        from .calibrate.gaussian_psf import as_widths
+        cols = dict(as_widths(cols, (getattr(self.predictor, "metadata", None) or {}).get("psf")))
         cols["x_pix"] = np.asarray(cols["x_pix"], np.float64) + ox
         cols["y_pix"] = np.asarray(cols["y_pix"], np.float64) + oy
         for name, values in cols.items():

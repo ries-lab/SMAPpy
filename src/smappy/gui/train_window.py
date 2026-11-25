@@ -33,7 +33,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHea
 from ..calibrate.depth import SampleSettings
 from ..plugins import param
 from .widgets import note_style
-from ..plugins.fit import TIFF_FILTER, CameraSettings, ChannelMoveSettings, move_shown
+from ..plugins.fit import (TIFF_FILTER, CameraSettings, ChannelMoveSettings, ChannelsSettings, ChannelTransformSettings,
+                           move_shown)
 from ..plugins.fit_decode import MODEL_FILTER
 from ..channels import FourPiChannelsSettings
 from ..plugins.fit_4pi import FourPiRegistrationSettings
@@ -64,6 +65,9 @@ FRAMES_AUTO = {1: 7, 2: 3, 4: 3}
 ON_TIME_RANGE = {1: (1.0, 3.0), 2: (1.0, 1.0), 4: (1.0, 3.0)}
 #: a 4Pi prefit fits this many frames at least: *4Pi z* follows the cavity's phase over windows of a quarter of them
 FOURPI_PREFIT_FRAMES = 2000
+#: what the network learns the PSF from: a calibration file (a bead average or a pupil model, whichever it
+#: holds), or Gaussians as wide as the data's spots, for 2D data without beads (`calibrate.gaussian_psf`)
+PSFS = (("calibration", "PSF calibration"), ("gaussian", "Gaussian"))
 CALIBRATION_FILTER = "Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat);;All files (*)"
 #: the densities offered, molecules per um^2 in a frame -- the sample's, whatever the camera's pixel
 #: (plex-plan §16, Jonas 2026-11-22): HD robust from sparse data to dense, UHD for dense data, any other
@@ -202,6 +206,9 @@ class PrepareSettings:
     """What a job is prepared from: the movie, its camera, the calibration, the density to train at."""
     movie: str = param("", label="movie", kind="open_file", file_filter=TIFF_FILTER,
                        help="the acquisition the model is for: the prefit reads blocks of it, the job lands beside it")
+    psf: str = param("calibration", label="PSF", choices=PSFS,
+                     help="what the network learns the PSF from: a calibration file, or Gaussians as wide as the "
+                          "data's spots (2D data without beads; the network reports each spot's width, not z)")
     calibration: str = param("", label="PSF calibration", kind="open_file", file_filter=CALIBRATION_FILTER,
                              help="the bead calibration the network learns the PSF from, the one the data were taken with")
     # a pupil (Zernike) calibration only: drawn for the focus in the sample, as Spline 3D's *focus* draws it
@@ -220,6 +227,11 @@ class PrepareSettings:
     uneven_background: str = param("auto", label="uneven backgrounds", choices=UNEVEN,
                                    help="half the training's movies drawn with a background that varies over the "
                                         "field, as a cell's does; auto: on for two channels, off for one")
+    # a Gaussian PSF's channels: the chip whole, or a split camera's two, as the fitters' *channels* part
+    # asks; for two, Gaussian 2D 2C's *channel registration* -- this movie's map or a file's
+    channels: ChannelsSettings = param(default_factory=ChannelsSettings, label="channels", collapsed=True)
+    registration: ChannelTransformSettings = param(default_factory=ChannelTransformSettings,
+                                                   label="channel registration", collapsed=True)
     two_channels: TwoChannelPrepare = param(default_factory=TwoChannelPrepare, label="two channels",
                                             collapsed=True)
     fourpi: FourPiPrepare = param(default_factory=FourPiPrepare, label="4Pi", collapsed=True)
@@ -278,6 +290,13 @@ class EstimateSettings:
     background_max: float = param(100.0, label="to", min=0.0, beside=True, help="the most")
     z_min_nm: float = param(-800.0, label="z", unit="nm", help="the lowest z drawn")
     z_max_nm: float = param(800.0, label="to", beside=True, help="the highest z drawn")
+    # a Gaussian PSF's widths in the sample, in place of z (`calibrate.gaussian_psf`)
+    sigma_min_nm: float = param(100.0, label="width", unit="nm", min=1.0,
+                                help="the narrowest Gaussian drawn (its sigma, in the sample)")
+    sigma_max_nm: float = param(180.0, label="to", min=1.0, beside=True, help="the widest")
+    sigma_ratio: float = param(1.0, label="second channel's width", unit="x the main's", min=0.2, max=5.0,
+                               help="two Gaussian channels: how much wider the second channel's spot is "
+                                    "than the main channel's, at every width")
     on_time_frames: float = param(2.0, label="on-time", unit="frames", min=1.0,
                                   help="frames a blink is seen in, on average")
     # SMAPpy's networks draw each sample's mean on-time over a range, one network for every dye in it
@@ -332,6 +351,9 @@ class Prepared:
     two: object = None                                       # netfit.prefit_two.TwoChannels: a two-channel calibration's
     #: a 4Pi model's: `netfit.fourpi.prefit`'s estimates and the movie's channel layout with its maps (``layout``)
     fourpi: Optional[dict] = None
+    sigma_nm: Optional[tuple] = None                         # a Gaussian PSF's widths, nm: the calibration drawn from them
+    ratio: float = 1.0                                       # two Gaussian channels: the second's width over the main's
+    transform: object = None                                 # two Gaussian channels: Gaussian 2D 2C's registration
 def _source(path):
     from ..plugins.fit import SourceSettings, _open
     return _open(SourceSettings(path=str(path)), watch=False)
@@ -418,12 +440,16 @@ def two_channel_problem(settings: PrepareSettings) -> str:
     """Why these settings cannot train on their calibration's channels, or "": a two-channel calibration
     trains SMAPpy's network alone, and *DECODE-Plex-like* needs one."""
     from ..netfit.prefit_two import is_dual
-    dual = bool(settings.calibration) and is_dual(settings.calibration)
+    if gaussian(settings):
+        dual = settings.channels.two
+    else:
+        dual = bool(settings.calibration) and is_dual(settings.calibration)
     if dual and settings.model not in TWO_CHANNEL_MODELS:
         return ("a two-channel calibration trains DECODE, transformed channels or DECODE-Plex-like: "
                 "choose one as model")
     if not dual and settings.model == "plexlike":
-        return "DECODE-Plex-like reads two channels: choose a two-channel calibration, or another model"
+        return ("DECODE-Plex-like reads two channels: choose two channels" if gaussian(settings)
+                else "DECODE-Plex-like reads two channels: choose a two-channel calibration, or another model")
     return ""
 
 
@@ -488,6 +514,8 @@ def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared
 
     from ..netfit.prefit_two import is_dual
     from ..training.prefit import prefit
+    if gaussian(settings):
+        return run_prefit_gaussian(settings, report)
     if not settings.movie or not settings.calibration:
         raise ValueError("choose the movie and its bead calibration")
     problem = two_channel_problem(settings)
@@ -613,17 +641,179 @@ def fourpi_params(prepared: Prepared, est, seed: int = 0, on_time: Optional[tupl
     return t.to_dict()
 
 
+def gaussian(settings: PrepareSettings) -> bool:
+    """The network learns Gaussians, not a calibration's PSF."""
+    return settings.psf == "gaussian"
+
+
+def run_prefit_gaussian(settings: PrepareSettings, report=lambda entry: None) -> Prepared:
+    """Gaussian 2D, its width free, on blocks of the movie (`training.prefit` without a calibration), DECODE's
+    estimates of them, and the widths to draw from the fully-on fits (`gaussian_psf.sigma_range`)."""
+    from decode_smlm import prefit as estimates_of
+
+    from ..calibrate import gaussian_psf
+    from ..training.prefit import prefit
+    if not settings.movie:
+        raise ValueError("choose the movie")
+    problem = two_channel_problem(settings)
+    if problem:
+        raise ValueError(problem)
+    if settings.channels.two:
+        return run_prefit_gaussian_two(settings, report)
+    source = _source(settings.movie)
+    camera = settings.camera.resolve(source)
+    blocks, block_frames = prefit_blocks(settings)
+    report({"message": f"fitting {blocks} blocks of {block_frames} frames with Gaussian 2D"})
+
+    def read(a, b):
+        return np.concatenate([block for _, block in source.frames(chunk=b - a, start=a, stop=b)])
+    while True:
+        found = prefit(read, source.n_frames, camera, None, n_blocks=blocks, block_frames=block_frames)
+        blinks, locs = found.columns()
+        est = estimates_of.estimates(blinks, locs, area_px=found.area_px, n_frames=found.n_frames,
+                                     max_iterations=found.max_iterations)
+        more = min(blocks * GROW, source.n_frames // block_frames)
+        if est.n_fully_on >= estimates_of.FULLY_ON_ENOUGH or more <= blocks:
+            break
+        report({"message": f"{est.n_fully_on} frames a molecule was fully on in, too few: "
+                           f"fitting {more} blocks of {block_frames} frames"})
+        blocks = more
+    # the widths of the frames a molecule was on in throughout: a blink's first and last frames, partly on,
+    # are dim, and their widths scatter; where too few, every fit the likelihood keeps
+    keep = estimates_of.fully_on(locs["group_id"], locs["frame"], locs["n_in_group"], locs.get("logl_rel"),
+                                 iterations=locs.get("iterations"), max_iterations=found.max_iterations)
+    if keep.sum() < estimates_of.FULLY_ON_ENOUGH and locs.get("logl_rel") is not None:
+        keep = estimates_of.logl_kept(locs["logl_rel"])
+    sigma = gaussian_psf.sigma_range(locs["sigma_nm"], keep)
+    prepared = Prepared(settings, camera, est, blinks, locs, source.n_frames,
+                        sample=read(0, min(4, source.n_frames)), sigma_nm=sigma)
+    prepared, est = gaussian_drawn(prepared, est)
+    return replace(prepared, estimates=est)
+
+
+def _width_mask(locs, max_iterations):
+    """The fits whose widths the range is taken from: those of frames a molecule was on in throughout -- a
+    blink's first and last frames, partly on, are dim, and their widths scatter -- or, where too few, every fit
+    the likelihood keeps."""
+    from decode_smlm import prefit as estimates_of
+    keep = estimates_of.fully_on(locs["group_id"], locs["frame"], locs["n_in_group"], locs.get("logl_rel"),
+                                 iterations=locs.get("iterations"), max_iterations=max_iterations)
+    if keep.sum() < estimates_of.FULLY_ON_ENOUGH and locs.get("logl_rel") is not None:
+        keep = estimates_of.logl_kept(locs["logl_rel"])
+    return keep
+
+
+def run_prefit_gaussian_two(settings: PrepareSettings, report=lambda entry: None) -> Prepared:
+    """Gaussian 2D 2C on blocks of the movie (`netfit.prefit_two.prefit_two_gaussian`): the estimates of its
+    molecules' total photons, the two channels as `run_prefit_two` finds them, the main channel's widths and
+    the second's ratio to them, and the registration the fits were paired with."""
+    from decode_smlm import prefit as estimates_of
+
+    from ..calibrate import gaussian_psf
+    from ..netfit.prefit_two import prefit_two_gaussian
+    source = _source(settings.movie)
+    camera = settings.camera.resolve(source)
+    n_blocks, block_frames = prefit_blocks(settings)
+    report({"message": f"fitting {n_blocks} blocks of {block_frames} frames with Gaussian 2D 2C"})
+    found, two, g = prefit_two_gaussian(settings.movie, settings.camera, settings.channels, settings.registration,
+                                        n_blocks=n_blocks, block_frames=block_frames,
+                                        n_frames=source.n_frames, report=lambda text: report({"message": text}))
+    blinks, locs = found.columns()
+    est = estimates_of.estimates(blinks, locs, area_px=found.area_px, n_frames=found.n_frames,
+                                 max_iterations=found.max_iterations)
+    keep = _width_mask(locs, found.max_iterations)
+    sigma = gaussian_psf.sigma_range(g.sigma_ch0, keep)
+    ratio = gaussian_psf.width_ratio(g.sigma_ch0, g.sigma_ch1, keep)
+
+    def read(a, b):
+        return np.concatenate([block for _, block in source.frames(chunk=b - a, start=a, stop=b)])
+    prepared = Prepared(settings, camera, est, blinks, locs, source.n_frames, sample=read(0, min(4, source.n_frames)),
+                        two=two, sigma_nm=sigma, ratio=ratio, transform=g.transform)
+    prepared, est = gaussian_drawn(prepared, est)
+    return replace(prepared, estimates=est)
+
+
+def gaussian_transform(settings: PrepareSettings, report=lambda entry: None):
+    """Two Gaussian channels without a prefit: the registration as Gaussian 2D 2C has it, measured from the
+    movie or read from the file (`netfit.prefit_two.prefit_two_gaussian`'s first step)."""
+    if settings.registration.map != "movie":
+        return settings.registration.load()
+    from ..plugins import Context
+    from ..plugins.fit import DualGaussianFit, DualGaussianFitSettings, DualGaussianModelSettings, SourceSettings
+    report({"message": "Gaussian 2D 2C: measuring the channels' registration on this movie"})
+    fit = DualGaussianFitSettings(source=SourceSettings(path=str(settings.movie)), camera=settings.camera,
+                                  channels=settings.channels,
+                                  model=DualGaussianModelSettings(registration=settings.registration))
+    return DualGaussianFit().measured(Context(), fit).transform
+
+
+#: the two-channel Gaussian calibrations written for the jobs and the window's frames, by what they were drawn
+#: from: a job copies the file (`training.job.write`), and the figure is drawn again with every estimate
+_DUAL_FILES: dict = {}
+
+
+def _dual_file(sigma, ratio, px, transform, em_on) -> str:
+    """The file of `gaussian_psf.dual_calibration` for these, written once into a temporary folder."""
+    import tempfile
+
+    from ..calibrate import gaussian_psf
+    from ..calibrate.dual import save_dual_color_calibration
+    key = (tuple(round(v, 3) for v in sigma), round(ratio, 4), tuple(float(v) for v in np.ravel(px)),
+           np.asarray(transform.transformation, float).round(6).tobytes(), bool(em_on))
+    path = _DUAL_FILES.get(key)
+    if path is None or not Path(path).exists():
+        path = str(Path(tempfile.mkdtemp(prefix="smappy_gauss2c_")) / "gaussian_2c.h5")
+        save_dual_color_calibration(path, gaussian_psf.dual_calibration(sigma, ratio, px, transform, em_on=em_on))
+        _DUAL_FILES[key] = path
+    return path
+
+
+def gaussian_drawn(prepared: Prepared, est, sigma_nm=None, ratio=None) -> tuple:
+    """``(prepared, est)`` of a Gaussian PSF: the calibration drawn for the widths ``sigma_nm`` (else the
+    prepared ones), and the estimates' z the widths' range about its middle, which is the network's z
+    (`gaussian_psf`).  Anything else as it is."""
+    if not gaussian(prepared.settings):
+        return prepared, est
+    from ..calibrate import gaussian_psf
+    sigma = tuple(float(v) for v in (sigma_nm or prepared.sigma_nm))
+    ratio = float(prepared.ratio if ratio is None else ratio)
+    px = prepared.camera.pixelsize_nm_or_default[0]
+    em = bool(prepared.camera.is_em)
+    cal = gaussian_psf.gaussian_calibration(sigma, px, em_on=em)
+    rec = gaussian_psf.record(cal)
+    z = tuple(float(v) for v in gaussian_psf.z_of(rec["sigma_nm"], rec))
+    if prepared.two is not None:
+        # two channels: a file, as a bead calibration's two channels are handed on (`run_prefit_two`)
+        cal = _dual_file(sigma, ratio, px, prepared.transform, em)
+    return replace(prepared, calibration=cal, sigma_nm=sigma, ratio=ratio), replace(est, z_nm=z)
+
+
+def edited(prepared: Prepared, s: EstimateSettings) -> tuple:
+    """``(prepared, est)`` as the estimates' form has them: `with_settings`, and a Gaussian PSF drawn for
+    its widths."""
+    est = with_settings(prepared.estimates, s)
+    return gaussian_drawn(prepared, est, (s.sigma_min_nm, s.sigma_max_nm), s.sigma_ratio)
+
+
 def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared:
     """What a job is written from when no prefit was run: the estimates as typed, the camera from
     the movie (its file and the microscope part), a few of its frames for the figure."""
     from decode_smlm.prefit import Estimates, lifetime
-    if not settings.movie or not settings.calibration:
+    if not settings.movie or not (settings.calibration or gaussian(settings)):
         raise ValueError("choose the movie and its bead calibration")
     from ..netfit.prefit_two import TwoChannels, is_dual, kind_of
     source = _source(settings.movie)
     camera = settings.camera.resolve(source)
-    two = fourpi = None
-    if psf_kind(settings.calibration)[0] == 4:
+    two = fourpi = transform = None
+    if gaussian(settings):
+        cal, focus = None, None
+        if settings.channels.two:
+            problem = two_channel_problem(settings)
+            if problem:
+                raise ValueError(problem)
+            two = TwoChannels("colour", [(s.background_min, s.background_max)] * 2, 0)
+            transform = gaussian_transform(settings)
+    elif psf_kind(settings.calibration)[0] == 4:
         # typed by hand: every channel the background typed, the cavity's drift the training's default
         from ..netfit.settings import ChannelSettings
         d = ChannelSettings()
@@ -652,8 +842,9 @@ def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared
     n = min(4, source.n_frames)
     sample = np.concatenate([block for _, block in source.frames(chunk=n, start=0, stop=n)])
     empty = {"photons": np.zeros(0), "background": np.zeros(0)}
-    return Prepared(settings, camera, est, empty, empty, source.n_frames, sample=sample, calibration=cal,
-                    focus=focus, two=two, fourpi=fourpi)
+    prepared = Prepared(settings, camera, est, empty, empty, source.n_frames, sample=sample, calibration=cal,
+                        focus=focus, two=two, fourpi=fourpi, transform=transform)
+    return edited(prepared, s)[0] if gaussian(settings) else prepared
 
 
 def by_hand(prepared: Optional[Prepared]) -> bool:
@@ -675,7 +866,8 @@ def on_time_range(est, channels: int = 1) -> tuple:
     return min(lo, measured), max(hi, measured)
 
 
-def estimate_settings(est, channels: int = 1) -> EstimateSettings:
+def estimate_settings(est, channels: int = 1, sigma_nm=None, ratio: float = 1.0) -> EstimateSettings:
+    """The form's values of the estimates, and of a Gaussian PSF's widths ``sigma_nm`` and second channel's ``ratio``."""
     default = EstimateSettings()
     lo, hi = on_time_range(est, channels)
     drawn = est.photons_range or (default.photons_min, default.photons_max)
@@ -683,7 +875,10 @@ def estimate_settings(est, channels: int = 1) -> EstimateSettings:
                             photons_min=float(drawn[0]), photons_max=float(drawn[1]),
                             background_min=float(est.background[0]), background_max=float(est.background[1]),
                             z_min_nm=float(est.z_nm[0]), z_max_nm=float(est.z_nm[1]),
-                            on_time_frames=float(est.on_time_frames), on_time_min=lo, on_time_max=hi)
+                            on_time_frames=float(est.on_time_frames), on_time_min=lo, on_time_max=hi,
+                            sigma_min_nm=float(sigma_nm[0]) if sigma_nm else default.sigma_min_nm,
+                            sigma_max_nm=float(sigma_nm[1]) if sigma_nm else default.sigma_max_nm,
+                            sigma_ratio=float(ratio))
 
 
 def with_settings(est, s: EstimateSettings):
@@ -751,10 +946,10 @@ def job_method(folder) -> Optional[str]:
 
 
 def default_folder(movie, calibration) -> Path:
-    """``<movie>_decode/<calibration>_<date>``: beside the data the model is for."""
+    """``<movie>_decode/<calibration>_<date>``: beside the data the model is for; ``gaussian`` for a Gaussian PSF."""
     movie = Path(movie)
     stem = movie.name.split(".")[0]
-    cal = Path(calibration).name.split(".")[0]
+    cal = Path(calibration).name.split(".")[0] if calibration else "gaussian"
     day = _dt.date.today().isoformat()
     base = movie.parent / f"{stem}_decode" / f"{cal}_{day}"
     folder, k = base, 2
@@ -778,11 +973,16 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
     else:
         params = params or method_params(prepared, est)
     cam = prepared.camera
+    if gaussian(s):
+        from ..calibrate import gaussian_psf
+        # no file: the Gaussian's record names what was drawn (the model file's ``psf``)
+        calibration = {"source": None, "psf": gaussian_psf.record(prepared.calibration)}
+    else:
+        calibration = {"source": str(Path(s.calibration).resolve()), **calibration_conditions(s.calibration),
+                       **sample_record(prepared.calibration)}
     job = jobfile.Job.new(method=method, seed=seed, device="auto", ranges=simulation(est, training_density(s, prepared.camera)),
                           camera={**camera_section(cam), "name": cam.camera_name},
-                          calibration={"source": str(Path(s.calibration).resolve()),
-                                       **calibration_conditions(s.calibration),
-                                       **sample_record(prepared.calibration)},
+                          calibration=calibration,
                           data={"path": str(Path(s.movie).resolve()), "frames": prepared.n_frames,
                                 "camera_roi": None if cam.roi is None else list(cam.roi),
                                 "em_on": bool(cam.is_em)})
@@ -797,7 +997,7 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
         cal = fourpi_job_calibration(s.calibration, prepared.fourpi["layout"], Path(folder))
         job.data["fourpi_layout"] = prepared.fourpi["layout"]
     elif prepared.two is not None:              # a two-channel calibration, copied as it is
-        cal = s.calibration
+        cal = prepared.calibration
     else:
         cal = prepared.calibration if prepared.calibration is not None else load_spline_calibration(s.calibration)
     out = jobfile.write(folder, job, params, cal)
@@ -1425,8 +1625,11 @@ class TrainWindow(QWidget):
             values["start_from"] = model.path          # the fitter's model: a warm start for these data
             try:                                       # and its calibration, where it is still there
                 from ..training import model_file
-                source = model_file.read_metadata(model.path).get("calibration_source")
-                if source and Path(source).is_file():
+                meta = model_file.read_metadata(model.path)
+                source = meta.get("calibration_source")
+                if meta.get("psf"):                    # trained on Gaussians: so again
+                    values["psf"] = "gaussian"
+                elif source and Path(source).is_file():
                     values["calibration"] = source
             except Exception:
                 pass
@@ -1623,12 +1826,22 @@ class TrainWindow(QWidget):
         if not decode:
             self.yaml_button.setChecked(False)
         self.yaml_button.setEnabled(decode)
-        # DECODE draws the photons normal (mean, spread), SMAPpy's networks uniformly (a range); DECODE
-        # one on-time, SMAPpy's networks each sample's over a range
+        self._estimates_shown()
+
+    def _estimates_shown(self) -> None:
+        """DECODE draws the photons normal (mean, spread), SMAPpy's networks uniformly (a range); DECODE one
+        on-time, SMAPpy's networks each sample's over a range; a Gaussian PSF its widths in place of z."""
+        try:
+            s = self.prepare_form.value()
+        except ValueError:
+            return
+        decode, g = s.model == "decode", gaussian(s)
         self.estimate_form.set_shown({"photons": decode, "photons_sd": decode,
                                       "photons_min": not decode, "photons_max": not decode,
                                       "on_time_frames": decode, "on_time_min": not decode,
-                                      "on_time_max": not decode})
+                                      "on_time_max": not decode,
+                                      "z_min_nm": not g, "z_max_nm": not g,
+                                      "sigma_min_nm": g, "sigma_max_nm": g, "sigma_ratio": g and s.channels.two})
 
     def _prepare_changed(self) -> None:
         """*in the sample* only for a pupil (Zernike) calibration (`calibrate.depth.sample_state`), its rows as
@@ -1636,16 +1849,34 @@ class TrainWindow(QWidget):
         from ..calibrate.depth import sample_state
         try:
             s = self.prepare_form.value()
-            shown, active, hints = sample_state(self._calibration(s.calibration), s.sample)
+            g = gaussian(s)
+            shown, active, hints = sample_state(None if g else self._calibration(s.calibration), s.sample)
             shown["sample"] = shown.pop("sample.focus")
             from ..netfit.prefit_two import is_dual
-            dual = bool(s.calibration) and is_dual(s.calibration)
-            shown["two_channels"] = dual
-            shown["fourpi"] = psf_kind(s.calibration)[0] == 4
+            shown["calibration"] = not g
+            two = s.channels.two if g else bool(s.calibration) and is_dual(s.calibration)
+            dual = two
+            shown["two_channels"] = two
+            # a Gaussian's channels as the fitters ask them; two colours always, the registration Gaussian 2D 2C's
+            shown["channels"] = g
+            shown["registration"] = g and s.channels.two
+            shown["two_channels.kind"] = not g
+            from ..calibrate.dual import arrangement_shown
+            shown.update({f"channels.{k}": v and s.channels.two for k, v in arrangement_shown(s.channels).items()})
+            from ..plugins.fit import MOVE_FIELDS, registration_shown
+            reg = registration_shown(s.registration)
+            shown.update({k.replace("model.registration.", "registration."): v and s.channels.two
+                          for k, v in reg.items()})
+            # the prefit pairs with the map alone; a drift over time is the fitter's to follow
+            shown.update({f"registration.{f}": False for f in MOVE_FIELDS})
+            shown["fourpi"] = not g and psf_kind(s.calibration)[0] == 4
             shown["density_manual"] = s.density == "manual"
             shown["uneven_background"] = s.model != "decode"
             shown["frames_read"] = shown["samples_m"] = s.model != "decode"
-            channels, line = psf_kind(s.calibration, self._calibration(s.calibration) if not dual else None)
+            if g:      # Gaussians: the channels the *channels* part reads, no file to name
+                channels, line = (2 if s.channels.two else 1), ""
+            else:
+                channels, line = psf_kind(s.calibration, self._calibration(s.calibration) if not dual else None)
             self.psf_note.setText(line)
             self.psf_note.setVisible(bool(line))
             # the models this calibration trains; the choice moves to the first where it is not one
@@ -1658,9 +1889,12 @@ class TrainWindow(QWidget):
                     self.prepare_form.set_values({"model": choices[0][0]})
                 self.prepare_form.set_choices({"model": list(choices)})
             shown.update(move_shown("two_channels.move", s.two_channels.move))
+            if g:
+                shown["two_channels.move"] = False          # the registration's own move, Gaussian 2D 2C's
             self.prepare_form.set_shown(shown)
             self.prepare_form.set_active(active)
             self.prepare_form.set_hints(hints)
+            self._estimates_shown()
         except Exception as error:
             print(f"DECODE training: {error}")
 
@@ -1688,7 +1922,7 @@ class TrainWindow(QWidget):
         import yaml
         self.prepared = prepared
         est = prepared.estimates
-        self.estimate_form.set(estimate_settings(est, channels_of(prepared)))
+        self.estimate_form.set(estimate_settings(est, channels_of(prepared), prepared.sigma_nm, prepared.ratio))
         self.estimate_form.setEnabled(True)
         self.yaml_edit.setPlainText(yaml.safe_dump(method_params(prepared, est), sort_keys=False))
         self.write_button.setEnabled(True)
@@ -1696,7 +1930,10 @@ class TrainWindow(QWidget):
         self.draw_prepared()
         self.simulate()
         from ..calibrate.depth import describe_sample
-        where = describe_sample(prepared.calibration) if prepared.two is None and prepared.fourpi is None else ""
+        where = (describe_sample(prepared.calibration)
+                 if prepared.two is None and prepared.fourpi is None and not gaussian(prepared.settings) else "")
+        if prepared.sigma_nm:
+            where = f"Gaussians {prepared.sigma_nm[0]:.0f} -- {prepared.sigma_nm[1]:.0f} nm wide"
         two = prepared.two
         said = "" if two is None else (
             f"; {'two colours' if two.kind == 'colour' else 'two focal planes'}, the brighter half "
@@ -1716,8 +1953,8 @@ class TrainWindow(QWidget):
     def draw_prepared(self) -> None:
         from decode_smlm.figures import draw_frames, draw_ranges, photons
         self.prepare_figure.clear()
-        est = with_settings(self.prepared.estimates, self.estimate_form.value())
-        params = method_params(self.prepared, est)
+        prepared, est = edited(self.prepared, self.estimate_form.value())
+        params = method_params(prepared, est)
         frames = self.simulated is not None and self.prepared.sample is not None
         axes = self.prepare_figure.subplots(2 if frames else 1, 3, squeeze=False)
         draw_ranges(axes[0], self.prepared.localizations, params)
@@ -1746,21 +1983,21 @@ class TrainWindow(QWidget):
             if self.busy:
                 self._simulate_later.start()
                 return
-            est = with_settings(self.prepared.estimates, self.estimate_form.value())
-            if self.prepared.fourpi is not None:
-                params = fourpi_params(self.prepared, est, on_time=self.on_time())
-                layout = self.prepared.fourpi["layout"]
-                calibration = self.prepared.settings.calibration
+            prepared, est = edited(self.prepared, self.estimate_form.value())
+            if prepared.fourpi is not None:
+                params = fourpi_params(prepared, est, on_time=self.on_time())
+                layout = prepared.fourpi["layout"]
+                calibration = prepared.settings.calibration
                 self._work("simulated", lambda report: simulated_frames_4pi(params, calibration, layout))
                 return
-            if self.prepared.two is not None:
+            if prepared.two is not None:
                 # DECODE's simulation draws one channel: a two-channel job's frames drawn as netfit draws them
-                params = netfit_params(self.prepared, est, on_time=self.on_time())
-                calibration = self.prepared.settings.calibration
+                params = netfit_params(prepared, est, on_time=self.on_time())
+                calibration = prepared.calibration
                 self._work("simulated", lambda report: simulated_frames_two(params, calibration))
                 return
-            params = method_params(self.prepared, est)
-            calibration = self.prepared.calibration or self.prepared.settings.calibration
+            params = method_params(prepared, est)
+            calibration = prepared.calibration or prepared.settings.calibration
             self._work("simulated", lambda report: simulated_frames(params, calibration))
         except Exception as error:
             print(f"DECODE training: {error}")
@@ -1779,7 +2016,7 @@ class TrainWindow(QWidget):
             except Exception as error:
                 self.status_bar.showMessage(f"{type(error).__name__}: {error}")
                 return
-        est = with_settings(self.prepared.estimates, self.estimate_form.value())
+        self.prepared, est = edited(self.prepared, self.estimate_form.value())
         params = method_params(self.prepared, est)
         if method_of(self.prepared.settings) == NETFIT:
             params = None                       # the optimised model's settings (`write_job`); no method.yaml
@@ -1791,8 +2028,8 @@ class TrainWindow(QWidget):
                 return
         s = self.prepared.settings
         try:
-            folder = write_job(self.prepared, est, default_folder(s.movie, s.calibration), params,
-                               on_time=self.on_time())
+            folder = write_job(self.prepared, est, default_folder(s.movie, None if gaussian(s) else s.calibration),
+                               params, on_time=self.on_time())
         except Exception as error:
             self.status_bar.showMessage(f"{type(error).__name__}: {error}")
             return
@@ -1933,7 +2170,7 @@ def channels_side_by_side(prepared, frame_photons) -> np.ndarray:
     side by side: what `simulated_frames_two` draws, from the data."""
     from ..calibrate.dual import load_dual_color_calibration
     from ..netfit.channels import TwoChannels
-    cal = load_dual_color_calibration(prepared.settings.calibration)
+    cal = load_dual_color_calibration(prepared.calibration)
     main = netfit_main(prepared)
     frame = np.asarray(frame_photons, float)
     two = TwoChannels.from_calibration(cal, prepared.camera.roi_offset, main=main, shape=frame.shape)

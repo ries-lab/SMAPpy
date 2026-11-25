@@ -299,7 +299,10 @@ def torch_here() -> bool:
 def summary_line(meta: dict) -> str:
     """The model in a line: what it was trained for and how far."""
     bits = []
-    if meta.get("calibration_source"):
+    if meta.get("psf"):
+        from ..calibrate.gaussian_psf import describe as gaussians
+        bits.append(f"trained on {gaussians(meta['psf'])}")
+    elif meta.get("calibration_source"):
         bits.append(f"trained on {Path(meta['calibration_source']).name}")
     scope = meta.get("calibration_microscope") or {}
     if scope.get("name"):
@@ -342,27 +345,31 @@ def model_summary(meta: dict, data: Optional[dict] = None) -> list:
     span = drew.get("photons_range")
     bg = drew.get("background")
     z = drew.get("z_nm")
+    psf = meta.get("psf")
     scope = meta.get("calibration_microscope")
     test = meta.get("test_metrics") or {}
     window = meta.get("channels_in") or meta.get("window")
     rows += [
         ("model", f"{describe(meta)} ({meta.get('method')})"),
-        ("PSF calibration", Path(meta["calibration_source"]).name if meta.get("calibration_source") else "not recorded"),
-        ("calibration file", meta.get("calibration_source") or ""),
+        ("PSF calibration", "none: Gaussians" if psf else
+         Path(meta["calibration_source"]).name if meta.get("calibration_source") else "not recorded"),
+        ("calibration file", "" if psf else meta.get("calibration_source") or ""),
         ("microscope", one_line(scope) if scope else "not recorded"),
         ("EM gain of the beads", {True: "on", False: "off"}.get(meta.get("calibration_em_on"), "not recorded")),
-        ("PSF drawn for", _drawn_for(meta)),
+        ("PSF drawn for", "" if psf else _drawn_for(meta)),
         ("photons a frame", f"{mu[0]:,.0f} \u00b1 {mu[1]:,.0f}" if mu
          else f"{span[0]:,.0f} to {span[1]:,.0f}" if span else ""),
         ("background", f"{bg[0]:g} to {bg[1]:g} photons a pixel" if bg else ""),
-        ("z", f"{z[0]:g} to {z[1]:g} nm" if z else ""),
+        ("width (sigma)", f"{psf['sigma_nm'][0]:.0f} to {psf['sigma_nm'][1]:.0f} nm" if psf else ""),
+        ("z", f"{z[0]:g} to {z[1]:g} nm" if z and not psf else ""),
         ("density", str(meta.get("density") or "")),
         ("frame window", str(window or "")),
         ("trained", f"epoch {meta['epoch']} of at most {meta.get('epochs')}" if meta.get("epoch") is not None else ""),
         ("started from", str(meta.get("base_model") or "scratch")),
         ("test set", ", ".join(f"{k} {v:.3g}" for k, v in (("Jaccard", test.get("jaccard")),
                                                           ("lateral RMSE (nm)", test.get("rmse_lat_nm")),
-                                                          ("axial RMSE (nm)", test.get("rmse_ax_nm")))
+                                                          ("width RMSE (nm)" if psf else "axial RMSE (nm)",
+                                                           test.get("rmse_ax_nm")))
                                if v is not None)),
         ("job written", str(meta.get("created") or "")),
         ("trained by", str(meta.get("trained_by") or f"SMAPpy {meta.get('smappy_version') or ''}".strip())),

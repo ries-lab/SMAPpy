@@ -167,6 +167,81 @@ def prefit_two(movie, camera_settings, calibration, kind: str = "auto", moved=(0
                   max_iterations=int(iterations)), two
 
 
+@dataclass
+class GaussianTwo:
+    """What a Gaussian two-channel prefit found beside `TwoChannels`: the registration Gaussian 2D 2C fitted
+    with (a `ChannelTransform`), and each fit's widths in the two channels."""
+    transform: object
+    sigma_ch0: np.ndarray = field(repr=False, default=None)
+    sigma_ch1: np.ndarray = field(repr=False, default=None)
+
+
+def prefit_two_gaussian(movie, camera_settings, channels, registration, *, n_blocks: int = 10,
+                        block_frames: int = 50, n_frames: int | None = None, report=lambda text: None):
+    """Gaussian 2D 2C on blocks of ``movie``, for a training on Gaussians (`calibrate.gaussian_psf`): ``(prefit,
+    two, gaussian)``, as `prefit_two` gives them (two colours: the widths say nothing of a biplane), and
+    `GaussianTwo`.  ``channels`` is the fitters' *channels* part (the split), ``registration`` Gaussian 2D 2C's
+    *channel registration*: from this movie -- measured once, before the blocks, on frames spread over it --
+    or a file."""
+    import tempfile
+    from dataclasses import replace
+
+    from ..calibrate.transform import save_channel_transform
+    from ..group import GroupSettings, group
+    from ..locs import Localizations
+    from ..plugins import Context
+    from ..plugins.fit import (DualGaussianFit, DualGaussianFitSettings, DualGaussianModelSettings, FinishSettings,
+                               OutputSettings, SourceSettings)
+    from ..training.prefit import GROUP_DX_NM, Prefit, blocks
+
+    def settings_for(source, reg):
+        return DualGaussianFitSettings(source=source, camera=camera_settings, channels=channels,
+                                       model=DualGaussianModelSettings(registration=reg),
+                                       output=OutputSettings(save=False),
+                                       finish=FinishSettings(assign_colors=False, fourpi_z=False))
+    fitter = DualGaussianFit()
+    if registration.map == "movie":
+        report("Gaussian 2D 2C: measuring the channels' registration on this movie")
+        found = fitter.measured(Context(), settings_for(SourceSettings(path=str(movie)), registration))
+        transform = found.transform
+    else:
+        transform = registration.load()
+    if n_frames is None:
+        n_frames = _source(movie).n_frames
+    locs, grouped, iterations = Localizations(), Localizations(), 0
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "prefit_2ct.h5"
+        save_channel_transform(path, transform)
+        fixed = replace(registration, map="file", path=str(path))
+        for start, stop in blocks(n_frames, n_blocks, block_frames):
+            report(f"Gaussian 2D 2C: frames {start} to {stop}")
+            settings = settings_for(SourceSettings(path=str(movie), start=start, stop=stop), fixed)
+            iterations = settings.fit.iterations
+            block = fitter.run(Context(), settings).locs
+            if block is None or len(block) == 0:
+                continue
+            block.columns["photons"] = np.asarray(block["photons_ch0"]) + np.asarray(block["photons_ch1"])
+            block.columns["background"] = np.asarray(block["background_ch0"])
+            blinks, _ = group(block, GroupSettings(dx=GROUP_DX_NM))
+            if len(locs):
+                block.columns["group_id"] = np.asarray(block["group_id"]) + int(np.asarray(locs["group_id"]).max())
+            locs.extend(block)
+            grouped.extend(blinks)
+    if len(locs) == 0:
+        raise ValueError("the prefit found no molecules: check the camera, the frames and the channels")
+    from decode_smlm.prefit import background_range
+    bg = [tuple(float(v) for v in background_range(np.asarray(locs[f"background_ch{c}"]))) for c in (0, 1)]
+    p0, p1 = np.asarray(locs["photons_ch0"], float), np.asarray(locs["photons_ch1"], float)
+    shares = p1 / np.maximum(p0 + p1, 1e-9)
+    two = TwoChannels("colour", bg, brighter(p0, p1), shares, dye_shares(shares))
+    rows, cols = _frame_shape(movie)
+    fitted = sum(b - a for a, b in blocks(n_frames, n_blocks, block_frames))
+    prefit = Prefit(localizations=locs, blinks=grouped, area_px=float(rows * cols / 2), n_frames=int(fitted),
+                    max_iterations=int(iterations))
+    return prefit, two, GaussianTwo(transform, np.asarray(locs["sigma_nm_ch0"], float),
+                                    np.asarray(locs["sigma_nm_ch1"], float))
+
+
 def _source(movie):
     from ..plugins.fit import SourceSettings, _open
     return _open(SourceSettings(path=str(movie)), watch=False)

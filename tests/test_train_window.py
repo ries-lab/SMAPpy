@@ -447,3 +447,139 @@ def test_trying_a_model_that_finds_more_molecules_than_it_was_trained_at_advises
     assert crowding_warning(0.8, 1.0) == "" and crowding_warning(float("nan"), 1.0) == ""
     assert "UHD" in crowding_warning(1.9, 1.0)
     assert "at least 4.0" in crowding_warning(4.0, 2.5)
+
+
+@pytest.fixture
+def gaussian_movie(tmp_path):
+    """300 frames of 48 x 48 with Gaussian spots 120 to 160 nm wide on 100 nm pixels: 2D data, no beads."""
+    from smappy.simulate.camera import _camera, _draw
+    rng = np.random.default_rng(3)
+    n_frames = 300
+    frame = np.repeat(np.arange(n_frames), rng.poisson(4, n_frames))
+    xy = rng.uniform(6, 42, (len(frame), 2))
+    s = rng.uniform(1.2, 1.6, len(frame)) * np.sqrt(2)
+    image = np.full((n_frames, 48, 48), 20.0)
+    _draw(image, frame, xy, rng.normal(3000, 500, len(frame)), s, s)
+    frames = np.stack([_camera(image[k], np.random.default_rng(k), 0.5, 100.0, 1.5) for k in range(n_frames)])
+    path = tmp_path / "data" / "flat.tif"
+    path.parent.mkdir()
+    tifffile.imwrite(path, frames, photometric="minisblack")
+    return path
+
+
+@pytest.mark.parametrize("model", ["optimised", "decode"])
+def test_a_gaussian_job_draws_the_widths_the_prefit_found_with_its_z_the_width(gaussian_movie, model):
+    from smappy.calibrate import gaussian_psf
+    from smappy.gui.train_window import default_folder, edited, estimate_settings, run_prefit, write_job
+    from smappy.io.calibration import load_spline_calibration
+    from smappy.training import job as jobfile
+    settings = _prepare_settings(gaussian_movie, "", model=model)
+    settings.psf = "gaussian"
+    prepared = run_prefit(settings)
+    lo, hi = prepared.sigma_nm
+    assert 90 < lo < 125 and 155 < hi < 200                     # the drawn 120 -- 160 nm, widened
+    assert prepared.estimates.z_nm == pytest.approx(((lo - hi) / 2, (hi - lo) / 2))
+    form = estimate_settings(prepared.estimates, sigma_nm=prepared.sigma_nm)
+    form.sigma_min_nm, form.sigma_max_nm = 110.0, 170.0              # as typed in the form
+    prepared, est = edited(prepared, form)
+    folder = write_job(prepared, est, default_folder(gaussian_movie, None))
+    assert folder.name.startswith("gaussian_")
+    job, params = jobfile.read(folder)
+    assert job.calibration["psf"]["sigma_nm"] == [110.0, 170.0] and job.calibration["source"] is None
+    cal = load_spline_calibration(folder / job.calibration["file"])
+    assert gaussian_psf.record(cal)["sigma_ref_nm"] == 140.0
+    z = params["simulation"]["z_nm"] if model == "optimised" else params["Simulation"]["emitter_extent"][2]
+    assert list(z) == [-30, 30]
+    assert jobfile.check(folder) == []
+
+
+def test_without_a_prefit_a_gaussian_job_takes_the_widths_typed_in(gaussian_movie):
+    from smappy.gui.train_window import EstimateSettings, edited, prepared_by_hand
+    settings = _prepare_settings(gaussian_movie, "", model="optimised")
+    settings.psf = "gaussian"
+    typed = EstimateSettings(sigma_min_nm=100.0, sigma_max_nm=200.0)
+    prepared = prepared_by_hand(settings, typed)
+    assert prepared.sigma_nm == (100.0, 200.0) and prepared.calibration.parameters["gaussian"]["sigma_ref_nm"] == 150.0
+    _, est = edited(prepared, typed)
+    assert est.z_nm == (-50.0, 50.0)
+
+
+def test_two_gaussian_channels_take_gaussian_2d_2cs_registration_and_the_second_channels_width_ratio(tmp_path):
+    """A split movie, its halves 1.1 and 1.4 pixels wide: the prefit measures the map from the movie, the
+    job's calibration is two Gaussian channels on one width axis with that map, the second 1.27 times as wide."""
+    from test_dual_gauss_fit import movie as split_movie
+    from test_dual_gauss_fit import transform as split_transform
+
+    from smappy.calibrate import gaussian_psf
+    from smappy.calibrate.dual import load_dual_color_calibration
+    from smappy.gui.train_window import PrepareSettings, run_prefit, write_job
+    from smappy.netfit.prefit_two import is_dual
+    from smappy.plugins.fit import CameraSettings, ChannelTransformSettings
+    from smappy.training import job as jobfile
+    truth = split_transform()
+    stack, _ = split_movie(300, np.random.default_rng(4), truth)
+    path = tmp_path / "split.tif"
+    tifffile.imwrite(path, (stack + 100).astype(np.uint16), photometric="minisblack")
+    s = PrepareSettings(movie=str(path), psf="gaussian", density="HD", prefit_frames=150, model="optimised",
+                        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1, em_on=False),
+                        registration=ChannelTransformSettings(map="movie", calibrate_frames=200, calibrate_skip=0))
+    s.channels.split, s.channels.layout, s.channels.main_channel = "two channels", "up-down", "upper"
+    prepared = run_prefit(s)
+    assert prepared.two is not None and prepared.two.kind == "colour"
+    assert prepared.ratio == pytest.approx(1.4 / 1.1, rel=0.03)
+    lo, hi = prepared.sigma_nm
+    assert lo < 110 < hi
+    m = np.asarray(prepared.transform.transformation, float)
+    np.testing.assert_allclose(m / m[2, 2], truth.transformation, atol=0.05)     # projective: up to a scale
+    folder = write_job(prepared, prepared.estimates, tmp_path / "job")
+    job, params = jobfile.read(folder)
+    assert params["channels"] is not None and jobfile.check(folder) == []
+    cal_path = folder / job.calibration["file"]
+    assert is_dual(cal_path)
+    cal = load_dual_color_calibration(cal_path)
+    rec = gaussian_psf.record(cal)
+    assert rec["ratio"] == pytest.approx(prepared.ratio) and gaussian_psf.record_of_file(cal_path) == rec
+    # one z, both channels: the second's plane as wide as the main's times the ratio
+    k = cal.main.psf.shape[0] // 2
+    width = lambda p: np.sqrt((p.sum(0) * (np.arange(p.shape[1]) - (p.shape[1] - 1) / 2) ** 2).sum() - 1 / 12)
+    assert width(cal.secondary.psf[k]) / width(cal.main.psf[k]) == pytest.approx(prepared.ratio, rel=2e-3)
+    np.testing.assert_allclose(cal.transformation, prepared.transform.transformation)
+
+
+def test_two_gaussian_channels_train_only_networks_that_read_two(gaussian_movie):
+    from smappy.gui.train_window import two_channel_problem
+    s = _prepare_settings(gaussian_movie, "", model="decode")
+    s.psf = "gaussian"
+    s.channels.split = "two channels"
+    assert "two-channel" in two_channel_problem(s) or "choose one as model" in two_channel_problem(s)
+    s.channels.split, s.model = "whole chip", "plexlike"
+    assert "choose two channels" in two_channel_problem(s)
+
+
+def test_the_form_shows_a_gaussians_widths_and_for_two_channels_their_registration(tmp_path, capsys):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui import train_window
+    w = train_window.TrainWindow()
+    shown, est_shown = {}, {}
+    w.prepare_form.set_shown = shown.update
+    w.estimate_form.set_shown = est_shown.update
+    try:
+        w.prepare_form.set_values({"psf": "gaussian"})
+        w._prepare_changed()
+        assert shown["calibration"] is False and shown["channels"] is True and shown["registration"] is False
+        assert est_shown["sigma_min_nm"] and not est_shown["z_min_nm"] and not est_shown["sigma_ratio"]
+        w.prepare_form.set_values({"channels.split": "two channels"})
+        w._prepare_changed()
+        assert shown["registration"] is True and shown["two_channels"] is True
+        assert shown["two_channels.kind"] is False and shown["two_channels.move"] is False
+        assert shown["registration.path"] is False and shown["registration.over_time"] is False
+        assert est_shown["sigma_ratio"]
+        w.prepare_form.set_values({"psf": "calibration"})
+        w._prepare_changed()
+        assert shown["calibration"] is True and shown["channels"] is False and est_shown["z_min_nm"]
+        assert "DECODE training:" not in capsys.readouterr().out          # the handler said no error
+    finally:
+        w.close()
+        w.timer.stop()
