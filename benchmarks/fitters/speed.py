@@ -373,9 +373,10 @@ def _steps(finder, photons_of, raw, threads, repeat, counts=None):
         t1 = time.perf_counter()
         filtered = finder.filter(photons, n_threads=threads)
         t2 = time.perf_counter()
-        candidates = find_candidates(filtered, finder.cutoff, n_threads=threads, affine=affine)
+        candidates = find_candidates(filtered, finder.cutoff, n_threads=threads,
+                                     **({} if affine is None else {"affine": affine}))
         t3 = time.perf_counter()
-        cut_rois(photons, candidates, ROI, counts=counts)
+        cut_rois(photons, candidates, ROI, **({} if counts is None else {"counts": counts}))
         t4 = time.perf_counter()
         for k, a, b in (("photons", t0, t1), ("filter", t1, t2), ("maxima+cutoff", t2, t3), ("boxes", t3, t4)):
             times[k].append((b - a) / n * 1e3)
