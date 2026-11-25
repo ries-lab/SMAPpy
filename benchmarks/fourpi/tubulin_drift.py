@@ -16,8 +16,9 @@ A ``TABLE`` instead is one of ours (`tubulin_fit.py`), after *4Pi z*.
 
 ``what``: any of ``comet`` (from the sure fringes or all, z on the lateral 2000-frame knots or, the default for
 a 4Pi table, on 250), ``rcc`` (one window per 3000
-frames, the authors' cycle) and ``check`` (the cavity *4Pi z* follows in 250-frame windows against COMET's
-fine z).  Outputs go to ``smappy_p6/`` beside the data.
+frames, the authors' cycle), ``check`` (the cavity *4Pi z* follows in 100-frame windows against COMET's
+fine z) and ``heldout`` (z knots judged by the structure: the drift from one half of the field, the z sharpness
+of the other).  Outputs go to ``smappy_p6/`` beside the data.
 """
 import sys
 import time
@@ -141,7 +142,7 @@ def main():
         from smappy.drift import DriftSettings, estimate_cost, estimate_drift
         # the whole hour's 4.5 M blinks within COMET's 300 nm are 19 billion pairs, 457 GB: RCC first over
         # one window per cycle, then COMET within 50 nm, on a random 30 % of the localizations (about 3 GB)
-        part = np.random.default_rng(0).random(len(locs)) < (0.3 if len(locs) > 2e6 else 1.0)
+        part = np.random.default_rng(0).random(len(locs)) < (0.3 if len(locs) > 4e6 else 1.0)
         fine = dict(split_half=False, rcc_prepass=True, rcc_prepass_windows=max(n_frames // 3000, 2),
                     max_drift_nm=50.0, initial_sigma_nm=None)
         for label, select, settings in (
@@ -166,6 +167,8 @@ def main():
                 pickle.dump(d.to_dict(), f)
     if "check" in what:
         check(locs, sure, n_frames, log)
+    if "heldout" in what:
+        heldout(locs, log)
     log.close()
 
 
@@ -183,9 +186,9 @@ def check(locs, sure, n_frames, log, short=100, knots=250):
     frames = np.arange(n_frames)
     long, fine = (cavity_phase(*args, window_frames=w) for w in (1000, short))
     missed = (np.interp(frames, fine.centres, fine.phase0) - np.interp(frames, long.centres, long.phase0)) / k
-    part = np.random.default_rng(0).random(len(locs)) < (0.3 if len(locs) > 2e6 else 1.0)
+    part = np.random.default_rng(0).random(len(locs)) < (0.3 if len(locs) > 4e6 else 1.0)
     common = dict(split_half=False, max_drift_nm=50.0)
-    if len(locs) > 2e6:
+    if len(locs) > 4e6:
         common.update(rcc_prepass=True, rcc_prepass_windows=max(n_frames // 3000, 2))
     coarse = estimate_drift(locs, DriftSettings(**common, z_knot_frames=2000), select=part)
     finer = estimate_drift(locs, DriftSettings(**common, z_knot_frames=knots), select=part)
@@ -202,6 +205,38 @@ def check(locs, sure, n_frames, log, short=100, knots=250):
     print(text)
     log.write(text + "\n")
     np.savez(OUT / "check.npz", missed=missed, smooth=smooth, seen=seen)
+
+
+
+def heldout(locs, log, knots=(None, 2000, 1000, 500, 250, 125)):
+    """Which z knots make the structure sharpest, on localizations the drift was not estimated from: the field cut
+    at the median x, the drift from one half, and on the other half pairs within 15 nm laterally and more than 1000
+    frames apart (fringes 99 % sure, at most 300 000 of them drawn), the robust spread of their z difference.  A
+    drift that takes out error in z narrows it; one that adds noise widens it."""
+    from scipy.spatial import cKDTree
+
+    from smappy.drift import DriftSettings, estimate_drift
+    x, y, z = (np.asarray(locs[c], float) for c in ("x_nm", "y_nm", "z_nm"))
+    f, p = np.asarray(locs["frame"]), np.asarray(locs["fringe_probability"])
+    for name, train in (("x below", x < np.median(x)), ("x above", x >= np.median(x))):
+        ev = np.flatnonzero(~train & (p >= 0.99))
+        ev = np.random.default_rng(1).choice(ev, min(len(ev), 300000), replace=False)
+        pairs = cKDTree(np.c_[x[ev], y[ev]]).query_pairs(15.0, output_type="ndarray")
+        a, b = ev[pairs[:, 0]], ev[pairs[:, 1]]
+        far = np.abs(f[a] - f[b]) > 1000
+        a, b = a[far], b[far]
+        spread = {}
+        for k in knots:
+            zc = z
+            if k is not None:
+                zc = z - estimate_drift(locs, DriftSettings(split_half=False, max_drift_nm=50, z_knot_frames=k),
+                                        select=train).drift[f, 2]
+            dz = zc[a] - zc[b]
+            dz = dz[np.abs(dz) < 60]
+            spread["none" if k is None else k] = round(float(1.4826 * np.median(np.abs(dz))), 2)
+        text = f"heldout: drift from {name} the median, {len(a):,} pairs of the other half; robust z spread {spread}"
+        print(text)
+        log.write(text + "\n")
 
 
 if __name__ == "__main__":

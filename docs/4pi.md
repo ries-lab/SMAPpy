@@ -2357,9 +2357,9 @@ worktree; P1, P2 and P4 started and landed on 2026-11-24 (§26, §27, §28).
 - **P5. DECODE for 4Pi** -- open: DECODE-Plex and netfit's C = 2 are on main (0.7.6).  The torch IAB
   renderer equal to `CSpline4Pi` with the phase convention settled, then a C = 4 network with the phase
   as one more factor of each molecule's mixture, a von Mises distribution (the Gaussian of an angle).
-- **P6. 3D drift over a long 4Pi movie** -- done on the authors' fits of the whole movie (§31): RCC / COMET on the
-  phase z, sure fringes, z on knots of its own, checked against `Cell01_DCresult.mat`; our own fit of a long
-  stretch waits for the share.
+- **P6. 3D drift over a long 4Pi movie** -- done (§31): RCC / COMET on the phase z, sure fringes, z on knots of its
+  own, checked against `Cell01_DCresult.mat` on the authors' fits of the whole movie and on our fit of 45 000
+  frames.
 
 P1 and P2 both touch uipsf's `workflows/fourpi.py`; P1 adds a per-stack phase to the bead learning, P2 a
 learning from localizations, so whichever lands second rebases.
@@ -2889,8 +2889,7 @@ the phase z after *4Pi z*, against the authors' (`Cell01_DCresult.mat`'s `shifts
 script is `benchmarks/fourpi/tubulin_drift.py`, its outputs in `smappy_p6/` beside the data; the simulations are
 `smappy.simulate.simulate_fourpi_drift` and `tests/test_drift_fourpi.py`.
 
-**Which localizations.**  The share holding the movie was not mounted while this was done, so our own fit covers
-only the 6000 cached frames (§26).  The whole hour is the authors' own raw fits, `Cell01_642_tmpresult_20200912.mat`
+**Which localizations.**  Our own fit covers 45 000 frames (below); the whole hour is the authors' own raw fits, `Cell01_642_tmpresult_20200912.mat`
 (11.8 M), made into a 4Pi table: their x and y, their astigmatic z as the envelope (turned to our direction,
 `-0.8975 zf + 473.7`, fitted to our envelope on the 283 802 pairs of the first 6000 frames, 53 nm scatter), their
 phase (ours less a constant on those pairs, resultant 0.95).  Their CRLB holds x and y but not the phase's error
@@ -2957,9 +2956,35 @@ windows, one per 3000-frame cycle as theirs, 3 min):
 - **Sure fringes or all, coarse or fine z: the same against theirs** (within 0.1 nm rms), as it must be at
   their 3000-frame resolution; the fine z's gain is inside a cycle, which their curve cannot show (above).
 
-**Not done.**  Our own fit of a long stretch: the share (`/Volumes/VBCShare`) was not mounted on 2026-11-25; the
-benchmark takes a fitted table as it is (`tubulin_drift.py TABLE`), so 20 files (60 000 frames, 38 GB, about
-20 min to copy and fit at P4's speed) are one run when it is.  The ghosts themselves (§25 item 4) stay: the drift
-no longer cares about them, the picture still does.  A blink merged across fringes averages a ghost into its z
+**Our own fit of 45 000 frames** (Cell01's first 15 files, copied once the share was mounted; a sixteenth filled
+the Mac's disk and was left).  `tubulin_fit.py` with P1's model (pupil, 680 nm, 100 nm beads) and settings: 760 s,
+59 frames/s, 2.08 M localizations, 3.7 GB; *4Pi z*: 5.8 % expected wrong fringes, 86 % at least 90 % sure.  The
+drift on all of them (COMET 15 -- 19 s, RCC 10 -- 16 s):
+
+| ours | x vs theirs (rms) | y | z | peak to peak x, y, z (theirs 13, 36, 17) |
+| --- | --- | --- | --- | --- |
+| COMET, sure fringes, z knots 2000 | 0.6 nm | 0.6 | 4.3 | 16, 36, 6 |
+| COMET, all, z knots 2000 | 0.6 | 0.6 | 4.3 | 15, 36, 6 |
+| COMET, sure fringes, z knots 250 (the default) | 0.6 | 0.6 | 4.8 | 16, 36, 16 |
+| RCC, sure fringes, 15 windows | 0.6 | 0.6 | 4.2 | 16, 37, 6 |
+
+- Lateral again the same as theirs to 0.6 nm.  The z the fine knots add correlates 0.83 with the cavity *4Pi z*
+  missed (3.6 nm rms), as on the first 6000 frames.
+- **The corrected z against their final z**, on the 709 798 of ours paired with their final table (same frame,
+  within 0.5 px): the median difference per cycle has an sd of 1.9 -- 2.0 nm with any of our curves (2.1 before
+  ours).  Per 250 frames it is 4.0 nm with z knots 2000, 3.8 with RCC, 4.7 with 250: the fine z *disagrees* more
+  with theirs inside a cycle, where their z, the phase's, still carries the cavity's wander and their per-cycle
+  curve cannot take it out.
+- **Which is right, measured on the structure itself.**  The drift estimated from one half of the field (x below
+  or above its median), and judged on the other: pairs of its localizations within 15 nm laterally and more than
+  1000 frames apart (1.95 M pairs, fringes 99 % sure), their z difference.  Robust spread, none / knots 2000 /
+  1000 / 500 / 250 / 125: 24.05 / 23.96 / 23.87 / 23.69 / 23.58 / 23.55 nm on one half, 23.32 / 23.24 / 23.11 /
+  22.94 / 22.79 / 22.77 on the other.  Finer z knots make the held-out filaments sharper in z, monotonically, to
+  250; 125 adds nothing.  Taking the variances apart, 250 against 2000 removes about 3 nm rms per localization --
+  the cavity's wander.  So the wander is error in z, the fine knots take it out, and the default of 250 is where
+  the gain stops.
+
+**Not done.**  The ghosts themselves (§25 item 4) stay: the drift no longer cares about them, the picture still
+does.  A blink merged across fringes averages a ghost into its z
 (`group`'s z is a mean); with the sure fringes taken first the estimate does not see it, but a merged picture
 would.
