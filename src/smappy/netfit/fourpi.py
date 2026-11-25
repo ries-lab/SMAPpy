@@ -203,7 +203,20 @@ def draw_batch(renderer, grid, sim, cam, channels, batch: int, g) -> Batch:
 _STEPS = (1e-3, 1e-3, None, 0.05, 1e-3)
 
 
-def crlb(cal, x, y, shift, z_nm, phase, photons, background, em: bool = False) -> np.ndarray:
+def crlb(cal, x, y, shift, z_nm, phase, photons, background, em: bool = False, chunk: int = 1024) -> np.ndarray:
+    """(n, 4): the bound of x, y (pixels), z (nm) and the phase (rad) -- `_crlb` on ``chunk`` molecules at
+    a time: each holds (pixels x parameters) derivatives in float64, 85 kB a molecule of 17-px squares."""
+    n = len(np.atleast_1d(x))
+    if n == 0:
+        return np.zeros((0, 4))
+    sh, bg = np.asarray(shift, float).reshape(n, -1), np.asarray(background, float).reshape(n, -1)
+    v = [np.broadcast_to(np.asarray(a, float), (n,)) for a in (x, y, z_nm, phase, photons)]
+    return np.concatenate([_crlb(cal, *(a[i:i + chunk] for a in v[:2]), sh[i:i + chunk],
+                                 *(a[i:i + chunk] for a in v[2:]), bg[i:i + chunk], em)
+                           for i in range(0, n, chunk)])
+
+
+def _crlb(cal, x, y, shift, z_nm, phase, photons, background, em: bool = False) -> np.ndarray:
     """(n, 4): the bound of x, y (pixels), z (nm) and the phase (rad) of molecules at channel-0
     positions ``x``, ``y`` with each other channel's remainder ``shift`` (n, 2 (C - 1)), ``z_nm``,
     ``phase``, ``photons`` (all channels together) and ``background`` (n, C) -- every channel's spot in
@@ -239,7 +252,7 @@ def crlb(cal, x, y, shift, z_nm, phase, photons, background, em: bool = False) -
         derivs.append(one)
     J = torch.stack(derivs, -1).reshape(len(x), -1, len(derivs))      # (n, pixels, params)
     mu = (N[:, None, None, None] * base.clamp_min(0) + bg[:, :, None, None]).reshape(len(x), -1).clamp_min(1e-9)
-    info = torch.einsum("npi,npj,np->nij", J, J, 1 / mu) / (2.0 if em else 1.0)
+    info = torch.matmul(J.transpose(1, 2), J / mu[..., None]) / (2.0 if em else 1.0)
     cov = torch.linalg.pinv(info)
     var = torch.diagonal(cov, dim1=1, dim2=2)[:, [0, 1, 3, 4]]
     return torch.sqrt(var.clamp_min(0)).numpy()
