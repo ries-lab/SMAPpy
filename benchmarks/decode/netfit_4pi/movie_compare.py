@@ -146,10 +146,10 @@ def main():
     pooled = {"netfit": ([], [], 0.0), "spline4pi": ([], [], 0.0)}
     for m in range(a.movies):
         frames, t = movie(cal, layout, four, a.frames, a.density, a.on, photons, bg, 0.002, 0.005, a.seed + 10 * m)
-        for name, run in (("netfit", lambda: netfit(frames, layout, four, a.model, a.device)),
-                          ("spline4pi", lambda: spline_4pi(frames, layout, cal, pixel_nm[0] / 1000))):
+        for name in ("netfit", "spline4pi"):
             t0 = time.time()
-            found = run()
+            found = (netfit(frames, layout, four, a.model, a.device) if name == "netfit"
+                     else spline_4pi(frames, layout, cal, pixel_nm[0] / 1000))
             ts, fs, sec = pooled[name]
             offset = m * a.frames
             found["frame"] = np.asarray(found["frame"]) + offset
@@ -158,7 +158,6 @@ def main():
             ts.append(tm)
             fs.append(found)
             pooled[name] = (ts, fs, sec + time.time() - t0)
-        del frames
     results = {}
     for name, (ts, fs, sec) in pooled.items():
         found = {k: np.concatenate([f[k] for f in fs]) for k in fs[0]}
