@@ -24,10 +24,10 @@ from ..plugins import param
 
 MODEL_FILTER = "4Pi models (*.h5)"
 LOCS_FILTER = "Localizations (*.hdf5 *.h5)"
-#: what in situ may change: everything §27 learnt, or only the channels' maps, the arms' misalignment and each
-#: channel's interference (coherence, balance, phase offset, share) -- on the 2017 tubulin the smaller set
-#: explained held-out molecules better (8.5 against 5.2 nats each) and removed the misfits the figures show
-#: no worse; the pupils and the blur took up the neighbours' light (docs/4pi.md §34)
+#: what in situ may change: by default only the channels' maps, the arms' misalignment and each channel's
+#: interference (coherence, balance, phase offset, share), or everything §27 learnt -- on the 2017 tubulin the
+#: smaller set explained held-out molecules better (8.5 against 5.2 nats each) and removed the misfits the figures
+#: show no worse; the pupils and the blur took up the neighbours' light (docs/4pi.md §34)
 LEARN_CHOICES = (("everything", "everything"), ("channels", "maps, misalignment, channels"))
 #: the shared parameters of *learn*'s "channels", besides every channel's map (``ch<c>.transform``)
 CHANNEL_PARAMETERS = ("fourpi.offset", "fourpi.coherence", "fourpi.balance", "fourpi.delta", "fourpi.share")
@@ -69,8 +69,10 @@ class FourPiInSituSettings:
                              help="a molecule is taken only with no other localization within this many boxes")
     isolation_frames: int = param(0, label="alone over", unit="frames", min=0, advanced=True,
                                   help="... in its own frame and this many frames before and after it")
-    learn: str = param("everything", label="learn", choices=LEARN_CHOICES, advanced=True,
-                       help="which of the model's parameters the molecules may change")
+    learn: str = param("channels", label="learn", choices=LEARN_CHOICES, advanced=True,
+                       help="which of the model's parameters the molecules may change: by default the maps, "
+                            "the misalignment and each channel's interference; everything also the pupils "
+                            "and the blur")
     cavity_sigma_rad: float = param(0.2, label="cavity tie", unit="rad", min=0.0, advanced=True,
                                     help="while learning, each molecule's phase is held this near the cavity's "
                                          "phase at its frame; 0: each its own")

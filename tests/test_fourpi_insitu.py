@@ -154,7 +154,8 @@ def test_learning_the_channels_only_frees_every_maps_the_misalignment_and_the_in
     from smappy.calibrate.fourpi_insitu import OFFSET_LOOSE_NM, learnt
     shared = dict.fromkeys(["pupil.phase", "psf.sigma", "fourpi.offset", "fourpi.coherence", "fourpi.balance",
                             "fourpi.delta", "fourpi.share", "ch1.transform", "ch2.transform", "ch3.transform"])
-    assert learnt(FourPiInSituSettings(), shared) == {}
+    assert FourPiInSituSettings().learn == "channels"
+    assert learnt(FourPiInSituSettings(learn="everything"), shared) == {}
     out = learnt(FourPiInSituSettings(learn="channels"), shared)
     assert set(out["free"]) == set(shared) - {"pupil.phase", "psf.sigma"}
     assert out["offset_sigma_nm"] == OFFSET_LOOSE_NM

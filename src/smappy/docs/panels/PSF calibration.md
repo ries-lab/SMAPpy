@@ -540,12 +540,12 @@ fit's layout puts it, in boxes of *box* pixels.
 molecule localised on the bead model (x, y, z, its own cavity phase, photons,
 backgrounds) from its fitted z and from a fringe period above and below, since
 a molecule's z has an optimum on every fringe; those whose fit is poor are
-left out; then both objectives' pupils, the coherence, the arms' balance, the
-channels' shares, phase offsets and maps, the blur and the misalignment along
-z are learnt together with every molecule (*learn*: everything, or only the
-maps, the misalignment and each channel's interference).  This is done *rounds* times.  The
-objectives' apodisation and the buffer's index are kept from the bead model,
-and so is the lateral misalignment, by a tight prior.  While learning, each
+left out; then the channels' maps, the objectives' misalignment and each
+channel's coherence, balance, share and phase offset are learnt together with
+every molecule -- with *learn* on *everything* also both objectives' pupils
+and the blur, the lateral misalignment then held by a tight prior.  This is
+done *rounds* times.  The objectives' apodisation and the buffer's index are
+kept from the bead model.  While learning, each
 molecule's interference phase is held near the cavity's -- the phase all
 molecules of a frame share, found from the molecules themselves in windows of
 1000 frames, with a tilt over the field -- within *cavity tie* (0: each its
@@ -1187,13 +1187,16 @@ there in this frame too, too dim to be found.  The molecule's own blink
 going on (within a pixel) does not count.  0 looks at the frame alone.
 
 ### learn
-*maps, misalignment, channels* learns only the channels' maps, where the two
-objectives' foci sit against each other, and each channel's coherence,
-balance, phase offset and share; the pupils, the blur and the index stay the
-bead model's.  Use it where the bead model's spot is right but the alignment
-moved, and on dense samples, where the pupils and the blur take up neighbours'
-light.  The model it saves keeps its learnt maps: fit with Spline 4Pi's
-*registration* set to the model's.
+*maps, misalignment, channels* by default: in situ learns only the channels'
+maps, where the two objectives' foci sit against each other, and each
+channel's coherence, balance, phase offset and share; the pupils, the blur and
+the index stay the bead model's.  On the 2017 tubulin this set explained
+held-out molecules better than learning everything, and on dense samples the
+pupils and the blur take up neighbours' light.  *everything* also learns the
+pupils and the blur: choose it where the sample changes the spot itself --
+molecules deep in the sample, a buffer whose index differs from the beads'.
+The model saved keeps its learnt maps: fit with Spline 4Pi's *registration*
+set to the model's.
 
 ### elliptical Gaussian
 The elliptical Gaussian method's own settings (*Elliptical Gaussian*).

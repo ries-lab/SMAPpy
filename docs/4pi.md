@@ -3437,11 +3437,14 @@ values (Δ 5, 47, 131 nm; coherence 1.00, 0.93, 1.00, 0.89; the blur held at 84 
   from a file or beads, which would replace them (`fit_4pi.maps_learnt_in_situ`).
 - *4Pi in situ* (the PSF window): *alone within* (boxes) and *alone over* (frames beside, the molecule's own blink
   within a pixel not counted; `fourpi_insitu.alone`), defaults as before, 1 box and 0 frames; *learn*:
-  *everything* (default, §27's set) or *maps, misalignment, channels* (`fourpi_insitu.learnt`, the misalignment
-  loose in x and y too).  uiPSF's `InSituSettings.free` learns only the named shared parameters.
+  *everything* (§27's set) or *maps, misalignment, channels* (`fourpi_insitu.learnt`, the misalignment
+  loose in x and y too), which is now the default (below).  uiPSF's `InSituSettings.free` learns only the named shared parameters.
 - The tubulin scripts: `TUBULIN_MAPS=model` fits with the model's maps (`tubulin_common.registration_settings`).
 
-**Not done.**  Whether *maps, misalignment, channels* should be the window's default (here it was better; on
-Nup96 everything was learnt and was fine, §27), and the isolation's; a blur that depends on z or brightness, or a
+**The default** of *learn* is now *maps, misalignment, channels* (decided 2026-11-25): it was better here on
+both held-out sets, and *everything* stays a choice for samples that change the spot (on Nup96 everything was
+learnt and was fine, §27).
+
+**Not done.**  The isolation's default; a blur that depends on z or brightness, or a
 coherence that may exceed what the beads' size allows, for the 4 % of modulation and the core; the remaining
 1.7× scatter of a blink's fits, which is the neighbours'; Nup96 with this set.
