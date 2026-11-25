@@ -2944,14 +2944,81 @@ the bound at both densities and puts 3 -- 8 % on a wrong fringe where the fitter
 show on simulations.  Not shown yet: the network on real movies (a predictor for the 4Pi grid, the prefit), and a
 comparison on the *same* frames with the fitter's own detection -- stage 3.
 
-### Stage 3: judged (planned)
+### Stage 3: on movies, against Spline 4Pi with its own detection (2026-11-25)
 
-On simulations at several densities, sparse to tubulin's ~70 a frame: detection (Jaccard), lateral and z RMSE
-against the CRLB of Spline 4Pi (`Global4PiPSF`'s), the phase's RMSE against its CRLB, z after *4Pi z*, the
-wrong-fringe share -- near focus (|z| < 300 nm) first, z beside lateral, the frame window labelled -- against Spline
-4Pi on the same frames, where its boxes overlap at density.  Then the Ries-lab Nup96 (the two rings' separation and
-the share of uncertain fringes, as §10 and §27 judge a model) and Gabin's tubulin against Spline 4Pi and the
-authors' localizations (§26).
+**What was added.**  `predict.Predictor` reads a 4Pi model: C channels on its grid, their offset maps, the phase
+out.  `fourpi.localize` runs it over a movie's channels in blocks, each with the window's context, and puts the
+positions where channel 0 saw the molecule on the camera frame, as Spline 4Pi reports them.  `fourpi.prefit` and
+`settings_from_prefit` take a training's photons (uniform over the fits' range, `decode_smlm.prefit.photon_range`),
+each channel's background, z and the cavity's drift from a Spline 4Pi table after *4Pi z* -- the cavity drifts by
+about 3e-5 rad a frame on both data sets, a hundredth of what the trainings drew, so the drift a window sees is
+negligible.  The benchmarks in `benchmarks/decode/netfit_4pi/`: `movie_compare.py` (simulated movies, both
+fitters each with its own detection on the same frames), `real_movie.py` (a model on the real movie, read through
+Spline 4Pi's own source, then *4Pi z*).  SMAPpy's extensions were built on gpuvm (pybind11 in a folder of its
+own), so that both fitters run there: the Mac was short of memory throughout.  Not yet: the DECODE fitter
+(`fit_decode.py`) reading a 4Pi model in the GUI, and a 4Pi job in the *Train DECODE* window.
+
+**The same simulated frames.**  `movie_compare.py`: ten movies of 100 frames each per row, drawn by
+`smappy.fourpi.render_frames` in the model's own layout with its maps (the simulation Spline 4Pi's tests use, not
+the training's), molecules blinking with a mean on-time of 1 or 3 frames, the cavity drifting; Spline 4Pi with the
+plugin's default detection, fit and starts; netfit with the stage-2 networks.  Scored where both read (the grid's
+box less 8 px), near focus: Jaccard / the robust width of the error over the CRLB in x, z and the phase / the
+wrong-fringe share with the cavity known (`results/movie_*.json`):
+
+| model | density / 40² px | on-time | netfit | Spline 4Pi |
+| --- | --- | --- | --- | --- |
+| Nup96 | 5 | 1 | 0.935 / 0.72 0.73 0.75 / 3.9 % | 0.712 / 1.14 1.23 1.08 / 7.0 % |
+| Nup96 | 5 | 3 | 0.946 / 0.67 0.69 0.68 / 3.2 % | 0.712 / 1.19 1.35 1.08 / 6.4 % |
+| Nup96 | 25 | 1 | 0.884 / 0.84 0.89 0.82 / 5.6 % | 0.230 / 1.99 2.81 1.27 / 13.7 % |
+| Nup96 | 25 | 3 | 0.899 / 0.79 0.85 0.76 / 4.0 % | 0.123 / 2.74 4.15 1.43 / 17.2 % |
+| tubulin | 5 | 1 | 0.826 / 0.69 0.69 0.69 / 3.7 % | 0.568 / 1.35 1.39 1.09 / 4.5 % |
+| tubulin | 5 | 3 | 0.879 / 0.65 0.65 0.66 / 2.8 % | 0.624 / 1.48 1.52 1.11 / 4.5 % |
+| tubulin | 25 | 1 | 0.785 / 0.86 0.88 0.81 / 4.3 % | 0.129 / 4.54 4.60 1.61 / 12.3 % |
+| tubulin | 25 | 3 | 0.834 / 0.86 0.88 0.80 / 2.7 % | 0.063 / 7.81 7.46 2.11 / 16.4 % |
+
+Both are precise (0.95 -- 0.99); the difference is recall and, with neighbours in its ROIs, Spline 4Pi's errors.
+At 25 per 40 × 40 px its detection keeps a sixth of the molecules: far beyond the density it is used at (the
+Nup96 movie has about 0.2 per 40 × 40 px, the tubulin movie about 4), so the rows at 5 are the ones that bear on
+the data.  There netfit finds 30 -- 40 % more molecules and puts half as many on a wrong fringe.  Each fitter took
+3 -- 8 s for a row's 1000 frames on gpuvm.
+
+**Real data: the coordinates agree.**  On the first 200 frames, the molecules both find: x, y within 0.1 -- 2.3 nm of
+each other at the median (robust sd 9 -- 14 nm), the envelope's z within 3 nm, the phase within 0.01 rad, the
+photons within 3 %.  netfit finds 85 -- 95 % of Spline 4Pi's molecules and many more of its own: on Nup96 most of
+them dim (median 87 photons, below the 100 the training started at), on tubulin bright ones too.
+
+**Nup96, the whole movie** (138 687 frames, 300 frames/s on the H100), judged by P2's `insitu/evaluate.py` (the even
+files, P2's drift, sure fringes for the rings), netfit's localizations from 150 photons -- Spline 4Pi's 5th
+percentile -- beside Spline 4Pi with the same v2 bead model (`results/nup96_eval.txt`):
+
+| | rows | pores | ring separation (IQR) | uncertain fringes | z_env error claimed (700 -- 1400 ph) | (z - z_env) / z_env_err |
+| --- | --- | --- | --- | --- | --- | --- |
+| Spline 4Pi | 599 449 | 4 182 | 61.9 nm (51.8 -- 72.7) | 10.1 % | 26.7 nm | 1.18 |
+| netfit | 875 741 | 5 636 | 62.5 nm (50.9 -- 76.4) | 9.9 % | 20.5 nm | 1.06 |
+
+A third more pores, the two rings as far apart, as few uncertain fringes; netfit's envelope z is claimed more
+precise and its claim is nearer the truth (the robust width of z_env's error against the phase's z, 1.06 against
+1.18).  Below 150 photons netfit reports 4.1 M more, which a user filters as Spline 4Pi's own detection does.
+
+**Tubulin, the first 6000 frames**, judged by P1's `tubulin_compare.py` against the authors (Zhang et al. 2020):
+
+| | localizations (a frame) | paired with the authors' final, filtered table | z against their final: spread, other fringe | envelope z spread |
+| --- | --- | --- | --- | --- |
+| Spline 4Pi | 369 582 (61.6) | 99 % | 4.4 nm, 0.1 % | 26.9 nm |
+| netfit, from 1000 photons | 655 959 (109.3) | 97 % | 6.4 nm, 0.0 % | 24.4 nm |
+| netfit, all | 1 024 280 (170.7) | 98 % | 6.4 nm, 0.0 % | 24.5 nm |
+
+netfit finds nearly every molecule the authors kept, its phase z agrees with theirs as Spline 4Pi's does (one
+fringe on 0.0 %), its spread against theirs a little larger (6.4 against 4.4 nm; its lateral spread against theirs
+11 -- 12 nm against Spline 4Pi's 7 -- 8).  Its extras: from 1000 photons, 415 000 localizations the authors did not
+report.  Whether they are molecules is judged by the structure, without a truth: a molecule lies on the filaments
+the other blinks trace.  Of netfit's unpaired, 74 % have an authors' localization of another blink (more than 3
+frames away) within 30 nm, against 86 % of Spline 4Pi's unpaired, 98 -- 99 % of either's paired, and 22 % of random
+positions -- so most of netfit's extras lie on the filaments, and up to about a third may not.  Some of those are
+where the authors fit nothing at all (the channels' bottom band, 140 -- 168 px, bright and dense, where Spline 4Pi's
+ROIs do not fit either), which this measure cannot tell from invented molecules.  Undecided; the place to look next
+is the training's flat background against the real movie's out-of-focus light (*uneven backgrounds*, off in these
+trainings).
 
 ## 31. 3D drift over the hour-long tubulin movie (P6, 2026-11-25)
 
