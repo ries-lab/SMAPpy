@@ -537,7 +537,7 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, drawer, g, test, tru
         score = metrics.evaluate(truth, found, cam.pixel_nm)
         if "phase" in truth:
             from .fourpi import phase_scores
-            score.update(phase_scores(truth, found, cam.pixel_nm))
+            score.update(phase_scores(truth, found, cam.pixel_nm, drawer.cal.phase_per_nm))
         score.update({f"loss_{k}": v / steps for k, v in parts_sum.items()})
         dt = time.perf_counter() - t0
         seconds += dt

@@ -197,3 +197,22 @@ def test_a_4pi_training_runs_and_scores_the_phase(cal, tmp_path):
     scored = [v for v in lines if v.get("kind") == "epoch"]
     assert len(scored) == 2
     assert "rmse_phase_rad" in scored[-1]["metrics"] and "crlb_width_phase" in scored[-1]["metrics"]
+
+
+def test_z_from_the_phase_takes_the_fringe_nearest_the_envelope_and_counts_the_wrong_ones():
+    """With the cavity's phase known, z from the phase is the truth when the envelope's z is within half a
+    fringe of it, and a whole fringe off when it is beyond: the wrong-fringe share counts exactly those."""
+    k = -2 * np.pi / 260.0
+    rng = np.random.default_rng(0)
+    z = rng.uniform(-500, 500, 400)
+    phase0 = rng.uniform(-np.pi, np.pi, 400)
+    phase = np.angle(np.exp(1j * (k * z + phase0)))
+    off = np.where(np.arange(400) < 100, 200.0, 40.0)          # a quarter of the envelopes beyond half a fringe
+    zp = NF.unwrap_known(phase, z + off, phase0, k)
+    assert np.allclose(zp[100:], z[100:], atol=1e-6)
+    assert np.allclose(np.abs(zp[:100] - z[:100]), 260.0, atol=1e-6)
+    truth = {"frame": np.arange(400), "xyz": np.c_[np.full(400, 5.0), np.full(400, 5.0), z],
+             "photons": np.full(400, 1000.0), "phase": phase}
+    found = {"frame": np.arange(400), "xyz": np.c_[np.full(400, 5.0), np.full(400, 5.0), z + off], "phase": phase}
+    s = NF.phase_scores(truth, found, (100.0, 100.0), k)
+    assert s["wrong_fringe_share"] == pytest.approx(0.25) and s["rmse_z_phase_nm"] < 1e-6

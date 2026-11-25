@@ -235,11 +235,22 @@ def crlb(cal, x, y, shift, z_nm, phase, photons, background, em: bool = False) -
     return torch.sqrt(var.clamp_min(0)).numpy()
 
 
-def phase_scores(truth: dict, found: dict, pixel_nm) -> dict:
+def unwrap_known(phase, z_env_nm, phase0, phase_per_nm: float) -> np.ndarray:
+    """z from the phase, on the fringe nearest the envelope's z, with the cavity's phase ``phase0`` known
+    (a simulation's): ``(phase - phase0 + 2 pi n) / phase_per_nm`` for the n that puts it nearest
+    ``z_env_nm``.  On real data *4Pi z* estimates phase0 from the localizations (`smappy.fourpi.unwrap`)."""
+    base = np.angle(np.exp(1j * (np.asarray(phase) - phase0))) / phase_per_nm
+    period = 2 * np.pi / abs(phase_per_nm)
+    return base + np.round((np.asarray(z_env_nm) - base) / period) * period
+
+
+def phase_scores(truth: dict, found: dict, pixel_nm, phase_per_nm: float | None = None) -> dict:
     """The phase of the molecules found against the truth's: matched as `metrics.evaluate` matches them,
     the circular RMSE (rad) and, with the truth's ``crlb_phase``, the robust width of the error over its
-    bound; the share of errors beyond pi/2, which put z on the wrong fringe whatever the envelope says."""
-    from .metrics import PHOTONS_MIN, _below_limit, match, robust_width
+    bound, over all and near the focus (|z| < `metrics.CORE_Z_NM`).  With ``phase_per_nm``: z unwrapped
+    from the phase with the cavity's phase known (`unwrap_known`) -- the share on a wrong fringe, and the
+    RMSE of z where the fringe is right, the 4Pi z the network's phase and envelope give together."""
+    from .metrics import CORE_Z_NM, PHOTONS_MIN, _below_limit, match, robust_width
     if "phase" not in found or "phase" not in truth:
         return {}
     ti, fi = match(truth["frame"], truth["xyz"], found["frame"], found["xyz"], pixel_nm)
@@ -247,10 +258,29 @@ def phase_scores(truth: dict, found: dict, pixel_nm) -> dict:
     if len(ti) < 10:
         return {}
     err = np.angle(np.exp(1j * (found["phase"][fi] - truth2["phase"][ti])))
+    z = truth2["xyz"][ti, 2]
+    core = np.abs(z) < CORE_Z_NM
     out = {"rmse_phase_rad": float(np.sqrt(np.mean(err ** 2))),
            "phase_flip_share": float(np.mean(np.abs(err) > np.pi / 2))}
+    if core.sum() >= 50:
+        out["core_rmse_phase_rad"] = float(np.sqrt(np.mean(err[core] ** 2)))
     if truth2.get("crlb_phase") is not None:
-        out["crlb_width_phase"] = robust_width(err / truth2["crlb_phase"][ti])
+        b = truth2["crlb_phase"][ti]
+        out["crlb_width_phase"] = robust_width(err / b)
+        if core.sum() >= 50:
+            out["core_crlb_width_phase"] = robust_width(err[core] / b[core])
     if found.get("phase_err") is not None:
         out["claim_width_phase"] = robust_width(err / found["phase_err"][fi])
+    if phase_per_nm:
+        phase0 = truth2["phase"][ti] - phase_per_nm * z
+        zp = unwrap_known(found["phase"][fi], found["xyz"][fi, 2], phase0, phase_per_nm)
+        period = 2 * np.pi / abs(phase_per_nm)
+        wrong = np.abs(zp - z) > period / 2
+        out["wrong_fringe_share"] = float(np.mean(wrong))
+        if (~wrong).sum() >= 10:
+            out["rmse_z_phase_nm"] = float(np.sqrt(np.mean((zp - z)[~wrong] ** 2)))
+        if core.sum() >= 50:
+            out["core_wrong_fringe_share"] = float(np.mean(wrong[core]))
+            if (core & ~wrong).sum() >= 10:
+                out["core_rmse_z_phase_nm"] = float(np.sqrt(np.mean((zp - z)[core & ~wrong] ** 2)))
     return out
