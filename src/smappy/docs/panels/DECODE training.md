@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.run_prefit_two, smappy.netfit.prefit_two.prefit_two, smappy.netfit.prefit_two.dye_shares, smappy.netfit.prefit_two.kind_of, smappy.netfit.job.two_channel_settings, smappy.gui.train_window.two_channel_problem, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.gui.train_window.simulated_frames_two, smappy.gui.train_window.channels_side_by_side, smappy.netfit.bounds.drawn_crlb, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample, smappy.gui.train_window.psf_kind, smappy.gui.train_window.model_choices, smappy.gui.train_window.on_time_range, smappy.gui.train_window.prefit_blocks, smappy.gui.train_window.frames_read]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.run_prefit_two, smappy.netfit.prefit_two.prefit_two, smappy.netfit.prefit_two.dye_shares, smappy.netfit.prefit_two.kind_of, smappy.netfit.job.two_channel_settings, smappy.gui.train_window.two_channel_problem, smappy.gui.train_window.netfit_params, smappy.netfit.job.settings_from_estimates, smappy.netfit.job.train_folder, smappy.netfit.metrics.outliers_and_inliers, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.gui.train_window.simulated_frames_two, smappy.gui.train_window.channels_side_by_side, smappy.netfit.bounds.drawn_crlb, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample, smappy.gui.train_window.psf_kind, smappy.gui.train_window.model_choices, smappy.gui.train_window.on_time_range, smappy.gui.train_window.prefit_blocks, smappy.gui.train_window.frames_read, smappy.gui.train_window.run_prefit_4pi, smappy.gui.train_window.fourpi_params, smappy.gui.train_window.fourpi_job_calibration, smappy.gui.train_window.simulated_frames_4pi, smappy.gui.train_window.fourpi_side_by_side, smappy.netfit.fourpi.prefit, smappy.netfit.fourpi.cavity_motion, smappy.netfit.fourpi.settings_from_prefit]
 ---
 
 ## What it does
@@ -19,8 +19,9 @@ under the form's *more*; a line under *PSF calibration* says what kind it
 is.  For one channel: *DECODE, optimised*, SMAPpy's own, by default, and
 *DECODE*, the original's.  For two channels (a split camera, biplane or two
 colours): *DECODE, transformed channels* by default, and
-*DECODE-Plex-like*.  A 4Pi calibration is recognised, but no network trains
-on it yet.  All are trained from the same estimates, in the same kind of job
+*DECODE-Plex-like*.  For a 4Pi model (the four phase channels of a 4Pi
+microscope): *DECODE, 4Pi*, which also gives each molecule's interference
+phase.  All are trained from the same estimates, in the same kind of job
 folder, and fitted by the same [DECODE](plugin:Localize/DECODE) fitter; what
 differs is the network and how it learns (the fitter's page compares them).
 
@@ -233,7 +234,8 @@ and a model to *start from*.
 The line under *PSF calibration* says what the file is: one channel (a
 bead average, or a pupil model drawn at the focus in the sample, and whether
 it varies over the chip), two channels (two focal planes or two colours,
-told by whether the two PSFs come into focus 200 nm or more apart), or 4Pi.
+told by whether the two PSFs come into focus 200 nm or more apart), or 4Pi
+(a 4Pi model, as [Spline 4Pi](plugin:Localize/Spline 4Pi) fits with).
 
 *model* (under *more*) offers what the calibration trains.  One channel:
 *DECODE, optimised* trains SMAPpy's own network, *DECODE* the original's.
@@ -365,6 +367,32 @@ learns that, and the fitter moves it.
 A two-channel job's preview shows each channel's corner of the data, cut as
 the network reads them (the main half on the left), beside the same two as
 the training draws them.
+
+### 4Pi
+A 4Pi model (the PSF calibration window's 4Pi mode, or uiPSF's) trains
+*DECODE, 4Pi*: a network that reads the four phase channels at once and gives
+each molecule's x, y, the envelope's z, its photons and its interference
+phase.  This part appears for such a model only: *channels* and
+*registration* say where the channels are on the movie's frames and how they
+map onto the first, as in Spline 4Pi, and the training draws its frames in
+that layout -- the job's calibration is the 4Pi model with the movie's
+layout and maps written in.
+
+*Prefit* runs Spline 4Pi and [4Pi z](plugin:Analysis/After fit/4Pi z) on the
+movie's first frames (*prefit frames*, at least 2000: 4Pi z follows the
+cavity's phase over a quarter of them).  It gives the photons' range (every
+fit counted: a 4Pi table is not grouped into blinks, so the on-time is not
+measured and the training draws 1 -- 3 frames), each channel's background
+range, z, and how fast the cavity's phase drifts, which the status line
+says.  On the Ries-lab Nup96 and the 2017 tubulin movies it drifts by about
+3e-5 rad a frame, far less than the 0.002 the training draws by default.
+
+The preview shows the four channels of the data cut onto the network's grid,
+side by side, beside the same four as the training draws them.  The job is
+trained and followed as any other, and its model fitted by the DECODE fitter,
+which then runs 4Pi z after the fit.  On simulations such a network reached
+the phase's CRLB, and on the Nup96 it found a third more pores than Spline
+4Pi, the two rings as far apart.
 
 ### Prefit
 Fits *prefit frames* of the movie (under the form's *more*: 500 by default,

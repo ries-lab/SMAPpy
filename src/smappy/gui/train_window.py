@@ -35,6 +35,8 @@ from ..plugins import param
 from .widgets import note_style
 from ..plugins.fit import TIFF_FILTER, CameraSettings, ChannelMoveSettings, move_shown
 from ..plugins.fit_decode import MODEL_FILTER
+from ..channels import FourPiChannelsSettings
+from ..plugins.fit_4pi import FourPiRegistrationSettings
 
 METHOD = "decode-v0.10.2"
 NETFIT = "netfit-v1"
@@ -45,19 +47,23 @@ NETFIT = "netfit-v1"
 #: and joined later, as DECODE-Plex does
 ONE_CHANNEL_MODELS = (("optimised", "DECODE, optimised"), ("decode", "DECODE"))
 TWO_CHANNEL_CHOICES = (("optimised", "DECODE, transformed channels"), ("plexlike", "DECODE-Plex-like"))
+#: a 4Pi model trains SMAPpy's network alone, reading the four phase channels and giving the phase (docs/4pi.md §30)
+FOURPI_CHOICES = (("optimised", "DECODE, 4Pi"),)
 MODELS = ONE_CHANNEL_MODELS + TWO_CHANNEL_CHOICES[1:]
 TWO_CHANNEL_MODELS = tuple(key for key, _ in TWO_CHANNEL_CHOICES)
 #: frames the network reads around the one it fits (*frames read*, auto): one channel's time model was
 #: chosen at 7 (poc-plan, "Step 4: the time model": 7 is 1.6 nm better than 5 at on-time 3, 3 loses
 #: 1.3 nm at on-time 1), two channels' at 3 (the C = 2 study's, plex-plan §16)
 FRAMES_READ = (("auto", "auto"), ("3", "3"), ("5", "5"), ("7", "7"))
-FRAMES_AUTO = {1: 7, 2: 3}
+FRAMES_AUTO = {1: 7, 2: 3, 4: 3}
 #: the mean on-time the optimised models train over by default, in frames (an exponential's mean, as
 #: netfit's ``lifetime_frames``): one channel the mixture 1 -- 3, within 2 % of either specialist
 #: (poc-plan, "Step 4: the time model"); two channels 1, which tied 1 -- 3 on molecules on for 3
 #: frames and beat it on the brief dim ones (plex-plan §16, "The time model").  Widened to take in
 #: the prefit's where it lies outside.
-ON_TIME_RANGE = {1: (1.0, 3.0), 2: (1.0, 1.0)}
+ON_TIME_RANGE = {1: (1.0, 3.0), 2: (1.0, 1.0), 4: (1.0, 3.0)}
+#: a 4Pi prefit fits this many frames at least: *4Pi z* follows the cavity's phase over windows of a quarter of them
+FOURPI_PREFIT_FRAMES = 2000
 CALIBRATION_FILTER = "Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat);;All files (*)"
 #: the densities offered, molecules per um^2 in a frame -- the sample's, whatever the camera's pixel
 #: (plex-plan §16, Jonas 2026-11-22): HD robust from sparse data to dense, UHD for dense data, any other
@@ -168,6 +174,16 @@ class TwoChannelPrepare:
     move: ChannelMoveSettings = param(default_factory=ChannelMoveSettings, label="channel move", collapsed=True)
 
 
+@dataclass
+class FourPiPrepare:
+    """A 4Pi model's training (docs/4pi.md §30): where the four channels are on the movie's frames and how they map
+    onto the first, as *Spline 4Pi* takes them -- the prefit fits with them, and the job draws its training in
+    them.  Shown for a 4Pi model alone."""
+    channels: FourPiChannelsSettings = param(default_factory=FourPiChannelsSettings, label="channels", collapsed=True)
+    registration: FourPiRegistrationSettings = param(default_factory=FourPiRegistrationSettings,
+                                                     label="registration", collapsed=True)
+
+
 #: *uneven backgrounds*: auto is on for a two-channel job and off for a one-channel one
 UNEVEN = (("auto", "auto"), ("on", "on"), ("off", "off"))
 
@@ -206,6 +222,7 @@ class PrepareSettings:
                                         "field, as a cell's does; auto: on for two channels, off for one")
     two_channels: TwoChannelPrepare = param(default_factory=TwoChannelPrepare, label="two channels",
                                             collapsed=True)
+    fourpi: FourPiPrepare = param(default_factory=FourPiPrepare, label="4Pi", collapsed=True)
     model: str = param("optimised", label="model", choices=MODELS, advanced=True,
                        help="the network trained, as the calibration allows: one channel DECODE, optimised "
                             "(SMAPpy's, the default) or the original DECODE's; two channels transformed "
@@ -313,6 +330,8 @@ class Prepared:
     calibration: object = field(repr=False, default=None)  # the spline the network learns: drawn in the sample, or the beads'
     focus: object = None                                     # calibrate.depth.AutoDepth: how *auto* or *in situ* found it
     two: object = None                                       # netfit.prefit_two.TwoChannels: a two-channel calibration's
+    #: a 4Pi model's: `netfit.fourpi.prefit`'s estimates and the movie's channel layout with its maps (``layout``)
+    fourpi: Optional[dict] = None
 def _source(path):
     from ..plugins.fit import SourceSettings, _open
     return _open(SourceSettings(path=str(path)), watch=False)
@@ -372,7 +391,7 @@ def psf_kind(path, spline=None) -> tuple:
     from ..netfit.prefit_two import is_dual
     try:
         if Path(path).suffix.lower() in (".h5", ".hdf5") and is_fourpi_calibration(path):
-            return 4, "4Pi, four phase channels: no DECODE model trains on it yet"
+            return 4, "4Pi, four phase channels: DECODE, 4Pi -- the phase too, z from it by 4Pi z"
         if is_dual(path):
             from ..calibrate.dual import load_dual_color_calibration
             from ..netfit.prefit_two import kind_of
@@ -392,7 +411,7 @@ def psf_kind(path, spline=None) -> tuple:
 
 def model_choices(channels) -> tuple:
     """The models a calibration of ``channels`` trains (`ONE_CHANNEL_MODELS`, `TWO_CHANNEL_CHOICES`)."""
-    return TWO_CHANNEL_CHOICES if channels == 2 else ONE_CHANNEL_MODELS
+    return TWO_CHANNEL_CHOICES if channels == 2 else FOURPI_CHOICES if channels == 4 else ONE_CHANNEL_MODELS
 
 
 def two_channel_problem(settings: PrepareSettings) -> str:
@@ -475,7 +494,7 @@ def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared
     if problem:
         raise ValueError(problem)
     if psf_kind(settings.calibration)[0] == 4:
-        raise ValueError("a 4Pi calibration: no DECODE model trains on it yet")
+        return run_prefit_4pi(settings, report)
     if is_dual(settings.calibration):
         return run_prefit_two(settings, report)
     source = _source(settings.movie)
@@ -506,6 +525,94 @@ def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared
                     calibration=cal, focus=focus)
 
 
+def fourpi_fit_settings(settings: PrepareSettings, frames: Optional[int] = None):
+    """*Spline 4Pi*'s settings for the prefit: the movie's first ``frames``, its microscope, the 4Pi model, the
+    *4Pi* part's channels and registration; nothing saved; *4Pi z* over windows of a quarter of the frames."""
+    from ..plugins.fit import OutputSettings, SourceSettings
+    from ..plugins.fit_4pi import FourPiFitSettings, FourPiModelSettings
+    f = FourPiFitSettings(source=SourceSettings(path=str(settings.movie), stop=frames), camera=settings.camera,
+                          channels=settings.fourpi.channels,
+                          model=FourPiModelSettings(calibration=str(settings.calibration),
+                                                    registration=settings.fourpi.registration),
+                          output=OutputSettings(path=""))
+    if frames:
+        f.finish.fourpi.window_frames = max(50, int(frames) // 4)
+    return f
+
+
+def fourpi_layout(settings: PrepareSettings) -> dict:
+    """The movie's channel layout with its maps, as Spline 4Pi takes it (`FourPiFit.channel_layout`), as a record."""
+    from ..plugins.fit_4pi import FourPiFit
+    return FourPiFit().channel_layout(fourpi_fit_settings(settings)).to_dict()
+
+
+def run_prefit_4pi(settings: PrepareSettings, report=lambda entry: None) -> Prepared:
+    """*Spline 4Pi* and *4Pi z* on the movie's first frames (*prefit frames*, at least `FOURPI_PREFIT_FRAMES`), and
+    `netfit.fourpi.prefit` of the table: the photons' range, each channel's background, z and the cavity's drift.
+    A 4Pi table is not grouped into blinks, so the on-time is not measured: the training draws 1 -- 3 frames."""
+    from decode_smlm.prefit import Estimates, lifetime
+
+    from ..netfit.fourpi import prefit
+    from ..plugins import Context
+    from ..plugins.fit_4pi import FourPiFit
+    source = _source(settings.movie)
+    camera = settings.camera.resolve(source)
+    n = min(source.n_frames, max(int(settings.prefit_frames), FOURPI_PREFIT_FRAMES))
+    report({"message": f"fitting the first {n} frames with Spline 4Pi"})
+    fit = fourpi_fit_settings(settings, n)
+    plugin = FourPiFit()
+    locs = plugin.run(Context(), fit).locs
+    if locs is None or not len(locs):
+        raise ValueError("Spline 4Pi found no molecules in the prefit's frames: check the movie's channels and the 4Pi model")
+    cols = {k: np.asarray(locs[k]) for k in locs.keys()}
+    pre = prefit(cols)
+    pre["layout"] = plugin.channel_layout(fit).to_dict()
+    ph = cols["photons"]
+    bg = np.mean([cols[k] for k in cols if k.startswith("background_ch")], axis=0)
+    mid, spread = float(np.median(ph)), float(1.4826 * np.median(np.abs(ph - np.median(ph))))
+    on = 2.0
+    est = Estimates(on_time_frames=on, lifetime_frames=lifetime(on), intensity_mu_sig=(mid, spread),
+                    intensity_from="every Spline 4Pi fit", n_fully_on=0,
+                    background=(min(b[0] for b in pre["background"]), max(b[1] for b in pre["background"])),
+                    z_nm=tuple(pre["z_nm"]), emitters_per_frame=len(ph) / n, n_blinks=0, n_localizations=len(ph),
+                    photons_range=tuple(pre["photons_range"]))
+    localizations = {"photons": ph, "background": bg, "z_nm": cols.get("z_env_nm", cols.get("z_nm"))}
+
+    def read(a, b):
+        return np.concatenate([block for _, block in source.frames(chunk=b - a, start=a, stop=b)])
+    return Prepared(settings, camera, est, localizations, localizations, source.n_frames,
+                    sample=read(0, min(4, source.n_frames)), calibration=str(settings.calibration), fourpi=pre)
+
+
+def fourpi_params(prepared: Prepared, est, seed: int = 0, on_time: Optional[tuple] = None) -> dict:
+    """A 4Pi model's ``settings.json`` (`netfit.fourpi.settings_from_prefit`, the recipe of docs/4pi.md §30) with the
+    form's estimates: the photons' range, z, and each channel's background -- the prefit's per channel, or the
+    form's range for all four where it was changed -- the movie's camera, the density, samples and frames read."""
+    from ..netfit.fourpi import settings_from_prefit
+    from ..netfit.settings import CameraModel, SimulationSettings
+    from ..training import job as jobfile
+    s = prepared.settings
+    pre = dict(prepared.fourpi)
+    overall = (min(b[0] for b in pre["background"]), max(b[1] for b in pre["background"]))
+    if not np.allclose(overall, est.background):
+        pre["background"] = [tuple(float(v) for v in est.background)] * len(pre["background"])
+    pre["photons_range"] = tuple(est.photons_range or pre["photons_range"])
+    pre["z_nm"] = tuple(est.z_nm)
+    sec = camera_section(prepared.camera)
+    py, px = sec["px_size"]
+    cam = CameraModel(conversion=float(sec["e_per_adu"]), offset=float(sec["baseline"]),
+                      em_gain=float(sec.get("em_gain") or 0.0), read_noise_e=float(sec["read_sigma"]),
+                      qe=float(sec.get("qe", 1.0)), pixel_nm=(float(px), float(py)))
+    t = settings_from_prefit(pre, cam, jobfile.CALIBRATION, density=training_density(s, prepared.camera), seed=seed)
+    lo, hi = on_time or on_time_range(est, 4)
+    t.simulation = SimulationSettings(**{**t.simulation.__dict__, "window": frames_read(s, 4),
+                                         "lifetime_frames": float(lo), "lifetime_max_frames": float(hi) if hi > lo else 0.0,
+                                         "background_uneven": 0.5 if s.uneven_background == "on" else 0.0})
+    t.parts.schedule.settings["max_samples"] = float(s.samples_m) * 1e6
+    t.parts.schedule.settings["snapshots"] = []
+    return t.to_dict()
+
+
 def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared:
     """What a job is written from when no prefit was run: the estimates as typed, the camera from
     the movie (its file and the microscope part), a few of its frames for the figure."""
@@ -515,8 +622,17 @@ def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared
     from ..netfit.prefit_two import TwoChannels, is_dual, kind_of
     source = _source(settings.movie)
     camera = settings.camera.resolve(source)
-    two = None
-    if is_dual(settings.calibration):
+    two = fourpi = None
+    if psf_kind(settings.calibration)[0] == 4:
+        # typed by hand: every channel the background typed, the cavity's drift the training's default
+        from ..netfit.settings import ChannelSettings
+        d = ChannelSettings()
+        layout = fourpi_layout(settings)
+        fourpi = {"photons_range": (s.photons_min, s.photons_max), "z_nm": (s.z_min_nm, s.z_max_nm),
+                  "background": [(s.background_min, s.background_max)] * len(layout["regions"]),
+                  "cavity_rate_rad": d.cavity_rate_rad, "cavity_walk_rad": d.cavity_walk_rad, "layout": layout}
+        cal, focus = str(settings.calibration), None
+    elif is_dual(settings.calibration):
         problem = two_channel_problem(settings)
         if problem:
             raise ValueError(problem)
@@ -537,7 +653,7 @@ def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared
     sample = np.concatenate([block for _, block in source.frames(chunk=n, start=0, stop=n)])
     empty = {"photons": np.zeros(0), "background": np.zeros(0)}
     return Prepared(settings, camera, est, empty, empty, source.n_frames, sample=sample, calibration=cal,
-                    focus=focus, two=two)
+                    focus=focus, two=two, fourpi=fourpi)
 
 
 def by_hand(prepared: Optional[Prepared]) -> bool:
@@ -545,6 +661,8 @@ def by_hand(prepared: Optional[Prepared]) -> bool:
 
 
 def channels_of(prepared: Optional[Prepared]) -> int:
+    if prepared is not None and prepared.fourpi is not None:
+        return 4
     return 1 if prepared is None or prepared.two is None else 2
 
 
@@ -601,6 +719,8 @@ def netfit_params(prepared: Prepared, est, seed: int = 0, on_time: Optional[tupl
     calibration its channels as the prefit found them and the form chose (`two_channel_settings`).
     ``on_time``: the (shortest, longest) mean on-time drawn, the form's; None: `on_time_range`."""
     from ..netfit.job import settings_from_estimates, two_channel_settings
+    if prepared.fourpi is not None:
+        return fourpi_params(prepared, est, seed, on_time)
     s = prepared.settings
     channels, fuse = None, "early"
     if prepared.two is not None:
@@ -671,7 +791,12 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
         if problem:
             raise ValueError(problem)
         job.base_model = BASE_MODEL
-    if prepared.two is not None:              # a two-channel calibration, copied as it is
+    if prepared.fourpi is not None:
+        # the 4Pi model with the movie's channel layout and maps written in: the training draws the geometry the
+        # data have (`netfit.fourpi.FourChannels.from_calibration`), whatever the beads' scans had
+        cal = fourpi_job_calibration(s.calibration, prepared.fourpi["layout"], Path(folder))
+        job.data["fourpi_layout"] = prepared.fourpi["layout"]
+    elif prepared.two is not None:              # a two-channel calibration, copied as it is
         cal = s.calibration
     else:
         cal = prepared.calibration if prepared.calibration is not None else load_spline_calibration(s.calibration)
@@ -683,6 +808,22 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
 
 
 BASE_MODEL = "base_model.safetensors"
+
+
+def fourpi_job_calibration(path, layout: dict, folder: Path) -> Path:
+    """The 4Pi model at ``path`` with ``layout`` (the movie's, with its maps) as its own, written as the job's
+    calibration in ``folder``."""
+    from ..channels import ChannelLayout
+    from ..fourpi import load_fourpi_calibration, save_fourpi_calibration
+    from ..training import job as jobfile
+    cal = load_fourpi_calibration(path)
+    lay = ChannelLayout.from_dict(layout)
+    cal.layout = lay.to_dict()
+    cal.transforms = None if lay.maps is None else np.stack([np.asarray(m, float) for m in lay.maps])
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / jobfile.CALIBRATION
+    save_fourpi_calibration(target, cal, overwrite=True)
+    return target
 
 
 def sample_record(cal) -> dict:
@@ -1500,6 +1641,7 @@ class TrainWindow(QWidget):
             from ..netfit.prefit_two import is_dual
             dual = bool(s.calibration) and is_dual(s.calibration)
             shown["two_channels"] = dual
+            shown["fourpi"] = psf_kind(s.calibration)[0] == 4
             shown["density_manual"] = s.density == "manual"
             shown["uneven_background"] = s.model != "decode"
             shown["frames_read"] = shown["samples_m"] = s.model != "decode"
@@ -1554,12 +1696,19 @@ class TrainWindow(QWidget):
         self.draw_prepared()
         self.simulate()
         from ..calibrate.depth import describe_sample
-        where = describe_sample(prepared.calibration) if prepared.two is None else ""
+        where = describe_sample(prepared.calibration) if prepared.two is None and prepared.fourpi is None else ""
         two = prepared.two
         said = "" if two is None else (
             f"; {'two colours' if two.kind == 'colour' else 'two focal planes'}, the brighter half "
             f"{'the main' if two.brighter == 0 else 'the other'}"
             + (f", dyes at {', '.join(f'{v:.2f}' for v in two.dyes)}" if two.dyes else ""))
+        if prepared.fourpi is not None:
+            f = prepared.fourpi
+            said = (f"; the cavity drifts {f['rate_measured']:+.1e} rad a frame (trained over "
+                    f"±{f['cavity_rate_rad']:.0e})") if "rate_measured" in f else ""
+            self.status_bar.showMessage(f"prefit: {est.n_localizations} Spline 4Pi localizations, "
+                                        f"{est.emitters_per_frame:.1f} a frame" + said)
+            return
         self.status_bar.showMessage(f"prefit: {est.n_blinks} blinks, {est.n_localizations} localizations; "
                                     f"photons from {est.intensity_from} ({est.n_fully_on} fully-on frames)"
                                     + (f"; {where}" if where else "") + said)
@@ -1572,7 +1721,10 @@ class TrainWindow(QWidget):
         frames = self.simulated is not None and self.prepared.sample is not None
         axes = self.prepare_figure.subplots(2 if frames else 1, 3, squeeze=False)
         draw_ranges(axes[0], self.prepared.localizations, params)
-        if frames and self.prepared.two is not None:
+        if frames and self.prepared.fourpi is not None:
+            real = fourpi_side_by_side(self.prepared, photons(self.prepared.sample[:1], params["Camera"])[0])
+            draw_frames(axes[1], real[None], self.simulated[:1], size=4 * PREVIEW_PX)
+        elif frames and self.prepared.two is not None:
             # each channel's corner of the data, cut as the network reads it, beside the simulated pair
             real = channels_side_by_side(self.prepared, photons(self.prepared.sample[:1], params["Camera"])[0])
             draw_frames(axes[1], real[None], self.simulated[:1], size=2 * PREVIEW_PX)
@@ -1595,6 +1747,12 @@ class TrainWindow(QWidget):
                 self._simulate_later.start()
                 return
             est = with_settings(self.prepared.estimates, self.estimate_form.value())
+            if self.prepared.fourpi is not None:
+                params = fourpi_params(self.prepared, est, on_time=self.on_time())
+                layout = self.prepared.fourpi["layout"]
+                calibration = self.prepared.settings.calibration
+                self._work("simulated", lambda report: simulated_frames_4pi(params, calibration, layout))
+                return
             if self.prepared.two is not None:
                 # DECODE's simulation draws one channel: a two-channel job's frames drawn as netfit draws them
                 params = netfit_params(self.prepared, est, on_time=self.on_time())
@@ -1742,6 +1900,33 @@ def simulated_frames_two(params: dict, calibration, n_frames: int = 2, seed: int
     return np.concatenate([f[:, 0], f[:, 1]], axis=-1)
 
 
+def simulated_frames_4pi(params: dict, calibration, layout: dict, n_frames: int = 2, seed: int = 0) -> np.ndarray:
+    """(n, PREVIEW_PX, 4 PREVIEW_PX): a 4Pi job's middle frames as its training draws them (`netfit.fourpi.draw_batch`,
+    in the movie's layout), the four channels side by side on the network's grid, in photons (needs torch)."""
+    import tempfile
+
+    import torch
+
+    from ..netfit.train import Drawer, settings_from_dict
+    with tempfile.TemporaryDirectory() as tmp:
+        cal = fourpi_job_calibration(calibration, layout, Path(tmp))
+        d = {**params, "calibration": str(cal),
+             "simulation": {**params["simulation"], "frame_px": PREVIEW_PX, "movie_windows": 1}}
+        b = Drawer(settings_from_dict(d), "cpu")(n_frames, torch.Generator().manual_seed(seed))
+    f = b.frames[:, :, b.frames.shape[2] // 2].numpy()                  # (n, 4, s, s)
+    return np.concatenate(list(f.transpose(1, 0, 2, 3)), axis=-1)
+
+
+def fourpi_side_by_side(prepared, frame_photons) -> np.ndarray:
+    """A frame of the movie cut into the four channels on the network's grid (the layout the prefit took), each
+    channel's corner of PREVIEW_PX, side by side: what `simulated_frames_4pi` draws, from the data."""
+    from ..channels import ChannelLayout
+    from ..netfit.fourpi import FourChannels
+    four = FourChannels.from_layout(ChannelLayout.from_dict(prepared.fourpi["layout"]))
+    cut = four.cut(np.asarray(frame_photons, float)[None])[0]
+    return np.concatenate([c[:PREVIEW_PX, :PREVIEW_PX] for c in cut], axis=-1)
+
+
 def channels_side_by_side(prepared, frame_photons) -> np.ndarray:
     """A frame of the movie cut into the two channels as the network reads them (the calibration's
     registration at the movie's camera ROI, the main half first), each channel's corner of PREVIEW_PX,
@@ -1865,7 +2050,7 @@ def try_on_data(folder, frames: int = TRY_FRAMES):
     from ..plugins.fit_decode import _mirrored
     from ..training import job as jobfile
     from ..training import model_file
-    from ..training.predictors import load, two_channel
+    from ..training.predictors import fourpi, load, two_channel
     from ..window_engine import WindowEngine
     job, _ = jobfile.read(folder)
     model = Path(folder) / "model.safetensors"
@@ -1876,7 +2061,19 @@ def try_on_data(folder, frames: int = TRY_FRAMES):
     source = _source(job.data["path"])
     n = min(frames, source.n_frames)
     stack = np.concatenate([b for _, b in source.frames(chunk=n, start=0, stop=n)])
-    if two_channel(meta):
+    area_share = 1.0
+    if fourpi(meta):
+        # cut into its channels by the movie's layout the job keeps, as the DECODE fitter cuts them
+        from ..channels import ChannelLayout
+        from ..fourpi import load_fourpi_calibration
+        from ..netfit.fourpi import FourPiPredictor
+        from ..netfit.predict import Predictor
+        layout = ChannelLayout.from_dict(job.data["fourpi_layout"])
+        cal = load_fourpi_calibration(Path(folder) / job.calibration.get("file", jobfile.CALIBRATION))
+        predictor = FourPiPredictor(Predictor(model, None), layout, cal)
+        w, h = layout.sizes[0]
+        area_share = w * h / (stack.shape[-2] * stack.shape[-1])
+    elif two_channel(meta):
         # cut into its channels by the job's calibration at the movie's camera ROI, as the fitter cuts them
         # (`fit_decode.two_channel_model`): positions on the frame, channel 0's
         from ..calibrate.dual import load_dual_color_calibration
@@ -1902,7 +2099,7 @@ def try_on_data(folder, frames: int = TRY_FRAMES):
     from ..camera import to_photons
     locs = np.stack([np.concatenate(xs), np.concatenate(ys)], 1) if xs else np.zeros((0, 2))
     py, px = (float(v) for v in cam["px_size"])
-    area = stack.shape[-2] * stack.shape[-1] * (0.5 if two_channel(meta) else 1.0) * px * py * 1e-6
+    area = stack.shape[-2] * stack.shape[-1] * (0.5 if two_channel(meta) else area_share) * px * py * 1e-6
     trained = job.ranges.get("emitter_av")
     return (to_photons(stack[0], camera), locs, found / n / area,
             float("nan") if trained is None else per_um2_of(trained, cam["px_size"]))
