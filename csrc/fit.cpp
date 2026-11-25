@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "cutoff.hpp"
+#include "detect.hpp"
 #include "filters.hpp"
 #include "lm.hpp"
 #include "maxima.hpp"
@@ -675,6 +676,68 @@ py::tuple find_maxima(const Array& images, float threshold, int n_threads) {
                           std::move(value));
 }
 
+// (frame, y, x, value) arrays of a list of maxima.
+static py::tuple maxima_arrays(const std::vector<smappy::Maximum>& found) {
+    const py::ssize_t count = static_cast<py::ssize_t>(found.size());
+    py::array_t<int32_t> frame(count), y(count), x(count);
+    py::array_t<float> value(count);
+    int32_t* pf = frame.mutable_data();
+    int32_t* py_ = y.mutable_data();
+    int32_t* px = x.mutable_data();
+    float* pv = value.mutable_data();
+    for (py::ssize_t i = 0; i < count; ++i) {
+        pf[i] = found[i].frame;
+        py_[i] = found[i].y;
+        px[i] = found[i].x;
+        pv[i] = found[i].value;
+    }
+    return py::make_tuple(std::move(frame), std::move(y), std::move(x), std::move(value));
+}
+
+// Candidates of a filtered block (n, ny, nx) in one call (`detect.hpp`): frames
+// over threads, each with its own scratch.  Returns (candidates, cutoffs,
+// deferred): the candidates and the deferred halves' maxima as (frame, y, x,
+// value), sorted by frame, and the cutoffs (n, halves).
+py::tuple detect_candidates(const Array& images, bool dynamic, float threshold,
+                            double factor, int split_axis, int split_position,
+                            long long min_count, int n_threads) {
+    if (images.ndim() != 3)
+        throw std::invalid_argument("images must have shape (n, ny, nx)");
+    const py::ssize_t n = images.shape(0);
+    const int ny = static_cast<int>(images.shape(1));
+    const int nx = static_cast<int>(images.shape(2));
+    const float* data = images.data();
+    const smappy::DetectParams p{dynamic, threshold, factor, split_axis, split_position, min_count};
+    const int halves = split_axis < 0 ? 1 : 2;
+    py::array_t<float> cutoffs({n, py::ssize_t(halves)});
+    float* c = cutoffs.mutable_data();
+
+    const int threads = smappy::resolve_threads(n_threads, n);
+    std::vector<std::vector<smappy::Maximum>> kept(threads), deferred(threads);
+    {
+        py::gil_scoped_release release;
+        smappy::parallel_ranges(n, threads, [&](long long begin, long long end, int t) {
+            smappy::FrameScratch scratch;
+            scratch.maxima.reserve(4096);
+            scratch.values.reserve(4096);
+            for (long long f = begin; f < end; ++f)
+                smappy::detect_frame(data + f * ny * nx, ny, nx, static_cast<int>(f), p,
+                                     scratch, kept[t], deferred[t], c + f * halves);
+        });
+    }
+    // thread order is frame order
+    auto joined = [](std::vector<std::vector<smappy::Maximum>>& parts) {
+        std::vector<smappy::Maximum> all;
+        size_t total = 0;
+        for (const auto& v : parts) total += v.size();
+        all.reserve(total);
+        for (auto& v : parts) all.insert(all.end(), v.begin(), v.end());
+        return all;
+    };
+    return py::make_tuple(maxima_arrays(joined(kept)), std::move(cutoffs),
+                          maxima_arrays(joined(deferred)));
+}
+
 py::array_t<float> segment_cutoffs(
         const py::array_t<float, py::array::c_style | py::array::forcecast>& values,
         const py::array_t<int64_t, py::array::c_style | py::array::forcecast>& starts,
@@ -822,6 +885,11 @@ PYBIND11_MODULE(_fit3d, m) {
           py::arg("identity"), py::arg("n_threads") = 0,
           "(n, C, ny, nx) channels summed onto channel 0's pixels by nearest-pixel lookups.");
 
+    m.def("detect_candidates", &detect_candidates, py::arg("images"), py::arg("dynamic"),
+          py::arg("threshold"), py::arg("factor"), py::arg("split_axis") = -1,
+          py::arg("split_position") = 0, py::arg("min_count") = 10, py::arg("n_threads") = 0,
+          "Maxima, cutoff and selection of a filtered block in one pass -> "
+          "((frame, y, x, value), cutoffs (n, halves), deferred (frame, y, x, value)).");
     m.def("segment_cutoffs", &segment_cutoffs, py::arg("values"), py::arg("starts"),
           py::arg("factor"), py::arg("min_count") = 10, py::arg("n_threads") = 0,
           "Dynamic cutoff of each segment values[starts[i]:starts[i+1]], as float32; "

@@ -16,13 +16,31 @@
 
 namespace smappy {
 
+// The dynamic cutoff of the n values at v, which it reorders: three order
+// statistics by nth_element, each search starting where the last left off.
+inline float dynamic_cutoff(float* v, long long n, double factor) {
+    const double levels[3] = {0.2, 0.5, 0.8};
+    double q[3];
+    long long from = 0;
+    for (int k = 0; k < 3; ++k) {
+        const long long rank = static_cast<long long>(std::ceil(n * levels[k])) - 1;
+        std::nth_element(v + from, v + rank, v + n);
+        q[k] = v[rank];
+        from = rank;
+    }
+    // 0.8 - 0.2 as MATLAB divides by it, 0.6000000000000001 and not 0.6
+    const double slope = (q[2] - q[0]) / (0.8 - 0.2);
+    // apart from the sum: fused into an FMA it would round once, not twice
+    volatile double rise = slope * factor;
+    return static_cast<float>(q[1] + rise);
+}
+
 // Cutoffs for the segments values[starts[i], starts[i+1]), i in [first, last).
 // A segment with fewer than `min_count` maxima gets NaN: below ten the rule is
 // a mean (`DynamicCutoff.__call__`), which the caller keeps.
 inline void segment_cutoffs(const float* values, const int64_t* starts,
                             long long first, long long last, double factor,
                             long long min_count, float* out) {
-    const double levels[3] = {0.2, 0.5, 0.8};
     std::vector<float> v;
     for (long long s = first; s < last; ++s) {
         const long long n = starts[s + 1] - starts[s];
@@ -31,19 +49,7 @@ inline void segment_cutoffs(const float* values, const int64_t* starts,
             continue;
         }
         v.assign(values + starts[s], values + starts[s + 1]);
-        double q[3];
-        long long from = 0;
-        for (int k = 0; k < 3; ++k) {
-            const long long rank = static_cast<long long>(std::ceil(n * levels[k])) - 1;
-            std::nth_element(v.begin() + from, v.begin() + rank, v.end());
-            q[k] = v[rank];
-            from = rank;
-        }
-        // 0.8 - 0.2 as MATLAB divides by it, 0.6000000000000001 and not 0.6
-        const double slope = (q[2] - q[0]) / (0.8 - 0.2);
-        // apart from the sum: fused into an FMA it would round once, not twice
-        volatile double rise = slope * factor;
-        out[s] = static_cast<float>(q[1] + rise);
+        out[s] = dynamic_cutoff(v.data(), n, factor);
     }
 }
 

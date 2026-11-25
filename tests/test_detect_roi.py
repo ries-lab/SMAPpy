@@ -203,3 +203,41 @@ def test_candidates_are_thread_independent(n_threads):
     b = finder(images, n_threads=n_threads)[0]
     assert np.array_equal(a.x, b.x) and np.array_equal(a.y, b.y)
     assert np.array_equal(a.frame, b.frame)
+
+
+def _numpy_route(monkeypatch, function, *args, **kwargs):
+    """``function`` as it ran before the fused kernel: the maxima, then the
+    cutoffs in numpy."""
+    import smappy.detect as detect
+    with monkeypatch.context() as m:
+        m.setattr(detect, "_fused", lambda *a, **k: None)
+        return getattr(detect, function)(*args, **kwargs)
+
+
+@pytest.mark.parametrize("split", [None, (0, 20), (1, 33)])
+@pytest.mark.parametrize("cutoff", [DynamicCutoff(1.7), DynamicCutoff(0.3), AbsoluteCutoff(4.0)])
+def test_the_fused_kernel_keeps_the_candidates_and_cutoffs_of_the_numpy_route(monkeypatch, split,
+                                                                              cutoff):
+    """Spots on noise, a frame with a few maxima only (the mean rule, judged
+    in Python), a flat frame (no maxima), on one thread and on several."""
+    from smappy.detect import frame_cutoffs
+    rng = np.random.default_rng(7)
+    frames = [_spots(rng.uniform(5, 55, (12, 2)), amplitude=40.0) + rng.normal(0, 2, (64, 60))
+              for _ in range(6)]
+    few = np.zeros((64, 60), np.float32)
+    for x, y in [(10, 10), (30, 12), (50, 40), (12, 50), (40, 25)]:
+        few[y, x] = 10.0 if (x, y) == (12, 50) else 1.0 + x / 100
+    frames += [few, np.zeros((64, 60), np.float32)]
+    filtered = DoGFilter(1.2)(np.array(frames, np.float32))
+    filtered[-2:] = np.array(frames[-2:])          # as they are: five maxima, then none
+    for threads in (1, 3):
+        fused = find_candidates(filtered, cutoff, n_threads=threads, split=split)
+        reference = _numpy_route(monkeypatch, "find_candidates", filtered, cutoff,
+                                 n_threads=threads, split=split)
+        for name in ("frame", "x", "y", "value"):
+            a, b = getattr(fused, name), getattr(reference, name)
+            assert np.array_equal(a, b) and a.dtype == b.dtype, name
+        assert set(fused.frame.tolist()) >= {6}       # the few maxima's frame found something
+        cut = frame_cutoffs(filtered, cutoff, n_threads=threads, split=split)
+        assert np.array_equal(cut, _numpy_route(monkeypatch, "frame_cutoffs", filtered, cutoff,
+                                                n_threads=threads, split=split), equal_nan=True)

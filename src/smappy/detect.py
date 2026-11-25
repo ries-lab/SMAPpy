@@ -293,6 +293,9 @@ def find_candidates(filtered: np.ndarray, cutoff,
     filtered = np.asarray(filtered, dtype=np.float32)
     if filtered.ndim == 2:
         filtered = filtered[None]
+    fused = _fused(filtered, cutoff, n_threads, split)
+    if fused is not None:
+        return fused[0]
 
     # an absolute cutoff can be applied during the search, which is cheaper
     fixed = cutoff(np.empty(0)) if isinstance(cutoff, AbsoluteCutoff) else -np.inf
@@ -314,6 +317,50 @@ def find_candidates(filtered: np.ndarray, cutoff,
                       value=values[keep])
 
 
+def _fused(filtered: np.ndarray, cutoff, n_threads: int = 0, split=None):
+    """``(candidates, cutoffs)`` of a filtered block in the extension's one
+    pass (`csrc/detect.hpp`), or None where it cannot: no extension, or a
+    cutoff that is neither absolute nor dynamic.
+
+    The numpy route searched every maximum (2 500 a 256 x 256 frame), handed
+    them all to Python and grouped them by frame and half to set and apply the
+    cutoffs -- 0.2 ms a frame of glue around the search.  Here each frame's
+    maxima stay in a buffer of its thread and only the candidates come back.
+    A half with fewer than ten maxima comes back whole, its cutoff
+    `DynamicCutoff.__call__`'s mean rule here, so the candidates and cutoffs
+    are the numpy route's, bit for bit (tested).
+    """
+    kernel = getattr(_fit3d, "detect_candidates", None)
+    if kernel is None or not isinstance(cutoff, (AbsoluteCutoff, DynamicCutoff)):
+        return None
+    dynamic = isinstance(cutoff, DynamicCutoff)
+    axis, position = (-1, 0) if split is None else (int(split[0]), int(split[1]))
+    found, cutoffs, deferred = kernel(
+        filtered, dynamic, float(np.float32(cutoff(np.empty(0)))) if not dynamic else 0.0,
+        float(cutoff.factor) if dynamic else 0.0, axis, position, 10, int(n_threads))
+    frame, y, x, value = found
+    cutoffs = cutoffs.astype(np.float64)
+    if deferred[0].size:
+        dframe, dy, dx, dvalue = deferred
+        side = _halves(dy, dx, split)
+        groups, first, which = np.unique(dframe.astype(np.int64) * 2 + side,
+                                         return_index=True, return_inverse=True)
+        applied = np.empty(groups.size, np.float32)
+        for g, key in enumerate(groups):
+            applied[g] = np.float32(cutoff(dvalue[which == g]))
+            cutoffs[key // 2, key % 2] = applied[g]
+        keep = dvalue > applied[which]
+        if keep.any():
+            frame = np.concatenate([frame, dframe[keep]])
+            y = np.concatenate([y, dy[keep]])
+            x = np.concatenate([x, dx[keep]])
+            value = np.concatenate([value, dvalue[keep]])
+            # back into the search's order: by frame, then row-major
+            order = np.lexsort((x, y, frame))
+            frame, y, x, value = frame[order], y[order], x[order], value[order]
+    return Candidates(frame=frame.astype(np.int64), x=x, y=y, value=value), cutoffs
+
+
 def frame_cutoffs(filtered: np.ndarray, cutoff, n_threads: int = 0,
                   split=None) -> np.ndarray:
     """The cutoff :func:`find_candidates` applies to each frame, ``(n_frames,
@@ -332,6 +379,9 @@ def frame_cutoffs(filtered: np.ndarray, cutoff, n_threads: int = 0,
     n_halves = 1 if split is None else 2
     if isinstance(cutoff, AbsoluteCutoff):
         return np.full((filtered.shape[0], n_halves), cutoff(np.empty(0)))
+    fused = _fused(filtered, cutoff, n_threads, split)
+    if fused is not None:
+        return fused[1]
     frames, rows, cols, values = local_maxima(filtered, n_threads=n_threads)
     return _cutoffs(frames, values, _halves(rows, cols, split),
                     filtered.shape[0], cutoff, n_halves, n_threads)
