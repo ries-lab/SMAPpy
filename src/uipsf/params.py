@@ -15,7 +15,7 @@ there is no variable scaling anywhere.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 import torch
@@ -130,6 +130,18 @@ class ParamSpec:
         return math.prod(self.shape)
 
 
+def _per_emitter(prior: Gaussian, n_emitters: int) -> bool:
+    """Whether a prior's mean or σ has a value per emitter: a leading axis of the emitters' length."""
+    return any(torch.is_tensor(v) and v.dim() > 0 and v.shape[0] == n_emitters for v in (prior.mean, prior.sigma))
+
+
+def _rows(v, index, n_emitters: int):
+    """``v``'s rows ``index`` where it has one per emitter, else ``v`` itself (a value for all)."""
+    if torch.is_tensor(v) and v.dim() > 0 and v.shape[0] == n_emitters:
+        return v[index.to(v.device) if torch.is_tensor(index) else index]
+    return v
+
+
 class Params:
     """Unconstrained values for a set of specs, packed into a shared vector and an emitter matrix."""
 
@@ -171,6 +183,12 @@ class Params:
         for n, s in self.specs.items():
             if s.scope == "emitter":
                 new.values[n] = self.values[n][index]
+                if s.prior is not None and _per_emitter(s.prior, self.n_emitters):
+                    # a prior with a mean or σ per emitter (4Pi in situ's cavity phase) follows its emitters
+                    if new.specs is self.specs:
+                        new.specs = dict(self.specs)
+                    new.specs[n] = replace(s, prior=Gaussian(*(_rows(v, index, self.n_emitters)
+                                                               for v in (s.prior.mean, s.prior.sigma))))
         new.n_emitters = next((v.shape[0] for n, v in new.values.items()
                                if self.specs[n].scope == "emitter"), 0)
         return new

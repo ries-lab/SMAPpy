@@ -50,16 +50,21 @@ START = dict(pairs=[(6, 0.25, -0.30), (8, 0.0, 0.05), (7, 0.05, 0.0), (11, 0.05,
              coherence=[0.7] * 4, delta=[1.9, 3.2, 4.4], dz=20.0, shift=(-0.2, 0.3), sigma=40.0)
 
 
-def _molecules(model, truth, E, seed=0):
+def _molecules(model, truth, E, seed=0, cavity=False):
     """E molecules in single frames, each with its own z over ±450 nm, cavity phase and brightness, drawn
     with ``truth``; and the fitter's start: positions off by 15 nm laterally and 40 nm in z, a tenth of them
-    a fringe off, the phase unknown."""
+    a fringe off, the phase unknown.  ``cavity``: the phase is the cavity's, drifting over 3000 frames and
+    tilted over the field, plus 0.1 rad of jitter, as a movie's."""
     rng = np.random.default_rng(seed)
     xyz = np.c_[rng.uniform(-60, 60, (E, 2)), rng.uniform(-450, 450, E)]
     roi_xy = np.repeat(rng.uniform(20, 180, (E, 1, 2)).round(), C, 1)
+    other = np.random.default_rng(seed + 100)            # its own draws: the untied test's stay as they were
+    frame = other.integers(0, 3000, E)
     drawn = {"xyz": xyz, "photons": rng.lognormal(math.log(4000), 0.4, E), "background": np.full((E, C), 10.0),
              "phase": rng.uniform(-math.pi, math.pi, E)}
-    batch = fi.molecule_batch(np.zeros((E, C, R, R)), roi_xy)
+    if cavity:
+        drawn["phase"] = 2.5 + 0.6 * frame / 3000 + 0.004 * (roi_xy[:, 0, 0] - 100) + other.normal(0, 0.1, E)
+    batch = fi.molecule_batch(np.zeros((E, C, R, R)), roi_xy, frame=frame)
     batch = simulate(model, fi.params_for(model, batch, truth, drawn), batch, seed=seed + 1)
     start = {"xyz": xyz + np.c_[rng.normal(0, 15, (E, 2)), rng.normal(0, 40, E)],
              "photons": drawn["photons"] * 0.9, "background": drawn["background"], "phase": np.zeros(E)}
@@ -82,6 +87,30 @@ def test_poor_fits_are_left_out_and_good_ones_never_for_fitting_too_well():
     d = np.r_[np.random.default_rng(0).normal(1.0, 0.02, 200), 0.5, 2.0]
     out = fi.outliers(d)
     assert out[-1] and not out[-2] and out[:200].sum() <= 2
+
+
+def test_the_cavity_phase_is_found_from_the_molecules_with_its_drift_and_tilt_through_noise_and_wraps():
+    rng = np.random.default_rng(0)
+    E = 3000
+    frame, xy = rng.integers(0, 6000, E), rng.uniform(0, 168, (E, 2))
+    true = 3.0 + 0.4 * frame / 6000 + 0.01 * (xy[:, 1] - 84)            # drifting, tilted in y, near +-pi
+    stray = (rng.random(E) < 0.1) * rng.uniform(-3, 3, E)                 # a tenth far off: wrong fits
+    phase = fi._wrap(true + rng.normal(0, 0.3, E) + stray)
+    cavity = fi.cavity_phases(phase, frame, xy, 1000)
+    assert np.median(np.abs(fi._wrap(cavity - true))) < 0.03 and np.max(np.abs(fi._wrap(cavity - true))) < 0.12
+    assert np.all(np.abs(cavity - phase) <= math.pi + 1e-9)               # each the turn nearest its own phase
+
+
+def test_a_prior_with_a_mean_per_emitter_follows_its_emitters_into_a_solvers_chunk():
+    from uipsf.params import Gaussian, Params, ParamSpec
+    mean = torch.arange(5.0)
+    p = Params([ParamSpec("emitter.phase", (), "emitter", prior=Gaussian(mean, 0.5))], 5,
+               values={"emitter.phase": torch.zeros(5)})
+    part = p.subset(torch.tensor([1, 3]))
+    assert torch.equal(part.specs["emitter.phase"].prior.mean, torch.tensor([1.0, 3.0]))
+    r, _ = part.prior_residuals("emitter")
+    assert torch.allclose(r.ravel(), torch.tensor([-2.0, -6.0]))
+    assert p.specs["emitter.phase"].prior.mean.shape == (5,)              # the whole set keeps its own
 
 
 def test_the_in_situ_export_keeps_the_bead_exports_phase_convention(bead_model):
@@ -116,3 +145,22 @@ def test_in_situ_learning_brings_back_the_samples_pupils_coherence_maps_and_misa
     dz = res.found["xyz"][:, 2] - xyz[:, 2]
     assert np.mean(np.abs(dz) > PERIOD_NM / 2) == 0
     assert np.median(np.abs(dz)) < 15
+
+
+@pytest.mark.long
+def test_tied_to_the_cavity_the_molecules_still_bring_back_the_sample_and_keep_the_fringe_period(bead_model):
+    """The same learning with each molecule's phase held near the cavity's (docs/4pi.md §29): what moved comes
+    back as untied, the model's fringe period is the truth's, and z lands on the right fringe."""
+    model = fi.molecule_model(bead_model, (R, R))
+    truth, start = _shared(model, **TRUTH), _shared(model, **START)
+    batch, fitter, xyz = _molecules(model, truth, 160, cavity=True)
+    res = fi.learn_insitu(bead_model, start, batch, fitter, PERIOD_NM,
+                          settings=fi.InSituSettings(rounds=1, cavity_sigma_rad=0.2, cavity_window_frames=1000))
+    for name in ("pupil.phase", "lo.pupil.phase"):
+        assert float((res.shared[name] - truth[name]).norm()) < 0.25 * float((start[name] - truth[name]).norm())
+    assert np.allclose(res.shared["fourpi.coherence"], truth["fourpi.coherence"], atol=0.05)
+    assert res.rounds[0]["cavity_spread_rad"] < 1.0
+    period = calibration((model, res.shared), z_range_nm=300, dz_nm=50).period_nm
+    assert period == pytest.approx(calibration((model, truth), z_range_nm=300, dz_nm=50).period_nm, rel=0.01)
+    dz = res.found["xyz"][:, 2] - xyz[:, 2]
+    assert np.mean(np.abs(dz) > PERIOD_NM / 2) == 0 and np.median(np.abs(dz)) < 15

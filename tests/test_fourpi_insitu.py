@@ -75,3 +75,40 @@ def test_each_molecule_is_cut_in_every_channel_where_the_layout_maps_it():
         cy, cx = np.unravel_index(np.argmax(summed[c]), summed[c].shape)
         assert (cy, cx) == (5, 5)
     assert np.allclose(got.roi_xy[:, 0], np.rint(np.c_[x, y]))
+
+
+def test_a_pupil_model_saved_without_its_recipe_is_refused_with_the_way_out(tmp_path):
+    # P1's tubulin model (docs/4pi.md §26, §29) was saved the day before pupil models kept their recipe
+    import pytest
+
+    from smappy.calibrate.fourpi_insitu import bead_model_of
+    cal = fourpi.model_calibration(size=15, z_range_nm=300.0)
+    cal.parameters = {"method": "uiPSF v2 4Pi bead model"}
+    fourpi.save_fourpi_calibration(tmp_path / "old_4pi.h5", cal)
+    with pytest.raises(ValueError, match="learn it again"):
+        bead_model_of(tmp_path / "old_4pi.h5")
+    cal.parameters = {"method": "IAB from a bead scan"}
+    fourpi.save_fourpi_calibration(tmp_path / "average_4pi.h5", cal, overwrite=True)
+    with pytest.raises(ValueError, match="bead average"):
+        bead_model_of(tmp_path / "average_4pi.h5")
+
+
+def test_a_better_held_out_likelihood_with_z_on_other_fringes_or_a_moved_period_is_still_warned_of():
+    # the 2017-11-28 tubulin (docs/4pi.md §29): 97 nats a molecule better, 15 % on another fringe, 294 -> 282.5 nm
+    from smappy.calibrate.fourpi_insitu import FourPiInSituRun, warnings_of
+    rng = np.random.default_rng(0)
+    z = rng.uniform(-400, 400, 100)
+    moved = z + 20 + np.where(rng.random(100) < 0.15, 294.2, 0.0)
+    bead = SimpleNamespace(period_nm=294.2)
+
+    def run(z_insitu, objective, period):
+        return FourPiInSituRun(None, None, bead, None, np.arange(100), {"bead": 1000.0, "in situ": objective},
+                               None, calibration=SimpleNamespace(period_nm=period),
+                               held_z={"bead": z, "in situ": z_insitu})
+
+    assert warnings_of(run(z + 20, 900.0, 293.0)) == []
+    tubulin = run(moved, 900.0 - 9700, 282.5)
+    assert 0.1 < tubulin.other_fringe < 0.2
+    text = " ".join(warnings_of(tubulin))
+    assert "another fringe" in text and "period moved" in text and "no better" not in text
+    assert "no better" in " ".join(warnings_of(run(z, 1000.0, 294.2)))

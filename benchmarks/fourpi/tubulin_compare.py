@@ -29,7 +29,7 @@ FRAMES = 6000
 
 
 def authors():
-    cache = OUT / "authors_6000.npz"
+    cache = DATA / "smappy_p1" / "authors_6000.npz"
     if not cache.exists():
         import scipy.io as sio
         raw = sio.loadmat(DATA / "Cell01_642_tmpresult_20200912.mat")

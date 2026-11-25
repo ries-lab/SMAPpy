@@ -55,6 +55,9 @@ class FourPiInSituSettings:
                             help="this share of the molecules is not learnt from, and judges the in-situ "
                                  "model against the bead model")
     seed: int = param(0, label="seed", advanced=True, help="which molecules are drawn, where there are more")
+    cavity_sigma_rad: float = param(0.2, label="cavity tie", unit="rad", min=0.0, advanced=True,
+                                    help="while learning, each molecule's phase is held this near the cavity's "
+                                         "phase at its frame; 0: each its own")
 
 
 def _column(locs, name):
@@ -203,6 +206,8 @@ class FourPiInSituRun:
     calibration: object = None
     saved: Path | None = None
     messages: list = field(default_factory=list)
+    #: each held-out molecule's z on each model, by the names of ``heldout``
+    held_z: dict = field(default_factory=dict)
 
     @property
     def gain_nats(self) -> float | None:
@@ -211,6 +216,45 @@ class FourPiInSituRun:
         if not self.heldout:
             return None
         return (self.heldout["bead"] - self.heldout["in situ"]) / max(1, len(self.held))
+
+    @property
+    def other_fringe(self) -> float | None:
+        """The share of the held-out molecules the two models put on different fringes: their z apart by more
+        than half the bead model's period, about the median difference; None without any held out."""
+        if "bead" not in self.held_z or "in situ" not in self.held_z:
+            return None
+        d = np.asarray(self.held_z["in situ"]) - np.asarray(self.held_z["bead"])
+        if not len(d):
+            return None
+        return float(np.mean(np.abs(d - np.median(d)) > self.bead_calibration.period_nm / 2))
+
+
+#: more of the held-out molecules than this on another fringe, or a period moved by more than this share: the
+#: in-situ model measures z differently from the beads', whatever its likelihood (docs/4pi.md §29)
+OTHER_FRINGE_WARNING = 0.05
+PERIOD_WARNING = 0.02
+
+
+def warnings_of(result: FourPiInSituRun) -> list:
+    """What the window warns of after a run: a held-out likelihood no better than the beads', and -- since a
+    better likelihood is not enough (on the 2017-11-28 tubulin in situ explained the held-out molecules by 97
+    nats each better and measured z worse, docs/4pi.md §29) -- z that moved to other fringes, or a period that
+    moved, which the molecules alone cannot fix."""
+    out = []
+    gain = result.gain_nats
+    if gain is not None and gain <= 0:
+        out.append(f"the in-situ model explains the held-out molecules no better than the bead model "
+                   f"({gain:+.1f} nats per molecule): keep the bead model")
+    other = result.other_fringe
+    if other is not None and other > OTHER_FRINGE_WARNING:
+        out.append(f"the in-situ model puts {other:.0%} of the held-out molecules on another fringe than the "
+                   f"bead model does: fit the movie with both and compare their uncertain fringes before using it")
+    if result.calibration is not None:
+        before, after = result.bead_calibration.period_nm, result.calibration.period_nm
+        if abs(after / before - 1) > PERIOD_WARNING:
+            out.append(f"the fringe period moved from {before:.1f} to {after:.1f} nm: single molecules do not "
+                       f"measure it, the beads' scan does; the in-situ z may be scaled")
+    return out
 
 
 def bead_model_of(path, device=None):
@@ -222,6 +266,12 @@ def bead_model_of(path, device=None):
     cal = load_fourpi_calibration(path)
     made = model_from_calibration(cal, device=device)
     if made is None:
+        if "uiPSF v2" in str((cal.parameters or {}).get("method", "")):
+            # a pupil model of this program's, saved before the model's recipe was kept with it (2026-11-24):
+            # the same beads and settings learn it again, recipe and all (docs/4pi.md §29)
+            raise ValueError(f"{Path(path).name} is a pupil model saved before its recipe was kept with it: "
+                             "learn it again from the same beads with the same settings, and in situ can "
+                             "start from the new file")
         raise ValueError(f"{Path(path).name} keeps no pupil model to start from: in situ needs a 4Pi pupil "
                          "model saved by this program's PSF calibration (a bead average or uiPSF v1's will not do)")
     return (cal,) + made
@@ -280,16 +330,20 @@ def run_insitu(paths, settings: FourPiInSituSettings, camera, save_to=None, prog
 
     sub, sub_start = part(learn)
     fit = fi.learn_insitu(bead_model, bead_shared, sub, sub_start, cal.period_nm,
-                          settings=fi.InSituSettings(rounds=settings.rounds), progress=tell, cancel=cancel)
-    heldout = {}
+                          settings=fi.InSituSettings(rounds=settings.rounds,
+                                                     cavity_sigma_rad=settings.cavity_sigma_rad or None),
+                          progress=tell, cancel=cancel)
+    heldout, held_z = {}, {}
     if len(held) and fit.result is not None and fit.result.stop_reason != "cancelled":
         tell({"message": f"judging both models on {len(held)} held-out molecules", "fraction": 0.95})
         hb, hs = part(held)
         model = fi.molecule_model(bead_model, tuple(batch.data.shape[-2:]))
         for name, shared in (("bead", bead_shared), ("in situ", fit.shared)):
-            heldout[name] = float(fi.localise(model, shared, hb, hs, cal.period_nm)["objective"].sum())
+            found = fi.localise(model, shared, hb, hs, cal.period_nm)
+            heldout[name] = float(found["objective"].sum())
+            held_z[name] = found["xyz"][:, 2]
     out = FourPiInSituRun(fit, (bead_model, {k: torch.as_tensor(v) for k, v in bead_shared.items()}), cal,
-                          molecules, held, heldout, layout)
+                          molecules, held, heldout, layout, held_z=held_z)
     if save_to is not None and fit.result is not None and fit.result.stop_reason != "cancelled":
         save(out, save_to)
     return out

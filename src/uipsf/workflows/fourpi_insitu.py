@@ -21,6 +21,16 @@ and only the envelope tells the fringes apart.  So every molecule is localised f
 period above and below it (`Z_STARTS`), each from the best of twelve phases (`fourpi.best_phases`), the best
 optimum kept (`localise`).
 
+**The cavity phase ties the molecules together** (``InSituSettings.cavity_sigma_rad``; docs/4pi.md §29).  With a
+phase of its own, a molecule's phase and z are one number for the interference, Θ = φ + k z: nothing then fixes
+the model's phase against z (the fringe period) or the envelope's z scale, and on the 2017-11-28 tubulin the
+learning wandered -- the period from 294 to 282.5 nm, the envelope's z warped, twice the uncertain fringes of
+the bead model it started from -- while the held-out molecules' likelihood improved.  The cavity's phase is the
+instrument's, common to every molecule of a frame and slow (0.25 rad over that movie's 60 s): so each molecule's
+φ is held near the cavity's, estimated from the molecules themselves in windows of ``cavity_window_frames`` with
+a tilt over the field (`cavity_phases`), by a prior of σ ``cavity_sigma_rad``.  Then the envelope has to agree
+with the phase's z, which the optics' k sets.
+
 **The rounds** (`learn_insitu`): every molecule localised on the current model, the shared parameters
 held; those whose fit is poor -- a neighbour in a box, a bad cut, a fit on the wrong fringe that no start
 fixed -- left out by a robust z-score of their deviance per pixel (`outliers`); then the shared parameters
@@ -62,6 +72,11 @@ class InSituSettings:
     offset_sigma_nm: tuple = OFFSET_SIGMA_NM
     #: also held, by name: e.g. ``ch1.transform`` where the channels' registration is trusted
     held: tuple = ()
+    #: each molecule's phase held near the cavity's by a prior of this σ (rad) while learning; None: each its own
+    #: (module docstring).  Needs the molecules' frames (`molecule_batch`'s ``frame``).
+    cavity_sigma_rad: float | None = None
+    #: the cavity's phase is estimated per window of this many frames
+    cavity_window_frames: int = 1000
 
 
 @dataclass
@@ -170,7 +185,34 @@ def outliers(deviance, z: float = OUTLIER_Z) -> np.ndarray:
     return (d - med) / sd > z
 
 
-def learning_params(params: Params, settings: InSituSettings, offset=None) -> Params:
+def _wrap(a):
+    return np.angle(np.exp(1j * np.asarray(a, float)))
+
+
+def cavity_phases(phase, frame, xy, window_frames: int, iterations: int = 3) -> np.ndarray:
+    """The cavity's phase where each molecule is, unwrapped to the nearest turn of its own ``phase``: a circular
+    mean per window of ``window_frames`` frames plus a plane over the field ``xy`` [E, 2] (a tilted cavity), the
+    plane fitted by least squares to the residuals within three robust σ, a few times in turn with the means."""
+    phase, xy = np.asarray(phase, float), np.asarray(xy, float)
+    window = (np.asarray(frame, np.int64) // max(int(window_frames), 1)).ravel()
+    centred = xy - xy.mean(0)
+    tilt = np.zeros(2)
+    for _ in range(iterations):
+        rest = phase - centred @ tilt
+        means = {w: np.angle(np.exp(1j * rest[window == w]).sum()) for w in np.unique(window)}
+        cavity = np.array([means[w] for w in window]) + centred @ tilt
+        r = _wrap(phase - cavity) + centred @ tilt            # what the plane has to explain, its own part back
+        sd = 1.4826 * np.median(np.abs(_wrap(phase - cavity))) or 1.0
+        ok = np.abs(_wrap(phase - cavity)) < 3 * sd
+        A = np.c_[centred[ok], np.ones(ok.sum())]
+        tilt = np.linalg.lstsq(A, r[ok], rcond=None)[0][:2]
+    rest = phase - centred @ tilt
+    means = {w: np.angle(np.exp(1j * rest[window == w]).sum()) for w in np.unique(window)}
+    cavity = np.array([means[w] for w in window]) + centred @ tilt
+    return phase - _wrap(phase - cavity)
+
+
+def learning_params(params: Params, settings: InSituSettings, offset=None, cavity=None) -> Params:
     """``params`` with the shared parameters that in situ learns free, the rest held (`HELD`, the settings'
     own), and the misalignment's prior (`OFFSET_SIGMA_NM`) about ``offset``, the bead model's -- never about
     a round's own result, or the rounds walk away from it."""
@@ -183,6 +225,10 @@ def learning_params(params: Params, settings: InSituSettings, offset=None) -> Pa
                                          prior=Gaussian(phys["fourpi.offset"].detach().clone() if offset is None else
                                                         torch.as_tensor(offset, dtype=sigma.dtype,
                                                                         device=sigma.device), sigma))
+    if cavity is not None and settings.cavity_sigma_rad is not None:
+        mean = torch.as_tensor(np.asarray(cavity, float), dtype=phys["emitter.phase"].dtype,
+                               device=phys["emitter.phase"].device)
+        specs["emitter.phase"] = replace(specs["emitter.phase"], prior=Gaussian(mean, float(settings.cavity_sigma_rad)))
     out = Params(list(specs.values()), params.n_emitters, dtype=phys["emitter.xyz"].dtype,
                  device=phys["emitter.xyz"].device, values=phys)
     return out.free(*[n for n, s in out.specs.items() if s.scope == "shared"]).fix(
@@ -218,12 +264,20 @@ def learn_insitu(bead_model: FourPiModel, bead_shared: dict, batch: Batch, start
         bad = outliers(found["deviance"], settings.outlier_z)
         kept = np.flatnonzero(~bad)
         sub = subset(batch, kept)
+        cavity = None
+        if settings.cavity_sigma_rad is not None:
+            if batch.frame is None:
+                raise ValueError("tying the molecules to the cavity's phase needs their frames (molecule_batch)")
+            cavity = cavity_phases(found["phase"][kept], batch.frame[kept, 0].cpu().numpy(),
+                                   batch.roi_xy[kept, 0].cpu().numpy(), settings.cavity_window_frames)
         p = learning_params(params_for(model, sub, shared, {k: v[kept] for k, v in found.items()}), settings,
-                            bead_shared.get("fourpi.offset"))
+                            bead_shared.get("fourpi.offset"), cavity)
         result = solver.solve(Problem(model, noise, sub, chunk_size), p, progress=tell("learn", r), cancel=cancel)
         specs = result.params.specs
         shared = {n: v.detach() for n, v in result.params.physical().items() if specs[n].scope == "shared"}
         rounds.append({"round": r, "kept": len(kept), "left_out": int(bad.sum()),
+                       **({} if cavity is None else {"cavity_spread_rad": float(
+                           1.4826 * np.median(np.abs(_wrap(found["phase"][kept] - cavity))))}),
                        "median_deviance": float(np.median(found["deviance"])),
                        "objective": float(result.objective), "stop": result.stop_reason})
         if result.stop_reason == "cancelled":

@@ -543,12 +543,21 @@ left out; then both objectives' pupils, the coherence, the arms' balance, the
 channels' shares, phase offsets and maps, the blur and the misalignment along
 z are learnt together with every molecule.  This is done *rounds* times.  The
 objectives' apodisation and the buffer's index are kept from the bead model,
-and so is the lateral misalignment, by a tight prior.
+and so is the lateral misalignment, by a tight prior.  While learning, each
+molecule's interference phase is held near the cavity's -- the phase all
+molecules of a frame share, found from the molecules themselves in windows of
+1000 frames, with a tilt over the field -- within *cavity tie* (0: each its
+own).  Without it a molecule's phase and its z trade freely, and nothing holds
+the model's z axis: on a tubulin movie the envelope's z warped and the share of
+uncertain fringes doubled.
 
 **3. The held-out molecules judge the result**: each is localised on the bead
 model and on the in-situ model, and the summary says how many nats per
-molecule the in-situ model explains them better.  Below zero, a line says to
-keep the bead model.  The model is saved for Spline 4Pi as
+molecule the in-situ model explains them better, and how many of them it puts
+on another fringe than the bead model does.  A line says to keep the bead
+model when it explains them no better, and warns when more than 5 % change
+fringe or the fringe period moved by more than 2 %: a better likelihood alone
+is no proof of better z.  The model is saved for Spline 4Pi as
 `<name>_insitu_4pi.h5`.
 
 The pages are *Pupils* (the learnt objectives) beside *Bead model's pupils*,
@@ -565,7 +574,12 @@ coherence rose from 0.8 to 0.96, which makes the precisions it claims smaller
 than its scatter shows; check *4Pi z*'s line, the envelope's scatter against
 its error, before taking them at their word.  In situ should matter more where
 the bead model is wrong: a buffer of another index, a deep sample, beads from
-another day, or only a few.
+another day, or only a few.  On a dense tubulin movie with a bead model from
+three one-bead scans (docs/4pi.md §29), in situ explained held-out molecules
+better by 97 nats each and still measured no better than the beads: it widened
+the PSF and lowered the coherence to take up neighbours' light in the boxes.
+Fit the movie with both models and compare *4Pi z*'s uncertain fringes before
+keeping it.
 
 ## Molecules on the coverslip
 

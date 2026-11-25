@@ -2691,3 +2691,85 @@ cores.  But after these changes the Nup96 movie is limited by reading (900 frame
 1.2 ms a frame), not the fit: a GPU would gain less than 2× there.  Dense data is where it would pay: tubulin's 73
 molecules a frame keep the CPU at 51-58 frames/s, and a GPU fit would take it to reading's 700-800, 10-15×.
 So the GPU question is one of density: a DECODE-like network for dense 4Pi data (P5) answers the same need.
+
+## 29. In situ on the 2017-11-28 tubulin: no better than the beads, and why (2026-11-25)
+
+§27's in situ run on Gabin's tubulin (Cell01's first 6000 frames), started from P1's bead model (§26: the pupil
+model of the three one-bead scans, 680 nm, 100 nm beads, maps held), and judged as P2 judged it on the Nup96,
+with the authors' fits beside.  The scripts are `benchmarks/fourpi/insitu/tubulin_*.py` (their order in that
+folder's README), their outputs in `smappy_insitu/` beside the data.
+
+**What it tripped on first.**  P1's model was saved the day before pupil models kept their recipe with them, so
+in situ could not start from it (`model_from_calibration` is None) and said only that a bead average will not
+do.  It now says to learn the model again from the same beads (`bead_model_of`); `tubulin_pupil.py 680 100 held`
+gives the same model (objective 851 590, as P1's), recipe and all, in a minute.
+
+**The learning.**  2853 molecules from the odd blocks of 500 frames (photons above the median: 8300 median; z
+−420 to +450 nm), two rounds, 22 min on the Mac's GPU; 1900 from the even blocks held out.  The movie then fitted
+with each model (Spline 4Pi, *4Pi z*, the registration file) and judged on the even blocks; the authors' raw
+fits and final table paired as in §26 (`tubulin_compare.py`).
+
+| model | held out: objective (nats) | deviance / px | uncertain fringes | p < 0.9 | z_phase vs z_env: scatter (× CRLB, nm) | z vs their final: spread, other fringe | envelope z vs their final | x, y vs theirs (nm) | photons ours / theirs | period (nm) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| beads (P1's) | 1 819 070 | 2.83 | 7.2 % | 16.2 % | 2.10, 44.5 | 4.4 nm, 0.1 % | 26.9 nm | −1.9, +0.5 | 1.60 | 294.2 |
+| in situ | **1 634 684** | **2.55** | 13.6 % | 30.0 % | 2.19, 58.2 | 7.7 nm, 1.7 % | 58.8 nm | +14.8, +12.5 | 1.86 | 282.5 |
+| in situ, cavity tied | 1 642 350 | 2.56 | 7.8 % | 16.3 % | 1.71, 43.7 | 6.3 nm, 0.1 % | 30.3 nm | +13.7, +15.2 | 1.89 | 282.8 |
+
+The held-out objective is the 1900 even-block molecules, each localised on each model by uipsf from three z
+starts; the deviance per pixel its mean.  On them the two in-situ models put 15 % (untied) and 5.6 % (tied) on
+another fringe than the beads do, their z otherwise within 89 and 39 nm (robust sd) of the beads'.  The rest are each model's own fit of the movie (the uncertain fringes
+over all of it, the scatter on the even blocks' sure ones), against the authors' as in §26.
+
+**So, plainly: in situ does not help here, and it does not explain the 1.6× photons.**
+- **In situ explains the molecules much better** -- 97 nats per held-out molecule (Nup96: 4) -- **and measures
+  z worse.**  It doubled the uncertain fringes, put 1.7 % of the authors' final localizations on another fringe
+  (beads: 0.1 %), and its envelope z against the authors' phase-precise z spread twice as wide (59 against 27 nm),
+  with a slope of 1.48 where the beads' was 0.86 and a plateau in the middle: the envelope's z axis warped.  The
+  window's check, the held-out likelihood alone, would have recommended it.
+- **Why the z axis can warp.**  Every molecule has its own cavity phase φ, and for the interference a molecule's
+  phase and its z are one number, φ + kz: nothing ties the model's phase against z, or the envelope's scale, to
+  anything.  On simulated molecules (§27's test) the PSF's shape fixed both; on these it did not.  The cavity's
+  phase is the instrument's and common to the molecules of a frame -- here it drifted 0.25 rad over the 60 s and
+  tilts by about 0.05 rad/µm in y (*4Pi z*'s cavity, and the residual of its phases across the field) -- so in situ can tie each molecule's phase to it: a prior
+  of σ 0.2 rad about the cavity's phase, found from the molecules in windows of 1000 frames with a plane over the
+  field (`InSituSettings.cavity_sigma_rad`, `cavity_phases`).  Tied, the envelope stays put (30 nm against the
+  authors', slope 1.10) and the uncertain fringes are the beads' (7.8 against 7.2 %).  The period still moved
+  (294.2 → 282.8 nm, as untied): the molecules' phases scatter 1.5 rad about the cavity's even after learning
+  (the bead model's envelope z error, 2× its CRLB, times k), so the tie holds the envelope, not the period, which
+  the bead scans measure (291.5 nm by the stage) and these molecules cannot.
+- **Tied, in situ is the beads' equal, not better**, though it still explains the held-out molecules by 93 nats each
+  better.  The same fringes and envelope scatter in nm; z against the
+  authors' 6.3 nm against 4.4 (the phase's z less linear in theirs: 5.7 against 3.8 nm about a line); x and y
+  moved 14 nm from theirs (the misalignment Δx, Δy, held by a 1 nm prior, moved 18 -- 24 nm: the data pulled).
+- **What the molecules show that no model fits.**  Their boxes are wider than the bead model's spots (rms width
+  2.3 -- 2.5 against 1.7 -- 1.9 px, at every z), and the deviance is 2 per pixel even at a box's edge, where only
+  background is modelled, rising with the neighbours a molecule has in its box (1.55, 2.23 and 4.17 for 1 -- 2,
+  3 -- 5 and 6 or more localizations within a box in the frame and the two beside it, the
+  molecule's own there counted too): these are dense filaments, and the boxes hold
+  their neighbours' light and their out-of-focus light.  In situ takes it up as PSF: the blur 84 → 106 nm, the
+  coherence 0.82 -- 0.99 → 0.60 -- 0.95 (light that does not interfere with the molecule's), Δ moved.  That
+  describes the boxes better and the molecules worse.  The Nup96, sparse and near the coverslip, had none of it
+  (deviance 1.15).
+- **The photons.**  A Gaussian with a flat background fitted to the model's own spots summed over the channels --
+  what the authors fit, astigmatic, to the sum (`tubulin_gauss.py`, noise-free, at the movie's median photons and
+  background) -- takes 0.76 of the bead model's photons (0.62 at −400 nm, 0.83 at +400 nm; 16-px box) and 0.67 of
+  the in-situ model's, whose spot is wider.  1.60 / 1.31 = 1.22 and 1.86 / 1.50 = 1.24: the rest is the same for
+  both models, so the camera's, and the backgrounds say the same -- ours over theirs 137 / 119.7 = 1.14, 1.18 with
+  the Gaussian's own background bias (+3.5 -- 5 photons a pixel here) taken off theirs.  **So the 1.6× is ~1.3
+  from the Gaussian taking only the spot's core and ~1.2 from the two pipelines' photon scales** (their camera
+  conversion is not in the files; P1 measured 0.40 -- 0.50 e⁻/ADU and took 0.5).  In situ does not explain it: it
+  raises our photons further, to 1.86 -- 1.89.
+
+**What changed.**
+- `fourpi_insitu.bead_model_of` says what to do with a pupil model saved without its recipe.
+- In situ ties the molecules to the cavity's phase, in the window by default (*cavity tie*, 0.2 rad, an advanced
+  setting of the *4Pi in situ* section; 0 learns as §27 did): `uipsf.workflows.fourpi_insitu.cavity_phases`, and
+  `Params.subset` now carries a prior's mean per emitter into a solver's chunk.  §27's Nup96 numbers are untied;
+  that movie was not learnt again tied.
+- The window warns when the in-situ model puts more than 5 % of the held-out molecules on another fringe than the
+  bead model, or moves the period by more than 2 % (`fourpi_insitu.warnings_of`, `FourPiInSituRun.other_fringe`):
+  here 15 % untied and 5.6 % tied, and 4 % for both.  The summary says the first.
+
+**Not done.**  A background that is not flat in a molecule's box, or the neighbours fitted with it, which is what
+this sample needs before in situ can learn from it; molecules chosen sparser (alone over several boxes and
+frames); the period held at the beads' while learning; the tied model on the Nup96.

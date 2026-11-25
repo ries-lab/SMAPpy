@@ -6,15 +6,17 @@ ORCA-Flash 4.0 at offset 100 and 0.5 e-/ADU (the photon transfer of the movie's 
 `tubulin_layout.py`), 128 nm pixels (the authors' ``para.pixelsz``).  The layout is the 4Pi-SMS design's
 (`channels.YALE_4PI`): its channel centres are the authors' (235, 474, 1557, 1797), the last two mirrored.
 """
+import os
 from pathlib import Path
 
 DATA = Path.home() / ".cache/uipsf/4pi_tubulin_2017-11-28"
-OUT = DATA / "smappy_p1"
+#: where the scripts write; ``TUBULIN_OUT`` moves it (the in-situ study, §29, writes beside P1's, never over them)
+OUT = Path(os.environ.get("TUBULIN_OUT", DATA / "smappy_p1"))
 SCANS = [DATA / f"Cell0{k}/Cell0{k}_642_000_000.dcimg" for k in (3, 4, 5)]
 FIELDS = [DATA / f"Cell{k:02d}" for k in range(6, 13)]
 MOVIE = DATA / "Cell01/Cell01_642_000_000.dcimg"
 CONVERSION, OFFSET, PIXEL_UM = 0.5, 100.0, 0.128
-REGISTRATION = OUT / "registration_cell06-12.json"
+REGISTRATION = DATA / "smappy_p1" / "registration_cell06-12.json"
 
 
 def camera():

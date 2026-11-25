@@ -1496,10 +1496,10 @@ class FourPiInSitu(_FourPi):
         done = run_insitu(paths, settings, inputs.get("camera"), save_to=save_to, progress=progress, cancel=cancel,
                           molecules=found["molecules"] if found else None, layout=found["layout"] if found else None)
         run = Run({"insitu": done, "settings": settings, "calibration": done.calibration}, False, done.saved)
-        gain = done.gain_nats
-        if gain is not None and gain <= 0:
-            run.extra["warning"] = (f"the in-situ model explains the held-out molecules no better than the bead "
-                                    f"model ({gain:+.1f} nats per molecule): keep the bead model")
+        from .fourpi_insitu import warnings_of
+        warnings = warnings_of(done)
+        if warnings:
+            run.extra["warning"] = "; ".join(warnings)
         return run
 
     def finish(self, run: Run, progress=None) -> Run:
@@ -1578,6 +1578,9 @@ class FourPiInSitu(_FourPi):
         if gain is not None:
             text += (f"; on {len(done.held)} held-out molecules {abs(gain):.1f} nats per molecule "
                      f"{'better' if gain > 0 else 'worse'} than the bead model")
+        other = done.other_fringe
+        if other is not None:
+            text += f", {other:.0%} of them on another fringe"
         return text
 
 
