@@ -271,11 +271,11 @@ class FitNoise:
     variance: np.ndarray
     path: str = ""
 
-    def to_photons(self, frames: np.ndarray, adu_to_photons: float) -> np.ndarray:
-        """`camera.to_photons` with the offset of each pixel."""
-        out = np.asarray(frames, np.float32) - self.offset_adu
-        out *= np.float32(adu_to_photons)
-        return out
+    def to_photons(self, frames: np.ndarray, adu_to_photons: float,
+                   n_threads: int = 0) -> np.ndarray:
+        """`camera.to_photons` with the offset of each pixel (`camera.convert`)."""
+        from .camera import convert
+        return convert(frames, self.offset_adu, adu_to_photons, n_threads=n_threads)
 
 
 def for_frames(camera, shape: Tuple[int, int], path=None) -> FitNoise:

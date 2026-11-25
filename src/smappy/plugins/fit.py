@@ -1594,6 +1594,10 @@ class _FitPlugin(Plugin):
         try:
             from ..pipeline import drive
             engine = self.engine(settings, camera, finder, model)
+            if hasattr(engine, "overlap"):
+                # a whole file: each block fitted while the next is found, the same table in the
+                # same order; a live fit shows each block as soon as it is fitted
+                engine.overlap = not src.live
             problem = self.region_problem(settings, getattr(engine, "layout", None))
             if problem:
                 ctx.warn(problem)

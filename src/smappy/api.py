@@ -107,7 +107,7 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
 
     try:
         _, engine = fit_stack(blocks, cam, finder, model, settings, sink=sink,
-                              progress=progress, read_ahead=read_ahead)
+                              progress=progress, read_ahead=read_ahead, overlap=True)
         extra = _acquisition(source)
         if writer is not None:
             # what the run actually did, beside how it was set up

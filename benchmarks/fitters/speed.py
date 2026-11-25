@@ -299,8 +299,8 @@ def whole(cls, settings):
     from smappy.io.hdf5 import LocalizationWriter
     from smappy.plugins import Context
     timer = Timer()
-    timer.wrap(smappy.pipeline, "to_photons", "photons")      # the single-channel engine's name for it
-    timer.wrap(smappy.camera, "to_photons", "photons")        # the multi-channel engine imports it each block
+    timer.wrap(smappy.pipeline, "fit_photons", "photons")     # the single-channel engine's name for it
+    timer.wrap(smappy.camera, "fit_photons", "photons")       # the multi-channel engine imports it each block
     timer.wrap(PeakFinder, "__call__", "peak finding")
     timer.wrap(smappy.detect, "find_candidates", "maxima+cutoff")
     timer.wrap(smappy.pipeline, "cut_rois", "boxes")
@@ -341,11 +341,14 @@ def cmd_plugin(args):
             walls = np.array([w for w, _, _ in runs])
             loops = np.array([p["loop"] for _, p, _ in runs])
             # shares of the loop's time; the loop's own rest is turning fits into localizations, the
-            # queue to the reading thread, progress
+            # queue to the reading thread, progress.  Since the fit runs in a worker while the next
+            # block is found (`LocalizationEngine.overlap`), detection and the fit overlap, and the
+            # shares add up to more than the loop: the rest is then what neither covers, the
+            # "overlapped" figure the gain the overlap could still give (1.00x: it has all of it)
             shares = {k: np.median([p.get(k, 0.0) / p["loop"] for _, p, _ in runs]) for k in ORDER}
-            rest = 1 - sum(shares.values())
+            rest = max(0.0, 1 - sum(shares.values()))
             detection = sum(shares[k] for k in ("photons", "filter", "maxima+cutoff", "boxes"))
-            overlapped = rest + shares["writing"] + max(detection, shares["fit"])
+            overlapped = min(1.0, rest + shares["writing"] + max(detection, shares["fit"]))
             print(f"{name}, {density}/frame: whole {spread(FRAMES / walls, '{:,.0f}')} frames/s, loop "
                   f"{spread(FRAMES / loops, '{:,.0f}')} frames/s, setup and after {spread(walls - loops, '{:.2f}')} s "
                   f"({runs[0][2] / FRAMES:.1f} locs/frame); reading alone {spread(read)} frames/s; loop: "
@@ -363,7 +366,7 @@ def _steps(finder, photons_of, raw, threads, repeat):
     n = len(raw)
     for _ in range(repeat):
         t0 = time.perf_counter()
-        photons = photons_of(raw)
+        photons = photons_of(raw, threads)
         t1 = time.perf_counter()
         filtered = finder.filter(photons, n_threads=threads)
         t2 = time.perf_counter()
@@ -382,7 +385,7 @@ def _fourpi_channels(frames=200):
     sys.path.insert(0, str(Path(__file__).parents[1] / "fourpi"))
     from speed import cases
 
-    from smappy.camera import to_photons
+    from smappy.camera import fit_photons
     from smappy.channels import detection_lookup
     from smappy.multichannel import detection_image
     from smappy.plugins.fit_4pi import FourPiFit
@@ -396,22 +399,22 @@ def _fourpi_channels(frames=200):
     lookups = [None] + [detection_lookup(layout, c, (h, w), engine.resampling)
                         for c in range(1, layout.n_channels)]
 
-    def photons_of(block):                 # four channels to photons, summed onto channel 0
-        return detection_image(to_photons(block, camera) / camera.excess_noise, layout, lookups)
+    def photons_of(block, threads):        # four channels to photons, summed onto channel 0
+        return detection_image(fit_photons(block, camera, n_threads=threads), layout, lookups, threads)
     return raw, photons_of
 
 
 def cmd_detect(args):
     import tifffile
 
-    from smappy.camera import to_photons
+    from smappy.camera import fit_photons
     from smappy.metadata import CameraMetadata
     from smappy.plugins.fit import DetectionSettings
     finder = DetectionSettings().finder()
     camera = CameraMetadata(conversion=CONVERSION, offset=OFFSET, pixelsize_um=PIXEL_UM, em_on=False)
 
-    def plain(block):
-        return to_photons(block, camera) / camera.excess_noise
+    def plain(block, threads):
+        return fit_photons(block, camera, n_threads=threads)
     small = tifffile.imread(movie_path("spline", 30), key=range(200))
     big = np.stack([np.block([[small[(i + 8 * r + c) % 200] for c in range(8)] for r in range(8)])
                     for i in range(10)])

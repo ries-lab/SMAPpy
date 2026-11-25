@@ -17,6 +17,7 @@
 #include "lm.hpp"
 #include "maxima.hpp"
 #include "parallel.hpp"
+#include "photons.hpp"
 #include "global.hpp"
 #include "models.hpp"
 
@@ -698,6 +699,96 @@ py::array_t<float> segment_cutoffs(
     return out;
 }
 
+// Raw counts (n, ..., ny, nx) of any integer or float type into float32 photons:
+// ((raw - offset) * gain) / excess, `offset` one value or one per pixel of the trailing
+// dimensions (a noise map's, `scmos.FitNoise`).  Frames are split over threads.
+template <class T>
+void photons_typed(const py::array& frames, float* out, const float* offset, std::size_t period,
+                   float gain, float excess, int n_threads) {
+    const T* raw = static_cast<const T*>(frames.data());
+    const std::size_t total = static_cast<std::size_t>(frames.size());
+    // chunks of whole periods; one offset for all is chunked by rows of 4096 pixels
+    const std::size_t unit = period > 1 ? period : 4096;
+    const long long units = static_cast<long long>((total + unit - 1) / unit);
+    py::gil_scoped_release release;
+    smappy::parallel_ranges(units, n_threads, [&](long long begin, long long end, int) {
+        const std::size_t a = static_cast<std::size_t>(begin) * unit;
+        const std::size_t b = std::min(total, static_cast<std::size_t>(end) * unit);
+        smappy::photons_range(raw, out, a, b, offset, period, gain, excess);
+    });
+}
+
+py::array_t<float> to_photons(const py::array& frames, const Array& offset, float gain,
+                              float excess, int n_threads) {
+    if (!(frames.flags() & py::array::c_style))
+        throw std::invalid_argument("frames must be C-contiguous");
+    const std::size_t period = static_cast<std::size_t>(offset.size());
+    if (period == 0) throw std::invalid_argument("offset is empty");
+    if (period > 1) {
+        // the offset's shape must be the frames' trailing dimensions
+        const py::ssize_t nd = offset.ndim();
+        if (nd > frames.ndim()) throw std::invalid_argument("offset has more dimensions than frames");
+        for (py::ssize_t k = 0; k < nd; ++k)
+            if (offset.shape(k) != frames.shape(frames.ndim() - nd + k))
+                throw std::invalid_argument("offset must be one value or the frames' trailing shape");
+    }
+    std::vector<py::ssize_t> shape(frames.shape(), frames.shape() + frames.ndim());
+    py::array_t<float> out(shape);
+    float* dst = out.mutable_data();
+    const float* off = offset.data();
+    const auto dtype = frames.dtype();
+    const char kind = dtype.kind();
+    const auto size = dtype.itemsize();
+    if (kind == 'u' && size == 2) photons_typed<uint16_t>(frames, dst, off, period, gain, excess, n_threads);
+    else if (kind == 'u' && size == 1) photons_typed<uint8_t>(frames, dst, off, period, gain, excess, n_threads);
+    else if (kind == 'i' && size == 2) photons_typed<int16_t>(frames, dst, off, period, gain, excess, n_threads);
+    else if (kind == 'u' && size == 4) photons_typed<uint32_t>(frames, dst, off, period, gain, excess, n_threads);
+    else if (kind == 'i' && size == 4) photons_typed<int32_t>(frames, dst, off, period, gain, excess, n_threads);
+    else if (kind == 'f' && size == 4) photons_typed<float>(frames, dst, off, period, gain, excess, n_threads);
+    else if (kind == 'f' && size == 8) photons_typed<double>(frames, dst, off, period, gain, excess, n_threads);
+    else throw std::invalid_argument("frames' type is not one to_photons reads");
+    return out;
+}
+
+// A block of channels (n, C, ny, nx) summed onto channel 0's pixels, each channel read through its
+// nearest-pixel lookup (`channels.detection_lookup`): index and inside (C, ny*nx), channel 0's rows
+// unused; identity[c] reads channel c pixel for pixel.
+Array channel_sum(const Array& channels,
+                  const py::array_t<int64_t, py::array::c_style | py::array::forcecast>& index,
+                  const py::array_t<uint8_t, py::array::c_style | py::array::forcecast>& inside,
+                  const py::array_t<uint8_t, py::array::c_style | py::array::forcecast>& identity,
+                  int n_threads) {
+    if (channels.ndim() != 4) throw std::invalid_argument("channels must be (n, C, ny, nx)");
+    const py::ssize_t n = channels.shape(0);
+    const int C = static_cast<int>(channels.shape(1));
+    const py::ssize_t ny = channels.shape(2), nx = channels.shape(3);
+    const std::size_t pixels = static_cast<std::size_t>(ny * nx);
+    if (index.ndim() != 2 || index.shape(0) != C || static_cast<std::size_t>(index.shape(1)) != pixels
+        || inside.ndim() != 2 || inside.shape(0) != C || static_cast<std::size_t>(inside.shape(1)) != pixels
+        || identity.ndim() != 1 || identity.shape(0) != C)
+        throw std::invalid_argument("index and inside must be (C, ny*nx), identity (C,)");
+    const int64_t* idx = index.data();
+    for (int c = 1; c < C; ++c)
+        if (!identity.data()[c])
+            for (std::size_t p = 0; p < pixels; ++p) {
+                const int64_t k = idx[c * pixels + p];
+                if (inside.data()[c * pixels + p] && (k < 0 || static_cast<std::size_t>(k) >= pixels))
+                    throw std::invalid_argument("index outside the channel");
+            }
+    Array out({n, ny, nx});
+    float* dst = out.mutable_data();
+    const float* src = channels.data();
+    const uint8_t* in = inside.data();
+    const uint8_t* id = identity.data();
+    {
+        py::gil_scoped_release release;
+        smappy::parallel_ranges(n, n_threads, [&](long long begin, long long end, int) {
+            smappy::channel_sum_range(src, dst, begin, end, C, pixels, idx, in, id);
+        });
+    }
+    return out;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_fit3d, m) {
@@ -723,6 +814,14 @@ PYBIND11_MODULE(_fit3d, m) {
           py::arg("threshold") = -std::numeric_limits<float>::infinity(),
           py::arg("n_threads") = 0,
           "Strict 3x3 local maxima of an image block -> (frame, y, x, value).");
+    m.def("to_photons", &to_photons, py::arg("frames"), py::arg("offset"), py::arg("gain"),
+          py::arg("excess") = 1.0f, py::arg("n_threads") = 0,
+          "Raw counts into float32 photons, ((raw - offset) * gain) / excess, as numpy computes "
+          "it; offset one value or the frames' trailing shape.");
+    m.def("channel_sum", &channel_sum, py::arg("channels"), py::arg("index"), py::arg("inside"),
+          py::arg("identity"), py::arg("n_threads") = 0,
+          "(n, C, ny, nx) channels summed onto channel 0's pixels by nearest-pixel lookups.");
+
     m.def("segment_cutoffs", &segment_cutoffs, py::arg("values"), py::arg("starts"),
           py::arg("factor"), py::arg("min_count") = 10, py::arg("n_threads") = 0,
           "Dynamic cutoff of each segment values[starts[i]:starts[i+1]], as float32; "

@@ -95,7 +95,7 @@ def main() -> None:
         writer.set_metadata(provenance(cam, finder, model, settings, source=a.data))
         _, engine = fit_stack(keeper.watch(src.frames(chunk=a.chunk, stop=n_frames)),
                               cam, finder, model, settings, sink=writer.append,
-                              progress=show, read_ahead=a.read_ahead)
+                              progress=show, read_ahead=a.read_ahead, overlap=True)
         writer.set_metadata({"frame_tags": src.tags.table(),
                              "acquisition": acquisition(src)})
         n_written = len(writer)

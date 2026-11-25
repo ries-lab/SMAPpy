@@ -40,7 +40,7 @@ DETECTION = ("sum", "pairs")
 
 
 def detection_image(channels: np.ndarray, layout: ChannelLayout, lookups: Optional[list] = None,
-                    resampling: str = "nearest") -> np.ndarray:
+                    n_threads: int = 0, resampling: str = "nearest") -> np.ndarray:
     """(n, C, h, w) channels -> (n, h, w): their sum on channel 0's pixels.
 
     Each channel is read onto channel 0's pixels by ``lookups`` (`channels.detection_lookup`, made here
@@ -53,14 +53,44 @@ def detection_image(channels: np.ndarray, layout: ChannelLayout, lookups: Option
         raise ValueError("the channels' sum needs channels of one size; these are "
                          f"{layout.sizes}: find the molecules in each channel instead")
     n, C, h, w = channels.shape
+    if lookups is None:
+        lookups = [None] + [detection_lookup(layout, c, (h, w), resampling) for c in range(1, C)]
+    kernel = _channel_sum_kernel(channels, layout, lookups)
+    if kernel is not None:
+        return kernel(n_threads)
     total = np.array(channels[:, 0], np.float32)
     for c in range(1, C):
         if np.allclose(layout.maps[c], np.eye(3)):
             total += channels[:, c]
             continue
-        lookup = lookups[c] if lookups is not None else detection_lookup(layout, c, (h, w), resampling)
-        total += onto_reference(channels[:, c], lookup)
+        total += onto_reference(channels[:, c], lookups[c])
     return total
+
+
+def _channel_sum_kernel(channels: np.ndarray, layout: ChannelLayout, lookups: list):
+    """`detection_image`'s sum in the extension's threaded kernel (`csrc/photons.hpp`), as a
+    function of the thread count, for nearest-pixel lookups of float32 channels; None otherwise.
+
+    The same float32 additions in the same order as the loop it replaces, so the same image to the
+    last bit (tested): on one core the loop was two thirds of the 4Pi channel sum's time.
+    """
+    from . import detect
+    kernel = getattr(detect._fit3d, "channel_sum", None)
+    if kernel is None or channels.dtype != np.float32:
+        return None
+    _, C, h, w = channels.shape
+    identity = np.array([c == 0 or np.allclose(layout.maps[c], np.eye(3)) for c in range(C)], np.uint8)
+    index = np.zeros((C, h * w), np.int64)
+    inside = np.zeros((C, h * w), np.uint8)
+    for c in range(1, C):
+        if identity[c]:
+            continue
+        lookup = lookups[c]
+        if lookup is None or lookup.mode != "nearest":
+            return None
+        index[c], inside[c] = lookup.index, lookup.inside
+    data = np.ascontiguousarray(channels)
+    return lambda n_threads: kernel(data, index, inside, identity, int(n_threads))
 
 
 def paired_candidates(found: List[Candidates], layout: ChannelLayout,
@@ -397,7 +427,7 @@ class MultiChannelEngine:
 
     def push(self, frames: np.ndarray, first_frame: int = 0):
         import time
-        from .camera import to_photons
+        from .camera import fit_photons
 
         started = time.perf_counter()
         frames = np.asarray(frames)
@@ -406,10 +436,7 @@ class MultiChannelEngine:
             raise ValueError(f"expected blocks of {self.layout.n_channels} channels of {w} x {h} "
                              f"(a ChannelSource's), got {frames.shape}")
         noise = self._noise()
-        if noise is None:
-            channels = to_photons(frames, self.camera) / self.camera.excess_noise
-        else:
-            channels = noise.to_photons(frames, self.camera.adu_to_photons)
+        channels = fit_photons(frames, self.camera, noise, n_threads=self.settings.n_threads)
         candidates = self.find(channels, first_frame)
         roisize = self.settings.roisize
         positions, residual, keep = channel_candidates(candidates, self.layout, roisize,
@@ -457,7 +484,7 @@ class MultiChannelEngine:
             h, w = channels.shape[-2:]
             self._lookups = [None] + [detection_lookup(self.layout, c, (h, w), self.resampling)
                                       for c in range(1, self.layout.n_channels)]
-        summed = detection_image(channels, self.layout, self._lookups)
+        summed = detection_image(channels, self.layout, self._lookups, self.settings.n_threads)
         return self.finder(summed, first_frame=first_frame, n_threads=self.settings.n_threads)[0]
 
     def flush(self):
@@ -591,11 +618,16 @@ class SplitEngine:
     ROI's place on the chip, its channel's pixels put back there as the positions are (`_on_chip`).
     """
 
-    def __init__(self, camera, finders, model, layout: ChannelLayout, settings):
+    def __init__(self, camera, finders, model, layout: ChannelLayout, settings,
+                 overlap: bool = False):
         from dataclasses import replace
         from .pipeline import LocalizationEngine
         self.camera, self.layout = camera, layout
         self.settings = settings
+        #: fit while the next block is found, as `LocalizationEngine.overlap`: here, not in each
+        #: channel's engine, so the channels' fits of one push stay one block, in the same order
+        self.overlap = overlap
+        self._pending = self._worker = None
         self.chip = None                           # the layout on the chip, as the table records it
         own = replace(camera, roi=None)            # each channel's own pixels; the chip comes after
         roi = np.array(camera.roi_offset, float)
@@ -635,20 +667,48 @@ class SplitEngine:
 
     def push(self, frames: np.ndarray, first_frame: int = 0):
         self._noise(frames)
-        out = []
+        batches = []
         for c, own in self._channels(frames):
-            found = self.engines[c].push(own, first_frame)
+            engine = self.engines[c]
+            engine.detect(own, first_frame)
+            if engine._buffered >= engine.settings.block_rois():
+                batches.append((c, engine.take()))
+        return self._fit(batches)
+
+    def flush(self):
+        return self._fit([(c, engine.take()) for c, engine in enumerate(self.engines)])
+
+    def _fit(self, batches):
+        """The channels' batches fitted and joined -- or, with `overlap`, those of the push before,
+        these started in the worker."""
+        batches = [(c, b) for c, b in batches if b is not None]
+        if not self.overlap:
+            return self._fitted(batches)
+        before = self.end()
+        if batches:
+            if self._worker is None:
+                from concurrent.futures import ThreadPoolExecutor
+                self._worker = ThreadPoolExecutor(1, thread_name_prefix="smappy-fit")
+            self._pending = self._worker.submit(self._fitted, batches)
+        return before
+
+    def _fitted(self, batches):
+        out = []
+        for c, batch in batches:
+            found = self.engines[c].fitted(batch)
             if found is not None and len(found):
                 out.append(self._on_chip(c, found))
         return self._joined(out)
 
-    def flush(self):
-        out = []
-        for c, engine in enumerate(self.engines):
-            found = engine.flush()
-            if found is not None and len(found):
-                out.append(self._on_chip(c, found))
-        return self._joined(out)
+    def end(self):
+        """The fit still in the worker, waited for (`overlap`); None when there is none."""
+        pending, self._pending = self._pending, None
+        return None if pending is None else pending.result()
+
+    def __del__(self):
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
+            worker.shutdown(wait=False)
 
     def detect(self, photons: np.ndarray, first_frame: int = 0):
         """``(positions on the frame (n, 2), the filtered image on the frame, cutoff per

@@ -20,7 +20,7 @@ from typing import Callable, Iterable, Iterator, List, Optional, Tuple
 
 import numpy as np
 
-from .camera import to_photons
+from .camera import fit_photons
 from .detect import Candidates, PeakFinder
 from .locs import Localizations, fit_to_localizations, to_nm, valid
 from .metadata import CameraMetadata
@@ -82,11 +82,18 @@ class LocalizationEngine:
     #: PSF: the camera ROI's corner added if None; a split chip's channel puts its own pixels back
     #: where they lie (`multichannel.SplitEngine`)
     on_chip: Optional[object] = None
+    #: fit each block in a worker thread while the next blocks are converted, searched and cut,
+    #: `flush` then handing back the block before -- for a whole file driven by `drive`, which takes
+    #: the last one from `end`; a live fit or a preview wants each block's at once.  The same table
+    #: in the same order either way (`MultiChannelEngine.overlap`, whose shape this is)
+    overlap: bool = False
 
     _rois: List[np.ndarray] = field(default_factory=list, init=False)
     _variances: List[np.ndarray] = field(default_factory=list, init=False)
     _candidates: List[Candidates] = field(default_factory=list, init=False)
     _buffered: int = field(default=0, init=False)
+    _pending: Optional[object] = field(default=None, init=False)     # the fit in the worker
+    _worker: Optional[object] = field(default=None, init=False)
     stats: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self):
@@ -98,12 +105,16 @@ class LocalizationEngine:
     def push(self, frames: np.ndarray, first_frame: int = 0
              ) -> Optional[Localizations]:
         """Process a block of raw frames ``(n, y, x)``."""
+        self.detect(frames, first_frame)
+        if self._buffered >= self.settings.block_rois():
+            return self.flush()
+        return None
+
+    def detect(self, frames: np.ndarray, first_frame: int = 0) -> None:
+        """A block of raw frames converted, searched and cut into the buffer, not fitted."""
         t0 = time.perf_counter()
         noise = self._noise(frames)
-        if noise is None:
-            photons = to_photons(frames, self.camera) / self.camera.excess_noise
-        else:
-            photons = noise.to_photons(frames, self.camera.adu_to_photons)
+        photons = fit_photons(frames, self.camera, noise, n_threads=self.settings.n_threads)
         candidates, _ = self.finder(photons, first_frame=first_frame,
                                     n_threads=self.settings.n_threads)
         rois = cut_rois(photons, candidates, self.settings.roisize,
@@ -122,20 +133,49 @@ class LocalizationEngine:
                                            self.settings.roisize))
             self._buffered += len(rois)
 
-        if self._buffered >= self.settings.block_rois():
-            return self.flush()
-        return None
-
     def flush(self) -> Optional[Localizations]:
-        """Fit everything buffered so far."""
+        """Fit everything buffered so far: its localizations -- or, with `overlap`, those of the
+        block fitted before, this one's fit started in the worker."""
+        batch = self.take()
+        if not self.overlap:
+            return None if batch is None else self.fitted(batch)
+        # Conversion, peak finding and cutting ran in this thread between the fits, every core
+        # idle but the few they keep busy: 55-67 % of Spline 3D's loop at ten molecules a frame
+        # (docs/performance.md).  One fit in flight, so the blocks come back in order and memory
+        # holds at most two blocks of ROIs.
+        before = self.end()
+        if batch is not None:
+            if self._worker is None:
+                from concurrent.futures import ThreadPoolExecutor
+                self._worker = ThreadPoolExecutor(1, thread_name_prefix="smappy-fit")
+            self._pending = self._worker.submit(self.fitted, batch)
+        return before
+
+    def end(self) -> Optional[Localizations]:
+        """The fit still in the worker, waited for (`overlap`); None when there is none."""
+        pending, self._pending = self._pending, None
+        if pending is None:
+            return None
+        return pending.result()
+
+    def __del__(self):
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
+            worker.shutdown(wait=False)
+
+    def take(self):
+        """The buffer emptied, as one batch for `fitted`; None when it is empty."""
         if not self._rois:
             return None
-
         images = np.concatenate(self._rois) if len(self._rois) > 1 else self._rois[0]
         candidates = _concat_candidates(self._candidates)
         per_pixel = (np.concatenate(self._variances) if self._variances else None)
         self._rois, self._variances, self._candidates, self._buffered = [], [], [], 0
+        return images, candidates, per_pixel
 
+    def fitted(self, batch) -> Localizations:
+        """A batch from `take` fitted: its localizations, in nanometres."""
+        images, candidates, per_pixel = batch
         stack = ROIStack(images, candidates, self.settings.roisize)
         t0 = time.perf_counter()
         variance = self.camera.readout_variance
@@ -353,7 +393,7 @@ def fit_stack(frames: Iterable[Tuple[int, np.ndarray]], camera: CameraMetadata,
               settings: Optional[FitSettings] = None,
               sink: Optional[Callable[[Localizations], None]] = None,
               progress: Optional[Callable[[LocalizationEngine], None]] = None,
-              read_ahead: int = 2
+              read_ahead: int = 2, overlap: bool = False
               ) -> Tuple[Localizations, LocalizationEngine]:
     """Run the pipeline over an iterable of ``(first_frame, block)``.
 
@@ -362,9 +402,12 @@ def fit_stack(frames: Iterable[Tuple[int, np.ndarray]], camera: CameraMetadata,
     stream to disk instead of keeping everything in memory.
 
     ``read_ahead`` blocks are fetched from ``frames`` by a background thread;
-    set it to 0 to read strictly in step with processing.
+    set it to 0 to read strictly in step with processing.  ``overlap`` fits
+    each block while the next is found (`LocalizationEngine.overlap`): for a
+    whole file, not for frames still arriving.
     """
-    engine = LocalizationEngine(camera, finder, model, settings or FitSettings())
+    engine = LocalizationEngine(camera, finder, model, settings or FitSettings(),
+                                overlap=overlap)
     return drive(engine, frames, sink=sink, progress=progress,
                  read_ahead=read_ahead), engine
 
