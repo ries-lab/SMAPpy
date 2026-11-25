@@ -526,7 +526,7 @@ class AssignColorSettings:
                       help="a cut in r, or a posterior per localization")
     colors: int = param(2, label="colours", min=1, max=MAX_COLORS,
                         help="how many species the histogram of r holds")
-    exclusion: float = param(0.05, label="exclusion dr", min=0.0,
+    exclusion: float = param(0.02, label="exclusion dr", min=0.0,
                              help="minima: leave this much of r on either "
                                   "side of a boundary unassigned")
     tolerance: float = param(3.0, label="sigma", min=0.0,
@@ -733,7 +733,7 @@ class AssignColors(Plugin):
                     "the two channels' intensities.  Nothing is saved and the "
                     "session is not touched.")
     Settings = AssignColorSettings
-    version = "2"
+    version = "3"
     # which fields each method actually reads; the GUI greys out the rest, so
     # that a number that does nothing does not look like a number that does
     USED = {"minima": ("exclusion",),

@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.plugins.assign_colors.ratios, smappy.plugins.assign_colors.find_modes, smappy.plugins.assign_colors.unclaimed_modes, smappy.plugins.assign_colors.assign_by_minima, smappy.plugins.assign_colors.log_likelihoods, smappy.plugins.assign_colors.variances, smappy.plugins.assign_colors.deviations, smappy.plugins.assign_colors.posteriors, smappy.plugins.assign_colors.assign_by_probability, smappy.plugins.assign_colors.region_polygons, smappy.plugins.assign_colors._mode_width, smappy.plugins.assign_colors.AssignColors, smappy.plugins.assign_colors.decide, smappy.plugins.assign_colors.ColourRecipe, smappy.plugins.assign_colors.photon_pair]
 ---
 
@@ -210,7 +210,7 @@ which = np.digitize(values.total, edges) - 1
 no_spread = assign_by_probability(values.r, values.n_eff, modes, tolerance=3.0)
 with_spread = assign_by_probability(values.r, values.n_eff, modes, spread=0.04,
                                     tolerance=3.0)
-runs = (("minima, dr = 0.05", by_minima, None, "0.4"),
+runs = ((f"minima, dr = {minima.exclusion:g}", by_minima, None, "0.4"),
         ("probabilistic, spread 0", *no_spread, "#1f77b4"),
         ("probabilistic, spread 0.04", *with_spread, "#d62728"))
 fig.set_size_inches(8.0, 2.9)
@@ -410,9 +410,16 @@ neighbouring peaks, up to 6.  The peaks are found in the histogram, so every
 colour needs a visible peak of its own; otherwise give *expected r*.
 
 ### exclusion
-In units of $r$.  A good value is a little more than $\sigma_r$ of the dim
-localizations (step 1): at 100 photons, about 0.1.  0 decides every
-localization.
+In units of $r$, on either side of each boundary.  The band costs the
+colours unequally: where one dye is rare, the boundary sits close to its
+peak -- the abundant dye's tail fills the valley -- and the band cuts away
+much of the rare one.  So the default, 0.02, is narrow.  AF647 and CF660C
+behind a 665 nm long-pass, at $r \approx 0.6$ and $0.9$, are such a pair:
+with CF660C a tenth of the molecules, a simulation with the dyes' ratios
+spread by 0.07 kept 63 % of CF660C at 0.05 and 76 % at 0.02, with AF647
+kept alike.  A wider band, about $\sigma_r$ of the dim localizations
+(step 1: at 100 photons, about 0.1), buys fewer wrong colours where both
+dyes are about equally common.  0 decides every localization.
 
 ### tolerance
 3 refuses about 0.3% of the localizations that really are the dye, and
