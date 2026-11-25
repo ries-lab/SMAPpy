@@ -1,14 +1,14 @@
 """Where *Spline 4Pi*'s time goes, end to end, on real 4Pi data (docs/4pi.md §28).
 
-    nice python benchmarks/fourpi/speed.py [--frames N] [--drift] [--save DIR] [--compare DIR]
+    nice python benchmarks/fourpi/speed.py [--frames N] [--drift | --kept] [--repeat 3] [--save DIR] [--compare DIR]
 
 Two data sets:
 
 * **tubulin**: Gabin's 4Pi-SMS DCIMG (2017-11-28, `Cell01_642_000_000.dcimg`, strips of 2048 x 168, the
-  four channels at the 4Pi-SMS (Yale) corners), read from ``~/.cache/uipsf/4pi_tubulin_2017-11-28``.  There
-  is no model of this microscope yet (P1 makes one): the Ries-lab bead model (zenodo 10823308,
-  ``4pi_40nm_bead/261027_..._3Dcal_4pi.h5``) stands in, with no registration.  The fits are wrong in
-  detail, the work per molecule is that of a real fit -- the same grid size and ROI.
+  four channels at the 4Pi-SMS (Yale) corners), read from ``~/.cache/uipsf/4pi_tubulin_2017-11-28``, with
+  P1's model of that microscope (§26: ``smappy_p1/pupil_680_100_held_4pi.h5``, the channels registered from
+  the bead fields, ``registration_cell06-12.json``) and its camera (0.5 e-/ADU, 128 nm).  ``--stand-in``
+  fits with the Ries-lab bead model instead, unregistered, as §28's first numbers were.
 * **nup96**: the Ries-lab Nup96-mMaple quadrant ``.mat`` series (zenodo 10823308) with v1's in-situ model
   and the maps kept with it.
 
@@ -31,18 +31,27 @@ HOME = Path.home() / ".cache/uipsf"
 ZENODO = Path(os.environ.get("UIPSF_DATA", HOME / "zenodo"))
 
 
-def cases():
+def cases(stand_in=False):
     from smappy.plugins.fit import CameraSettings, SourceSettings
     from smappy.plugins.fit_4pi import FourPiFitSettings, FourPiModelSettings
 
     def tubulin():
-        s = FourPiFitSettings(
-            source=SourceSettings(path=str(HOME / "4pi_tubulin_2017-11-28/Cell01/Cell01_642_000_000.dcimg")),
-            camera=CameraSettings(conversion=0.45, offset=100.0, pixelsize_um=0.12),
-            model=FourPiModelSettings(
-                calibration=str(ZENODO / "4pi_40nm_bead/261027_4pi_40nm_bead_3Dcal_4pi.h5")))
+        tubulin = HOME / "4pi_tubulin_2017-11-28"
+        if stand_in:
+            s = FourPiFitSettings(
+                source=SourceSettings(path=str(tubulin / "Cell01/Cell01_642_000_000.dcimg")),
+                camera=CameraSettings(conversion=0.45, offset=100.0, pixelsize_um=0.12),
+                model=FourPiModelSettings(
+                    calibration=str(ZENODO / "4pi_40nm_bead/261027_4pi_40nm_bead_3Dcal_4pi.h5")))
+            s.model.registration.source = "none"
+        else:                            # P1's model and registration (benchmarks/fourpi/tubulin_fit.py)
+            s = FourPiFitSettings(
+                source=SourceSettings(path=str(tubulin / "Cell01/Cell01_642_000_000.dcimg")),
+                camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.128),
+                model=FourPiModelSettings(calibration=str(tubulin / "smappy_p1/pupil_680_100_held_4pi.h5")))
+            s.model.registration.source = "file"
+            s.model.registration.path = str(tubulin / "smappy_p1/registration_cell06-12.json")
         s.channels.layout = "yale"
-        s.model.registration.source = "none"
         return s
 
     def nup96():
@@ -110,12 +119,12 @@ def engine_alone(plugin, settings, frames):
     return engine.stats, wall, kept, model, camera
 
 
-def fit_alone(model, camera, pairs):
+def fit_alone(model, camera, pairs, n_threads=0):
     from smappy.pipeline import with_readout
     t = time.perf_counter()
     n = 0
     for p in pairs:
-        model.fit(with_readout(p.images, camera.readout_variance), p.link)
+        model.fit(with_readout(p.images, camera.readout_variance), p.link, n_threads=n_threads)
         n += len(p.images)
     return n / (time.perf_counter() - t), n
 
@@ -181,41 +190,86 @@ def compare(locs, path):
               f"share > 1e-3: {np.mean(np.abs(d) > 1e-3) if len(d) else 0:.4f}")
 
 
+def spread(values, fmt="{:,.0f}"):
+    """The median of the repeats and their range, as the tables give them."""
+    v = np.asarray(values, float)
+    if len(v) == 1:
+        return fmt.format(v[0])
+    return f"{fmt.format(np.median(v))} ({fmt.format(v.min())}-{fmt.format(v.max())})"
+
+
+def load():
+    return os.getloadavg()[0]
+
+
 def main():
     from smappy.plugins.fit_4pi import FourPiFit
     parser = argparse.ArgumentParser()
     parser.add_argument("--frames", type=int, default=2000)
     parser.add_argument("--drift", action="store_true", help="with the channel-drift prefit")
+    parser.add_argument("--kept", action="store_true",
+                        help="the whole plugin with the channel drift read from beside the movie (measured "
+                             "first if it is not there), timed --repeat times")
+    parser.add_argument("--repeat", type=int, default=1, help="each number this often: median (range)")
+    parser.add_argument("--one-thread-fits", type=int, default=20000,
+                        help="the C++ fit on one thread on this many of the engine's ROIs")
+    parser.add_argument("--stand-in", action="store_true", help="tubulin with the Ries-lab bead model (§28)")
     parser.add_argument("--only", choices=["tubulin", "nup96"])
     parser.add_argument("--save")
     parser.add_argument("--compare")
     args = parser.parse_args()
-    for name, make in cases().items():
+    r = args.repeat
+    for name, make in cases(args.stand_in).items():
         if args.only and name != args.only:
             continue
         plugin = FourPiFit()
         settings = make()
-        print(f"{name}: {args.frames} frames")
-        print(f"  reading alone: {read_alone(plugin, settings, args.frames):,.0f} frames/s")
-        stats, wall, pairs, model, camera = engine_alone(plugin, settings, args.frames)
+        print(f"{name}: {args.frames} frames, {os.cpu_count()} cores, load {load():.1f}", flush=True)
+        rates = [read_alone(plugin, settings, args.frames) for _ in range(r)]
+        print(f"  reading alone: {spread(rates)} frames/s", flush=True)
+        engine = [engine_alone(plugin, settings, args.frames) for _ in range(r)]
+        stats, _, pairs, model, camera = engine[0]
         n_fits = stats["pairs"]
-        print(f"  engine alone: {stats['frames'] / wall:,.0f} frames/s; detection {stats['detect_seconds']:.2f} s, "
-              f"fit {stats['fit_seconds']:.2f} s ({n_fits / stats['fit_seconds']:,.0f} fits/s, "
-              f"{n_fits / stats['frames']:.1f} per frame), rest {wall - stats['detect_seconds'] - stats['fit_seconds']:.2f} s")
-        rate, n = fit_alone(model, camera, pairs)
-        print(f"  C++ fit alone: {rate:,.0f} fits/s ({n} ROIs of {pairs[0].images.shape[-1]} px)")
-        result, wall, parts = whole(plugin, make(), args.frames, args.drift)
-        s = result.locs.metadata.get("stats", {})
-        loop = wall - sum(parts.values())
-        print(f"  whole plugin: {args.frames / wall:,.0f} frames/s, {wall:.1f} s; "
-              + ", ".join(f"{k} {v:.1f} s" for k, v in parts.items())
-              + f"; fit loop otherwise {loop:.1f} s (detection {s.get('detect_seconds', 0):.1f}, "
-                f"fit {s.get('fit_seconds', 0):.1f}); {len(result.locs)} localizations")
-        if args.drift:                   # again: the drift read from beside the movie, where it now is
-            _, wall2, parts2 = whole(plugin, make(), args.frames, True, fresh=False)
-            print(f"  again, the drift kept: {args.frames / wall2:,.0f} frames/s, {wall2:.1f} s; "
-                  + ", ".join(f"{k} {v:.1f} s" for k, v in parts2.items()))
-            _forget_drift(settings.source.path)
+        fps = [e[0]["frames"] / e[1] for e in engine]
+        det = [e[0]["detect_seconds"] / e[0]["frames"] * 1e3 for e in engine]
+        fit = [e[0]["pairs"] / e[0]["fit_seconds"] for e in engine]
+        print(f"  engine alone: {spread(fps)} frames/s; detection {spread(det, '{:.2f}')} ms/frame, "
+              f"fit {spread(fit)} fits/s; {n_fits / stats['frames']:.1f} fits per frame", flush=True)
+        all_cores = [fit_alone(model, camera, pairs)[0] for _ in range(r)]
+        n = pairs[0].images.shape[-1]
+        print(f"  C++ fit alone, all cores: {spread(all_cores)} fits/s ({n_fits} ROIs of {n} px)", flush=True)
+        few, k = [], 0
+        for p in pairs:                  # the first ROIs, for one thread
+            if k >= args.one_thread_fits:
+                break
+            few.append(p)
+            k += len(p.images)
+        one = [fit_alone(model, camera, few, n_threads=1)[0] for _ in range(r)]
+        print(f"  C++ fit alone, one thread: {spread(one)} fits/s ({k} ROIs); "
+              f"{np.median(all_cores) / np.median(one):.1f}x on all cores", flush=True)
+        if args.kept:
+            # once first, untimed in the table: it measures the drift if what is kept beside the movie
+            # is for other settings, and leaves it there for the runs that are timed
+            _, wall, parts = whole(plugin, make(), args.frames, True, fresh=False)
+            print(f"  whole plugin, first run: {args.frames / wall:,.1f} frames/s, {wall:.1f} s; "
+                  + ", ".join(f"{k} {v:.1f} s" for k, v in parts.items()), flush=True)
+            runs = [whole(plugin, make(), args.frames, True, fresh=False) for _ in range(r)]
+            result = runs[0][0]
+            print(f"  whole plugin, drift kept: {spread([args.frames / w for _, w, _ in runs], '{:,.1f}')} "
+                  f"frames/s; {len(result.locs)} localizations; load {load():.1f}", flush=True)
+        else:
+            result, wall, parts = whole(plugin, make(), args.frames, args.drift)
+            s = result.locs.metadata.get("stats", {})
+            loop = wall - sum(parts.values())
+            print(f"  whole plugin: {args.frames / wall:,.0f} frames/s, {wall:.1f} s; "
+                  + ", ".join(f"{k} {v:.1f} s" for k, v in parts.items())
+                  + f"; fit loop otherwise {loop:.1f} s (detection {s.get('detect_seconds', 0):.1f}, "
+                    f"fit {s.get('fit_seconds', 0):.1f}); {len(result.locs)} localizations")
+            if args.drift:                   # again: the drift read from beside the movie, where it now is
+                _, wall2, parts2 = whole(plugin, make(), args.frames, True, fresh=False)
+                print(f"  again, the drift kept: {args.frames / wall2:,.0f} frames/s, {wall2:.1f} s; "
+                      + ", ".join(f"{k} {v:.1f} s" for k, v in parts2.items()))
+                _forget_drift(settings.source.path)
         if args.save:
             from smappy.io.hdf5 import save_localizations
             Path(args.save).mkdir(parents=True, exist_ok=True)

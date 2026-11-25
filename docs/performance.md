@@ -70,6 +70,93 @@ and as many pages per pixel.  It would need a second copy of every node's
 coefficients kept for the fit (a 9-node grid of this calibration is 300 MB),
 so it is left for when field-dependent fits are slow enough to matter.
 
+### The fitters' speed on a quiet machine (2026-11-25)
+
+The reference for the next speed work (peak finding, overlapping detection with
+the fit) and for the GPU-fitter decision.  M1 Max (8 performance and 2
+efficiency cores, 32 GB), main at `b605a3a9` (after the spline's sums),
+`benchmarks/fitters/speed.py`, niced, nothing else of ours running: the 1-min
+load was below 3 before each step (2.6-2.9); Word and macOS's
+`ANECompilerService` (one core) ran throughout, Zoom (about one core) during the
+first table only.  Each number is the median of three runs (range).  Spline
+4Pi's numbers, on the same day, are in `docs/4pi.md` section 28.
+
+The data are simulated (the script's docstring): 2000 frames of 256 x 256 at 10
+and 30 molecules a frame, 1000-5000 photons, 30 photons of background, z within
++-500 nm, spots drawn with a real astigmatic bead calibration (197 planes of
+26 x 26) for Spline 3D and the elliptical Gaussian, round Gaussians (sigma 1.3
+px) for Gaussian 2D, and for Spline 3D 2C a 512 x 256 chip split left / right,
+30 % of the photons in the second half, the channel move off.
+
+**The C++ fit alone**, on the 13-px boxes each fitter's own detection cut from
+the first 1000 frames of the 30-a-frame movie (about 30 000):
+
+| | one thread | ten cores | |
+| --- | --- | --- | --- |
+| Gaussian 2D | 20 700 (20 600-20 700) fits/s | 140 400 (134 100-143 300) fits/s | 6.8x |
+| Gaussian 2D elliptical | 11 900 (11 900-11 900) fits/s | 81 400 (79 600-81 900) fits/s | 6.8x |
+| Spline 3D | 16 400 (16 300-16 400) fits/s | 111 600 (110 400-113 600) fits/s | 6.8x |
+| Spline 3D 2C (both channels, one fit) | 5 480 (5 470-5 490) fits/s | 37 100 (37 000-37 200) fits/s | 6.8x |
+
+(Spline 3D's 16 400 against the 18 500 of the section before: these boxes are
+the detection's, dim and off-centre ones among them, which take more
+iterations.)  Ten cores give 6.8x: eight of them are performance cores.
+
+**The whole plugin** (`run`, written to HDF5, everything after the fit at its
+default), frames/s; "loop" is `pipeline.drive` alone, without opening the
+calibration and the file (Spline 3D's 0.36 s, Spline 3D 2C's 0.41-0.44 s,
+Gaussian's 0.03 s, which a long movie makes nothing of).  The shares are of the
+loop's time; *rest* is turning fits into localizations and the loop itself.
+Reading runs in its own thread and is 12 000 frames/s for 256 x 256 (6 800 for
+the 2C chip), never the limit:
+
+| | whole | loop | photons | filter | maxima + cutoff | boxes | fit | writing | rest |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Gaussian 2D, 10/frame | 2 770 (2 770-2 780) | 2 880 | 15 % | 17 % | 32 % | 3 % | 18 % | 1 % | 14 % |
+| Gaussian 2D, 30/frame | 1 860 (1 800-1 900) | 1 920 | 10 % | 11 % | 22 % | 6 % | 39 % | 2 % | 10 % |
+| elliptical, 10/frame | 2 400 (2 390-2 430) | 2 490 | 13 % | 15 % | 28 % | 3 % | 28 % | 1 % | 12 % |
+| elliptical, 30/frame | 1 400 (1 330-1 460) | 1 430 | 8 % | 8 % | 16 % | 5 % | 53 % | 2 % | 8 % |
+| Spline 3D, 10/frame | 1 780 (1 760-1 800) | 2 660 | 13 % | 16 % | 30 % | 3 % | 24 % | 1 % | 13 % |
+| Spline 3D, 30/frame | 1 310 (1 280-1 310) | 1 710 | 8 % | 10 % | 19 % | 5 % | 46 % | 2 % | 9 % |
+| Spline 3D 2C, 10/frame | 825 (821-831) | 993 | 10 % | 11 % | 23 % | 3 % | 25 % | 1 % | 27 % |
+| Spline 3D 2C, 30/frame | 532 (525-545) | 602 | 6 % | 7 % | 14 % | 5 % | 47 % | 2 % | 19 % |
+
+What overlapping detection with the fit would give -- the fit of a block in a
+worker while the next is found, as `MultiChannelEngine.overlap` does for 4Pi,
+which `LocalizationEngine` does not -- is rest + writing + max(detection, fit)
+of the loop: **1.2-1.4x at 10 a frame, 1.5-1.7x at 30** (Gaussian 2D 1.22 /
+1.63, elliptical 1.40 / 1.59, Spline 3D 1.31 / 1.74, Spline 3D 2C 1.34 / 1.46).
+An upper bound: detection's filter and maxima are themselves threaded and would
+share the cores with the fit.  A GPU fit, the fit's share taken to nothing,
+would gain at most the same 1.2-2x on these frames: at 256 x 256 the fitters
+are detection's, and the fit is under half the loop even at 30 a frame.
+
+**Peak finding alone**, ms per frame by step (`detect`): *photons* is the
+camera conversion (numpy, one thread whatever the setting), *filter* the
+difference of Gaussians, *maxima + cutoff* the local maxima and the dynamic
+cutoff, *boxes* cutting the 13-px boxes.  The 2048 x 2048 frames are the 256
+frames tiled 8 x 8 (1920 molecules); the 4Pi strip is the 2017-11-28 tubulin
+(four channels of 168 x 168, 88 candidates a frame), where *photons* is the four
+channels converted and summed onto channel 0 (Spline 4Pi's detection image) and
+*boxes* is cut from the sum alone (the engine cuts all four):
+
+| | | in all | photons | filter | maxima + cutoff | boxes |
+| --- | --- | --- | --- | --- | --- | --- |
+| 256 x 256 | one thread | 0.82 (0.80-0.83) | 0.082 | 0.276 | 0.419 | 0.033 |
+| | ten cores | 0.27 (0.26-0.28) | 0.072 | 0.053 | 0.110 | 0.033 |
+| 2048 x 2048 | one thread | 53.6 (50.8-53.7) | 6.3 | 18.1 | 27.1 | 2.0 |
+| | ten cores | 16.6 (16.3-16.9) | 4.6 | 3.5 | 6.5 | 2.0 |
+| 4Pi tubulin | one thread | 0.69 (0.69-0.70) | 0.318 | 0.133 | 0.173 | 0.063 |
+| | ten cores | 0.47 (0.46-0.48) | 0.322 | 0.027 | 0.050 | 0.064 |
+
+The steps vary between runs by a few per cent, the photon conversion by up to
+30 % (2048 x 2048 on one thread: 4.6-6.4 ms).  On all cores what is left is what runs on one thread: the photon
+conversion (a quarter of 2048 x 2048's time, two thirds of 4Pi's) and cutting
+the boxes; maxima + cutoff is still the largest threaded step, 0.11 ms of 0.27
+at 256 x 256.  In the whole plugin detection costs what it costs here on all
+cores: 0.23-0.25 ms a frame at 256 x 256 (Gaussian 2D at 10 a frame: 67 % of
+the loop's 0.35 ms).
+
 ## Rendering
 
 M1 Pro, 5M localizations into 2000x2000:

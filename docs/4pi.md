@@ -2694,6 +2694,35 @@ cores.  But after these changes the Nup96 movie is limited by reading (900 frame
 molecules a frame keep the CPU at 51-58 frames/s, and a GPU fit would take it to reading's 700-800, 10-15×.
 So the GPU question is one of density: a DECODE-like network for dense 4Pi data (P5) answers the same need.
 
+**Measured again on a quiet Mac (2026-11-25)**, as the reference for the next speed work and the GPU decision.
+M1 Max (8 performance and 2 efficiency cores, 32 GB), main at `b605a3a9`, `benchmarks/fourpi/speed.py --frames
+2000 --kept --repeat 3`, niced, nothing else of ours running: the 1-min load was below 3 before each step (2.5-2.9);
+Word and macOS's `ANECompilerService` (one core) ran throughout, Zoom only before these steps.  Tubulin is now
+fitted with P1's model (§26: `smappy_p1/pupil_680_100_held_4pi.h5`, the channels registered from the bead fields,
+0.5 e-/ADU, 128 nm) instead of the stand-in -- 77 fits a frame after P1's duplicate check; Nup96 as above, 7.8.
+Each number the median of three runs (range):
+
+| | tubulin (P1's model) | Nup96 |
+| --- | --- | --- |
+| reading alone (the channel layer) | 4 735 (903 cold - 4 774) frames/s | 997 (964-1 000) frames/s |
+| detection, in the engine | 1.23 (1.21-1.28) ms/frame | 0.96 (0.96-0.97) ms/frame |
+| C++ fit, one thread | 1 102 (1 099-1 113) fits/s | 1 707 (1 702-1 708) fits/s |
+| C++ fit, ten cores | 6 874 (6 847-6 875) fits/s, 6.2× | 12 396 (12 333-12 533) fits/s, 7.3× |
+| engine (detection + fit, overlapped) | 86 (85-88) frames/s | 815 (808-823) frames/s |
+| whole plugin, drift kept | **84 (83-85) frames/s** | **602 (602-604) frames/s** |
+| whole plugin, drift measured (one run) | 21 frames/s (prefit 71 s) | 142 frames/s (prefit 11 s) |
+
+Tubulin's first read is from the disk (900 frames/s), the next from the page cache; Nup96's `.mat` series decodes
+at 1 000 frames/s however often it is read.  P1's model fits tubulin 1.6× faster on all cores than the stand-in
+did (6 900 against 4 310 fits/s), as §28 expected: its fits converge.  **Where the time goes now**: tubulin is the
+fit's -- 77 fits at 6 874 a second are 11.2 ms a frame against 1.2 ms of detection, so the engine runs at the
+fit's rate (89 frames/s) and the whole plugin at 84; Cell01's 360 000 frames are 72 minutes.  Nup96 is detection's
+and reading's: 0.63 ms of fit a frame beside 0.96 ms of detection (overlapped, 1.23 ms a frame in all), and the
+whole plugin at 602 is bounded by the `.mat` reader's 1 000.  Detection on the tubulin's channel sum is 0.69 ms a
+frame on one thread and 0.47 on all, of which 0.32 ms is turning the four channels into photons and summing them,
+on one thread (`docs/performance.md`, "The fitters' speed on a quiet machine").  So a GPU fit would take tubulin
+from 84 towards detection's ~800 frames/s (about 10×) and gain Nup96 nothing measurable.
+
 ## 29. In situ on the 2017-11-28 tubulin: no better than the beads, and why (2026-11-25)
 
 §27's in situ run on Gabin's tubulin (Cell01's first 6000 frames), started from P1's bead model (§26: the pupil
