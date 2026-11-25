@@ -161,6 +161,8 @@ def write_model(path: Path, model, param, job, epoch: int, calibration_em_on=Non
             "calibration_microscope": job.calibration.get("microscope"),
             # where in the sample a pupil calibration was drawn for (SMAPpy's `calibrate.depth`), or None: the beads'
             "calibration_sample_depth": job.calibration.get("sample_depth"),
+            # SMAPpy's Gaussian PSF (`calibrate.gaussian_psf`): its z is the width, which the fitter reports as sigma_nm
+            "psf": job.calibration.get("psf"),
             "test_metrics": {k: metrics.get(k) for k in ("jaccard", "rmse_lat_nm", "rmse_ax_nm", "eff_lat", "eff_ax")}
             if metrics else None, "created": job.created}
     model_file.write(path, tensors, meta)
