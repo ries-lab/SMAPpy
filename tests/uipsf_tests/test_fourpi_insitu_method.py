@@ -108,8 +108,7 @@ def test_spline_4pi_fits_with_what_in_situ_learnt_or_with_the_model_where_its_ch
     # again; a learning in situ's checks speak against keeps the model and says why
     from dataclasses import replace
 
-    from smappy.plugins import Context, PreflightQuestion
-    from smappy.plugins import fit_4pi
+    from smappy.plugins import Context, PreflightQuestion, fit_4pi
     from smappy.plugins.fit import SourceSettings
     from smappy.plugins.fit_4pi import FourPiFit, FourPiFitSettings, FourPiModelSettings
     monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
@@ -161,14 +160,14 @@ def test_spline_4pi_in_situ_learns_a_movie_and_fits_it_with_the_model_learnt(tmp
     """The bead model a day off, as above; Spline 4Pi with *in situ* fits the first frames with it, learns,
     keeps the model learnt -- the held-out molecules prefer it -- and fits the movie with it, the fitted
     file carrying it."""
+    import functools
+
+    from smappy.calibrate import fourpi_insitu
     from smappy.io import embedded
     from smappy.plugins import Context
     from smappy.plugins.fit import CameraSettings, OutputSettings, SourceSettings
     from smappy.plugins.fit_4pi import FourPiFit, FourPiFitSettings, FourPiModelSettings
     from tests.test_fourpi_channels import _write_quadrant_series
-    import functools
-
-    from smappy.calibrate import fourpi_insitu
     monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
     # one round on the model's own box, as the window's test learns: minutes fewer
     monkeypatch.setattr(fourpi_insitu, "FourPiInSituSettings",
