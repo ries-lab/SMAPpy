@@ -29,7 +29,8 @@ only where a DECODE model is used, as uipsf is (a test checks); `import
 decode_smlm` itself loads no torch, so its torch-free parts (`prefit`, the
 estimates of what to train on) serve the GUI.  What a training needs that is
 no method's -- the prefit, the job folder, the model and progress files, the list of jobs
-(`jobs.py`), a training on a workstation over ssh (`remote.py`) -- is `src/smappy/training/`; a job folder trains with `smappy-decode train FOLDER`
+(`jobs.py`), a training on a workstation over ssh (`remote.py`), how long a job will take and on what
+hardware (`estimate.py`, said before *Start*) -- is `src/smappy/training/`; a job folder trains with `smappy-decode train FOLDER`
 (`decode_smlm/training.py`).  `src/decode_smlm/plex/` is DECODE-Plex (two channels:
 biplane, colour), ported the same way and GPL-3 too, as step 5's baseline
 (`docs/decode/plex-plan.md`; its tests in `tests/decode_tests/plex/`).

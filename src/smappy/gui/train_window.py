@@ -1086,6 +1086,14 @@ def start_problem(path, params: dict) -> str:
     return ""
 
 
+def training_estimate(folder, train: TrainSettings):
+    """How long the job in ``folder`` trains with the Train tab's settings, and whether the hardware is up
+    to it (`training.estimate`); None where the job does not read."""
+    from ..training import estimate, jobs
+    return estimate.estimate(folder, train.run_on, train.device, train.epochs, train.until_converged,
+                             hosts_exist=bool(jobs.hosts()))
+
+
 def torch_here() -> bool:
     return importlib.util.find_spec("torch") is not None
 
@@ -1521,9 +1529,15 @@ class TrainWindow(QWidget):
         self.stop_button.setToolTip("stop it after the epoch it is in; Start goes on from there")
         self.train_note = QLabel("")
         self.train_note.setWordWrap(True)
+        # how long the chosen job trains where *run on* says, and a warning for hardware not up to it
+        self.estimate_note = QLabel("")
+        self.estimate_note.setWordWrap(True)
+        self.train_form.changed.connect(self.show_estimate)
+        self.job_list.currentCellChanged.connect(lambda *_: self.show_estimate())
         train = QWidget()
         tv = QVBoxLayout(train)
         tv.addWidget(self.train_form)
+        tv.addWidget(self.estimate_note)
         row = QHBoxLayout()
         row.addWidget(self.start_button)
         row.addWidget(self.stop_button)
@@ -2038,18 +2052,40 @@ class TrainWindow(QWidget):
         self.status_bar.showMessage(f"job written: {folder}")
         self.tabs.setCurrentIndex(1)
 
+    def show_estimate(self) -> Optional[object]:
+        """The chosen job's `training_estimate` under the Train form, a warning in the warning colour."""
+        try:
+            folder = self.selected_folder()
+            e = None if folder is None else training_estimate(folder, self.train_form.value())
+        except Exception as error:                     # a half-written job: no estimate, never a failure
+            print(f"DECODE training: {error}")
+            e = None
+        if e is None:
+            self.estimate_note.setText("")
+            return None
+        self.estimate_note.setText(f"⚠ {e.warning}" if e.warning else f"Expected: {e.text()}.")
+        self.estimate_note.setStyleSheet("color: #c06000;" if e.warning else note_style())
+        return e
+
     def start(self) -> None:
         folder = self.selected_folder()
         if folder is None:
             self.train_note.setText("choose a job on the left")
             return
         train = self.train_form.value()
-        if train.run_on != "here":
-            self._work("started", lambda report: start_on_host(folder, train, report))
-            return
-        if not torch_here():
+        if train.run_on == "here" and not torch_here():
             self.train_note.setText("this Python has no torch: install SMAPpy's decode extra "
                                     "(pip install smappy-smlm[decode]), or train on a training host")
+            return
+        e = self.show_estimate()
+        if e is not None and e.warning:
+            answer = QMessageBox.question(self, "DECODE training", f"{e.warning}\n\nStart anyway?",
+                                          QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+            if answer != QMessageBox.Yes:
+                self.train_note.setText("not started")
+                return
+        if train.run_on != "here":
+            self._work("started", lambda report: start_on_host(folder, train, report))
             return
         start_here(folder, train)
         self.train_note.setText(f"started here: {Path(folder).name}; its output in train.log")

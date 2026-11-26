@@ -527,6 +527,16 @@ Starts the chosen job where *run on* says, or goes on with it from its last
 checkpoint.  Here it needs torch, SMAPpy's `decode` extra; on a training
 host the job folder is copied there first.
 
+Under the Train form the window says how long the chosen job will take where
+*run on* says: the epochs it will most likely run (an optimised model's
+*samples*; for *DECODE*, about 400 with *stop when it no longer improves*,
+else every epoch) times the seconds an epoch takes there.  Those seconds come
+from your earlier jobs on the same machine and device when there are any, and
+otherwise from benchmark rates (an H100, an M1 Max), so it is an estimate to
+the nearest hour, not a promise.  When the job would train on the CPU, or
+longer than 12 hours, the line turns orange with what an NVIDIA GPU would
+take, and *Start* asks before it begins: a training on the CPU takes days.
+
 ### Stop
 Stops the chosen job after the epoch it is in.
 
