@@ -18,7 +18,7 @@ manager's three steps:
    [Localization Statistics](plugin:Analysis/Measure/Localization Statistics)
    or [NPC Corners](plugin:Analysis/Measure/NPC Corners).
 3. **Summarise**: summarise the collection of ROIs, for example as
-   [Histograms](plugin:Analysis/Regions/Summarize/Histograms).
+   [Histogram](plugin:Analysis/Measure/Histogram) of the region results.
 
 How the structures are found is the *method*, a model of the structure; the
 form shows only the chosen method's settings:

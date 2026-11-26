@@ -58,8 +58,8 @@ class Expensive(Plugin):
 
 def spec(*steps, grouping="layer"):
     from smappy.chain import step_from_dict
-    return ChainSpec(steps=[s if not isinstance(s, dict) else
-                            (step_from_dict(s) if "block" in s else Step(**s))
+    # as a chain's file is read, so an old path is read as it is now (`MOVED`)
+    return ChainSpec(steps=[s if not isinstance(s, dict) else step_from_dict(s)
                             for s in steps], grouping=grouping)
 
 
@@ -310,7 +310,7 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     assert steps["sites"].text == "4 ROIs, 1 step(s)"
     assert steps["sites"].data["regions"] == 4
     # the analysis after it read the four rows the evaluator had just made
-    assert "4 ROIs" in steps["histograms"].text
+    assert "4 ROIs" in steps["histogram"].text
     # the ROIs and the run are the session's now; the window's pipeline is
     # still the user's, and the rows are there without it
     project = session.rois
@@ -322,7 +322,7 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     # and the log says so, step by step
     assert [s["plugin"] for s in session.history[-1]["steps"]] == [
         "Analysis/Regions/Segment regions", "Chain/Block",
-        "Analysis/Regions/Summarize/Histograms"]
+        "Analysis/Measure/Histogram"]           # the old path, read as it is now
     assert session.history[-1]["steps"][1]["grouping"] == "layer"
 
 
@@ -393,7 +393,8 @@ def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
 
 
 def test_histograms_of_every_evaluation_need_no_choice():
-    """Two evaluations on the ROIs: Histograms draws both unless one is named."""
+    """Two evaluations on the ROIs: the region histograms draw both unless one
+    is named (the old path, `plugins.MOVED`)."""
     from smappy.chain import Block, Step as ChainStep
     session = four_sites()
     cls = chain_class(spec(SEGMENT))
@@ -404,7 +405,7 @@ def test_histograms_of_every_evaluation_need_no_choice():
                                values={"bins": 50})])
     cls = chain_class(spec({"plugin": "Analysis/Regions/Summarize/Histograms", "label": "h",
                             "values": {"evaluation": ""}}))
-    # Histograms draws every evaluation unless one is named: nothing to ask
+    # every evaluation is drawn unless one is named: nothing to ask
     assert cls().preflight(session.context(), cls.Settings()) is None
     result = session.run(cls(), cls.Settings())
     assert {"a.n_localizations", "b.n_localizations"} <= set(

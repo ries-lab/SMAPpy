@@ -105,7 +105,91 @@ def test_it_runs_per_cluster():
 def test_the_form_shows_the_quantile_or_the_bounds_as_the_range_needs():
     plugin = plugins.get(PLUGIN)
     describe = plugin().describe
-    assert describe(None, plugin.Settings()).shown == {"quantile": True, "lo": False,
-                                                       "hi": False}
-    assert describe(None, plugin.Settings(range="fixed")).shown == \
-        {"quantile": False, "lo": True, "hi": True}
+    range_fields = ("quantile", "lo", "hi")
+
+    def shown(settings):
+        return {k: v for k, v in describe(None, settings).shown.items() if k in range_fields}
+    assert shown(plugin.Settings()) == {"quantile": True, "lo": False, "hi": False}
+    assert shown(plugin.Settings(range="fixed")) == {"quantile": False, "lo": True, "hi": True}
+
+
+# ------------------------------------------------------- region results
+
+def region_rows(n=200, seed=0):
+    rng = np.random.default_rng(seed)
+    return [{"roi_id": i, "file_id": "f", "radius_nm": float(rng.normal(50, 3)),
+             "n_corners": int(rng.integers(0, 9)), "angle_deg": float(rng.uniform(0, 45)),
+             "name": "pore"} for i in range(n)]
+
+
+def test_the_region_source_histograms_every_measured_column_with_histograms_binning():
+    rows = region_rows()
+    result = run(Context(site_table=rows), source="regions")
+    drawn = result.data["histograms"]
+    assert set(drawn) == {"radius_nm", "n_corners", "angle_deg"}   # numbers only
+    assert result.text.startswith("200 ROIs, 3 measures")
+    assert result.plot.panels == 3
+    # whole numbers a bin each, as for the localizations; no region left out
+    corners = drawn["n_corners"]
+    assert np.allclose(np.diff(corners["edges"]), 1.0)
+    (one,) = corners["groups"]
+    assert one.counts.sum() == 200 and one.stats["outside"] == 0
+    radius = drawn["radius_nm"]["groups"][0].stats
+    assert radius["median"] == pytest.approx(50, abs=1) and radius["std"] == \
+        pytest.approx(3, rel=0.2)
+    # an attribute named: that one, as one histogram
+    single = run(Context(site_table=rows), source="regions", column="radius_nm")
+    assert list(single.data["histograms"]) == ["radius_nm"]
+
+
+def test_group_by_file_gives_one_histogram_per_file():
+    from smappy.io.formats import FileInfo
+    from test_compare_groups import traces
+    session = Session()
+    session.add_file(traces(3.0), FileInfo("tight", "/tight", "test"))
+    session.add_file(traces(9.0, seed=1), FileInfo("wide", "/wide", "test"), append=True)
+    session.show_grouped(0, False)
+    session.layers[0].set_files(None)
+    ids = plugins.get("Analysis/Measure/Id statistics")
+    session.run(ids(), ids.Settings())
+    cls = plugins.get(PLUGIN)
+    settings = cls.Settings(source="regions", evaluation="per tid: Id statistics",
+                            column="std_xy_nm", group_by="file")
+    offered = cls().describe(session.context(), settings).choices["group_by"]
+    assert ("file", "file") in offered
+    result = session.run(cls(), settings)
+    groups = {h.name: h for h in result.data["histograms"]["std_xy_nm"]["groups"]}
+    assert set(groups) == {"tight", "wide"} and result.data["groups"] == ["tight", "wide"]
+    assert groups["tight"].stats["n"] == groups["wide"].stats["n"] == 20
+    assert groups["tight"].stats["median"] == pytest.approx(3.0, rel=0.2)
+    assert groups["wide"].stats["median"] == pytest.approx(9.0, rel=0.2)
+
+
+def test_the_form_shows_only_the_fields_of_the_chosen_source():
+    cls = plugins.get(PLUGIN)
+    on_locs = cls().describe(None, cls.Settings()).shown
+    on_regions = cls().describe(None, cls.Settings(source="regions")).shown
+    assert not on_locs["evaluation"] and not on_locs["group_by"]
+    assert on_regions["evaluation"] and on_regions["group_by"]
+
+
+def test_the_region_source_refuses_to_run_in_one_region():
+    with pytest.raises(ValueError, match="not in one"):
+        run(Context(site_table=region_rows(5), region_id="1"), source="regions")
+
+
+def test_the_old_region_histograms_path_maps_through_moved():
+    from smappy.chain import Step
+    from smappy.plugins import moved, settings_from
+    old = "Analysis/Regions/Summarize/Histograms"
+    path, values = moved(old, {"bins": 30, "fields": "radius_nm",
+                               "evaluation": "per tid: Id statistics"})
+    assert path == PLUGIN and values == {"source": "regions", "column": "radius_nm",
+                                         "evaluation": "per tid: Id statistics"}
+    assert plugins.get(old) is plugins.get(PLUGIN)
+    step = Step.from_dict({"plugin": old, "values": {"fields": "radius_nm"}})
+    settings = settings_from(plugins.get(PLUGIN).Settings, step.values)
+    assert step.plugin == PLUGIN and settings.source == "regions" \
+        and settings.column == "radius_nm"
+    result = plugins.get(old)()(ctx=Context(site_table=region_rows()), **step.values)
+    assert list(result.data["histograms"]) == ["radius_nm"]

@@ -1334,11 +1334,13 @@ def _image_tags_values(values: Dict[str, Any]) -> Dict[str, Any]:
     return image_tags_values(values)
 
 
-#: Plugins merged into another, by their old path: the new path, the part of
-#: its settings the old ones are now -- or a function turning the old values
-#: into the new, where they do not map one to one -- and the settings that
-#: choose it.  A chain step, a pinned plugin or a log naming an old path is
-#: read as the new one (`moved`), so what was saved keeps working.
+#: Plugins merged into another, by their old path: the new path, where its
+#: settings the old ones are now -- the name of a part, a map from each old
+#: name to its new one (an old setting it leaves out is dropped), or a
+#: function turning the old values into the new where they do not map one to
+#: one -- and the settings that choose it.  A chain step, a pinned plugin or a
+#: log naming an old path is read as the new one (`moved`), so what was saved
+#: keeps working.
 MOVED: Dict[str, Tuple[str, Any, Dict[str, Any]]] = {
     "Analysis/Regions/Regions to attribute": (
         "Analysis/Regions/Write results", "localizations", {"to": "localizations"}),
@@ -1347,14 +1349,19 @@ MOVED: Dict[str, Tuple[str, Any, Dict[str, Any]]] = {
     # *Plot image tags*, merged into Time Course: its tags as tag series
     "Analysis/Process/Image Tags": (
         "Analysis/Measure/Time Course", _image_tags_values, {}),
+    # its *bins* (a count from smallest to largest) has no counterpart:
+    # Histogram's bins are a width, or found from the values
+    "Analysis/Regions/Summarize/Histograms": (
+        "Analysis/Measure/Histogram", {"fields": "column", "evaluation": "evaluation"},
+        {"source": "regions"}),
 }
 
 
 def moved(path: str, values: Optional[Dict[str, Any]] = None
           ) -> Tuple[str, Optional[Dict[str, Any]]]:
     """``(path, values)`` as the plugin now is: an old path (`MOVED`) becomes
-    the new one, its values put under their part (or translated by its
-    function).  Anything else unchanged."""
+    the new one, its values put under their part, renamed, or translated by
+    its function.  Anything else unchanged."""
     if path not in MOVED:
         return path, values
     new, part, fixed = MOVED[path]
@@ -1363,7 +1370,11 @@ def moved(path: str, values: Optional[Dict[str, Any]] = None
         out.update(part(dict(values or {})))
         return new, out
     for key, value in (values or {}).items():
-        out[f"{part}.{key}"] = value
+        if isinstance(part, dict):
+            if key in part:
+                out[part[key]] = value
+        else:
+            out[f"{part}.{key}"] = value
     return new, out
 
 

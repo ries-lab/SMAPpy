@@ -277,7 +277,8 @@ square on its centre.
 Analysis/Measure/...                every measurement: on the view, per ROI, per cluster
 Analysis/Regions/Segment regions    ROIs: a circle template (ring, disc), beads, an id column, a file, like examples
 Analysis/Regions/Find clusters      DBSCAN, Voronoi or HDBSCAN (cluster_id)
-Analysis/Regions/Summarize/...      Histograms, Curves, NPC labelling efficiency, qPAINT: read a region table
+Analysis/Regions/Summarize/...      Curves, Compare groups, NPC labelling efficiency, qPAINT: read a region table
+Analysis/Measure/Histogram          source "region results": the histograms of a region table
 Analysis/Regions/Write results  what was measured per region onto the table or the ROIs
 Analysis/Regions/Filter regions     keep the regions whose results pass: one flag, region_filter
 Analysis/Regions/Average ROIs       the used ROIs centred, turned and superimposed: a new file

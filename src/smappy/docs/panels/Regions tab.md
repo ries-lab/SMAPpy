@@ -28,7 +28,7 @@ every localization carries), positions from a file, or like a few ROIs
 put on good examples -- and
 [Export table](plugin:Analysis/Regions/Summarize/Export table), which writes
 what was measured in every ROI to a file.  The summaries, such as
-[Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms), and
+[Histogram](plugin:Analysis/Measure/Histogram) with *source* on region results, and
 [NPC Analysis](plugin:Analysis/Regions/Workflow/NPC Analysis), which finds
 the pores, measures them and fits their
 [labelling efficiency](plugin:Panels/Glossary) (also called degree of
@@ -143,7 +143,7 @@ roi.polygon = None
 steps that run once in every included ROI of every file -- plugins that measure a
 region and return a row of numbers for it, such as Localization Statistics,
 the same plugin as on the whole view.  One row per ROI, the rows together
-are the *results table*, which the summaries such as Histograms of ROI results read.  The
+are the *results table*, which the summaries such as Histogram on region results read.  The
 list is a *block*, as in a [chain](plugin:Panels/Glossary) (also called a
 pipeline or workflow: plugins run one after another as one): it can repeat
 over the [regions](plugin:Panels/Glossary) of an id attribute instead (a region

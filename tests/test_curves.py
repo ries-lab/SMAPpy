@@ -194,3 +194,50 @@ def test_the_form_offers_the_keyword_lists_and_the_arrays():
     assert ("condition", "condition") in state.choices["group_by"]
     assert ("r_nm", "r_nm") in state.choices["x"]
     assert "g_lo" not in state.hints["curves"]
+
+
+def test_curves_group_by_file_as_every_region_summary_does():
+    """The shared grouping (`region_groups`): one curve per file, the
+    clustered file's L(r) - r well above the random one's."""
+    from smappy.io.formats import FileInfo
+    rng = np.random.default_rng(5)
+
+    def points(clustered):
+        parts = []
+        for i in range(3):
+            x0 = i * GAP
+            if clustered:
+                centres = np.column_stack([rng.uniform(x0 + 200, x0 + SIDE - 200, 40),
+                                           rng.uniform(200, SIDE - 200, 40)])
+                p = (centres[:, None, :] + rng.normal(0, 25, (40, 25, 2))).reshape(-1, 2)
+            else:
+                p = np.column_stack([rng.uniform(x0, x0 + SIDE, 1000),
+                                     rng.uniform(0, SIDE, 1000)])
+            parts.append(p)
+        p = np.vstack(parts)
+        return Localizations({"x_nm": p[:, 0], "y_nm": p[:, 1],
+                              "frame": np.arange(len(p), dtype=np.int64)}, {})
+
+    session = Session()
+    session.add_file(points(True), FileInfo("clustered", "/clustered", "test"))
+    session.add_file(points(False), FileInfo("random", "/random", "test"), append=True)
+    session.show_grouped(0, False)
+    session.layers[0].set_files(None)
+    project = session.rois
+    project.set_geometry(SIDE, "square")
+    for k in range(2):
+        source = project.source_of(k)
+        for i in range(3):
+            project.add_roi(source.id, [i * GAP + SIDE / 2, SIDE / 2])
+    step = Step(plugin=SPATIAL, values={"radial.r_max_nm": 300, "radial.dr_nm": 10,
+                                         "radial.null": "none"})
+    cls = chain_class(ChainSpec(steps=[Block(steps=[step])]))
+    session.run(cls(), cls.Settings())
+    state = Curves().describe(session.context(), CurvesSettings())
+    assert ("file", "file") in state.choices["group_by"]
+    result = session.run(Curves(), CurvesSettings(group_by="file"))
+    groups = result.data["groups"]
+    assert set(groups) == {"clustered", "random"}
+    assert groups["clustered"]["n"] == 3 and groups["random"]["n"] == 3
+    assert np.nanmax(groups["clustered"]["mean"]["lr_nm"]) > 30
+    assert np.nanmax(np.abs(groups["random"]["mean"]["lr_nm"])) < 10

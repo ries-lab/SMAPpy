@@ -286,11 +286,12 @@ def test_histograms_summarise_the_clusters_too():
     cls = chain_class(ChainSpec(steps=[Block(regions="cluster_id", steps=[
         Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
-    histograms = plugins.get("Analysis/Regions/Summarize/Histograms")
-    offered = histograms().describe(session.context(), histograms.Settings()).choices["evaluation"]
+    histograms = plugins.get("Analysis/Measure/Histogram")
+    offered = histograms().describe(session.context(), histograms.Settings(
+        source="regions")).choices["evaluation"]
     name = "per cluster_id: Localization Statistics"
     assert (name, name) in offered
-    result = histograms()(ctx=session.context(), evaluation=name)
+    result = histograms()(ctx=session.context(), source="regions", evaluation=name)
     assert result.text.startswith("3 regions")
     assert sorted(result.data["histograms"]["n_localizations"]["values"]) == sorted(SIZES)
 

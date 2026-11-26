@@ -68,10 +68,12 @@ def test_both_stores_are_read_the_same_way():
 
 def test_clusters_relabelled_leave_their_results_out_of_date():
     """Three clusters made one: what was measured in the three no longer
-    describes the table, and Histograms says so rather than drawing three."""
+    describes the table, and Histogram's region source says so rather than
+    drawing three."""
     session, truth = measured_clusters()
-    histograms = plugins.get("Analysis/Regions/Summarize/Histograms")
-    assert histograms()(ctx=session.context(), evaluation=PER_CLUSTER).text.startswith(
+    histograms = plugins.get("Analysis/Measure/Histogram")
+    assert histograms()(ctx=session.context(), source="regions",
+                        evaluation=PER_CLUSTER).text.startswith(
         "3 regions")
     one = Localizations({**session.locs.columns,
                          "cluster_id": np.where(truth > 0, 1, 0)}, dict(session.locs.metadata))
@@ -80,15 +82,16 @@ def test_clusters_relabelled_leave_their_results_out_of_date():
     ev = Evaluation.parse(PER_CLUSTER)
     assert not is_current(ctx, ev) and rows(ctx, ev) == [] and available(ctx) == []
     with pytest.raises(ValueError, match="out of date"):
-        histograms()(ctx=session.context(), evaluation=PER_CLUSTER)
-    offered = histograms().describe(ctx, histograms.Settings()).choices["evaluation"]
+        histograms()(ctx=session.context(), source="regions", evaluation=PER_CLUSTER)
+    offered = histograms().describe(ctx, histograms.Settings(source="regions")
+                                    ).choices["evaluation"]
     assert (PER_CLUSTER, PER_CLUSTER) not in offered
 
 
 def test_histograms_asks_nothing_before_reading_the_clusters():
     session, _ = measured_clusters()
-    histograms = plugins.get("Analysis/Regions/Summarize/Histograms")
-    settings = histograms.Settings(evaluation=PER_CLUSTER)
+    histograms = plugins.get("Analysis/Measure/Histogram")
+    settings = histograms.Settings(source="regions", evaluation=PER_CLUSTER)
     assert histograms().preflight(session.context(), settings) is None
 
 

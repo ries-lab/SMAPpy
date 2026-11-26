@@ -21,7 +21,7 @@ conditions, with the distribution of each value to set its range on, and
 the Render tab's *regions* button turns the filter off in one layer to
 see what it takes away.
 
-The summaries -- *Histograms*, *Curves*, *Export table* -- then count the
+The summaries -- *Histogram* on region results, *Curves*, *Export table* -- then count the
 regions the filter keeps, as the views show them.
 
 ## How it works

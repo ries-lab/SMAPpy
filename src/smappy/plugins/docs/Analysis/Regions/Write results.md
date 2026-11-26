@@ -240,7 +240,7 @@ saying so; an attribute written by this plugin is not such a change, so a second
 value can be written from the same results.
 
 ### localizations.values
-The names are those of the results' columns, as *Summarize/Histograms*
+The names are those of the results' columns, as *Histogram* on region results
 shows them.  The lines drawn on the ROIs in the ROI manager give
 `<line>_angle_deg` and `<line>_length_nm` with or without *results from*:
 they are the ROIs' own, as `roi_id` is, and need no measurement; so are the
@@ -293,7 +293,8 @@ in none.
 
 A histogram of such an attribute in the filter counts **localizations**, not
 regions: a large cluster weighs more than a small one.  For the distribution
-over regions, use *Summarize/Histograms* on the same results.
+over regions, use [Histogram](plugin:Analysis/Measure/Histogram) with *source* on
+region results.
 
 **To the ROIs.**  The ROIs' new properties, and a line saying how many were set, how many
 changed, and how many were passed over and why: set by hand, already set,

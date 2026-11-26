@@ -5,7 +5,7 @@ import pytest
 from smappy import plugins
 from smappy.locs import Localizations
 from smappy.plugins import Context, settings_from, settings_values
-from smappy.plugins.roi import HistogramSettings, Histograms, histograms
+from smappy.plugins.histogram import Histogram, HistogramSettings, region_histograms
 from smappy.plugins.segment import CircleSettings, SegmentRegions, SegmentSettings
 from smappy.segmentation import find_circles
 
@@ -47,7 +47,6 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Centre ROIs",
                           "Analysis/Regions/Accept proposals",
                           "Analysis/Regions/Average ROIs",
-                          "Analysis/Regions/Summarize/Histograms",
                           "Analysis/Regions/Summarize/Curves",
                           "Analysis/Regions/Summarize/Compare groups",
                           "Analysis/Regions/Summarize/Export table",
@@ -91,17 +90,19 @@ def test_a_bad_setting_is_refused_rather_than_silently_odd():
         find_circles(table([(0, 0)]), "disc", 20.0, 80.0, bin_nm=0.0)
 
 
-def test_histograms_needs_a_site_table():
+def test_histogram_of_region_results_needs_a_site_table():
     with pytest.raises(ValueError, match="nothing measured in the regions yet"):
-        Histograms().run(Context(), HistogramSettings())
+        Histogram().run(Context(), HistogramSettings(source="regions"))
 
 
-def test_histograms_picks_the_numeric_columns_itself():
+def test_histogram_of_region_results_picks_the_numeric_columns_itself():
     rows = [{"roi_id": "a", "file_id": "f", "n": 3, "name": "x"},
             {"roi_id": "b", "file_id": "f", "n": 5, "name": "y"}]
-    out = histograms(rows, HistogramSettings(bins=2))
+    result = Histogram().run(Context(site_table=rows), HistogramSettings(source="regions"))
+    out = result.data["histograms"]
     assert set(out) == {"n"}                # roi_id, file_id and text are skipped
-    assert out["n"]["counts"].sum() == 2
+    assert sum(h.counts.sum() for h in out["n"]["groups"]) == 2
+    assert set(region_histograms(rows, ["n"])) == {"n"}
 
 
 # ------------------------------------------------------------ the pipeline
@@ -425,7 +426,8 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     rows = project.results()
     assert len(rows) == 4 and rows[0]["n_localizations"] == 100
 
-    analysis = plugins.get("Analysis/Regions/Summarize/Histograms")()(ctx=session.context())
+    analysis = plugins.get("Analysis/Measure/Histogram")()(ctx=session.context(),
+                                                           source="regions")
     assert "4 ROIs" in analysis.text
     assert analysis.plot is not None
 

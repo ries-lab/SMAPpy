@@ -111,7 +111,7 @@ and `smappy/simulate` are the record, and the code wins where they differ.
 title=...)`, every part optional (`title` says what the figures are of, in
 the figure window's title).  `plot(ax)` is handed **one** axis; for a grid, pass
 `Plot(draw, panels=n, size=(w, h))` instead, and `draw` is handed the figure
-and lays out its own panels (`statistics.py`, `Analysis/Regions/Summarize/Histograms`
+and lays out its own panels (`statistics.py`, `histogram.py` on region results
 and the fit preview all do this).  Never set the figure's size or its layout
 engine: on the window's *All* page a plot is handed a `SubFigure`, which has
 neither, and `size` is the hint the window reads instead.  The *All* page is

@@ -15,22 +15,28 @@ Three kinds, all ordinary plugins:
   here any more: the statistics an ROI gets are Localization Statistics'
   (`statistics.py`), the same plugin as on the view.
 * **Analyze** reads the table evaluation produced and summarises it.  It runs
-  once, over ``ctx.site_table``.
+  once, over ``ctx.site_table``.  `SiteAnalysisPlugin` is the base of every
+  such summary -- *Curves*, *Compare groups*, and *Histogram*'s region
+  source (`histogram.py`, which took over *Summarize/Histograms*).
 
 The algorithms stay module-level functions so a script can call them without a
 plugin, a session or a project.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from . import (Context, FormState, Plot, Plugin, PreflightChoice, PreflightQuestion,
-               Result, param, register)
+from . import (Context, FormState, Plugin, PreflightChoice, PreflightQuestion,
+               Result, param)
 from .. import region_results
 from ..region_results import Evaluation
+
+#: the bases the plugins in other files derive from; this file registers none
+#: itself (`discovery`)
+__plugin_bases__ = ("SegmenterPlugin", "SiteAnalysisPlugin")
+
 
 def replace_param(what: str = "ROIs"):
     """The *replace* setting every segmenter's settings end with.
@@ -139,45 +145,6 @@ def auto_only():
     return [("", "auto")]
 
 
-@dataclass
-class HistogramSettings:
-    bins: int = param(20, label="bins", min=1,
-                      help="number of equal-width bins, spanning each column's "
-                           "smallest to largest value")
-    fields: str = param("", label="columns",
-                        help="comma separated; empty means every numeric "
-                             "column but the counts behind the means")
-    evaluation: str = param("", label="results from", choices=auto_only,
-                            help="the measurement whose columns are drawn, on "
-                                 "the ROIs or per region of an id attribute; "
-                                 "auto: everything measured on the ROIs")
-
-
-def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
-               ) -> Dict[str, Dict[str, Any]]:
-    """One histogram per column of the site table."""
-    if not rows:
-        return {}
-    named = [f.strip() for f in settings.fields.split(",") if f.strip()]
-    if not named:
-        # every numeric column but the ids and the ``_n`` counts, which only
-        # say how many values went into a mean -- nearly always the
-        # localization count again
-        named = [k for k in rows[0]
-                 if k not in ("roi_id", "file_id") and not k.endswith("_n")
-                 and all(isinstance(r.get(k), (int, float)) and not isinstance(r.get(k), bool)
-                         for r in rows)]
-    out = {}
-    for field in named:
-        values = np.asarray([r.get(field, np.nan) for r in rows], dtype=float)
-        finite = np.isfinite(values)
-        counts, edges = np.histogram(values[finite], bins=settings.bins)
-        out[field] = {"counts": counts, "edges": edges,
-                      "roi_ids": [r["roi_id"] for r, ok in zip(rows, finite) if ok],
-                      "values": values[finite], "missing": int((~finite).sum())}
-    return out
-
-
 def grid_shape(n: int, columns: int = 4) -> Tuple[int, int]:
     """``(rows, columns)`` for ``n`` panels: up to four across, so a dozen
     measures read as three rows rather than a column a screen tall."""
@@ -277,7 +244,8 @@ class SiteAnalysisPlugin(Plugin):
             raise ValueError(region_results.missing(ctx, ev))
         return found, ev
 
-    # what *auto* is called when it means every evaluation (Histograms)
+    # what *auto* is called when it means every evaluation (Histogram's
+    # region source)
     auto_label = ""
 
     def describe(self, ctx, settings) -> FormState:
@@ -325,71 +293,3 @@ class SiteAnalysisPlugin(Plugin):
         except ValueError:
             return None
         return None
-
-
-@register("Analysis/Regions/Summarize/Histograms")
-class Histograms(SiteAnalysisPlugin):
-    """Distributions of what was measured per region, one histogram per column."""
-
-    Settings = HistogramSettings
-    name = "Histograms of ROI results"
-    changes_locs = False
-    version = "1"
-    auto_label = "all"
-
-    def evaluation(self, ctx: Context, settings) -> Optional[Evaluation]:
-        # every column of every evaluation on the ROIs unless one is named: a
-        # histogram of each is the overview, and nothing here can be ambiguous
-        if settings.evaluation:
-            return choose_evaluation(ctx, "", settings.evaluation)
-        return None
-
-    def run(self, ctx: Context, settings: HistogramSettings) -> Result:
-        rows, ev = self.rows(ctx, settings)
-        if not rows:
-            raise ValueError("nothing measured in the regions yet: run the "
-                             "per-region steps first")
-        data = histograms(rows, settings)
-        # a measure no region has a value for is said, not drawn as an empty
-        # panel (NPC's labelling-efficiency columns before it has run, say)
-        empty = [field for field, d in data.items() if not len(d["values"])]
-        shown = {field: d for field, d in data.items() if len(d["values"])}
-        if not shown:
-            raise ValueError("no numeric columns with values to histogram"
-                             + (f" ({', '.join(empty)} have none)" if empty else ""))
-        what = "ROIs" if ev is None or ev.on_rois else "regions"
-        rows_n, across = grid_shape(len(shown))
-
-        def one(ax, field, d, first_column) -> None:
-            ax.bar(d["edges"][:-1], d["counts"], width=np.diff(d["edges"]),
-                   align="edge", color="0.6", edgecolor="0.3")
-            ax.set_title(measure_title(field), fontsize=9)
-            ax.tick_params(labelsize=7)
-            if first_column:
-                ax.set_ylabel(what, fontsize=8)
-            if d["missing"]:
-                ax.text(0.98, 0.95, f"{d['missing']} without a value",
-                        transform=ax.transAxes, ha="right", va="top",
-                        fontsize=7, color="0.4")
-
-        def plot(figure) -> None:
-            """A grid, up to four across, one histogram per measure.
-
-            As many panels as there are measures, which is why this declares
-            them and is handed the figure: a single axis is right for a plugin
-            with one thing to draw and this has as many as the table has
-            columns.
-            """
-            axes = figure.subplots(rows_n, across, squeeze=False).ravel()
-            for i, (axis, (field, d)) in enumerate(zip(axes, shown.items())):
-                one(axis, field, d, i % across == 0)
-            for axis in axes[len(shown):]:
-                axis.set_visible(False)
-
-        text = f"{len(rows)} {what}, {len(shown)} measures"
-        if empty:
-            text += f"; no values for {', '.join(empty)}"
-        return Result(text=text,
-                      plot=Plot(draw=plot, panels=len(shown),
-                                size=(3.2 * across, 2.6 * rows_n)),
-                      data={"histograms": data, "rows": rows}, settings=settings)

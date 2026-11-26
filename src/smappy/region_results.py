@@ -8,7 +8,7 @@ together, so its table is current or not as a whole -- the digest of the
 column's inputs (`region_runs.column_inputs`) against the one each row was
 measured on.  Every reader used to branch on the store and parse
 "per cluster_id: label" itself, and the per-cluster branch never checked: three
-clusters relabelled as one, and Histograms still counted three.
+clusters relabelled as one, and the histograms of the results still counted three.
 
 An evaluation is an `Evaluation(source, label)`; its string form is what
 *results from* holds and a chain file saves -- "Corners" on the ROIs,

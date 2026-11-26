@@ -114,7 +114,8 @@ selections return count zero and NaN means.
 Missing required measurement columns produce a per-ROI error without stopping
 other ROIs. Select the error row to see its message.
 
-The **Histograms** analysis (`Analysis/Regions/Summarize/Histograms`) plots the
+*Histogram* with *source* on region results (`Analysis/Measure/Histogram`,
+once `Analysis/Regions/Summarize/Histograms`) plots the
 current results for included ROIs.  NaN means are
 omitted, with the number of missing values shown.  A histogram is a snapshot:
 run it again after anything changes.

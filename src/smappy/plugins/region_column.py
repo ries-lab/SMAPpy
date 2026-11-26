@@ -8,7 +8,7 @@ that reads a column (the layer's filter, colour by a field, the statistics,
 a block repeating over an id) works on them, per layer, with nothing new to
 learn.  The cost is that a histogram of such a column counts localizations,
 not regions (a large cluster weighs more): the distribution over regions is
-*Summarize/Histograms*.
+*Histogram* with *source* on region results.
 
 It is a snapshot, as any column written by a plugin.  A block writes the same
 columns itself at the end of its run (*write values*), so a chain keeps them

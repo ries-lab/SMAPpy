@@ -257,6 +257,17 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
     classes: List[_Class] = []
     used_as_base = set()
     for node in tree.body:
+        # ``__plugin_bases__ = ("SiteAnalysisPlugin", ...)``: classes that are
+        # bases for plugins in other files, as a class used as a base here is
+        # -- a module of bases alone (`roi.py`) is then a helper, not a file
+        # with several unregistered plugins
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "__plugin_bases__" for t in node.targets):
+            try:
+                used_as_base.update(str(n) for n in ast.literal_eval(node.value))
+            except ValueError:
+                pass
+            continue
         if not isinstance(node, ast.ClassDef):
             continue
         bases = _base_names(node)
@@ -291,7 +302,7 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
     derived = f"{path_prefix}/{title(stem)}" if path_prefix else title(stem)
     if len(candidates) == 1:
         return [make(derived, candidates[0], title(stem))], []
-    if not any(_looks_like_plugin(c) for c in classes):
+    if not any(_looks_like_plugin(c) and c.name not in used_as_base for c in classes):
         return [], []           # a helper module living beside the plugins
     if not candidates:
         return [], [Diagnostic(origin, "every plugin class here is private or is "

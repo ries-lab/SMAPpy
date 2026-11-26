@@ -11,7 +11,7 @@ measured) in order of something measured in them -- the number of corners
 of a nuclear pore, the localizations in a cluster -- or of a keyword they
 were given in the ROI manager (*annotate*).  The ROI manager's list, the
 results table and every summary that reads it, such as
-[Histograms](plugin:Analysis/Regions/Summarize/Histograms), then go through
+[Export table](plugin:Analysis/Regions/Summarize/Export table), then go through
 the ROIs in that order.  Use it to look at the best or the worst sites
 first, or to step through them in the ROI manager grouped by a keyword.
 

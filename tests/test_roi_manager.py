@@ -5,10 +5,19 @@ import pytest
 
 from smappy.locs import Localizations
 from smappy.group import GroupSettings
-from smappy.roi_manager import Histograms
 from smappy.roi_manager.pipeline import Step, errors, merged_values
-from smappy.plugins.roi import HistogramSettings, histograms
+from smappy.plugins.histogram import HistogramSettings, region_histograms
+from smappy.region_groups import numeric_fields
 from test_roi_session import rois_of, set_bounds              # noqa: E402
+
+
+def histograms(rows):
+    """Histogram's region source on every numeric measure, as a script calls it."""
+    return region_histograms(rows, numeric_fields(rows))
+
+
+def counted(entry):
+    return int(sum(h.counts.sum() for h in entry["groups"]))
 
 
 def table(x, y=None):
@@ -94,9 +103,9 @@ def test_empty_and_nonfinite_measurements():
     assert rows[0]['mean_photons'] == 200
     assert rows[1]['n_localizations'] == 0
     assert np.isnan(rows[1]['mean_photons'])
-    hist = histograms(rows, HistogramSettings(bins=10))
-    assert hist['n_localizations']['counts'].sum() == 2
-    assert hist['mean_photons']['counts'].sum() == 1
+    hist = histograms(rows)
+    assert counted(hist['n_localizations']) == 2
+    assert counted(hist['mean_photons']) == 1
     assert hist['mean_photons']['missing'] == 1
 
 
@@ -155,8 +164,8 @@ def test_find_rings_and_blobs_review_evaluate_histogram():
     assert not p.find(s.id)  # repeat finding does not duplicate existing ROIs
     p.evaluate()
     assert [row['n_localizations'] for row in p.results()] == [30] * 4
-    hist = histograms(p.results(), HistogramSettings(bins=10))
-    assert hist['n_localizations']['counts'].sum() == 4
+    hist = histograms(p.results())
+    assert counted(hist['n_localizations']) == 4
     set_bounds(p, {'photons': (2000, None)})
     assert not p.find(s.id)
     # the statistics are out of date; what the segmenter measured stays
@@ -229,7 +238,7 @@ def test_the_default_histograms_draw_every_number_the_statistics_gave():
     p.session.layers[0].show_grouped(False)
     p.find(s.id)
     p.evaluate()
-    drawn = histograms(p.results(), HistogramSettings(bins=10))
+    drawn = histograms(p.results())
     # and what Segment regions measured on each candidate
     from smappy.segmentation import VALUES
     assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
@@ -284,13 +293,14 @@ def test_the_region_histograms_are_a_titled_grid_and_say_which_measures_had_no_v
     """Twelve panels stacked in one column overlapped and named nothing."""
     from matplotlib.figure import Figure
     from smappy.plugins import Context
-    from smappy.plugins.roi import Histograms, grid_shape, measure_title
+    from smappy.plugins.histogram import Histogram
+    from smappy.plugins.roi import grid_shape, measure_title
     rng = np.random.default_rng(0)
     rows = [{"roi_id": i, "file_id": "", "radius_nm": float(rng.normal(50, 3)),
              "n_corners": int(rng.integers(0, 9)), "angle_deg": float(rng.uniform(0, 45)),
              "efficiency": float("nan")} for i in range(40)]
-    monkeypatch.setattr(Histograms, "rows", lambda self, ctx, s: (rows, None))
-    result = Histograms().run(Context(), HistogramSettings(bins=10))
+    monkeypatch.setattr(Histogram, "rows", lambda self, ctx, s: (rows, None))
+    result = Histogram().run(Context(), HistogramSettings(source="regions"))
     assert "no values for efficiency" in result.text
     figure = Figure()
     result.plot.draw(figure)

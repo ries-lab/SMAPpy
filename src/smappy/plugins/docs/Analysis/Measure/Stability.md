@@ -346,7 +346,7 @@ With *each bead*, run on the view, the same numbers for every bead are
 also kept as a [region table](plugin:Panels/Glossary) of the id attribute
 ("per track_id: Stability"): per axis `x_sd_nm`, `x_precision_nm`,
 `x_vibration_nm`, `x_peak_hz` and `x_peak_nm` (and y, z), with `n_points`.
-*Summarize/Histograms* then compares the beads, and the
+[Histogram](plugin:Analysis/Measure/Histogram) on region results then compares the beads, and the
 [region filter](plugin:Analysis/Regions/Filter regions) can leave out one
 that shakes more than the others.  Not when an ROI is drawn, since the table
 stands for every bead the layer shows.

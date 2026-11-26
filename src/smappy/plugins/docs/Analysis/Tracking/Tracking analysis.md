@@ -620,7 +620,7 @@ Run on the view, the fit of every track is also kept as a
 [region table](plugin:Panels/Glossary) of the track id ("per track_id:
 Tracking analysis"): `n_locs`, `D_um2_per_s`, `alpha`, `lags` and
 `reduced_error` (the localization error over D times the step), NaN for a
-track shorter than *minimum length*.  *Summarize/Histograms* shows their
+track shorter than *minimum length*.  [Histogram](plugin:Analysis/Measure/Histogram) on region results shows their
 distributions, and the [region filter](plugin:Analysis/Regions/Filter regions)
 keeps the tracks of one population -- `alpha` below 0.7, say -- without a
 attribute per value; *write per track* is for colouring the tracks.  Not when

@@ -3,7 +3,7 @@
 SMAP's ``ExportEvaluationsTable``, for every evaluation at once: the results
 table -- a row per ROI (or per region of an id column), a column per number
 the steps measured -- as a csv, for the statistics and figures that are
-made elsewhere.  What it reads is what *Summarize/Histograms* reads
+made elsewhere.  What it reads is what *Histogram* on region results reads
 (`region_results`, through `SiteAnalysisPlugin.rows`): on *auto* every
 evaluation on the ROIs side by side, or one named evaluation, on the ROIs
 or per cluster.
@@ -120,7 +120,8 @@ class ExportTable(SiteAnalysisPlugin):
     auto_label = "all on the ROIs"
 
     def evaluation(self, ctx: Context, settings):
-        # every evaluation on the ROIs unless one is named, as Histograms
+        # every evaluation on the ROIs unless one is named, as Histogram's
+        # region source
         from .roi import choose_evaluation
         if settings.evaluation:
             return choose_evaluation(ctx, "", settings.evaluation)

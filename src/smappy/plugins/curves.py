@@ -8,11 +8,15 @@ differ.  So: every region's arrays of one evaluation, the mean at each x with
 its standard deviation or standard error over the regions, a line per group.
 `docs/smap_porting/wave4_design.md`, step 17b.
 
-**Groups** are an ROI keyword list (`ROI.annotations`, *Annotate ROIs*): with
-*group by* set to a list, the ROIs with one keyword are one curve, those with
-another a second, those with none a third; so "control" and "treated" ROIs
-of one data set are compared in one plot.  Regions of an id column (clusters)
-carry no keywords and are one group.
+**Groups** are those every summary of a region table offers
+(`smappy.region_groups`, shared with *Compare groups* and *Histogram*): the
+file, a column of the results with few values, or an attribute of an id
+column's localizations (a *File conditions* column).  An ROI keyword list
+(`ROI.annotations`, *Annotate ROIs*) is read from the ROIs themselves, as it
+always was: with *group by* set to a list, the ROIs with one keyword are one
+curve, those with another a second, those with none a third; so "control"
+and "treated" ROIs of one data set are compared in one plot.  Regions of an
+id column carry no keywords: a keyword list leaves them one group.
 
 **Pooled where the evaluator says how** (`Plugin.pool`).  A curve that is a
 ratio -- pairs found over pairs expected -- is better summed than averaged:
@@ -46,6 +50,7 @@ import numpy as np
 
 from . import Context, FormState, Notice, Plot, Result, param, register
 from .. import region_results
+from ..region_groups import NO_GROUP, group_choices, group_labels
 from ..region_results import Evaluation
 from .roi import (AmbiguousEvaluation, EVALUATION_HELP, SiteAnalysisPlugin, auto_only,
                   grid_shape, measure_title)
@@ -56,7 +61,6 @@ GRID_TOLERANCE = 1e-6
 # names an x axis is recognised by, first match wins (*x* on auto)
 X_NAMES = ("r_nm", "lag_nm", "x_nm", "distance_nm", "lag_s", "lag_frames", "t_s",
            "time_s", "frame")
-NO_GROUP = "(none)"
 # what a panel is called, for the curves of the shipped evaluators (a layer's
 # suffix, `_L2`, kept after it); any other by its name and unit
 TITLES = {"g": "g(r)", "K_nm2": "K(r) (nm²)", "lr_nm": "L(r) - r (nm)",
@@ -307,7 +311,8 @@ class CurvesSettings:
                         help="over the regions: how much they differ (SD), or how "
                              "well the mean is known (SEM)")
     group_by: str = param("", label="group by", choices=_no_groups,
-                          help="an ROI keyword list: a curve per keyword")
+                          help="a curve per group: an ROI keyword list, the file, a "
+                               "results column or an attribute with few values")
 
 
 def has_arrays(ctx, ev: Evaluation) -> bool:
@@ -353,25 +358,45 @@ class Curves(SiteAnalysisPlugin):
         state.choices["evaluation"] = [
             (v, label) for v, label in names
             if not v or has_arrays(ctx, Evaluation.parse(v))]
-        project = ctx.rois
-        lists = list(getattr(project, "annotation_lists", {}) or {})
-        state.choices["group_by"] = [("", "-")] + [(n, n) for n in lists]
+        lists = _keyword_lists(ctx)
         try:
             ev = self.evaluation(ctx, settings)
         except (AmbiguousEvaluation, ValueError):
             ev = None
+        try:
+            rows = region_results.rows(ctx, ev) if ev is not None else []
+        except Exception:                                  # noqa: BLE001
+            rows = []
+        state.choices["group_by"] = group_choices(
+            ctx, rows, ev, extra=lists if ev is None or ev.on_rois else ())
         found = region_results.table(ctx, ev) if ev is not None else None
         if found is not None and found.arrays:
             state.choices["x"] = [("", "auto")] + [(n, n) for n in found.arrays]
             state.hints["curves"] = ", ".join(n for n in found.arrays if not _is_band(n))
-        if ev is not None and not ev.on_rois and settings.group_by:
+        if ev is not None and not ev.on_rois and settings.group_by in lists:
             state.notice = Notice("regions of an id attribute have no keywords: "
                                   "one group", kind="info")
         return state
 
+    def groups(self, ctx: Context, ev: Evaluation, group_by: str
+               ) -> Optional[Dict[str, str]]:
+        """Each region's group by its id, from the shared grouping
+        (`region_groups.group_labels` over the evaluation's rows); None when
+        there is no grouping, or it is an ROI keyword list, which `regions`
+        reads off the ROIs.  A keyword list on an id column's regions is no
+        grouping: they have no keywords."""
+        if not group_by:
+            return None
+        if group_by in _keyword_lists(ctx):
+            return None if ev.on_rois else {}
+        rows = region_results.rows(ctx, ev)
+        return {str(r["roi_id"]): g
+                for r, g in zip(rows, group_labels(ctx, rows, ev, group_by))}
+
     def regions(self, ctx: Context, ev: Evaluation, group_by: str = "") -> List[Region]:
         """Every current region of ``ev`` with its arrays, values and group."""
         out = []
+        labels = self.groups(ctx, ev, group_by)
         if ev.on_rois:
             project = ctx.rois
             if project is None:
@@ -384,7 +409,11 @@ class Curves(SiteAnalysisPlugin):
                 if not found or "values" not in found[0]:
                     continue
                 entry = found[0]
-                group = (roi.annotations.get(group_by) or NO_GROUP) if group_by else NO_GROUP
+                if labels is not None:
+                    group = labels.get(str(roi.number), NO_GROUP)
+                else:
+                    group = (roi.annotations.get(group_by) or NO_GROUP) if group_by \
+                        else NO_GROUP
                 out.append(Region(str(roi.number), _arrays(entry), entry.get("values", {}),
                                   group))
             return out
@@ -394,7 +423,8 @@ class Curves(SiteAnalysisPlugin):
         for region_id in table.ids:
             entry = table.entry(region_id)
             if entry and "values" in entry:
-                out.append(Region(str(region_id), _arrays(entry), entry["values"]))
+                out.append(Region(str(region_id), _arrays(entry), entry["values"],
+                                  (labels or {}).get(str(region_id), NO_GROUP)))
         return out
 
     def _pool(self, ctx: Context, ev: Evaluation):
@@ -418,7 +448,7 @@ class Curves(SiteAnalysisPlugin):
         if ev is None:
             raise ValueError("no results with curves in the regions yet: run a "
                              "per-region step that measures one (Spatial statistics)")
-        regions = self.regions(ctx, ev, settings.group_by if ev.on_rois else "")
+        regions = self.regions(ctx, ev, settings.group_by)
         named = [c.strip() for c in settings.curves.split(",") if c.strip()]
         x_name, x, names, groups = summarise(regions, settings.x, named, settings.spread,
                                              self._pool(ctx, ev))
@@ -446,6 +476,10 @@ class Curves(SiteAnalysisPlugin):
                       plot=Plot(plot, panels=len(names),
                                 size=(3.4 * across, 2.8 * rows)),
                       title="curves")
+
+
+def _keyword_lists(ctx) -> List[str]:
+    return list(getattr(ctx.rois, "annotation_lists", {}) or {}) if ctx is not None else []
 
 
 def _arrays(entry: Dict[str, Any]) -> Dict[str, np.ndarray]:

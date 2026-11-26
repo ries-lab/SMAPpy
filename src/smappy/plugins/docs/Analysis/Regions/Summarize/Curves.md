@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.curves.summarise, smappy.plugins.curves.spread_of, smappy.plugins.curves.common_grid, smappy.plugins.curves.x_axis, smappy.plugins.curves.curve_names, smappy.plugins.curves.mean_values, smappy.plugins.curves.Curves.run, smappy.plugins.curves.Curves.regions, smappy.plugins.curves.Curves.evaluation, smappy.plugins.spatial_statistics.SpatialStatistics.pool]
+covers: [smappy.plugins.curves.summarise, smappy.plugins.curves.spread_of, smappy.plugins.curves.common_grid, smappy.plugins.curves.x_axis, smappy.plugins.curves.curve_names, smappy.plugins.curves.mean_values, smappy.plugins.curves.Curves.run, smappy.plugins.curves.Curves.regions, smappy.plugins.curves.Curves.evaluation, smappy.plugins.curves.Curves.groups, smappy.region_groups.group_labels, smappy.region_groups.group_choices, smappy.plugins.spatial_statistics.SpatialStatistics.pool]
 ---
 
 ## What it does
@@ -10,12 +10,17 @@ Some per-region steps measure a curve rather than a number:
 [pair correlation](plugin:Panels/Glossary) g(r) and L(r) - r of every
 [ROI](plugin:Panels/Glossary).  One ROI's curve is noisy; this draws them
 together -- the **mean curve with its spread** over the regions -- and, with
-*group by*, one curve per keyword the ROIs were annotated with ("control",
-"treated"), so conditions are compared in one plot.
+*group by*, one curve per group: per keyword the ROIs were annotated with
+("control", "treated"), per file, or per value of a condition, so conditions
+are compared in one plot.  The groups are those
+[Compare groups](plugin:Analysis/Regions/Summarize/Compare groups) and
+[Histogram](plugin:Analysis/Measure/Histogram) offer for region results:
+one grouping for every summary.
 
 It reads the curves of one evaluation (*results from*), the arrays each
-region kept beside its values.  Regions of an id attribute (clusters) are read
-too, as one group: they carry no keywords.
+region kept beside its values.  Regions of an id attribute (clusters,
+traces) are read too; they carry no keywords, but can be grouped by file or
+by an attribute of their localizations.
 
 **Counts are pooled, not averaged.**  Where the measurement is a ratio of
 counts -- g is the pairs found over the pairs chance would give -- the curve
@@ -84,7 +89,13 @@ or another array named like an axis.  Every ROI must have the same x grid.
 
 **3. Groups.**  With *group by* set to a keyword list, the ROIs with each
 keyword are a group, and the ROIs with none are a group of their own,
-"(none)", drawn last in grey.
+"(none)", drawn last in grey.  Set to *file*, the regions of each file are a
+group -- the file an ROI was drawn on, or the file a cluster's localizations
+are in.  Set to a column of the results with few values (at most 12), the
+regions with each value; set to an attribute *(of the localizations)*,
+offered for an id attribute's regions, the value of each region's first
+localization -- a condition [File conditions](plugin:Analysis/Process/File conditions)
+wrote, say.
 
 **4. The centre.**  Per group and per x, the mean of the ROIs' curves -- or,
 for a curve the measurement says how to pool, the curve made from the
@@ -186,8 +197,11 @@ knowing before reading the mean; SEM to judge whether two groups' means
 differ.
 
 ### group_by
-Annotate the ROIs first (the ROI manager's *Annotate*); ROIs without a
-keyword in the list form the group "(none)".
+For keywords, annotate the ROIs first (the ROI manager's *Annotate*); ROIs
+without a keyword in the list form the group "(none)".  A keyword list on
+an id attribute's regions groups nothing -- they have no keywords -- and the
+form says so.  The list offers what the table can be split by; a column
+with more than 12 different values is not offered.
 
 ## Output
 
