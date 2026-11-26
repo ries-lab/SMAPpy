@@ -169,21 +169,35 @@ def residual_atlas(model, params, batch, noise, z_bin_nm: float = 100.0, chunk_s
         checks["photons per observation"] = (float(within), _threshold((E - 1) * K))
 
     # background ramp: plane through each bead's (and channel's) mean Pearson residual map
-    Rm = np.where(keep, R, np.nan)
-    maps = np.nanmean(Rm, axis=2).reshape(E * C, Y, X)                  # [E·C, Y, X]
     counts = keep.sum(2).reshape(E * C, Y, X)                           # pixels averaged per map pixel
+    with np.errstate(invalid="ignore", divide="ignore"):                # a pixel masked in every slice: NaN
+        maps = (np.where(keep, R, 0.0).sum(2).reshape(E * C, Y, X) / counts)
+    z2 = ramp_z2(maps, counts)
+    if z2:
+        checks["background ramp"] = (float(np.mean(z2)), _threshold(len(z2)))
+
+    findings = [Finding(n, v, t, SUGGESTS[n]) for n, (v, t) in checks.items() if v > t]
+    return Atlas(float(D[keep].mean()), groups, checks, findings, rr)
+
+
+def ramp_z2(maps: np.ndarray, counts: np.ndarray) -> list:
+    """Each map's planar slope in x and y as z² (slope² over its variance), the plane fitted with each map
+    pixel weighted by the pixels averaged into it.  A map whose pixels do not fix a plane -- every pixel
+    masked, or those left on one row or column -- is passed over: in situ on a split chip, a molecule's region
+    in the other channel can be masked whole (its neighbours there), and inverting that map's normal matrix
+    raised a singular-matrix error that ended the learning, for a diagnostic (Zenodo 2ch_smlm_nup96_WGA)."""
+    n, Y, X = maps.shape
     gy, gx = np.mgrid[:Y, :X]
     A = np.c_[np.ones(Y * X), (gx.ravel() - (X - 1) / 2), (gy.ravel() - (Y - 1) / 2)]
     z2 = []
-    for e in range(E * C):
+    for e in range(n):
         w = counts[e].ravel().astype(float)
         ok = w > 0
         Aw = A[ok] * np.sqrt(w[ok])[:, None]
+        if ok.sum() < 3 or np.linalg.matrix_rank(Aw) < 3:
+            continue
         bw = maps[e].ravel()[ok] * np.sqrt(w[ok])
         coef, *_ = np.linalg.lstsq(Aw, bw, rcond=None)
         cov = np.linalg.inv(Aw.T @ Aw)
         z2 += [coef[1] ** 2 / cov[1, 1], coef[2] ** 2 / cov[2, 2]]
-    checks["background ramp"] = (float(np.mean(z2)), _threshold(len(z2)))
-
-    findings = [Finding(n, v, t, SUGGESTS[n]) for n, (v, t) in checks.items() if v > t]
-    return Atlas(float(D[keep].mean()), groups, checks, findings, rr)
+    return z2
