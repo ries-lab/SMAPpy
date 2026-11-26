@@ -160,8 +160,40 @@ with a warning; the cache is used on a second run.  Slow tier.
    configuration directory's `fourpi_insitu` (`fit_4pi.insitu_path`), the registration then the model's.
    A Preview takes what a Run kept and never learns (a fit of 20000 frames is no Preview).  The end-to-end
    test is `long`.
-3. **Spline 3D 2C in situ**, when it fits the plan: needs a dual in situ workflow in uipsf (biplane first:
-   the same molecules in both channels; colour split later) and its benchmark.
+3. **Spline 3D 2C in situ**: needs a dual in situ workflow in uipsf (biplane first:
+   the same molecules in both channels; colour split later) and its benchmark.  **Done 2026-11-26** on
+   simulated movies, biplane and two dyes alike:
+   * **No new uipsf workflow.**  The single-channel rounds (`calibrate_insitu`, `learn_insitu`) run unchanged on
+     a model of two channels, since they talk to the model and `rois.batch` only.  uipsf gained what a
+     two-channel model needs: `insitu_model` of several channels (each its own held pupil, the transforms),
+     `Channel(fit_dz=False)` and **a share of the light per molecule** (`Channel(share_per_emitter=True)`) --
+     one share for all is right for biplane and one dye, wrong for two dyes -- and split movies to test on
+     (`movie.simulate_movie` with ``region``, ``dyes``).
+   * **The molecules** (`calibrate/insitu_dual.py`): each half detected on its own with in situ's steps, units
+     of the same frames paired within 2 px of where the map in force puts them -- the calibration's (or the
+     file's) with the channel *move* on top when it is measured; a lone unit's partner cut where the map puts it,
+     that half's molecules masked; chosen by the main half's Gaussian.
+   * **The settings**: *in the sample*'s *focus* gains *in situ* (it was a choice of `SampleSettings` 2C did
+     not offer), with *learn* as Spline 3D's and *learn registration* (off: the map held, the channel *move*
+     being the tool for a splitter moved since the beads).  *learn* = focus and blur holds both pupils and the
+     channels' offset in z (`ch1.dz`); *aberrations* learns the offset too.  The share is per molecule exactly
+     when the fit's *link photons* is off: in situ models the photons as the fit does.
+   * **The run** (`depth.insitu_dual`): as Spline 3D's, the focus alone first from 1000 molecules, then on
+     request the aberrations from the same molecules; both judged by `depth.judged` (shared with Spline 3D now)
+     on the tenth of the blinks held out, the learnt kept only if better, else the focus alone with a warning.
+     Drawn by `dual_depth_calibration` at the learnt focus, the registration the model's; kept in
+     `sample_depth` as a dual calibration with the model inside (`depth.kept(key, dual=True)`); a Preview
+     never learns (Spline 4Pi's rule: it takes what a Run kept, else fits with the focus on auto); the
+     preflight asks before any in situ not kept, offering the focus on auto.
+   * **Measured** (`tests/uipsf_tests/test_insitu_dual.py`, `long`): a biplane movie (150 molecules,
+     `ch1.dz` = −300 nm, share 0.45) and a dual calibration with half its astigmatism in both channels;
+     *aberrations* brought the astigmatism back to 0.665 / 0.568 rad (0.70 / 0.60), the offset to −297 nm,
+     the share to 0.458, the focus to 667 nm (700), 17 nats per held-out molecule better than the focus alone;
+     the fit's z scatter about the truth (MAD) 26 nm against 33 nm with the start at the focus on auto.  Two
+     dyes (0.2, 0.8): the shares per molecule 0.24 / 0.75.
+   * **Not done**: real data (Zenodo `2ch_smlm_nup96_WGA`, M2's two colours); a field-dependent calibration
+     is learnt and drawn without its field; the PSF calibration window has no in situ dual sample (the
+     fitter was the goal; `insitu_dual.run_insitu_dual` is the entry a window would call).
 
 ## Open
 
