@@ -389,8 +389,11 @@ def _validate_native_calibration(cal):
         raise ValueError('invalid spline coefficient array: expected finite (64,nz,ny,nx)')
     if not np.isfinite(cal.dz) or cal.dz <= 0:
         raise ValueError('calibration dz must be positive and finite')
-    if not np.isfinite(cal.z0) or not 0 <= cal.z0 <= c.shape[1]:
-        raise ValueError('calibration z0 is outside the spline grid')
+    # z0 may lie outside the grid: a spline drawn for a focus deep in the sample (`calibrate.depth`) has z0 at
+    # the coverslip, its planes about the plane in focus far above it, and fits as well (emitter = -(i - z0) dz);
+    # refusing it ended an in situ run that could not keep its model (M2 sun1, focus ~1 um)
+    if not np.isfinite(cal.z0):
+        raise ValueError('calibration z0 must be finite')
     if cal.psf is not None:
         if cal.psf.shape != tuple(n+1 for n in c.shape[1:]) or not np.isfinite(cal.psf).all():
             raise ValueError('native PSF must contain the finite spline knots, shape (nz+1,ny+1,nx+1)')
@@ -591,6 +594,6 @@ def light_at_focus(calibration) -> float:
     Here, not in `psf`, so that the training on a host without SMAPpy's compiled fitter can take it
     (`netfit.fit_two.biplane_total`)."""
     psf = np.asarray(calibration.psf, float)
-    z = round(float(calibration.z0))
+    z = min(max(round(float(calibration.z0)), 0), psf.shape[0] - 1)     # z0 may lie outside (a deep focus)
     value = float(psf[max(z - 2, 0):z + 3].sum(axis=(1, 2)).mean())
     return value if np.isfinite(value) and value > 0 else 1.0

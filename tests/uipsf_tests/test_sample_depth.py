@@ -71,6 +71,21 @@ def test_the_spline_reaches_below_the_coverslip_into_the_glass_and_runs_on_at_ze
     assert np.abs(psf[0] - psf[1]).sum() < 0.05 * psf[1].sum()
 
 
+def test_a_spline_drawn_for_a_deep_focus_ends_above_the_coverslip_and_is_saved_and_read_back(tmp_path, learned,
+                                                                                               beads):
+    # its planes about the plane in focus, the coverslip (z0) below them: an in situ result with a focus of a
+    # micrometre was refused by the writer and could not be kept for the fit (M2 sun1)
+    from smappy.io.calibration import load_spline_calibration, save_spline_calibration
+    cal = depth.depth_spline(beads, 1500.0, learned=learned)
+    assert cal.parameters["sample_depth"]["heights_nm"][0] > 0
+    assert cal.z0 > cal.coeff.shape[1]
+    path = tmp_path / "deep_3dcal.h5"
+    save_spline_calibration(path, cal)
+    back = load_spline_calibration(path)
+    assert back.z0 == pytest.approx(cal.z0)
+    assert back.z_index_to_nm(0) == pytest.approx(cal.parameters["sample_depth"]["heights_nm"][1])
+
+
 def test_a_drawn_spline_with_another_sample_index_moves_the_plane_in_focus(learned):
     model, shared = depth.with_medium(learned, 1.45)
     water = depth.in_focus_height(learned.model, learned.shared, 1000.0, 800.0)
