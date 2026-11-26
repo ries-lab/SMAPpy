@@ -79,6 +79,10 @@ class FilterRegions(Plugin):
     """Keeps the localizations of the regions -- ROIs, clusters, traces --
     whose results pass a condition, by one flag every layer honours."""
 
+    # a step for chains and batches: the Regions tab's *Region filter*
+    # section edits the same conditions by hand (`Plugin.chain_only`)
+    chain_only = True
+
     Settings = FilterRegionsSettings
     changes_locs = False
     logged = True

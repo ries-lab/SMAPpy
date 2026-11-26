@@ -430,6 +430,13 @@ class Thing(Plugin):
   that is a column computed from the others can return a `ColumnRecipe`
   instead (`Result.recipe`, with `column_recipe_for`), which follows the
   live table: `math_parser.py`, `assign_colors.py`.
+* Set `chain_only = True` on a plugin that exists for chains, batches and
+  the assistant while the GUI does the same by hand another way (*Save
+  smappy HDF5* and File > Save, *Filter regions* and the Regions tab's
+  *Region filter*): it is left out of the Plugins menu and the chooser
+  that pins or opens plugins, and offered where a chain's steps are
+  picked (`gui/chooser.py`'s `chain_steps`).  A plain literal: the scan
+  reads it (`discovery.PluginRef.chain_only`).
 * Set `follow_roi = True` on a plugin whose work is tens of milliseconds: the
   GUI grows a *follow ROI* tick and measures again while the ROI is dragged (its
   `preview` if it has one, else `run`, never applied), silently (no log line,

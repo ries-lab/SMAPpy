@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # attributes we read off the class body when they are plain literals
-_READ = ("name", "description", "per_region", "window")
+_READ = ("name", "description", "per_region", "window", "chain_only")
 
 
 @dataclass
@@ -60,6 +60,9 @@ class PluginRef:
     # names a window it opens (`Plugin.window`): a launcher, whose panel a
     # tab builds at once, to put its buttons in the section's title bar
     window: bool = False
+    # a step for chains and batches only (`Plugin.chain_only`): left out of
+    # the menus and the chooser, offered where chain steps are picked
+    chain_only: bool = False
 
     @property
     def group(self) -> str:
@@ -273,6 +276,7 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
             attr=cls.name,
             per_region=attrs.get("per_region") is True,
             window=isinstance(attrs.get("window"), str),
+            chain_only=attrs.get("chain_only") is True,
         )
 
     # 1. explicit @register wins, and is the only way to get several from one file

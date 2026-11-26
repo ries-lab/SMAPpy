@@ -418,7 +418,8 @@ class ChainPanel(QWidget):
     def add_step(self) -> None:
         from .chooser import choose_plugin
         # into a block -- the per-region steps -- an analysis, nearly always
-        path = choose_plugin(self.window(), opened="Analysis" if self.root else "")
+        path = choose_plugin(self.window(), opened="Analysis" if self.root else "",
+                             chain_steps=True)
         if not path:
             return
         try:

@@ -127,6 +127,9 @@ def _describe(bounds: Dict[str, Tuple]) -> str:
 @register("Analysis/Process/Layers")
 class ChainLayers(Plugin):
     """The layers' bounds and whether they merge blinks, as the Render tab would set them."""
+
+    # a step for chains and batches: the Render tab sets the layers by hand (`Plugin.chain_only`)
+    chain_only = True
     Settings = LayersSettings
     changes_locs = True            # only with *remove*: see changes_locs_for
     # quantile bounds are of the localizations; *remove* drops rows

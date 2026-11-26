@@ -204,6 +204,9 @@ class Open(Plugin):
 class LoadAuto(Plugin):
     """Read a localization file of any known format into the session."""
 
+    # a step for chains and batches: Load and File > Open read files by hand (`Plugin.chain_only`)
+    chain_only = True
+
     Settings = LoadSettings
     name = "Load from path"
     changes_locs = True
@@ -349,6 +352,10 @@ def left_out(session, settings: SaveSettings, done: bool = False) -> Optional[st
 @register("File/Save/smappy HDF5")
 class Save(Plugin):
     """Write the current table, its history and its ROIs."""
+
+    # a step for chains and batches: File > Save and Save as write the
+    # same file by hand (`Plugin.chain_only`)
+    chain_only = True
 
     Settings = SaveSettings
     changes_locs = False

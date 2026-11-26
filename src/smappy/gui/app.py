@@ -1752,6 +1752,8 @@ class ControlWindow(QMainWindow):
         # in the menu without a restart, and the scan parses, never imports
         registry.discover(force=True)
         for path, ref in sorted(registry.refs().items()):
+            if ref.chain_only:           # done by hand elsewhere (`Plugin.chain_only`)
+                continue
             action = group_for(ref.group).addAction(ref.name)
             action.setToolTip(ref.description or path)
             action.triggered.connect(lambda _=False, p=path: self.open_plugin_window(p))

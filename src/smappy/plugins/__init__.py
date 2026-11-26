@@ -1040,6 +1040,13 @@ class Plugin:
     # its bead table -- and which a form and a Run button cannot be; the
     # plugin is what lets it sit in a tab, and it imports no Qt to do so.
     window: Optional[str] = None
+    # A step for chains, batches and the assistant only: the GUI does the same
+    # by hand another way -- File > Save, the Regions tab's *Apply* and
+    # *Region filter*, the Render tab's layers -- so the plugin is left out of
+    # the Plugins menu and the chooser that pins or opens plugins, and offered
+    # where a chain's steps are picked.  Read off the class by the scan
+    # (`discovery.PluginRef.chain_only`), so it must be a plain literal.
+    chain_only: bool = False
     # A launcher whose window is where its settings are set by hand, and whose
     # `run` makes the same thing without it: the panel shows the launcher alone,
     # as for one with nothing to set, and the settings are for a run with no

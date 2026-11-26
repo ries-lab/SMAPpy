@@ -54,13 +54,17 @@ class PluginTree(QTreeWidget):
 
     chosen = Signal(str)            # a leaf was double-clicked or Enter pressed
 
-    def __init__(self, per_region: bool = False, parent=None, opened: str = ""):
+    def __init__(self, per_region: bool = False, parent=None, opened: str = "",
+                 chain_steps: bool = False):
         """``per_region`` keeps only the plugins that can run once per
         region (`Plugin.per_region`), for the ROI evaluation pipeline.  It is
         the plugin's own declaration, not its folder, which is what makes
-        filtering work with one shared tree."""
+        filtering work with one shared tree.  ``chain_steps`` offers the
+        plugins that are steps for chains only (`Plugin.chain_only`), which
+        are left out everywhere else."""
         super().__init__(parent)
         self.per_region = per_region
+        self.chain_steps = chain_steps
         self.opened = opened         # a branch's path, "Analysis": unfolded to begin
         self.setHeaderHidden(True)
         self.setUniformRowHeights(True)
@@ -73,7 +77,8 @@ class PluginTree(QTreeWidget):
     def reload(self) -> None:
         self.clear()
         self.refs = {p: r for p, r in plugins.refs().items()
-                     if not self.per_region or r.per_region}
+                     if (not self.per_region or r.per_region)
+                     and (self.chain_steps or not r.chain_only)}
         groups: Dict[str, QTreeWidgetItem] = {}
 
         def group_for(path: str) -> Optional[QTreeWidgetItem]:
@@ -162,7 +167,7 @@ class PluginChooser(QDialog):
 
     def __init__(self, parent=None, per_region: bool = False,
                  title: str = "Add a plugin", new_chain: bool = False,
-                 opened: str = ""):
+                 opened: str = "", chain_steps: bool = False):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.path: Optional[str] = None
@@ -170,7 +175,8 @@ class PluginChooser(QDialog):
         self.search = QLineEdit(placeholderText="find a plugin: its name, or a word from its page")
         self.search.setClearButtonEnabled(True)
         layout.addWidget(self.search)
-        self.tree = PluginTree(per_region=per_region, opened=opened)
+        self.tree = PluginTree(per_region=per_region, opened=opened,
+                               chain_steps=chain_steps)
         layout.addWidget(self.tree, 1)
         self.about = QLabel(" ")
         self.about.setWordWrap(True)
@@ -249,12 +255,14 @@ class PluginChooser(QDialog):
 
 def choose_plugin(parent=None, per_region: bool = False,
                   title: str = "Add a plugin", new_chain: bool = False,
-                  opened: str = "") -> Optional[str]:
+                  opened: str = "", chain_steps: bool = False) -> Optional[str]:
     """Show the chooser; the plugin path picked, or None (or `NEW_CHAIN`).
-    ``opened``: the branch unfolded to begin with (`PluginTree`)."""
+    ``opened``: the branch unfolded to begin with; ``chain_steps``: a
+    chain's step is picked, so the chain-only plugins are offered too
+    (`PluginTree`)."""
     # scanned again, so a plugin saved into a folder since is offered: the
     # scan parses the files and imports none
     plugins.discover(force=True)
     dialog = PluginChooser(parent, per_region=per_region, title=title, opened=opened,
-                           new_chain=new_chain)
+                           new_chain=new_chain, chain_steps=chain_steps)
     return dialog.path if dialog.exec() == QDialog.Accepted else None

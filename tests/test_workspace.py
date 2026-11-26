@@ -590,7 +590,8 @@ def test_the_plugins_menu_is_the_whole_tree_and_opens_a_window(window, monkeypat
     # The leaf is the plugin's *name*, as the chooser shows it, not the last
     # part of its path
     for path, ref in plugins.refs().items():
-        assert f"{ref.group}/{ref.name}" in found, path
+        # a chain's step only (`Plugin.chain_only`) is done by hand elsewhere
+        assert (f"{ref.group}/{ref.name}" in found) != ref.chain_only, path
     assert "Find a plugin..." in found
 
     stats = f"{plugins.refs()[STATS].group}/{plugins.refs()[STATS].name}"
@@ -647,3 +648,12 @@ def test_a_plugin_that_cannot_be_opened_says_so_rather_than_raising(window, monk
                         lambda *a, **k: said.append(a[-1]), raising=False)
     assert window.open_plugin_window("No/Such/Plugin") is None
     assert said and "No/Such/Plugin" in said[0]
+
+
+def test_a_chain_only_plugin_is_offered_where_chain_steps_are_picked_and_nowhere_else(app):
+    from smappy.gui.chooser import PluginTree
+    hidden = [p for p, r in plugins.refs().items() if r.chain_only]
+    assert "Analysis/Regions/Filter regions" in hidden
+    assert "File/Save/smappy HDF5" in hidden
+    assert not set(hidden) & set(PluginTree().refs)
+    assert set(hidden) <= set(PluginTree(chain_steps=True).refs)

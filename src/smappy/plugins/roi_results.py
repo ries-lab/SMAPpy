@@ -550,6 +550,10 @@ class AcceptProposals(Plugin):
     a range, a line, a keyword, its centre -- as the Regions tab's *Apply*
     does, for a chain or a batch."""
 
+    # a step for chains and batches: the Regions tab's *Apply* does it by
+    # hand (`Plugin.chain_only`)
+    chain_only = True
+
     # what it does, in the tab; the path, which chains name it by, stays
     name = "Apply proposals to ROIs"
 

@@ -354,8 +354,8 @@ def make(d) -> None:
            "beads, to correct drift and to put measurements on top of each "
            "other.</li>"
            "<li><b>Stability</b>: how still the instrument was, from beads.</li>"
-           "<li><b>Filter regions</b>: keep the traces whose numbers pass a "
-           "condition.</li></ul>"
+           "<li><b>Region filter</b> (Regions tab): keep the traces whose "
+           "numbers pass a condition.</li></ul>"
            "<p>Each plugin's <b>?</b> opens its page.</p>",
            say="There is more: two colours, the beads for drift, the "
                "instrument's stability, and filtering traces by their numbers. "
