@@ -77,9 +77,9 @@ each shows), the settings blinks are merged with, the 2D view's range, the
 3D view's angle and its box, which windows were open -- the 3D view, the ROI
 manager, plugins opened from the Plugins menu with their settings -- and
 where every window was.  None of it is put back when the file is opened
-with File > Open.  File > Open and restore opens the file and puts all of
-it back, and File > Restore saved session does the same for the file that
-is open; File > Workspace > From data file takes the tabs alone.  The
+with File > Open.  File > Restore saved session opens the file and puts all
+of it back -- onto the table, when it is the file already open; View >
+Workspace > From data file takes the tabs alone.  The
 windows come back on the screens there are: a window saved on a monitor
 that is not connected now is moved onto the nearest one and shrunk to fit
 it.  A script's save, with no windows, writes the layers and the 3D view.
@@ -145,7 +145,7 @@ opening a `_sml.mat` or a csv, give the new file a name.
 ### gui_state
 Useful for a file that is a record of how it was analysed, and for coming
 back to a piece of work where it was left; it costs a few kB.  Nothing is
-restored unless someone asks for it (File > Open and restore), so it does
+restored unless someone asks for it (File > Restore saved session), so it does
 no harm in a file that is shared.
 
 ### region_results

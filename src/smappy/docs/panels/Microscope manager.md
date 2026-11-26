@@ -39,7 +39,7 @@ then read with its microscope's optics wherever it is opened:
   its data were taken otherwise: the 3D lens out where the beads had it in,
   another filter, another microscope.
 
-This window is where the entries are made.  Opened from *File > Microscope
+This window is where the entries are made.  Opened from *Plugins > Microscope
 manager...*, or from *Microscope manager...* in any *microscope* section.  A value typed where a file is opened (an NA in *PSF
 calibration*, a pixel size in the fitter) still wins over the entry, for that
 run.

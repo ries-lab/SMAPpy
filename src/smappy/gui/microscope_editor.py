@@ -1,6 +1,6 @@
 """The microscope manager: the microscope entries, edited and checked against a file.
 
-Opened from the menu (*File > Microscope manager...*), and from what a file opener shows of
+Opened from the menu (*Plugins > Microscope manager...*), and from what a file opener shows of
 the microscope it found (`gui.microscope_view`).  An entry is what `microscope_db` resolves a
 file with: the tags that recognise the microscope, its devices and their named states, the
 parameters that follow them, the arms of a split and the cameras it has had

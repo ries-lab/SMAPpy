@@ -148,7 +148,7 @@ range can be dragged or typed.  A new layer opens with a few bounds already
 set (see *In detail*), so that fits which are clearly bad are left out from
 the start -- and are left out visibly, in the shaded histogram, rather than
 silently.  A file opened in place of the last one keeps the filters its
-first layer had, and a saved workspace (*File > Workspace > Save*) keeps
+first layer had, and a saved workspace (*View > Workspace > Save*) keeps
 them too and sets them again when it is opened.
 
 ```figure A simulated ring-and-cross structure.  Left: the localization precision of all localizations, with the range the default bound keeps shaded.  Middle: every localization.  Right: what the default bounds take out -- mostly the dim, imprecise localizations scattered around the lines.

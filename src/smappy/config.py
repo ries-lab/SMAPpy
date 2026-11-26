@@ -127,6 +127,41 @@ def set_ask_before_quit(on: bool) -> None:
     set("ask_before_quit_unsaved", bool(on))
 
 
+# ------------------------------------------------------------- recent files
+
+RECENT_FILES = "recent_files"       # localization files opened or saved, newest first
+RECENT_FILES_MAX = 10
+
+
+def remember_file(path) -> None:
+    """Put ``path`` at the top of *File > Open recent*.  A file opened
+    again moves up rather than appearing twice."""
+    if not path:
+        return
+    resolved = str(Path(str(path)).expanduser().resolve())
+    earlier = [p for p in get(RECENT_FILES) or [] if isinstance(p, str)]
+    listed = [resolved] + [p for p in earlier if p != resolved]
+    if listed[:RECENT_FILES_MAX] != earlier[:RECENT_FILES_MAX]:
+        set(RECENT_FILES, listed[:RECENT_FILES_MAX])
+
+
+def recent_files() -> List[Path]:
+    """The localization files last opened or saved, newest first, that are
+    still there: one gone since (a moved run, an unplugged drive) is left out
+    of the menu rather than offered and refused."""
+    found = []
+    for raw in get(RECENT_FILES) or []:
+        if isinstance(raw, str):
+            path = Path(raw).expanduser()
+            if path.is_file():
+                found.append(path)
+    return found
+
+
+def forget_recent_files() -> None:
+    set(RECENT_FILES, [])
+
+
 # -------------------------------------------------------------- last folder
 
 def last_folder() -> Path | None:

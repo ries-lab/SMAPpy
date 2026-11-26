@@ -1,4 +1,4 @@
-"""A saved file brings its session back: *File > Open and restore*
+"""A saved file brings its session back: *File > Restore saved session*
 (`handoff.session_block`, `gui.restore`)."""
 from __future__ import annotations
 

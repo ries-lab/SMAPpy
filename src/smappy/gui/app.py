@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QH
                                QMainWindow, QMenu, QScrollArea, QSizePolicy, QTabWidget,
                                QToolButton, QVBoxLayout, QWidget)
 
-from .. import plugins, workspace as workspace_module
+from .. import config, plugins, workspace as workspace_module
 from ..io.formats import (csv_columns, guess_csv_mapping, load as load_any,
                           name_filter, reader_for)
 from . import drops, folders
@@ -138,6 +138,14 @@ def _add_menu(parent, title: str, owner: QWidget) -> QMenu:
     menu = QMenu(title, owner)
     parent.addMenu(menu)
     return menu
+
+
+def _same_file(a, b) -> bool:
+    """Whether paths ``a`` and ``b`` name one file, however they are spelt."""
+    try:
+        return Path(str(a)).expanduser().resolve() == Path(str(b)).expanduser().resolve()
+    except OSError:
+        return False
 
 
 def _copy_selected_text(widget) -> bool:
@@ -288,19 +296,24 @@ class ControlWindow(QMainWindow):
         # any -- an Add file... and an Open image... beside it were three
         # entries for one thing, and the wrong one replaced a table
         open_ = self._action(menu, "Open...", QKeySequence.Open, lambda: self.open())
+        # filled as it opens, as Workspace > Recent is: a file moved since is
+        # left out rather than offered and refused
+        self.recent_files_menu = _add_menu(menu, "Open recent", self)
+        self.recent_files_menu.setToolTipsVisible(True)
+        self.recent_files_menu.aboutToShow.connect(self._fill_recent_files)
         # a saved file's whole session -- tabs, layers, views, windows -- on
         # request only: Open stays one click and leaves the windows alone
-        # (`gui.restore`)
-        open_restore = self._action(menu, "Open and restore...", None,
-                                    lambda: self.open_and_restore())
-        open_restore.setToolTip("open a smappy HDF5 file and bring back the session "
-                                "it was saved with: tabs, layers, views, windows")
-        restore_open = self._action(menu, "Restore saved session", None,
-                                    lambda: self.restore_open_file())
-        restore_open.setToolTip("the session the open file was saved with: tabs, "
-                                "layers, views, windows")
+        # (`gui.restore`).  One entry for the open file and for another: an
+        # *Open and restore* beside a *Restore saved session* were two names
+        # for one thing, told apart only by whether the file was open yet
+        restore = self._action(menu, "Restore saved session...", None,
+                               lambda: self.restore_session())
+        restore.setToolTip("a smappy HDF5 file opened with the session it was saved "
+                           "with: tabs, layers, views, windows")
+        menu.addSeparator()
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
+        menu.addSeparator()
         self._action(menu, "Session name...", None, self.rename_session)
         self._action(menu, "File properties...", None, self.edit_file_properties).setToolTip(
             "the open files' frame times: what turns frames into seconds")
@@ -312,11 +325,11 @@ class ControlWindow(QMainWindow):
         self.new_window_action.setToolTip("the session as it is now -- table, layers, "
                                     "filters, ROIs -- in a new instance of the "
                                     "program; a live fit carries on here")
-        menu.addSeparator()
-        # the tabs, their plugins and their values (`smappy.workspace`), in a
-        # submenu of their own: a "Save GUI" beside Save left one guessing
-        # which of the two kept the data
-        self.workspace_menu = _add_menu(menu, "Workspace", self)
+        # the tabs, their plugins and their values (`smappy.workspace`), in
+        # View (attached there below): how the program is laid out, not the
+        # data -- a "Save GUI" beside Save, and then a Workspace submenu in
+        # File, left one guessing which of them kept the data
+        self.workspace_menu = QMenu("Workspace", self)
         self.workspace_menu.setToolTipsVisible(True)
         for text, slot, tip in (
                 ("Save", self.save_gui, "overwrite the workspace file that is loaded"),
@@ -341,10 +354,7 @@ class ControlWindow(QMainWindow):
                 self.recent_gui_menu.aboutToShow.connect(self._fill_recent_guis)
             else:
                 self._action(self.workspace_menu, text, None, slot).setToolTip(tip)
-        self._action(menu, "Microscope manager...", None,
-                     lambda: self.open_microscope_manager()).setToolTip(
-            "the microscope entries: which devices set the pixel and the optics; "
-            "EMU configurations to start them from")
+        menu.addSeparator()
         self._action(menu, "Preferences...", QKeySequence.Preferences,
                      self.open_preferences).setMenuRole(QAction.PreferencesRole)
         menu.addSeparator()
@@ -375,7 +385,8 @@ class ControlWindow(QMainWindow):
         self._offers: list = []            # sessions handed to new instances
         self._offer_timer = QTimer(self, interval=500)
         self._offer_timer.timeout.connect(self._check_offers)
-        self._load_locked = [open_, open_restore, restore_open, save, save_as,
+        self._load_locked = [open_, self.recent_files_menu.menuAction(), restore,
+                             save, save_as,
                              self.new_window_action,
                              self.undo_action,
                              self.redo_action, self.undo_menu.menuAction(),
@@ -446,6 +457,8 @@ class ControlWindow(QMainWindow):
         view.addAction(manager)
         self.addAction(manager)
         render.addAction(manager)
+        view.addSeparator()
+        view.addMenu(self.workspace_menu)
         # a plugin that would change a table a fit is still appending to
         # offers to run in a new instance instead (`PluginPanel._ask_live`)
         session.window_openers["new window"] = \
@@ -573,7 +586,7 @@ class ControlWindow(QMainWindow):
         QApplication.instance().aboutToQuit.connect(self._stop_assistant)
         session.gui_state_provider = self.plugin_state
         session.session_block_provider = lambda: restore_module.session_block(self)
-        self._restore_pending: Optional[Path] = None   # *Open and restore*
+        self._restore_pending: Optional[Path] = None   # `open_and_restore`
         session.on_change(self._on_session)
         self._on_session("locs")
 
@@ -971,19 +984,42 @@ class ControlWindow(QMainWindow):
 
     # ------------------------------------------------ restoring a session
     def open_and_restore(self, path=None) -> None:
-        """*File > Open and restore*: open a smappy HDF5 file in place of
+        """*File > Restore saved session* for a file not open: open it in place of
         what is open, and once it is read, bring back its session
         (`gui.restore`)."""
         if path is None:
-            path, _ = QFileDialog.getOpenFileName(self, "Open and restore",
+            path, _ = QFileDialog.getOpenFileName(self, "Restore saved session",
                                                   folders.start(), name_filter())
             if not path:
                 return
         self._restore_pending = Path(path)
         self.load_paths([str(path)], append=False)
 
+    def restore_session(self, path=None) -> None:
+        """*File > Restore saved session...*: a smappy HDF5 file's session.
+
+        The dialog starts on the open file: chosen as it is, its session goes
+        back onto the table already here (`restore_open_file`, nothing read
+        again); another file is opened in place of what is open first
+        (`open_and_restore`).  One entry for both, so nobody has to know
+        which of two to pick before the dialog shows the file.
+        """
+        if path is None:
+            here = self.session.path
+            start = (str(here) if here and Path(here).suffix.lower() in (".h5", ".hdf5")
+                     else folders.start())
+            path, _ = QFileDialog.getOpenFileName(self, "Restore saved session",
+                                                  start, "smappy HDF5 (*.h5 *.hdf5)")
+            if not path:
+                return
+        here = self.session.path
+        if here is not None and _same_file(path, here):
+            self.restore_open_file()
+        else:
+            self.open_and_restore(path)
+
     def restore_open_file(self) -> None:
-        """*File > Restore saved session*: the open file's, onto its table."""
+        """The open file's saved session, onto its table."""
         path = self.session.path
         if not path or Path(path).suffix.lower() not in (".h5", ".hdf5"):
             QMessageBox.information(self, "Restore saved session",
@@ -1012,7 +1048,7 @@ class ControlWindow(QMainWindow):
                 + "\n".join(sorted(set(missing))))
 
     def _restore_if_pending(self) -> None:
-        """After the loads of *Open and restore*: the restore, if the file
+        """After the loads of `open_and_restore`: the restore, if the file
         that was asked for is the one open (it may have failed to load)."""
         path, self._restore_pending = self._restore_pending, None
         if path is None:
@@ -1573,6 +1609,28 @@ class ControlWindow(QMainWindow):
                 "loaded, without plugins that are not installed here:\n"
                 + "\n".join(sorted(set(missing))))
 
+    def _fill_recent_files(self) -> None:
+        """The localization files last opened or saved, newest first; one
+        opens as File > Open does, asking to replace or add when a table is
+        open."""
+        menu = self.recent_files_menu
+        menu.clear()
+        paths = config.recent_files()
+        names = [p.name for p in paths]
+        for path, name in zip(paths, names):
+            if names.count(name) > 1:          # two "locs.h5" in different runs
+                name = f"{name} ({path.parent.name})"
+            action = menu.addAction(name)
+            action.setToolTip(str(path))
+            action.triggered.connect(lambda _=False, p=path: self.open_dropped([str(p)]))
+        if not paths:
+            menu.addAction("(none yet)").setEnabled(False)
+            return
+        menu.addSeparator()
+        # a lambda: `triggered` hands on `checked`, which forget would refuse
+        menu.addAction("Clear the list").triggered.connect(
+            lambda _=False: config.forget_recent_files())
+
     def _fill_recent_guis(self) -> None:
         """The workspaces last saved or loaded, newest first, one click each."""
         menu = self.recent_gui_menu
@@ -1664,6 +1722,12 @@ class ControlWindow(QMainWindow):
         # a chain over many files: beside the plugins it runs, not in a Tools
         # menu of its own that held nothing else
         self._action(menu, "Batch...", None, self.open_batch)
+        # the microscope database, beside the other windows that are tools
+        # rather than plugins; File held it, where it read as a file of the data
+        self._action(menu, "Microscope manager...", None,
+                     lambda: self.open_microscope_manager()).setToolTip(
+            "the microscope entries: which devices set the pixel and the optics; "
+            "EMU configurations to start them from")
         # the user's own plugins (`smappy.user_plugins`): where they are
         # written, by hand or by an assistant, and appear under User
         self._action(menu, "New plugin...", None, self.new_user_plugin)
@@ -2195,6 +2259,7 @@ class ControlWindow(QMainWindow):
                 loads = self._ask_parts(path)
                 if loads is None:
                     continue
+            config.remember_file(path)        # File > Open recent
             for args in loads:
                 self._queue.append((str(path), args, append or queued > 0,
                                     reset_view and queued == 0))
@@ -2610,6 +2675,7 @@ class ControlWindow(QMainWindow):
             except ValueError as error:
                 QMessageBox.warning(self, "Not saved", str(error))
                 return
+            config.remember_file(path)            # File > Open recent
             self._on_session("locs")
 
     # ------------------------------------------------------------ quitting

@@ -278,7 +278,7 @@ not in `f.attrs`, and the existing `metadata` attribute is left alone.
 Beyond the pipeline, the rest of the GUI state -- tabs, their instances and
 values, which section is open -- is saved:
 
-* in a **GUI file**, and only when someone asks: *File > Workspace > Save*
+* in a **GUI file**, and only when someone asks: *View > Workspace > Save*
   overwrites the loaded one (on the shipped default it asks for a file of
   one's own), *Save as* writes a new one, *Open* reads one, *Recent* lists the
   ones saved or loaded lately to read again in a click, and the next start
@@ -297,14 +297,14 @@ it, `/gui/session` (`handoff.session_block`, the serialisation *Open in a new
 window* uses) keeps the rest of the session -- layers, views, open windows --
 and the window geometry, which first was left out: it travels badly to a
 colleague's screen.  It is kept as plain rectangles and put back only by
-*File > Open and restore* (`gui/restore.py`), each moved onto a screen there
+*File > Restore saved session* (`gui/restore.py`), each moved onto a screen there
 is and shrunk to fit it, so a file saved at a two-monitor desk opens on a
 laptop with every window in reach.  A
 preference turns the embedding off (`save_gui_state_in_files`) for anyone who
 wants their data files to contain only data.  Reading it back is deliberately
 *not* automatic: rearranging someone's tabs because they opened a colleague's
-dataset would be a surprise, so it is a menu item, *File > Workspace > From data file*
-for the tabs, *File > Open and restore* and *Restore saved session* for the whole.  Values are a flat map of dotted names read off the form
+dataset would be a surprise, so it is a menu item, *View > Workspace > From data file*
+for the tabs, *File > Restore saved session* for the whole.  Values are a flat map of dotted names read off the form
 widgets -- so a form left mid-edit with an unparseable number is still saveable,
 and a panel never opened keeps the values it was given rather than being
 blanked -- and are read back a field at a time: a name the plugin no longer has

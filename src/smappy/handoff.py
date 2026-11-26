@@ -35,7 +35,7 @@ is for working with the localizations.
 
 The layers and the 3D view are serialised once, here, for two uses: the
 handoff, and the session block a saved file carries (`session_block`,
-`/gui/session`) for *File > Open and restore* to put back (`gui.restore`).
+`/gui/session`) for *File > Restore saved session* to put back (`gui.restore`).
 """
 from __future__ import annotations
 
@@ -270,7 +270,7 @@ BLOCK_VERSION = 1
 
 def session_block(session, view=None, projection=None, windows=None) -> Dict[str, Any]:
     """What a saved file needs beyond its table, ROIs and tabs to bring the
-    session back (*File > Open and restore*): the layers, the merge settings,
+    session back (*File > Restore saved session*): the layers, the merge settings,
     the 3D view, and -- from the GUI -- the 2D view's range and the windows.
     The table's metadata, files and results are in the file already."""
     return {

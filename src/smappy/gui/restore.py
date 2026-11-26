@@ -1,4 +1,4 @@
-"""A saved file's session brought back: *File > Open and restore*.
+"""A saved file's session brought back: *File > Restore saved session*.
 
 A localization file keeps its tabs and their values (`/gui/state`, what
 *Workspace > From data file* has always put back) and, beside them, a

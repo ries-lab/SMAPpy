@@ -73,7 +73,7 @@ ax.set_xlabel("x (nm)"); ax.set_ylabel("y (nm)")
 under names.  A transformation applied here is added to it with *keep
 as*, and is then applied by name.  The list belongs to the data, not to
 the GUI: it is saved with the localization file and comes back when the
-file is opened, but a workspace (*File > Workspace*) does not carry it.  To
+file is opened, but a workspace (*View > Workspace*) does not carry it.  To
 use a transformation with other files, write it to a file (*write to*) and
 apply that.
 

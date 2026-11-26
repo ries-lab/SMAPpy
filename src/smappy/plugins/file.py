@@ -295,7 +295,7 @@ class SaveSettings:
     gui_state: bool = param(
         True, label="save the GUI state too",
         help="the tabs and their settings, the layers, the views and the "
-             "windows, for File > Open and restore to put back")
+             "windows, for File > Restore saved session to put back")
     region_results: bool = param(
         True, label="save the ROI results",
         help="the numbers measured in the ROIs; off keeps "

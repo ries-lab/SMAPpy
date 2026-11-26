@@ -288,7 +288,7 @@ def save_localizations(path, locs: Localizations,
 GUI_GROUP = "gui"
 GUI_STATE = "gui/state"
 # the rest of the session beside the tabs -- layers, views, windows
-# (`handoff.session_block`) -- for *File > Open and restore*; a file without
+# (`handoff.session_block`) -- for *File > Restore saved session*; a file without
 # it restores its tabs alone
 GUI_SESSION = "gui/session"
 

@@ -38,9 +38,10 @@ OPEN_AS = {"type": "string", "enum": ["auto", "image", "stack"],
 LEFT_OUT = {
     "File/Save": "writes over the open file: the save tool writes under the output folder",
     "File/Save as": "the save tool, which writes under the output folder",
-    "File/Workspace/Save": "writes a file outside the output folder",
-    "File/Workspace/Save as": "writes a file outside the output folder",
-    "File/Workspace/Recent": "a list: File/Workspace/Open takes the file",
+    "File/Open recent": "a list: File/Open takes the file",
+    "View/Workspace/Save": "writes a file outside the output folder",
+    "View/Workspace/Save as": "writes a file outside the output folder",
+    "View/Workspace/Recent": "a list: View/Workspace/Open takes the file",
     "File/Preferences": "a modal dialog: the user's own settings",
     "File/Quit": "ends the program, and the assistant's connection with it",
     "Edit/Undo steps": "Edit/Undo takes how many",
@@ -132,7 +133,10 @@ def actions_of(window) -> Dict[str, Action]:
                      "open_as says otherwise: " + "; ".join(decided))
         return note
 
-    def restore_open():
+    def restore(path=None):
+        if path:                       # the open file's, or another opened for it
+            window.restore_session(_paths(path)[0])
+            return
         path = session.path
         if not path or Path(path).suffix.lower() not in (".h5", ".hdf5"):
             raise ToolError("the open file is not a smappy HDF5 file: only those "
@@ -243,12 +247,10 @@ def actions_of(window) -> Dict[str, Action]:
                "open -- tables as more files, images as sources.",
                lambda path, open_as="auto": opened(path, True, open_as),
                {"path": PATHS, "open_as": OPEN_AS}, ("path",)),
-        Action("File/Open and restore", "Open a smappy HDF5 file in place of what "
-               "is open and bring back the session it was saved with: tabs, "
-               "layers, views, windows.", lambda path: window.open_and_restore(
-                   _paths(path)[0]), {"path": PATH}, ("path",)),
-        Action("File/Restore saved session", "The session the open smappy HDF5 "
-               "file was saved with: tabs, layers, views, windows.", restore_open),
+        Action("File/Restore saved session", "The session a smappy HDF5 file was "
+               "saved with: tabs, layers, views, windows.  Without a path the open "
+               "file's; another file is opened in place of what is open first.",
+               restore, {"path": PATH}),
         Action("File/Session name", "Name the session, and colour it (a name of "
                "Session.COLOURS, '' for none): every window's title says it.",
                lambda name, colour=None: session.rename(name, colour),
@@ -261,14 +263,14 @@ def actions_of(window) -> Dict[str, Action]:
                ("frame_time_ms",)),
         Action("File/Open in a new window", "The session as it is now in a new "
                "instance of the program.", lambda: window.open_in_new_window()),
-        Action("File/Workspace/Open", "A saved workspace: its tabs and their "
+        Action("View/Workspace/Open", "A saved workspace: its tabs and their "
                "values replace these.", lambda path: window.load_gui_from(
                    _paths(path)[0]), {"path": PATH}, ("path",)),
-        Action("File/Workspace/Reset", "The shipped workspace, now and at the "
+        Action("View/Workspace/Reset", "The shipped workspace, now and at the "
                "next start.", window.load_default_gui),
-        Action("File/Workspace/From data file", "The workspace a localization "
+        Action("View/Workspace/From data file", "The workspace a localization "
                "file was saved with.", workspace_from, {"path": PATH}, ("path",)),
-        Action("File/Microscope manager", "The microscope entries' window.",
+        Action("Plugins/Microscope manager", "The microscope entries' window.",
                window.open_microscope_manager, shows=True),
         # ---- Edit
         Action("Edit/Undo", "Undo changes to the table.", undo,

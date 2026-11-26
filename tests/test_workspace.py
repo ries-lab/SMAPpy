@@ -422,8 +422,8 @@ def test_loading_a_gui_replaces_the_values_and_is_remembered(window, tmp_path):
     assert make_window().workspace.path == path.resolve()
 
 
-def test_the_workspace_is_a_submenu_of_file_and_reset_gives_the_default(window, tmp_path):
-    file_menu = next(a.menu() for a in window.menuBar().actions() if a.text() == "File")
+def test_the_workspace_is_a_submenu_of_view_and_reset_gives_the_default(window, tmp_path):
+    file_menu = next(a.menu() for a in window.menuBar().actions() if a.text() == "View")
     entries = [a.text() for a in file_menu.actions()]
     assert "Workspace" in entries and not any("GUI" in e for e in entries)
     actions = {a.text(): a for a in window.workspace_menu.actions() if a.text()}

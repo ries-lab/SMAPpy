@@ -15,7 +15,7 @@ without a GUI, and window geometry is carried as opaque text the GUI encodes.
 
 **Nothing is saved behind the user's back.**  One installation is shared by a
 lab, so a value one person typed and the program remembered would silently
-become everyone's default.  A GUI file is written only by *File > Workspace >
+become everyone's default.  A GUI file is written only by *View > Workspace >
 Save* or *Save as*, and read at start only because someone saved or loaded it last
 (`remember`); with none, the shipped default is built afresh.  Where the
 windows are is part of the GUI file too (`Workspace.windows`), written by the
@@ -301,7 +301,7 @@ def remember(path: Optional[Path]) -> None:
 def recent() -> List[Path]:
     """The GUI files last saved or loaded, newest first, that are still there.
 
-    *File > Workspace > Recent* lists them, so going back to a lab's own
+    *View > Workspace > Recent* lists them, so going back to a lab's own
     workspace is one click rather than a file dialog.
     """
     found = []

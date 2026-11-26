@@ -452,7 +452,7 @@ Little space where files are opened, the manager elsewhere:
   whose band only it bounds (260821's transmitted arm, an empty slider behind 665LP) has
   its wavelength typed in the entry for that choice, or in the run.
 
-Built as: *File > Microscope manager...* (`gui/microscope_editor.py`, its page
+Built as: *Plugins > Microscope manager...* (`gui/microscope_editor.py`, its page
 `docs/panels/Microscope manager.md`), the tables typed as the camera editor types a map;
 *PSF calibration*'s line under the stacks with *Microscope...*
 (`gui/microscope_view.FoundMicroscope`), a microscope chosen there handed to the run as its

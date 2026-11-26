@@ -469,7 +469,7 @@ _TERMINAL_WINDOW = '(first window whose name contains "mcp-gui.json")'
 
 def terminal_bounds(run=subprocess.run) -> Optional[Tuple[int, int, int, int]]:
     """Where the terminal SMAPpy started is, (left, top, right, bottom), for
-    *File > Workspace > Save*: on a Mac, and only while it is open.  Asked
+    *View > Workspace > Save*: on a Mac, and only while it is open.  Asked
     only if Terminal is running, which telling it would start."""
     if sys.platform != "darwin":
         return None

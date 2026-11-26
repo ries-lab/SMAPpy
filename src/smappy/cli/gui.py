@@ -1,7 +1,7 @@
 """``smappy gui [FILE ...]``: the Qt GUI.  Needs ``pip install smappy-smlm[gui]``.
 
-The options are what the menus do at a start: *File > Workspace > Open*
-(``--workspace``), *File > Open and restore* (``--restore``), a plugin in a
+The options are what the menus do at a start: *View > Workspace > Open*
+(``--workspace``), *File > Restore saved session* (``--restore``), a plugin in a
 window of its own (``--open``).  They are checked here, before Qt starts, so
 a mistyped name is a line in the terminal rather than a window and a box.
 
@@ -28,11 +28,11 @@ def parser() -> argparse.ArgumentParser:
                    help="localization files: smappy HDF5, SMAP, Picasso, MINFLUX, csv, ...")
     p.add_argument("--workspace", metavar="FILE.yaml",
                    help="start with the tabs and plugins of a saved workspace "
-                        "(File > Workspace > Save); like the menu's, it is then the "
+                        "(View > Workspace > Save); like the menu's, it is then the "
                         "one the next start opens")
     p.add_argument("--restore", action="store_true",
                    help="bring back the session the file was saved with: its layers, "
-                        "views and windows (File > Open and restore); one smappy HDF5 file")
+                        "views and windows (File > Restore saved session); one smappy HDF5 file")
     p.add_argument("--open", action="append", default=[], metavar="PLUGIN",
                    help='a plugin in a window of its own, by its path or its name: '
                         '"Analysis/Drift/RCC" or "RCC"; may be given more than once')
