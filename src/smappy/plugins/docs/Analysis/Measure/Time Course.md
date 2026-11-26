@@ -1,6 +1,6 @@
 ---
-version: "2"
-covers: [smappy.metadata.file_frame_time, smappy.plugins.time_course.frame_windows, smappy.plugins.time_course.window_edges, smappy.plugins.time_course.rate, smappy.plugins.time_course.window_statistic, smappy.plugins.time_course.tag_in_windows, smappy.plugins.time_course.draw_panels, smappy.plugins.time_course.draw_one, smappy.plugins.time_course.TimeCourse.run]
+version: "3"
+covers: [smappy.metadata.file_frame_time, smappy.plugins.time_course.frame_windows, smappy.plugins.time_course.window_edges, smappy.plugins.time_course.rate, smappy.plugins.time_course.window_statistic, smappy.plugins.time_course.tag_times, smappy.plugins.time_course.tag_names, smappy.frametags.FrameTags, smappy.frametags.flatten, smappy.frametags.acquisition, smappy.plugins.image_tags.names, smappy.plugins.image_tags.summary, smappy.plugins.time_course.draw_panels, smappy.plugins.time_course.draw_one, smappy.plugins.time_course.TimeCourse.run]
 ---
 
 ## What it does
@@ -21,9 +21,22 @@ Each visible [layer](plugin:Panels/Glossary) is a line of its own, read as
 the layer shows it -- its [filter](plugin:Panels/Glossary), the drawn
 [ROI](plugin:Panels/Glossary), and [merged blinks](plugin:Panels/Glossary)
 if the layer merges them, when the rate is blinks per frame.  The image
-tags belong to the acquisition and are drawn once, in grey.  To look at a
-tag in detail, beside the localization rate on a second axis, use
-[Image Tags](plugin:Analysis/Process/Image Tags).
+tags belong to the acquisition and are drawn once, in grey, at every frame.
+
+**The image tags.**  Micro-Manager writes the state of every device into the
+metadata of every frame.  The few values that change are a record of what
+happened while the camera ran: where the piezo held the focus, how long the
+UV pulse was, what the focus lock's sensor read.  The fit keeps them with
+the localizations, and they are offered as series named `tag: <name>`.  The
+piezo position is the one to check: a focus lock that drifted, jumped or
+ran into the end of its range shows there at once, while in the
+localizations it shows only as a slow loss of quality.  The fit can draw it
+by itself while it runs (*show image tags* in its output settings).  A
+table loaded from another program has no image tags.
+
+This plugin took over *Plot image tags* (formerly *Analysis/Process/Image
+Tags*): a saved chain or workspace that names it opens this one, with its
+tags as tag series and the localization rate beside them.
 
 ## How it works
 
@@ -51,11 +64,25 @@ frames: 6000 frames in 60 windows are windows of 100 frames.
 **2. A value per window.**  For the rate, the localizations in the window
 over the frames it covers.  For an attribute, the median (or mean, with
 *statistic*) of the localizations in the window; a window with fewer than
-10 gives no point.  For an image tag, its mean over the window's frames.
+10 gives no point.  An image tag is not put in windows: it is one reading
+per frame, with none of the counting noise a window averages away, and a
+jump of one frame is what one looks for, so it is drawn at every frame it
+was read.  A tag that is text (a laser *On* or *Off*) is drawn as steps
+between its states.
 
 **3. Drawing.**  A panel per series, one under the other on the same time
 axis -- or, with *draw* on *one graph*, every series in one graph, each
 divided by its own largest value, so their shapes can be compared.
+
+```figure A focus lock that holds and then, at frame 4137, jumps by 0.25 µm: the piezo tag is drawn at every frame, so the jump stays a sharp step beside the rate in 60 windows.
+from smappy.plugins.time_course import TAG
+piezo = 50.0 - 0.3 * np.arange(6000) / 6000 + np.random.default_rng(2).normal(0, 0.004, 6000)
+piezo[4137:] += 0.25
+fig.set_size_inches(6.0, 3.4)
+draw_panels(fig, [COUNT, TAG + "PIZStage-Position"],
+            [lines[0], Line(TAG + "PIZStage-Position", "", "0.35",
+                            np.arange(6000.0), piezo, dense=True)], "frame")
+```
 
 ```figure A simulated acquisition whose dye bleaches with a time constant of 2500 frames and whose photons fall by 40 % over the movie: both trends come back (dashed: the truth).
 fig.set_size_inches(6.0, 4.0)
@@ -84,9 +111,14 @@ fitter's *frame time*), else the exposure -- the same on a camera that
 streams as fast as it can, and short by the camera's dead time on one that
 does not; a file that records neither is given one in *File > File
 properties*.  With several files open, the first file's.  The windows are still whole frames; only the
-axis is relabelled.  A table with a clock of its own (MINFLUX's `time_s`)
+axis is relabelled, and the image tags are put on it the same way, frame
+times frame time.  A table with a clock of its own (MINFLUX's `time_s`)
 is cut into equal windows of that clock instead, and its rate is per
-second.
+second.  A tag's frame is then put on that clock through the
+localizations: each localized frame's median `time_s`, interpolated
+linearly between them.  A tag frame before the first or after the last
+localized frame has no time there and is not drawn (the text says so); a
+table with a clock but no `frame` column draws no tags.
 
 **Files.**  With *x* on *file number*, one point per file of the session
 (`filenumber`), every localization of the file in it; the rate is per file.
@@ -94,7 +126,26 @@ The image tags are per frame and are not drawn against files.
 
 **The text** gives, per series and layer, its first and last value and the
 change between them in percent: the one number to read when the question is
-whether the acquisition held.
+whether the acquisition held.  For each image tag it gives its value at the
+first and last frame and its range, and for a text tag its states in the
+order they appeared (more than 4: their number).  The note the acquisition
+was saved with (`comments.txt`) comes first, if there is one.
+
+**Recording the tags, during the fit.**  The metadata of a frame is read
+together with its pixels and flattened to `Device-Property` keys; user data
+Micro-Manager wraps as `{"type": ..., "scalar": value}` is unwrapped, which
+is how the camera's hardware clock becomes a tag.  Each frame is compared
+with the first: a tag is kept from the first frame its value differs,
+filled backwards with the first frame's value, so nothing has to be named
+in advance.  Values that change by construction (the image number, a UUID,
+the file name, the time the computer received the frame) are left out.  A
+tag whose values read as numbers is kept as a number; a text tag is a state
+until it has had more than 16 values, when it is an identifier and is
+dropped.  At most 64 tags are kept.  They are saved in the localization
+file beside the table (the group `/frame_tags`, the acquisition's static
+metadata in `/acquisition`) and read back when it is opened.  During a fit
+they are handed on every 5 seconds, so this plugin runs on a fit that is
+still going.
 
 ## Parameters
 
@@ -102,7 +153,9 @@ whether the acquisition held.
 The localization rate and photons are where to start.  Add `background`
 when the activation laser is being raised, `xy_err_nm` or `sigma_nm` when
 the focus is in doubt, and the piezo tag beside them to see whether the
-focus lock moved.
+focus lock moved.  A tag series matches part of a name too, without regard
+to case -- `tag: PIZ` is every tag whose name contains `piz` -- and `tag: *`
+is every tag the table has.
 
 ### windows
 100 suits most movies.  Fewer windows give smoother lines and miss a short
@@ -112,10 +165,14 @@ few hundred localizations for a median to be steady.
 ## Output
 
 The figure: a panel per series, or one graph of the shapes, with a line per
-visible layer.  The text: the windows, and per series and layer the first
-and last value and the change.  A good acquisition has a rate that falls
+visible layer, and a grey line per image tag.  The text: the windows, per
+series and layer the first and last value and the change, and per tag its
+range or its states.  For a script, `data["lines"]` holds every line drawn,
+its `x` and `y`.  A good acquisition has a rate that falls
 slowly and smoothly, photons and precision that stay flat, and a piezo that
-moves only as much as the focus lock needs.
+moves only as much as the focus lock needs: flat apart from slow, smooth
+changes.  Steps, a trace that saturates at a limit, or a burst of noise mark
+the frames whose z cannot be trusted.
 
 ## Differences from SMAP
 
@@ -130,6 +187,11 @@ Based on SMAP's `Analyze/measure/StatsVsTime`
 * Each visible layer is a line, with its own filter and grouping; SMAP drew
   the layers, or the grouped against the ungrouped table.
 * The windows are whole frames.
+* The image tags are SMAP's `Analyze/other/DisplayImageTags`, merged in.
+  SMAP read only the tags named in the camera's `imagemetadata` setting and
+  left out the frames where a tag was zero, which also hid a UV pulse that
+  was off; here every tag that changes is kept, and a frame that was not
+  read is not in the table, so a real zero is drawn.
 
 ## References
 

@@ -548,7 +548,7 @@ class OutputSettings:
     show_tags: str = param("PIZStage", label="show image tags", advanced=True,
                            help="image tags drawn while the fit runs and when "
                                 "it is done, names or parts of names; empty: "
-                                "none (Analysis/Process/Image Tags)")
+                                "none (all of them: Analysis/Measure/Time Course)")
 
     def resolve(self, source_path: str) -> Optional[Path]:
         if not self.save:

@@ -6,12 +6,14 @@ import numpy as np
 import pytest
 import tifffile
 
+from smappy import plugins
 from smappy.frametags import MAX_STATES, FrameTags, acquisition
 from smappy.io.hdf5 import load_localizations, save_localizations
 from smappy.io.tiff import open_stack
 from smappy.locs import Localizations
 from smappy.plugins import Context
-from smappy.plugins.image_tags import ImageTags, ImageTagsSettings, names, per_frame
+from smappy.plugins.image_tags import names, per_frame, plots
+from smappy.plugins.time_course import COUNT, TAG
 
 N_FRAMES = 60
 
@@ -107,27 +109,36 @@ def test_tags_are_found_by_part_of_their_name_and_the_rate_is_per_frame():
     assert len(centres) == 10 and np.allclose(rate, 3.0)
 
 
-def test_the_plugin_draws_a_tab_per_tag_and_says_the_piezo_range():
+def _time_course(locs, **settings):
+    plugin = plugins.get("Analysis/Measure/Time Course")
+    return plugin().run(Context(locs=locs), plugin.Settings(**settings))
+
+
+def test_time_course_draws_the_tags_by_part_of_their_name_and_says_the_piezo_range():
     tags = FrameTags()
     for frame in range(N_FRAMES):
         tags.add(frame, _plane(frame))
-    locs = Localizations({"frame": np.arange(N_FRAMES, dtype=np.int64)},
-                         {"frame_tags": tags.table()})
-    result = ImageTags().run(Context(locs=locs), ImageTagsSettings(tags="PIZ, trigger"))
-    assert list(result.plots) == ["PIZStage-Position", "Laser Trigger-Duration0 (us)"]
+    table = tags.table()
+    locs = Localizations({"frame": np.repeat(np.arange(N_FRAMES, dtype=np.int64), 20)},
+                         {"frame_tags": table})
+    result = _time_course(locs, series=[COUNT, TAG + "piz",
+                                        TAG + "trigger"], windows=6)
+    assert [ln.series for ln in result.data["lines"]] == [
+        COUNT, TAG + "PIZStage-Position", TAG + "Laser Trigger-Duration0 (us)"]
     assert "range 0.59" in result.text
+    # the helpers the fit's own figure draws with still draw every tag
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    for draw in result.plots.values():
+    shown = names(table, "PIZ, trigger")
+    for draw in plots(table, shown, np.asarray(locs["frame"])).values():
         draw(plt.figure().add_subplot())
     plt.close("all")
 
 
 def test_a_table_without_tags_says_so():
     with pytest.raises(ValueError, match="no image tags"):
-        ImageTags().run(Context(locs=Localizations({"frame": np.arange(3)})),
-                        ImageTagsSettings())
+        _time_course(Localizations({"frame": np.arange(30)}), series=[TAG + "*"])
 
 
 def _tagged_acquisition(tmp_path):
@@ -135,8 +146,11 @@ def _tagged_acquisition(tmp_path):
     its path and the camera to fit it with."""
     from smappy.plugins import get
     from smappy.plugins.fit import CameraSettings
-    from smappy.simulate import (CameraOutputSettings, LabellingSettings,
-                                 SimulationSettings)
+    from smappy.simulate import (
+        CameraOutputSettings,
+        LabellingSettings,
+        SimulationSettings,
+    )
     made = get("File/Simulate/Simulate")().run(Context(), SimulationSettings(
         output="camera", n_frames=N_FRAMES, seed=3,
         labelling=LabellingSettings(efficiency=0.1),
@@ -155,8 +169,12 @@ def _tagged_acquisition(tmp_path):
 
 
 def test_the_fit_keeps_the_tags_and_shows_the_piezo(tmp_path):
-    from smappy.plugins.fit import (GaussianFit, GaussianFitSettings, OutputSettings,
-                                    SourceSettings)
+    from smappy.plugins.fit import (
+        GaussianFit,
+        GaussianFitSettings,
+        OutputSettings,
+        SourceSettings,
+    )
     path, camera = _tagged_acquisition(tmp_path)
     out = tmp_path / "out.hdf5"
     result = GaussianFit().run(Context(), GaussianFitSettings(
@@ -178,9 +196,14 @@ def test_a_running_fit_hands_on_its_tags_and_draws_them_as_it_goes(tmp_path, mon
     import matplotlib
     matplotlib.use("Agg")
     from matplotlib.figure import Figure
+
     from smappy.plugins import fit as fit_module
-    from smappy.plugins.fit import (GaussianFit, GaussianFitSettings, OutputSettings,
-                                    SourceSettings)
+    from smappy.plugins.fit import (
+        GaussianFit,
+        GaussianFitSettings,
+        OutputSettings,
+        SourceSettings,
+    )
     monkeypatch.setattr(fit_module, "LIVE_TAGS_SECONDS", 0.0)
     path, camera = _tagged_acquisition(tmp_path)
     events = []

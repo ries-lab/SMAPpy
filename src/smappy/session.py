@@ -1531,7 +1531,7 @@ class Session:
     def set_live_metadata(self, key: str, value) -> None:
         """Put ``value`` in the live table's metadata under ``key``, as the
         finished table will have it: a fit's image tags so far, which it
-        hands on every few seconds, so *Plot image tags* works on a fit
+        hands on every few seconds, so *Time Course* draws them on a fit
         still running.  Ignored once the fit has ended -- the finished
         table carries its own."""
         if self._live:

@@ -1,16 +1,20 @@
-"""The image tags -- what the microscope recorded per frame -- against frame.
+"""Drawing the image tags -- what the microscope recorded per frame -- against frame.
 
 A fit keeps every tag that changed during the acquisition
 (`smappy.frametags`): the piezo position, the UV pulse length, the focus
-lock's signals, the camera's clock.  This draws them, one tab each, with the
-number of localizations per frame beside them on a second axis, because the
-question is nearly always how the two go together: did the density follow
-the UV, did the focus lock hold while the localizations thinned out.
+lock's signals, the camera's clock.  These functions draw them, one tab
+each, with the number of localizations per frame beside them on a second
+axis, because the question is nearly always how the two go together: did
+the density follow the UV, did the focus lock hold while the localizations
+thinned out.
 
-The piezo position is the one looked at most -- a focus lock that ran into
-its limit or jumped shows there before it shows in the data -- so the fit
-draws it by itself (`OutputSettings.show_tags`), with the same function as
-here: every few seconds while it runs, from the tags read so far
+No plugin lives here any more: *Plot image tags* was merged into *Time
+Course* (`time_course.py`, which draws the tags as series and takes
+`names` and `summary` from here; its old path is read as Time Course
+through `plugins.MOVED`).  What stays is the drawing the fit uses for its
+own figure of the piezo position (`OutputSettings.show_tags`) -- a focus
+lock that ran into its limit or jumped shows there before it shows in the
+data -- every few seconds while it runs, from the tags read so far
 (`fit.LIVE_TAGS_SECONDS`), and once more when it finishes.
 
 Ported from SMAP's ``Analyze/other/DisplayImageTags``.  SMAP plots tag k for
@@ -20,13 +24,9 @@ pulse that is off -- is drawn as one.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
-
-from . import Context, Plugin, Result, param, register
-from ..frametags import ACQUISITION, KEY
 
 
 def names(tags: Dict[str, np.ndarray], wanted: str = "") -> List[str]:
@@ -113,48 +113,3 @@ def plots(tags: Dict[str, np.ndarray], shown: Sequence[str],
     def one(name):
         return lambda ax: draw_tag(ax, tags, name, locs_frames)
     return {name: one(name) for name in shown}
-
-
-@dataclass
-class ImageTagsSettings:
-    tags: str = param("", label="tags",
-                      help="names or parts of names, comma-separated; "
-                           "empty: every tag the fit kept")
-    rate: bool = param(True, label="localizations per frame",
-                       help="draw the rate of the selected localizations "
-                            "on a second axis")
-
-
-@register("Analysis/Process/Image Tags")
-class ImageTags(Plugin):
-    """The per-frame image tags of the acquisition (piezo z, UV pulse, ...)
-    against frame."""
-
-    Settings = ImageTagsSettings
-    name = "Plot image tags"
-    changes_locs = False
-    # a rate of localizations per frame
-    grouping = "ungrouped"
-    version = "1"
-
-    def run(self, ctx: Context, settings: ImageTagsSettings) -> Result:
-        tags = (ctx.locs.metadata or {}).get(KEY) or {}
-        if not tags or len(tags) < 2:
-            raise ValueError(
-                "this table carries no image tags: they are recorded by the "
-                "fit, from a Micro-Manager acquisition whose frames say "
-                "something that changes")
-        shown = names(tags, settings.tags)
-        if not shown:
-            raise ValueError(f"no tag matches '{settings.tags}'; there are: "
-                             + ", ".join(names(tags)))
-        frames = None
-        if settings.rate and "frame" in ctx.locs:
-            frames = np.asarray(ctx.selection.apply(ctx.locs)["frame"])
-        text = summary(tags, shown)
-        comment = ((ctx.locs.metadata or {}).get(ACQUISITION) or {}).get("comment")
-        if comment:
-            text = f"comment: {' | '.join(comment.splitlines())}\n{text}"
-        return Result(text=text, plots=plots(tags, shown, frames),
-                      data={"tags": {n: tags[n] for n in ["frame", *shown]}},
-                      settings=settings)

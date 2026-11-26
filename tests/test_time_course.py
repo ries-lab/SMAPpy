@@ -6,8 +6,8 @@ from smappy import plugins
 from smappy.frametags import KEY
 from smappy.locs import Localizations
 from smappy.plugins import Context
-from smappy.plugins.time_course import (COUNT, TAG, frame_windows, rate,
-                                        window_edges, window_statistic)
+from smappy.plugins.time_course import (ALL_TAGS, COUNT, TAG, frame_windows, rate,
+                                        tag_times, window_edges, window_statistic)
 from smappy.session import Session
 
 PLUGIN = "Analysis/Measure/Time Course"
@@ -79,7 +79,7 @@ def test_per_file_one_point_each():
     assert len(result.data["lines"][0].y) == 3 and result.text.startswith("3 files")
 
 
-def test_image_tags_are_series_drawn_once_numbers_averaged_states_as_steps():
+def test_image_tags_are_series_drawn_once_numbers_per_frame_states_as_steps():
     frames = np.arange(5000)
     tags = {"frame": frames, "Piezo-Position": 10.0 + frames * 0.001,
             "Laser": np.array(["off"] * 2500 + ["on"] * 2500, dtype=object)}
@@ -93,7 +93,7 @@ def test_image_tags_are_series_drawn_once_numbers_averaged_states_as_steps():
     lines = result.data["lines"]
     assert [ln.series for ln in lines].count(COUNT) == 2          # a line per layer
     piezo = next(ln for ln in lines if ln.series == TAG + "Piezo-Position")
-    assert np.allclose(piezo.y, 10.0 + piezo.x * 0.001, atol=0.01)
+    assert np.array_equal(piezo.x, frames) and np.allclose(piezo.y, 10.0 + frames * 0.001)
     laser = next(ln for ln in lines if ln.series == TAG + "Laser")
     assert laser.states == ["off", "on"]
     assert "Laser: off -> on" in result.text
@@ -121,3 +121,76 @@ def test_the_list_offers_the_rate_the_columns_and_the_tags():
     assert offered[0] == COUNT and "photons" in offered and TAG + "Piezo" in offered
     assert "frame" not in offered
     assert state.active["frame_time_ms"] is False
+
+
+def _stepping_piezo(n=5000, at=137):
+    frames = np.arange(n)
+    return {"frame": frames, "PIZStage-Position": np.where(frames < at, 50.0, 50.25)}
+
+
+def test_a_tag_is_drawn_at_every_frame_not_averaged_in_windows():
+    # windows of 500 frames: averaged, the step at 137 would be smeared over
+    # the first window; drawn per frame it stays a step of one frame
+    result = run(bleaching(**{KEY: _stepping_piezo()}),
+                 series=[COUNT, TAG + "PIZStage-Position"], windows=10)
+    count, piezo = result.data["lines"]
+    assert len(count.y) == 10 and len(piezo.y) == 5000
+    assert piezo.y[136] == 50.0 and piezo.y[137] == 50.25
+    assert set(np.unique(piezo.y)) == {50.0, 50.25}
+    assert "50 at the start, 50.25 at the end, 50 to 50.25 (range 0.25)" in result.text
+
+
+def test_tags_against_seconds_land_at_frame_times_frame_time():
+    result = run(bleaching(camera={"exposure_ms": 20.0}, **{KEY: _stepping_piezo()}),
+                 series=[TAG + "PIZStage-Position"], x="seconds", windows=10)
+    piezo = result.data["lines"][0]
+    assert np.allclose(piezo.x, np.arange(5000) * 0.02)
+    assert "not drawn" not in result.text
+
+
+def test_on_a_tables_own_clock_a_tag_frame_takes_its_localizations_time():
+    locs = bleaching(n_frames=1000, **{KEY: _stepping_piezo(n=1200)})
+    frames = np.asarray(locs["frame"], float)
+    locs.columns["time_s"] = 3.0 + 0.05 * frames            # 50 ms a frame, from 3 s
+    result = run(locs, series=[TAG + "PIZStage-Position"], x="seconds", windows=10)
+    piezo = result.data["lines"][0]
+    inside = np.isfinite(piezo.x)
+    assert np.allclose(piezo.x[inside], 3.0 + 0.05 * np.arange(1200)[inside])
+    assert not inside[1100]                        # after the last localization
+    assert "only the frames between" in result.text
+    assert np.isnan(tag_times([0.0, 1.0], [np.nan, np.nan], [0.5])).all()
+
+
+def test_against_files_tags_are_not_drawn_and_the_text_says_so():
+    locs = bleaching(n_frames=300, **{KEY: _stepping_piezo(n=300)})
+    locs.columns["filenumber"] = (np.asarray(locs["frame"]) // 100 + 1).astype(np.int32)
+    result = run(locs, series=[COUNT, TAG + "PIZStage-Position"], x="file")
+    assert [ln.series for ln in result.data["lines"]] == [COUNT]
+    assert "not drawn against files" in result.text
+
+
+def test_a_text_tag_shows_its_states():
+    frames = np.arange(3000)
+    laser = np.array(["Off"] * 1000 + ["On"] * 1500 + ["Off"] * 500, dtype=object)
+    result = run(bleaching(n_frames=3000, **{KEY: {"frame": frames, "Luxx405": laser}}),
+                 series=[TAG + "Luxx405"], windows=10)
+    line = result.data["lines"][0]
+    assert line.states == ["Off", "On"] and len(line.y) == 3000
+    assert line.y[999] == 0 and line.y[1000] == 1 and line.y[2500] == 0
+    assert "Luxx405: Off -> On" in result.text
+
+
+def test_plot_image_tags_old_path_opens_time_course_with_its_tags():
+    path, values = plugins.moved("Analysis/Process/Image Tags",
+                                 {"tags": "PIZ, trigger", "rate": True})
+    assert path == PLUGIN and plugins.get("Analysis/Process/Image Tags") is plugins.get(PLUGIN)
+    assert values["series"] == [COUNT, TAG + "PIZ", TAG + "trigger"]
+    assert plugins.moved("Analysis/Process/Image Tags", {"rate": False})[1]["series"] == [ALL_TAGS]
+    # the old settings run: every tag whose name holds the part
+    tags = {"frame": np.arange(200), "PIZStage-Position": np.linspace(50, 51, 200),
+            "Laser Trigger-Duration0 (us)": np.zeros(200), "Other": np.ones(200)}
+    result = run(bleaching(n_frames=200, **{KEY: tags}), **values)
+    assert [ln.series for ln in result.data["lines"]] == [
+        COUNT, TAG + "PIZStage-Position", TAG + "Laser Trigger-Duration0 (us)"]
+    result = run(bleaching(n_frames=200, **{KEY: tags}), series=[ALL_TAGS])
+    assert len(result.data["lines"]) == 3

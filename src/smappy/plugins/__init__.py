@@ -1327,26 +1327,41 @@ def problems() -> List[Diagnostic]:
     return list(_PROBLEMS)
 
 
+def _image_tags_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    """*Plot image tags*' settings as Time Course's (`time_course.image_tags_values`),
+    imported only when a saved file names it."""
+    from .time_course import image_tags_values
+    return image_tags_values(values)
+
+
 #: Plugins merged into another, by their old path: the new path, the part of
-#: its settings the old ones are now, and the settings that choose it.  A
-#: chain step, a pinned plugin or a log naming an old path is read as the new
-#: one (`moved`), so what was saved keeps working.
-MOVED: Dict[str, Tuple[str, str, Dict[str, Any]]] = {
+#: its settings the old ones are now -- or a function turning the old values
+#: into the new, where they do not map one to one -- and the settings that
+#: choose it.  A chain step, a pinned plugin or a log naming an old path is
+#: read as the new one (`moved`), so what was saved keeps working.
+MOVED: Dict[str, Tuple[str, Any, Dict[str, Any]]] = {
     "Analysis/Regions/Regions to attribute": (
         "Analysis/Regions/Write results", "localizations", {"to": "localizations"}),
     "Analysis/Regions/ROIs from results": (
         "Analysis/Regions/Write results", "rois", {"to": "rois"}),
+    # *Plot image tags*, merged into Time Course: its tags as tag series
+    "Analysis/Process/Image Tags": (
+        "Analysis/Measure/Time Course", _image_tags_values, {}),
 }
 
 
 def moved(path: str, values: Optional[Dict[str, Any]] = None
           ) -> Tuple[str, Optional[Dict[str, Any]]]:
     """``(path, values)`` as the plugin now is: an old path (`MOVED`) becomes
-    the new one, its values put under their part.  Anything else unchanged."""
+    the new one, its values put under their part (or translated by its
+    function).  Anything else unchanged."""
     if path not in MOVED:
         return path, values
     new, part, fixed = MOVED[path]
     out = dict(fixed)
+    if callable(part):
+        out.update(part(dict(values or {})))
+        return new, out
     for key, value in (values or {}).items():
         out[f"{part}.{key}"] = value
     return new, out

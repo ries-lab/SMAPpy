@@ -583,7 +583,7 @@ open from an earlier fit is redrawn every 5 seconds while the fit runs, in
 place and without coming to the front, so a focus lock that slips is seen
 during the acquisition.  On a microscope whose
 piezo has another name, put that name (or part of it) here.  Every tag that changed is kept in the file whatever this
-says; Analysis/Process/Image Tags draws any of them later.
+says; Analysis/Measure/Time Course draws any of them later.
 
 ### region.shapes
 To fit only part of the camera frame -- one cell of several, or everything

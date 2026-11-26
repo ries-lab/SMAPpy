@@ -616,7 +616,7 @@ class PluginPanel(QWidget):
         elif event == "block":
             self.session.append(payload)
         elif event == "tags":
-            # the image tags so far, where *Plot image tags* and a saved
+            # the image tags so far, where *Time Course* and a saved
             # table look for them (`Session.set_live_metadata`)
             from ..frametags import KEY
             if self._owns_live:

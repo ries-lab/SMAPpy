@@ -13,7 +13,10 @@ median (or mean) in each time window -- photons, `background`, `xy_err_nm`,
 fixed set (photons, lifetime, background, PSF width, precision, falloff);
 here a column is a column, so a column another program wrote or Math Parser
 made is a series too.  The tags make this the one place to see how the data
-follow what the microscope did, which Image Tags shows one tag at a time.
+follow what the microscope did; it took over *Plot image tags*
+(`image_tags.py`, whose drawing functions the fit's live piezo plot still
+uses), and a saved chain or workspace naming that is read as this
+(`plugins.MOVED`, `image_tags_values`).
 
 **Windows.**  The frames are cut into *windows* of equal length (SMAP's
 *framewindows*), and a statistic of a window is of the localizations in it:
@@ -21,7 +24,10 @@ a median rather than SMAP's fitted exponential mean of the photons, because
 it needs no model and is the same statistic for every column.  A window with
 fewer than `MIN_IN_WINDOW` localizations gives no point -- a median of three
 is noise drawn as a trend.  Per file instead of per window when *x* is the
-file number (SMAP's *files*).
+file number (SMAP's *files*).  The image tags are not cut into windows: a
+tag is one reading per frame, without the counting noise a window averages
+away, and a focus lock's jump of one frame is what one looks for, so a tag
+is drawn at every frame it was read.
 
 **Layers.**  Each visible layer is its own line, read as the layer shows it
 -- its filter, the ROI, merged blinks or not (merged, the count is blinks
@@ -34,8 +40,11 @@ which is what the panels are for.
 
 **Time.**  *x* in seconds is the frame times the *frame time*, which defaults
 to the file's (`metadata.file_frame_time`: the cycle time where the file
-recorded one, else the exposure); set it when neither is right.  A table
-with its own clock (MINFLUX's `time_s`) uses that instead.
+recorded one, else the exposure); set it when neither is right.  The tags
+go on the same scale.  A table with its own clock (MINFLUX's `time_s`) uses
+that instead, and a tag's frame is put on it through the localizations'
+own times, each frame's median, interpolated (`tag_times`): only frames
+between the first and last localized frame have a time there.
 """
 from __future__ import annotations
 
@@ -51,6 +60,8 @@ from . import (NO_FRAME_TIME, Context, FormState, Plot, Plugin, Result,
 COUNT = "localizations per frame"
 #: a tag's series name: what the list shows and the settings keep
 TAG = "tag: "
+#: a tag series meaning every tag the table has (`image_tags_values`)
+ALL_TAGS = TAG + "*"
 #: a window with fewer localizations than this gives no point
 MIN_IN_WINDOW = 10
 
@@ -116,10 +127,51 @@ def window_statistic(t: np.ndarray, values: np.ndarray, edges: np.ndarray,
     return out
 
 
-def tag_in_windows(frames: np.ndarray, values: np.ndarray, edges: np.ndarray
-                   ) -> np.ndarray:
-    """A numeric tag averaged over the frames of each window."""
-    return window_statistic(frames, values, edges, "mean", min_count=1)
+def tag_times(frames: np.ndarray, times: np.ndarray, tag_frames: np.ndarray
+              ) -> np.ndarray:
+    """The tags' frames on a table's own clock: each localized frame's
+    median time, interpolated between them; NaN outside the localized
+    frames, where nothing says what the clock read (an extrapolation would
+    invent a frame time the table does not have)."""
+    frames = np.asarray(frames, float)
+    times = np.asarray(times, float)
+    ok = np.isfinite(frames) & np.isfinite(times)
+    frames, times = frames[ok], times[ok]
+    out = np.full(len(tag_frames), np.nan)
+    if not len(frames):
+        return out
+    order = np.argsort(frames, kind="stable")
+    frames, times = frames[order], times[order]
+    unique, start = np.unique(frames, return_index=True)
+    bounds = np.append(start, len(frames))
+    median = np.array([np.median(times[a:b]) for a, b in zip(bounds[:-1], bounds[1:])])
+    tag_frames = np.asarray(tag_frames, float)
+    inside = (tag_frames >= unique[0]) & (tag_frames <= unique[-1])
+    out[inside] = np.interp(tag_frames[inside], unique, median)
+    return out
+
+
+def tag_names(tags: Dict[str, np.ndarray], series: str) -> List[str]:
+    """The tags a tag series means: its name, else every tag whose name
+    contains it (case aside, *Plot image tags*' way), every tag for
+    `ALL_TAGS`."""
+    from .image_tags import names
+    key = series[len(TAG):]
+    if key in tags and key != "frame":
+        return [key]
+    if series == ALL_TAGS:
+        return names(tags)
+    return names(tags, key) if key.strip() else []
+
+
+def image_tags_values(values: Dict[str, object]) -> Dict[str, object]:
+    """*Plot image tags*' settings as this plugin's (`plugins.MOVED`): its
+    *tags*, names or parts of names, as tag series (all of them when empty),
+    after the rate when *localizations per frame* was ticked."""
+    parts = [p.strip() for p in str(values.get("tags") or "").split(",") if p.strip()]
+    series = ([COUNT] if values.get("rate", True) else []) + (
+        [TAG + p for p in parts] or [ALL_TAGS])
+    return {"series": series, "x": "frame"}
 
 
 def change(series: np.ndarray) -> Tuple[float, float]:
@@ -140,6 +192,7 @@ class Line:
     y: np.ndarray
     states: Optional[List[str]] = None         # a tag that is a state, not a number
     label: str = ""                            # what it is called, if not its series
+    dense: bool = False                        # a point per frame: no markers
 
 
 # --------------------------------------------------------------- drawing
@@ -167,6 +220,8 @@ def draw_panels(figure, names: Sequence[str], lines: Sequence[Line], xlabel: str
                 ax.step(ln.x, ln.y, where="post", color=ln.colour, lw=1)
                 ax.set_yticks(range(len(ln.states)))
                 ax.set_yticklabels(ln.states)
+            elif ln.dense:
+                ax.plot(ln.x, ln.y, color=ln.colour, lw=0.8)
             else:
                 ax.plot(ln.x, ln.y, color=ln.colour, lw=1.0, marker=".", ms=2,
                         label=ln.layer)
@@ -266,8 +321,10 @@ class TimeCourse(Plugin):
 
     Settings = TimeCourseSettings
     changes_locs = False
-    # 2: on auto, the file's frame time, where it took the exposure
-    version = "2"
+    # 2: on auto, the file's frame time, where it took the exposure;
+    # 3: the image tags at every frame, not averaged in windows, and against
+    # seconds; *Plot image tags* merged in
+    version = "3"
 
     def describe(self, ctx: Optional[Context], settings: TimeCourseSettings) -> FormState:
         """The series there are: the rate, the numeric columns, the tags."""
@@ -290,11 +347,20 @@ class TimeCourse(Plugin):
         groups = _layers(ctx)
         reference = ctx.locs
         tags = _tags(reference)
-        wanted = list(settings.series) or [COUNT] + [
+        asked = list(settings.series) or [COUNT] + [
             n for n in reference.keys() if n not in ("frame", "filenumber")]
-        missing = [s for s in wanted if s != COUNT and not s.startswith(TAG)
+        if any(s.startswith(TAG) for s in asked) and len(tags) < 2:
+            raise ValueError(
+                "this table carries no image tags: they are recorded by the "
+                "fit, from a Micro-Manager acquisition whose frames say "
+                "something that changes")
+        missing = [s for s in asked if s != COUNT and not s.startswith(TAG)
                    and s not in reference]
-        missing += [s for s in wanted if s.startswith(TAG) and s[len(TAG):] not in tags]
+        missing += [s for s in asked if s.startswith(TAG) and not tag_names(tags, s)]
+        # a tag series by part of a name, or all of them, is each tag it means
+        wanted = list(dict.fromkeys(
+            x for s in asked
+            for x in ([TAG + n for n in tag_names(tags, s)] if s.startswith(TAG) else [s])))
         if missing:
             raise ValueError(f"not in the table: {', '.join(missing)}")
 
@@ -333,13 +399,19 @@ class TimeCourse(Plugin):
         if clock == "filenumber":
             widths = np.ones(len(centres))            # per file, not per frame
 
+        # the tags' frames on the axis: frames, seconds by the frame time, or
+        # the table's own clock through the localizations' times
+        tag_x = None
+        if tags and "frame" in tags and clock == "frame":
+            tag_x = np.asarray(tags["frame"], float) * scale
+        elif tags and "frame" in tags and clock == "time_s" and "frame" in reference:
+            tag_x = tag_times(reference["frame"], reference["time_s"], tags["frame"])
+
         lines: List[Line] = []
         for series in wanted:
             if series.startswith(TAG):
-                line = self._tag_line(series, tags, edges, centres, clock)
-                if line is not None:
-                    line.x = line.x * scale
-                    lines.append(line)
+                if tag_x is not None:
+                    lines.append(self._tag_line(series, tags, tag_x))
                 continue
             for name, colour, locs, merged in groups:
                 t = np.asarray(locs[clock], float)
@@ -359,12 +431,16 @@ class TimeCourse(Plugin):
         unit = "s" if settings.x == "seconds" else "frames"
         text = [f"{len(edges) - 1} windows of {np.diff(edges)[0]:.4g} {unit}"
                 if clock != "filenumber" else f"{len(edges) - 1} files"]
-        if wanted and any(s.startswith(TAG) for s in wanted) and clock != "frame":
+        shown_tags = [s[len(TAG):] for s in wanted if s.startswith(TAG)]
+        if shown_tags and tag_x is None:
             text.append("image tags are per frame: not drawn against "
-                        + ("files" if clock == "filenumber" else "the table's own clock"))
+                        + ("files" if clock == "filenumber" else
+                           "the table's own clock, which has no frames to put them on"))
+        elif shown_tags and clock == "time_s" and not np.isfinite(tag_x).all():
+            text.append("image tags: only the frames between the first and the last "
+                        "localization have a time on the table's clock")
         for ln in lines:
-            if ln.states is not None:
-                text.append(f"{_name(ln)}: {' -> '.join(ln.states)}")
+            if ln.series.startswith(TAG):
                 continue
             first, last = change(ln.y)
             rel = (f" ({100 * (last - first) / first:+.0f} %)"
@@ -372,6 +448,15 @@ class TimeCourse(Plugin):
             who = f" ({ln.layer})" if ln.layer else ""
             text.append(f"{_name(ln)}{who}: {first:.4g} at the start, "
                         f"{last:.4g} at the end{rel}")
+        if shown_tags:
+            # *Plot image tags*' lines: the value at the start and the end,
+            # the range, or a text tag's states
+            from .image_tags import summary
+            from ..frametags import ACQUISITION
+            comment = ((reference.metadata or {}).get(ACQUISITION) or {}).get("comment")
+            if comment:
+                text.append(f"comment: {' | '.join(comment.splitlines())}")
+            text.append(summary(tags, shown_tags))
         names = list(dict.fromkeys(ln.series for ln in lines))
         if settings.draw == "one":
             def plot(ax):
@@ -386,18 +471,14 @@ class TimeCourse(Plugin):
                       title="time course")
 
     @staticmethod
-    def _tag_line(series, tags, edges, centres, clock) -> Optional[Line]:
-        """A tag in the windows: averaged if numeric, its states if not.  A
-        tag is per frame, so it has no place on a clock of files or seconds
-        that is not the frames'."""
-        if clock != "frame":
-            return None
+    def _tag_line(series, tags, x) -> Line:
+        """A tag at every frame it was read -- never averaged in windows, it
+        is one reading per frame with no counting noise to average away --
+        a number as it is, a text as its states, in order of appearance."""
         name = series[len(TAG):]
-        frames = np.asarray(tags["frame"], float)
         values = np.asarray(tags[name])
         if values.dtype == object:
             states = list(dict.fromkeys(str(v) for v in values))
             index = np.array([states.index(str(v)) for v in values], float)
-            return Line(series, "", "0.35", frames, index, states=states)
-        return Line(series, "", "0.35", centres,
-                    tag_in_windows(frames, values.astype(float), edges))
+            return Line(series, "", "0.35", x, index, states=states)
+        return Line(series, "", "0.35", x, values.astype(float), dense=True)
