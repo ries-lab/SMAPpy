@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.cluster_shape.cluster_shape, smappy.plugins.cluster_shape.hull_measure, smappy.plugins.cluster_shape.principal_axes, smappy.plugins.cluster_shape.draw, smappy.plugins.cluster_shape.ClusterShape.run]
+covers: [smappy.plugins.cluster_shape.cluster_shape, smappy.id_statistics.region_shapes, smappy.id_statistics.covariance_axes, smappy.id_statistics.hull_measure, smappy.plugins.cluster_shape.principal_axes, smappy.plugins.cluster_shape.draw, smappy.plugins.cluster_shape.ClusterShape.run]
 ---
 
 ## What it does
@@ -16,7 +16,11 @@ closer to each other than to the rest).  After
 [per-region steps](plugin:Panels/Glossary) over `cluster_id` and it runs once
 in every cluster, a row of numbers each: the size distribution of
 the clusters, whether they are round or stretched, whether the big ones are
-also the dense ones.  It runs the same way in every
+also the dense ones.  For every cluster at once, without a block,
+[Id statistics](plugin:Analysis/Measure/Id statistics) with *shape* ticked
+gives the same numbers under the same names -- the same function computes
+both -- in a fraction of the time; this plugin is for looking at one
+cluster or ROI, with its figure.  It runs the same way in every
 [ROI](plugin:Panels/Glossary) of the ROI manager, and on the view, where it
 measures everything that is shown as one shape.
 

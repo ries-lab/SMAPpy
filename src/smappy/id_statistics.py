@@ -28,7 +28,15 @@ What is measured, per region (an id, 0 or above, among the rows kept):
   max) of its finite values -- a localization whose `cfr` was not measured
   (NaN) counts for neither -- named ``<quantity>_<stat>[_<unit>]``
   (``cfr_mean``, ``xy_err_median_nm``) and listed as a group, so a reader
-  can show ``cfr › mean`` as a level of its own (`RegionTable.groups`).
+  can show ``cfr › mean`` as a level of its own (`RegionTable.groups`);
+* on request (``shape``), *Cluster shape*'s numbers under its names
+  (`region_shapes`): the convex hull's area and density, the radius of
+  gyration, the standard deviations along the covariance's long and short
+  axis, the long axis' angle (degrees, 0 to 180 from x, unoriented: a
+  cluster has no direction in time, unlike `traces.axes`' 0-360 forward
+  one), the elongation and the extents along both axes, and in 3D the z
+  extent and the hull's volume.  *Cluster shape* calls the same function
+  for its one region, so the numbers are the same to the last bit.
 
 The regions are found without a sort where the ids allow (`dense_codes`):
 ids are small integers, so a lookup table maps each to its region; the rows
@@ -37,6 +45,16 @@ follow each other), and every statistic but the median is a `reduceat` over
 each region's run.  A median sorts once per column.  2 x 10^7
 localizations in 10^6 traces, with three coordinates, the time and three
 columns: see `tests/test_id_statistics.py`.
+
+The shape is vectorised the same way -- the covariance's axes in closed
+form from three sums per region, the extents an `fmax` / `fmin.reduceat` of
+the rotated positions -- all but the hull, which qhull computes one region
+at a time (`hull_measure`).  That loop is the cost of *shape*: 10^5
+clusters of 5-60 localizations (3.2 x 10^6 in all) took 3.9 s in 2D and
+7.9 s in 3D (the area's hull and the volume's) on an M-series Mac, ~35 us
+a hull, almost all of it inside qhull, against 0.15 s for every statistic
+without *shape*; a region of fewer than three points (four in 3D) has no
+hull and is not passed to qhull.
 """
 from __future__ import annotations
 
@@ -170,16 +188,131 @@ class _Regions:
         return med
 
 
+# ------------------------------------------------------------------ shape
+
+#: what `region_shapes` adds to a region table, *Cluster shape*'s names
+SHAPE_2D = ("area_nm2", "density_per_um2", "rg_nm", "std_long_nm", "std_short_nm",
+            "angle_deg", "elongation", "extent_long_nm", "extent_short_nm")
+SHAPE_3D = ("z_extent_nm", "volume_nm3")
+
+
+def hull_measure(points: np.ndarray) -> float:
+    """The convex hull's area of (n, 2) points, or volume of (n, 3); 0 when
+    the points span less than the dimension (too few, or on one line or
+    plane)."""
+    from scipy.spatial import ConvexHull, QhullError
+    points = np.asarray(points, dtype=float)
+    n, d = points.shape
+    if n <= d:
+        return 0.0
+    try:
+        return float(ConvexHull(points).volume)
+    except QhullError:
+        return 0.0
+
+
+def covariance_axes(vx, vy, cxy):
+    """``(std_long, std_short, angle)`` of covariances given by their
+    entries (arrays, one per region): the square roots of the eigenvalues,
+    in closed form, and the long axis' angle in radians in [0, pi) --
+    unoriented, where `traces.axes` turns it forward in time.  A short axis
+    below a millionth of the long one is 0: points on one line leave a
+    rounding error across it that would make an elongation of 10^8."""
+    vx, vy, cxy = (np.asarray(a, dtype=np.float64) for a in (vx, vy, cxy))
+    half = 0.5 * (vx + vy)
+    disc = np.sqrt(np.maximum((0.5 * (vx - vy)) ** 2 + cxy * cxy, 0.0))
+    big = np.maximum(half + disc, 0.0)
+    small = np.maximum(half - disc, 0.0)
+    small = np.where(small > 1e-12 * big, small, 0.0)
+    angle = np.mod(0.5 * np.arctan2(2.0 * cxy, vx - vy), np.pi)
+    return np.sqrt(big), np.sqrt(small), angle
+
+
+def region_shapes(codes: np.ndarray, n: int, x, y, z=None) -> Dict[str, np.ndarray]:
+    """*Cluster shape*'s values of every region at once: ``codes`` is each
+    row's region (0 .. n-1, -1 for none), ``x``, ``y`` (``z``) in nm.  Rows
+    with a position that is not finite are left out, as *Cluster shape*
+    leaves them out.  Returns ``centre_x_nm`` ... and the `SHAPE_2D` (and
+    with ``z`` `SHAPE_3D`) names, an array of ``n`` each; NaN where a value
+    needs more points than a region has (a standard deviation of one, a
+    density without area), 0 for the hull of fewer than three (four) points
+    or of points on a line (plane)."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    use = (np.asarray(codes) >= 0) & np.isfinite(x) & np.isfinite(y)
+    if z is not None:
+        z = np.asarray(z, dtype=np.float64)
+        use &= np.isfinite(z)
+    regions = _Regions(np.where(use, codes, -1), n)
+    counts = regions.counts
+    present = counts > 0
+    begin = regions.begin[present]
+    m = counts.astype(np.float64)
+
+    def per(op, v):
+        out = np.full(n, np.nan)
+        if begin.size:
+            out[present] = op.reduceat(v, begin)
+        return out
+
+    xs, ys = x[regions.order], y[regions.order]
+    out: Dict[str, np.ndarray] = {}
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cx, cy = per(np.add, xs) / m, per(np.add, ys) / m
+        # two passes: positions are 10^4 nm, their spread a few nm
+        dx, dy = xs - np.repeat(cx, counts), ys - np.repeat(cy, counts)
+        sxx, syy, sxy = per(np.add, dx * dx), per(np.add, dy * dy), per(np.add, dx * dy)
+        two = m > 1
+        long, short, angle = covariance_axes(sxx / (m - 1), syy / (m - 1), sxy / (m - 1))
+        long, short, angle = (np.where(two, a, np.nan) for a in (long, short, angle))
+        c, s = np.cos(angle), np.sin(angle)
+        cr, sr = np.repeat(c, counts), np.repeat(s, counts)
+        along, across = dx * cr + dy * sr, -dx * sr + dy * cr
+        out["centre_x_nm"], out["centre_y_nm"] = cx, cy
+        out["rg_nm"] = np.sqrt((sxx + syy) / m)
+        out["std_long_nm"], out["std_short_nm"] = long, short
+        out["angle_deg"] = np.degrees(angle)
+        out["elongation"] = np.where(short > 0, long / short, np.nan)
+        out["extent_long_nm"] = np.where(
+            two, per(np.fmax, along) - per(np.fmin, along), np.nan)
+        out["extent_short_nm"] = np.where(
+            two, per(np.fmax, across) - per(np.fmin, across), np.nan)
+        out["area_nm2"] = _hulls(np.column_stack((xs, ys)), regions, n)
+        out["density_per_um2"] = np.where(out["area_nm2"] > 0,
+                                          m / out["area_nm2"] * 1e6, np.nan)
+        if z is not None:
+            zs = z[regions.order]
+            out["centre_z_nm"] = per(np.add, zs) / m
+            out["z_extent_nm"] = per(np.fmax, zs) - per(np.fmin, zs)
+            out["volume_nm3"] = _hulls(np.column_stack((xs, ys, zs)), regions, n)
+    return out
+
+
+def _hulls(points: np.ndarray, regions: _Regions, n: int) -> np.ndarray:
+    """Each region's hull measure (`hull_measure`) of its run of
+    ``points`` (rows in region order): the one loop over regions, skipping
+    those too small for a hull (0) and the empty ones (NaN)."""
+    d = points.shape[1]
+    counts, begin = regions.counts, regions.begin
+    out = np.where(counts > 0, 0.0, np.nan)
+    for i in np.flatnonzero(counts > d):
+        b = begin[i]
+        out[i] = hull_measure(points[b:b + counts[i]])
+    return out
+
+
 def id_statistics(ids, positions: Dict[str, np.ndarray], *, keep=None,
                   time_s=None, frame=None,
                   columns: Optional[Dict[str, np.ndarray]] = None,
-                  stats: Sequence[str] = ("mean", "median", "max")) -> IdStatistics:
+                  stats: Sequence[str] = ("mean", "median", "max"),
+                  shape: bool = False) -> IdStatistics:
     """The statistics of every region of ``ids`` (see the module docstring).
 
     ``positions`` maps ``"x"``, ``"y"`` and optionally ``"z"`` to nm; ``keep``
     is the rows measured (a layer's filter), the rest are in no region and a
     region with none kept is left out; ``time_s`` or ``frame`` give the time;
-    ``columns`` the other quantities, each summarised by ``stats``."""
+    ``columns`` the other quantities, each summarised by ``stats``;
+    ``shape`` adds `region_shapes`' values (3D ones where ``"z"`` is given)."""
     unknown = [s for s in stats if s not in STATISTICS]
     if unknown:
         raise ValueError(f"unknown statistics {unknown}: choose among {STATISTICS}")
@@ -202,6 +335,11 @@ def id_statistics(ids, positions: Dict[str, np.ndarray], *, keep=None,
                              if f"std_{a}_nm" in out.values}
         out.groups["centre"] = {a: f"centre_{a}_nm" for a in ("x", "y", "z")
                                 if f"centre_{a}_nm" in out.values}
+    if shape:
+        found_shape = region_shapes(codes, n, positions["x"], positions["y"],
+                                    positions.get("z"))
+        for name in SHAPE_2D + (SHAPE_3D if "z" in positions else ()):
+            out.values[name] = found_shape[name]
     if time_s is not None:
         s = regions.statistics(time_s, ("min", "max"))
         out.values["start_s"], out.values["end_s"] = s["min"], s["max"]

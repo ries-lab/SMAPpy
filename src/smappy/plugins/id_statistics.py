@@ -5,6 +5,8 @@ this is the wrapper.  A region of an id column is a MINFLUX trace (`tid`), a
 linked track, a cluster: everything a block over that column would measure
 one region at a time with *Localization statistics*, counted here in one
 pass, so 10^5 traces take a second instead of minutes.
+*shape* adds *Cluster shape*'s numbers (`id_statistics.region_shapes`,
+which *Cluster shape* calls for its one region) for every cluster at once.
 
 What it hands back is a region table, not columns: the table of every
 region (`region_runs.column_table`), signed as a block's run would sign it
@@ -92,6 +94,9 @@ class IdStatisticsSettings:
                          help="attributes to summarise, separated by commas; empty: "
                               "cfr, efo, dcr, photons, xy_err_nm where present")
     use_z: bool = param(True, label="use z", help="z_nm's centre and spread too")
+    shape: bool = param(False, label="shape",
+                        help="Cluster shape's numbers too: hull area, axes, angle, "
+                             "extents; the hull a loop")
     statistics: StatisticsSettings = param(default_factory=StatisticsSettings,
                                            label="statistics of the attributes")
 
@@ -145,7 +150,7 @@ class IdStatistics(Plugin):
             locs[column], positions, keep=keep,
             time_s=locs["time_s"] if "time_s" in locs else None,
             frame=locs["frame"] if "time_s" not in locs and "frame" in locs else None,
-            columns={n: locs[n] for n in names}, stats=stats)
+            columns={n: locs[n] for n in names}, stats=stats, shape=settings.shape)
         if not len(found):
             raise ValueError(f"no regions: no localization the layer keeps has "
                              f"an id in {column} (-1 is none)")
@@ -158,11 +163,15 @@ class IdStatistics(Plugin):
                  f"localizations: a median of {np.median(v['n_locs']):.0f} each"]
         if "std_xy_nm" in v and np.isfinite(v["std_xy_nm"]).any():
             lines.append(f"spread (std_xy_nm): median {np.nanmedian(v['std_xy_nm']):.3g} nm")
+        if "elongation" in v and np.isfinite(v["std_long_nm"]).any():
+            lines.append(f"shape: median {np.nanmedian(v['std_long_nm']):.3g} x "
+                         f"{np.nanmedian(v['std_short_nm']):.3g} nm (std_long_nm x "
+                         f"std_short_nm), area {np.nanmedian(v['area_nm2']):.3g} nm²")
         if "duration_s" in v:
             lines.append(f"duration: median {np.nanmedian(v['duration_s']):.3g} s")
         lines.append(f"kept as 'per {column}: {LABEL}': {len(v)} values per region")
-        panels = [(k, v[k]) for k in ("n_locs", "std_xy_nm", "duration_s", "frames")
-                  if k in v]
+        panels = [(k, v[k]) for k in ("n_locs", "std_xy_nm", "duration_s", "frames",
+                                       "elongation") if k in v]
         for name in names:
             group = found.groups.get(name, {})
             first = group.get("median") or group.get("mean") or next(iter(group.values()), None)

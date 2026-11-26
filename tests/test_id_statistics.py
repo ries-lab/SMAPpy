@@ -169,3 +169,84 @@ def test_each_regions_rows_stay_in_table_order():
     ids, rows_ = split_ids(np.array([2, 0, 1, 2, -1, 1, 2, 1]))
     assert list(ids) == [0, 1, 2]                   # 0 is a region, -1 none
     assert [list(r) for r in rows_] == [[1], [2, 5, 7], [0, 3, 6]]
+
+
+def gaussian_clusters(n_clusters=100, seed=7, three_d=False):
+    """Elongated Gaussian clusters, each with its own angle (0-180 degrees
+    from x) and standard deviations along and across it, in random order of
+    rows, a few singletons and pairs among them."""
+    rng = np.random.default_rng(seed)
+    n = rng.integers(800, 1200, n_clusters)
+    n[:3] = (1, 2, 3)                           # too small for a std or a hull
+    angle = rng.uniform(0, 180, n_clusters)
+    long = rng.uniform(30, 80, n_clusters)
+    short = long / rng.uniform(2.5, 4.0, n_clusters)
+    ids = np.repeat(np.arange(n_clusters), n)
+    u = rng.normal(size=len(ids)) * long[ids]
+    v = rng.normal(size=len(ids)) * short[ids]
+    t = np.radians(angle[ids])
+    centre = rng.uniform(0, 30000, (n_clusters, 2))
+    x = centre[ids, 0] + u * np.cos(t) - v * np.sin(t)
+    y = centre[ids, 1] + u * np.sin(t) + v * np.cos(t)
+    z = rng.normal(size=len(ids)) * 40.0 if three_d else None
+    order = rng.permutation(len(ids))
+    return (ids[order], x[order], y[order], None if z is None else z[order],
+            angle, long, short)
+
+
+def test_shape_finds_the_angle_and_the_axes_of_elongated_gaussian_clusters():
+    ids, x, y, _, angle, long, short = gaussian_clusters()
+    found = id_statistics(ids, {"x": x, "y": y}, shape=True)
+    v = found.values
+    big = v["n_locs"] >= 800
+    # unoriented, in [0, 180): the difference is taken modulo 180
+    diff = (v["angle_deg"][big] - angle[big] + 90) % 180 - 90
+    assert np.all((v["angle_deg"] >= 0) & (v["angle_deg"] < 180) | np.isnan(v["angle_deg"]))
+    assert np.abs(diff).max() < 5
+    assert np.abs(v["std_long_nm"][big] / long[big] - 1).max() < 0.1
+    assert np.abs(v["std_short_nm"][big] / short[big] - 1).max() < 0.1
+    assert np.allclose(v["elongation"][big], v["std_long_nm"][big] / v["std_short_nm"][big])
+    # a Gaussian's radius of gyration is the RMS of the two axes (ddof 0)
+    assert np.median(v["rg_nm"][big] / np.hypot(long[big], short[big])) == \
+        pytest.approx(1, abs=0.03)
+    # one point: no std, no hull; two: a std but no hull; three: a triangle
+    assert np.isnan(v["std_long_nm"][0]) and v["area_nm2"][0] == 0
+    assert np.isfinite(v["std_long_nm"][1]) and v["area_nm2"][1] == 0
+    assert v["area_nm2"][2] > 0 and np.isnan(v["density_per_um2"][0])
+
+
+def test_shape_values_equal_cluster_shapes_for_the_same_clusters():
+    from smappy.plugins.cluster_shape import NAMES_2D, NAMES_3D, cluster_shape
+    ids, x, y, z, *_ = gaussian_clusters(n_clusters=40, three_d=True)
+    x[5] = np.nan                     # left out of the shape, as Cluster shape does
+    found = id_statistics(ids, {"x": x, "y": y, "z": z}, shape=True)
+    for k, i in enumerate(found.ids):
+        rows_ = (ids == i) & np.isfinite(x)
+        expect = cluster_shape(x[rows_], y[rows_], z[rows_])
+        for name in NAMES_2D + NAMES_3D:
+            if name in ("n_locs", "centre_x_nm", "centre_y_nm", "centre_z_nm"):
+                continue              # Id statistics' own: per coordinate's finite values
+            assert np.array_equal(found.values[name][k], expect[name], equal_nan=True), \
+                (i, name)
+
+
+def test_shape_off_adds_no_columns_and_the_plugin_adds_them_when_ticked():
+    from smappy.id_statistics import SHAPE_2D, SHAPE_3D
+    ids, x, y, _, *_ = gaussian_clusters(n_clusters=20)
+    plain = id_statistics(ids, {"x": x, "y": y})
+    assert not set(SHAPE_2D + SHAPE_3D) & set(plain.values)
+    shaped = id_statistics(ids, {"x": x, "y": y}, shape=True)
+    assert set(shaped.values) == set(plain.values) | set(SHAPE_2D)
+    for name in plain.values:
+        assert np.array_equal(plain.values[name], shaped.values[name], equal_nan=True)
+    locs, _, _ = traces(n_traces=50)
+    session = Session(locs)
+    session.show_grouped(0, False)
+    cls = plugins.get(PLUGIN)
+    assert cls.Settings().shape is False
+    session.run(cls(), cls.Settings())
+    assert "area_nm2" not in session.id_regions["tid"]["Id statistics"].columns()
+    result = session.run(cls(), cls.Settings(shape=True))
+    columns = session.id_regions["tid"]["Id statistics"].columns()
+    assert set(SHAPE_2D + SHAPE_3D) <= set(columns)
+    assert "shape:" in result.text

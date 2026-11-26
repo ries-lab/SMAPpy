@@ -1,5 +1,10 @@
 """The shape of a cluster: its size, extent, orientation and density.
 
+For every cluster of an id column at once, without a block, *Id
+statistics*' *shape* gives the same values under the same names: the
+algorithm is `smappy.id_statistics.region_shapes`, vectorised over regions,
+which `cluster_shape` calls for one.
+
 The shape half of SMAP's ``Analyze/cluster/ClusterStatistics`` (whose pair
 correlation and Ripley's K, despite its description, it never computed).
 ``per_region``, so it measures the view, one ROI, or -- the case it is for --
@@ -50,6 +55,9 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+# the algorithm is shared with *Id statistics*' shape, which measures every
+# cluster of an id column at once; hull_measure is re-exported for callers here
+from ..id_statistics import covariance_axes, hull_measure, region_shapes  # noqa: F401
 from . import Context, Plot, Plugin, Result, param, register
 
 # the points drawn per layer in a figure: a scatter of a million is a grey
@@ -65,21 +73,6 @@ NAMES_3D = ("centre_z_nm", "z_extent_nm", "volume_nm3")
 
 
 # ------------------------------------------------------------- the algorithm
-
-def hull_measure(points: np.ndarray) -> float:
-    """The convex hull's area of (n, 2) points, or volume of (n, 3); 0 when
-    the points span less than the dimension (too few, or on one line or
-    plane)."""
-    from scipy.spatial import ConvexHull, QhullError
-    points = np.asarray(points, dtype=float)
-    n, d = points.shape
-    if n <= d:
-        return 0.0
-    try:
-        return float(ConvexHull(points).volume)
-    except QhullError:
-        return 0.0
-
 
 def hull_outline(x: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
     """The hull's corners, closed, as (m, 2), or None where it has no area."""
@@ -97,16 +90,11 @@ def hull_outline(x: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
 def principal_axes(x: np.ndarray, y: np.ndarray):
     """``(std_long, std_short, angle)``: the square roots of the eigenvalues
     of the covariance (with n - 1, as MATLAB's ``cov``) and the long axis's
-    angle in radians, in [0, pi)."""
+    angle in radians, in [0, pi) -- `id_statistics.covariance_axes`, the
+    closed form *Id statistics* uses for every cluster at once."""
     cov = np.cov(np.vstack((x, y)), ddof=1)
-    values, vectors = np.linalg.eigh(cov)            # ascending
-    # points on one line leave a rounding error of 1e-6 nm across it, which
-    # would make an elongation of 10^8: below a millionth of the long axis
-    # the short one is 0
-    values = np.where(values > 1e-12 * values[1], values, 0.0)
-    vx, vy = vectors[:, 1]
-    return (float(np.sqrt(values[1])), float(np.sqrt(values[0])),
-            float(np.mod(np.arctan2(vy, vx), np.pi)))
+    long, short, angle = covariance_axes(cov[0, 0], cov[1, 1], cov[0, 1])
+    return float(long), float(short), float(angle)
 
 
 def cluster_shape(x, y, z=None) -> Dict[str, float]:
@@ -115,39 +103,16 @@ def cluster_shape(x, y, z=None) -> Dict[str, float]:
 
     ``z`` None measures in 2D and leaves the 3D values out.  A value that
     needs more points than there are -- a standard deviation of one point,
-    an elongation or density with nothing below the line -- is NaN.
+    an elongation or density with nothing below the line -- is NaN.  It is
+    `id_statistics.region_shapes` on one region, so *Id statistics*' *shape*
+    gives every cluster the same numbers at once.
     """
     x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
     n = len(x)
-    nan = float("nan")
-    out = {name: nan for name in NAMES_2D}
-    if z is not None:
-        out.update({name: nan for name in NAMES_3D})
-    out["n_locs"] = n
-    if n == 0:
-        return out
-    cx, cy = float(x.mean()), float(y.mean())
-    dx, dy = x - cx, y - cy
-    out.update(centre_x_nm=cx, centre_y_nm=cy,
-               rg_nm=float(np.sqrt(np.mean(dx * dx + dy * dy))))
-    area = hull_measure(np.column_stack((x, y)))
-    out["area_nm2"] = area
-    if area > 0:
-        out["density_per_um2"] = n / area * 1e6
-    if n >= 2:
-        long, short, angle = principal_axes(x, y)
-        c, s = np.cos(angle), np.sin(angle)
-        along, across = dx * c + dy * s, -dx * s + dy * c
-        out.update(std_long_nm=long, std_short_nm=short,
-                   angle_deg=float(np.degrees(angle)),
-                   elongation=long / short if short > 0 else nan,
-                   extent_long_nm=float(np.ptp(along)),
-                   extent_short_nm=float(np.ptp(across)))
-    if z is not None:
-        z = np.asarray(z, dtype=float)
-        out.update(centre_z_nm=float(z.mean()), z_extent_nm=float(np.ptp(z)),
-                   volume_nm3=hull_measure(np.column_stack((x, y, z))))
+    found = region_shapes(np.zeros(n, np.int64), 1, x, y, z)
+    names = NAMES_2D + (NAMES_3D if z is not None else ())
+    out: Dict[str, float] = {"n_locs": n}
+    out.update({name: float(found[name][0]) for name in names if name != "n_locs"})
     return out
 
 
