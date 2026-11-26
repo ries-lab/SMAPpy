@@ -385,3 +385,106 @@ def test_alt_wheel_steps_the_player_and_alt_drag_scrubs_it_over_the_picture(app)
     assert not mouse(QEvent.MouseMove, 0, Qt.NoModifier)  # released: moves are pyqtgraph's
     view.scrubber = None                                  # a picture without a player
     assert not wheel(-120)
+
+
+def test_a_cumulative_scan_keeps_its_start_and_a_track_layer_its_tail():
+    steps = sc.scan_steps(0, 999, window=100, step=100, integer=True, cumulative=True)
+    assert all(s.lo == 0 for s in steps) and steps[2].hi == 300
+    import dataclasses
+    session = Session(table())
+    layers = snapshot_layers(session.layers)
+    tracks = dataclasses.replace(layers[0], settings=dataclasses.replace(
+        layers[0].settings, mode="tracks"))
+    shown, = sc.scanned([tracks], sc.Scan("frame", 0, 500, tail=50))
+    frames = np.asarray(layers[0].locs["frame"])[np.asarray(shown.mask, bool)]
+    assert frames.min() >= 450 and frames.max() < 500
+    plain, = sc.scanned(layers, sc.Scan("frame", 0, 500, tail=50))   # not tracks: whole
+    assert np.asarray(layers[0].locs["frame"])[np.asarray(plain.mask, bool)].min() < 50
+
+
+def test_the_player_and_save_stack_hand_their_settings_to_each_other(app):
+    from smappy.gui.scan_player import ScanPlayer
+    from smappy.plugins.file import (ExportStackSettings, StackOutputSettings,
+                                     scan_for_stack)
+    session = Session(table())
+    player = ScanPlayer(session)
+    player.coordinate.setCurrentText("photons")
+    player.cumulative.setChecked(True)
+    player.output = StackOutputSettings(labels=False, quality="high")
+    stack = player.stack_settings()
+    assert stack.along == "attribute" and stack.attribute.column == "photons"
+    assert stack.attribute.cumulative and not stack.output.labels
+    assert stack.attribute.window == pytest.approx(player._resolved[0])
+    # and back: Save stack's Play
+    other = ScanPlayer(session)
+    other.take_stack(stack)
+    assert other.coordinate.currentText() == "photons" and other.cumulative.isChecked()
+    assert session.scan is not None and session.scan.lo == other.steps[1].lo
+    assert other.output.quality == "high"
+    other.stop()
+    movie = ExportStackSettings()
+    movie.frames.step, movie.frames.window, movie.fps = 200, 400, 20.0
+    other.take_stack(movie)
+    assert other.coordinate.currentText() == "frame"
+    assert (other.window_.value(), other.step.value(), other.speed.value()) == (400, 200, 20)
+    assert session.scan.hi - session.scan.lo == 400
+    other.stop()
+    assert scan_for_stack(movie)["layers"] is None
+
+
+def test_the_player_records_with_the_output_options_it_asked(app, tmp_path, monkeypatch):
+    tifffile = pytest.importorskip("tifffile")
+    from smappy.gui import scan_player
+    from smappy.gui.render_view import RenderView
+    from smappy.plugins.file import StackOutputSettings
+    session = Session(table())
+    view = RenderView(session)
+    view.resize(200, 200)
+    player = scan_player.ScanPlayer(session)
+    player.coordinate.setCurrentText("frame")
+    player.window_.setValue(500)
+    player.step.setValue(500)
+    player.output = StackOutputSettings(pixelsize_nm=100.0, scale_bar=False,
+                                        colour_bars=False, labels=False, stamp=False)
+    path = tmp_path / "scan.tif"
+    monkeypatch.setattr(scan_player.QFileDialog, "getSaveFileName",
+                        lambda *a, **k: (str(path), ""))
+    player._record()
+    with tifffile.TiffFile(path) as tif:
+        stack = tif.asarray()
+    frame = session.view_frames["2D"]()
+    width = (frame.xrange[1] - frame.xrange[0]) / 100.0
+    assert abs(stack.shape[2] - width) <= 1                # the pixel asked, not the window's
+
+
+def test_save_stacks_play_hands_its_settings_to_the_player(app):
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins.file import ExportStack
+    session = Session(table())
+    got = []
+    session.window_openers["player"] = lambda settings=None: got.append(settings)
+    panel = PluginPanel(ExportStack, session)
+    play, = [b for b in panel.window_buttons if b.text() == "Play"]
+    assert panel.run_button.text() != "Open"          # it still runs
+    play.click()
+    assert got and got[0].along == "frames"
+
+
+def test_record_asks_the_output_and_keeps_it_for_the_next(app, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+    from smappy.gui.scan_player import ScanPlayer
+    from smappy.gui.params import SettingsForm
+    from smappy.plugins.file import StackOutputSettings
+    player = ScanPlayer(Session(table()))
+    player.output = StackOutputSettings(labels=False, quality="low")
+    seen = []
+
+    def exec_(dialog):
+        form, = dialog.findChildren(SettingsForm)[:1]
+        seen.append(form.value())
+        return QDialog.Accepted
+
+    monkeypatch.setattr(QDialog, "exec", exec_)
+    assert player.ask_output()
+    assert seen[0].labels is False and seen[0].quality == "low"
+    assert player.output == seen[0]

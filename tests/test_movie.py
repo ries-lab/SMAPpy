@@ -9,8 +9,8 @@ from smappy.movie import (estimate_size, frame_steps, has_encoder, raw_plane, re
 from smappy.picture import read_description
 from smappy.plugins import Context
 from smappy.plugins.file import (ExportImageSettings, ExportStack, ExportStackSettings,
-                                 StackFramesSettings, StackZSettings, export_image,
-                                 stack_plan)
+                                 StackFramesSettings, StackOutputSettings, StackZSettings,
+                                 export_image, stack_plan)
 from smappy.session import Session
 
 tifffile = pytest.importorskip("tifffile")
@@ -30,6 +30,14 @@ def session_of(locs) -> Session:
 
 
 BARE = dict(scale_bar=False, colour_bars=False, labels=False, stamp=False)
+OUTPUT = {f for f in StackOutputSettings.__dataclass_fields__}
+
+
+def stack_settings(**values) -> ExportStackSettings:
+    """Save stack's settings, the output's keywords (`StackOutputSettings`)
+    put in their part."""
+    output = StackOutputSettings(**{k: values.pop(k) for k in list(values) if k in OUTPUT})
+    return ExportStackSettings(output=output, **values)
 
 
 def test_the_steps_of_a_movie_and_of_a_z_stack():
@@ -48,7 +56,7 @@ def test_the_steps_of_a_movie_and_of_a_z_stack():
 def test_each_movie_frame_is_the_picture_of_its_window(tmp_path, simulated):
     session = session_of(simulated)
     path = tmp_path / "m.tif"
-    settings = ExportStackSettings(path=str(path), region="all", pixelsize_nm=40.0,
+    settings = stack_settings(path=str(path), region="all", pixelsize_nm=40.0,
                                    layout="composite",
                                    frames=StackFramesSettings(step=500), **BARE)
     ExportStack().run(session.context(), settings)
@@ -72,7 +80,7 @@ def test_each_movie_frame_is_the_picture_of_its_window(tmp_path, simulated):
 
 def test_a_cumulative_movie_grows(simulated):
     session = session_of(simulated)
-    settings = ExportStackSettings(path="x.tif", region="all", pixelsize_nm=40.0,
+    settings = stack_settings(path="x.tif", region="all", pixelsize_nm=40.0,
                                    frames=StackFramesSettings(step=400, cumulative=True))
     plan = stack_plan(session.context(), settings)
     shown = [int(restrict(plan.layers, "frame", s)[0].mask.sum()) for s in plan.steps]
@@ -85,7 +93,7 @@ def test_a_cumulative_movie_grows(simulated):
 
 def test_each_slice_holds_only_its_z_range(tmp_path, simulated):
     session = session_of(simulated)
-    settings = ExportStackSettings(path=str(tmp_path / "z.tif"), along="z", region="all",
+    settings = stack_settings(path=str(tmp_path / "z.tif"), along="z", region="all",
                                    pixelsize_nm=40.0, layout="composite",
                                    z=StackZSettings(step_nm=200.0, z_min_nm=-400.0,
                                                     z_max_nm=400.0), **BARE)
@@ -118,7 +126,7 @@ def test_a_track_is_drawn_with_its_tail_up_to_now():
                          truth.metadata)
     session = session_of(locs)
     session.layers[0].state.settings = RenderSettings(mode="tracks")
-    settings = ExportStackSettings(path="t.tif", region="all", pixelsize_nm=50.0,
+    settings = stack_settings(path="t.tif", region="all", pixelsize_nm=50.0,
                                    frames=StackFramesSettings(step=10, tail=50))
     plan = stack_plan(session.context(), settings)
     frame = np.asarray(plan.layers[0].locs["frame"])
@@ -144,7 +152,7 @@ def test_the_camera_frames_go_beside_the_picture(simulated):
                     frames=np.array([-1, 0, 1000, 1900]))
     session.images.append(raw)
     assert raw_plane([raw], 1100)[1] == 2 and raw_plane([raw], 10)[1] == 1  # never the average
-    settings = ExportStackSettings(path="r.tif", region="all", pixelsize_nm=40.0,
+    settings = stack_settings(path="r.tif", region="all", pixelsize_nm=40.0,
                                    layout="raw", frames=StackFramesSettings(step=500),
                                    **BARE)
     plan = stack_plan(session.context(), settings)
@@ -162,7 +170,7 @@ def test_a_gif_and_an_mp4_are_written(tmp_path, simulated, suffix):
         pytest.skip("imageio-ffmpeg is not installed")
     session = session_of(simulated)
     path = tmp_path / f"m{suffix}"
-    settings = ExportStackSettings(path=str(path), region="all", pixelsize_nm=33.0,
+    settings = stack_settings(path=str(path), region="all", pixelsize_nm=33.0,
                                    frames=StackFramesSettings(step=250, cumulative=True))
     result = ExportStack().run(session.context(), settings)
     n = result.data["frames"]
@@ -180,23 +188,23 @@ def test_a_gif_and_an_mp4_are_written(tmp_path, simulated, suffix):
         assert meta["size"] == (w + w % 2, h + h % 2)          # even sides
         assert sum(1 for _ in reader) == n
         # the size the form shows is the right order of magnitude
-        size = estimate_size("mp4", h, w, n, settings.quality)
+        size = estimate_size("mp4", h, w, n, settings.output.quality)
         assert size / 4 < path.stat().st_size < size * 4
 
 
 def test_the_form_says_how_many_frames_and_how_large(simulated):
     session = session_of(simulated)
-    settings = ExportStackSettings(path="m.tif", region="all", pixelsize_nm=40.0,
+    settings = stack_settings(path="m.tif", region="all", pixelsize_nm=40.0,
                                    frames=StackFramesSettings(step=500))
     state = ExportStack().describe(session.context(), settings)
     plan = stack_plan(session.context(), settings)
     h, w = plan.shape
     assert state.notice.text.startswith(f"4 frames of {w} x {h}")
-    assert state.shown["frames"] and not state.shown["z"] and not state.shown["quality"]
+    assert state.shown["frames"] and not state.shown["z"] and not state.shown["output.quality"]
     settings.path, settings.along = "m.mp4", "z"
     state = ExportStack().describe(session.context(), settings)
-    assert state.shown["z"] and state.shown["quality"]
-    assert ExportStack().preflight(session.context(), ExportStackSettings(
+    assert state.shown["z"] and state.shown["output.quality"]
+    assert ExportStack().preflight(session.context(), stack_settings(
         path="m.tif", region="all", pixelsize_nm=40.0)) is None   # quick: no question
 
 
@@ -208,6 +216,30 @@ def test_a_stopped_stack_leaves_no_file(tmp_path, simulated):
     ctx.stop.set()
     path = tmp_path / "s.tif"
     with pytest.raises(Stopped):
-        ExportStack().run(ctx, ExportStackSettings(path=str(path), region="all",
+        ExportStack().run(ctx, stack_settings(path=str(path), region="all",
                                                    pixelsize_nm=40.0))
     assert not path.exists()
+
+
+def test_a_stack_along_any_attribute_moves_only_the_layers_named(simulated):
+    from smappy.plugins.file import StackAttributeSettings, stack_layers
+    session = session_of(simulated)
+    session.add_layer()
+    settings = stack_settings(path="a.tif", region="all", pixelsize_nm=40.0,
+                              along="attribute", layers="2",
+                              attribute=StackAttributeSettings(column="photons",
+                                                               cumulative=True))
+    plan = stack_plan(session.context(), settings)
+    assert plan.which == (1,) and len(plan.steps) > 2
+    assert all(s.lo == plan.steps[0].lo for s in plan.steps)          # cumulative
+    from smappy.scan import Scan, scanned
+    first = scanned(plan.layers, Scan("photons", plan.steps[0].lo, plan.steps[0].hi,
+                                      layers=plan.which))
+    assert first[0] is plan.layers[0]                                  # shown whole
+    assert first[1].mask.sum() < plan.layers[1].locs.__len__()
+    assert stack_layers("1, 3") == (0, 2) and stack_layers("") is None
+    with pytest.raises(ValueError):
+        stack_layers("one")
+    with pytest.raises(ValueError, match="camera frames"):
+        stack_plan(session.context(), stack_settings(path="a.tif", along="attribute",
+                                                     layout="raw"))

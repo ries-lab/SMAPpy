@@ -508,6 +508,10 @@ class ControlWindow(QMainWindow):
         # the 3D window's *Make a movie of this...*: its rock or spin as the
         # Render tab's player's view path (`ScanPlayer.take_path`)
         session.window_openers["view path"] = self.open_view_path
+        # *Save stack*'s *Play*: its settings in the player, which is its
+        # preview; and the player's *Save as stack...* back into Save stack
+        session.window_openers["player"] = self.open_player
+        session.window_openers["save stack"] = self.open_save_stack
         # Transform with given settings: Register layers' *apply*, with the
         # named transformation it measured (`transform.settings_for`)
         session.window_openers["transform"] = self.open_transform
@@ -1989,6 +1993,25 @@ class ControlWindow(QMainWindow):
                 self.show()
                 self.raise_()
                 return
+
+    def open_player(self, settings=None) -> None:
+        """The Render tab in front, its player playing *Save stack*'s
+        ``settings`` (`ScanPlayer.take_stack`)."""
+        for index, widget in enumerate(self._tab_widgets()):
+            if isinstance(widget, RenderTab):
+                self.tabs.setCurrentIndex(index)
+                widget.show_stack(settings)
+                self.show()
+                self.raise_()
+                return
+
+    def open_save_stack(self, settings=None) -> None:
+        """*Save stack* in its window, set to ``settings`` when given: the
+        player's *Save as stack...* (`plugins.file.stack_settings_for_scan`)."""
+        from ..plugins.file import STACK_PATH
+        window = self.open_plugin_window(STACK_PATH)
+        if window is not None and settings is not None:
+            window.panel.form.set(settings)
 
     def draw_line(self) -> None:
         """Start drawing a line ROI on the picture, which comes to the front."""

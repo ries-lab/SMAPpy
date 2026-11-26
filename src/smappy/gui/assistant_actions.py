@@ -67,6 +67,9 @@ WINDOW_BUTTONS = {
     "decode training": "open_window",
     "training hosts": "File/Preferences",
     "decode model": "describe_plugin",          # its notice: the model in a line, or how it differs
+    # Save stack's *Play*: a preview to watch, which a model cannot; it
+    # writes the movie itself, and looks at a frame of it
+    "player": "run_plugin",
 }
 
 

@@ -1598,6 +1598,12 @@ class RenderTab(QWidget):
         self.player.take_path(path)
         QTimer.singleShot(0, self.player_section._scroll_into_view)
 
+    def show_stack(self, settings) -> None:
+        """The player open and playing *Save stack*'s ``settings`` (its *Play*)."""
+        self.player_section.set_expanded(True)
+        self.player.take_stack(settings)
+        QTimer.singleShot(0, self.player_section._scroll_into_view)
+
     @property
     def layer(self) -> Layer:
         return self.session.layers[self.strip.current]

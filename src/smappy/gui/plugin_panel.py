@@ -285,15 +285,7 @@ class PluginPanel(QWidget):
             self.result_button.hide()
             self.output.hide()
             self.run_button.clicked.connect(self.open_window)
-            self.window_buttons = []
-            for label, window in self.plugin.window_buttons:
-                extra = QPushButton(label)
-                extra.setMinimumWidth(
-                    extra.fontMetrics().horizontalAdvance(label) + 20)
-                extra.clicked.connect(lambda _=False, w=window: self.open_window(w))
-                buttons.insertWidget(buttons.indexOf(self.run_button) + 1
-                                     + len(self.window_buttons), extra)
-                self.window_buttons.append(extra)
+            self.window_buttons = self._window_buttons(buttons)
             # nothing to set: the buttons can stand in the section's title
             # bar (`title_buttons`, `CollapsibleSection.put_in_title`)
             # (a launcher whose settings are its window's, `form_in_window`, as one)
@@ -321,6 +313,9 @@ class PluginPanel(QWidget):
                         button.setToolTip(self.plugin.description)
         else:
             self.run_button.clicked.connect(self._run_or_stop)
+            # a plugin that runs can open a window with its settings too:
+            # *Save stack*'s *Play*, the player as its preview
+            self.window_buttons = self._window_buttons(buttons)
         self.result_button.clicked.connect(self.show_result)
         self._following = False
         # this panel's run started the session's live table (the "start" it
@@ -704,6 +699,17 @@ class PluginPanel(QWidget):
         self.run_button.setEnabled(False)
         self._status_text = "stopping..."
         self._tick_status()
+
+    def _window_buttons(self, row) -> list:
+        """A button per `Plugin.window_buttons`, after *Run* or *Open* in ``row``."""
+        made = []
+        for label, window in self.plugin.window_buttons:
+            extra = QPushButton(label)
+            extra.setMinimumWidth(extra.fontMetrics().horizontalAdvance(label) + 20)
+            extra.clicked.connect(lambda _=False, w=window: self.open_window(w))
+            row.insertWidget(row.indexOf(self.run_button) + 1 + len(made), extra)
+            made.append(extra)
+        return made
 
     def open_window(self, window: Optional[str] = None) -> None:
         """Hand the settings to the window the plugin names (`Plugin.window`,

@@ -31,7 +31,7 @@ can be written.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, List, Optional, Sequence, Tuple
 

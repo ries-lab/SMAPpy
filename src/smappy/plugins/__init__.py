@@ -1054,10 +1054,12 @@ class Plugin:
     # bead and the PSF calibration: their windows set everything a form would
     # ask twice.
     form_in_window: bool = False
-    # More buttons beside *Open*, each ``(label, window)``: another window of
-    # the GUI's, opened the same way.  *Load*'s *Add* is the window's File >
-    # Open adding rather than replacing.  A launcher with nothing to set has
-    # these and *Open* in its section's title bar, and no section to unfold.
+    # More buttons beside *Open* (or *Run*), each ``(label, window)``: another
+    # window of the GUI's, handed the form's settings as *Open* hands them.
+    # *Load*'s *Add* is the window's File > Open adding rather than
+    # replacing; *Save stack*'s *Play* plays its settings in the Render tab's
+    # player.  A launcher with nothing to set has these and *Open* in its
+    # section's title bar, and no section to unfold.
     window_buttons: Tuple[Tuple[str, str], ...] = ()
     # A launcher with settings whose buttons stand in the title bar all the
     # same, its section unfolding to its settings: *Load*, whose *Open* and

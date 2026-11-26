@@ -139,7 +139,8 @@ class ScanPlayer(QWidget):
         self.record_from.setToolTip("which window's picture a recording is of")
         self.record_button = QPushButton("Record...")
         self.record_button.setToolTip("every step, as the window shows it, to a TIFF "
-                                      "stack, an MP4 or a GIF")
+                                      "stack, an MP4 or a GIF; asks the bars, labels "
+                                      "and quality first")
         record.addWidget(QLabel("record"))
         record.addWidget(self.record_from, 1)
         record.addWidget(self.record_button)
@@ -155,6 +156,18 @@ class ScanPlayer(QWidget):
         layers_row.addWidget(QLabel("layers"))
         layers_row.addWidget(self.layer_choice, 1)
         more_layout.addLayout(layers_row)
+        self.cumulative = QCheckBox("cumulative")
+        self.cumulative.setToolTip("each step shows everything from the start on: "
+                                   "a structure building up")
+        self.save_as_stack = QPushButton("Save as stack...")
+        self.save_as_stack.setToolTip("this scan in Save stack, to keep its settings, "
+                                      "run it in a chain or a batch, or put the camera "
+                                      "frames beside it")
+        stack_row = QHBoxLayout()
+        stack_row.addWidget(self.cumulative)
+        stack_row.addStretch(1)
+        stack_row.addWidget(self.save_as_stack)
+        more_layout.addLayout(stack_row)
         self.path_section = CollapsibleSection("view path", self._path_part(), expanded=True)
         more_layout.addWidget(self.path_section)
         self.more_section = CollapsibleSection("more", more, expanded=False)
@@ -171,6 +184,13 @@ class ScanPlayer(QWidget):
         self.stop_button.clicked.connect(self.stop)
         self.slider.valueChanged.connect(self._on_slider)
         self.record_button.clicked.connect(self.record)
+        self.cumulative.toggled.connect(self._changed)
+        self.save_as_stack.clicked.connect(lambda: self._guarded(self.open_as_stack))
+        # how a recording is drawn and written: *Save stack*'s output part,
+        # asked by *Record...* and kept for the next one
+        from ..plugins.file import StackOutputSettings
+        self.output = StackOutputSettings()
+        self._resolved = (0.0, 0.0)       # the window and step *auto* resolved to
         session.on_change(self._on_session)
         self._fill_coordinates()
         self._layer_text()
@@ -557,18 +577,9 @@ class ScanPlayer(QWidget):
             self.slider.blockSignals(blocked)
             self._dirty = False
             return self.steps
-        if coordinate in sc.LINE_COORDINATES:
-            if line is None or line.kind != "line":
-                raise ValueError(f"{coordinate}: draw a line ROI first")
-            p0, p1 = line.ends()
-            half = (float(np.hypot(*(p1 - p0))) if coordinate == sc.ALONG
-                    else line.width) / 2
-            lo, hi = -half, half
-            self._integer = False
-        else:
-            layers = snapshot_layers(self.session.layers)
-            lo, hi = sc.shown_range(layers, coordinate, which=self.scanned_layers())
-            self._integer = sc.is_integer(layers, coordinate)
+        layers = snapshot_layers(self.session.layers)
+        lo, hi = sc.coordinate_range(layers, coordinate, line, self.scanned_layers())
+        self._integer = sc.is_integer(layers, coordinate)
         window, step = sc.auto_window(lo, hi, self._integer)
         window = self.window_.value() or window
         step = self.step.value() or (window / sc.AUTO_OVERLAP if self.window_.value()
@@ -577,7 +588,9 @@ class ScanPlayer(QWidget):
             step = max(1.0, round(step))
         self._range = (lo, hi)
         self._hints(window, step)
-        self.steps = sc.scan_steps(lo, hi, window, step, self._integer)
+        self._resolved = (window, step)
+        self.steps = sc.scan_steps(lo, hi, window, step, self._integer,
+                                   self.cumulative.isChecked())
         blocked = self.slider.blockSignals(True)
         self.slider.setMaximum(len(self.steps) - 1)
         self.slider.blockSignals(blocked)
@@ -724,14 +737,94 @@ class ScanPlayer(QWidget):
             self.pause()
             self._say(f"stopped: {error}")
 
+    # ------------------------------------------------------------ Save stack
+    def take_stack(self, settings) -> None:
+        """Play *Save stack*'s ``settings`` (its *Play*): what moves, the window
+        and step, cumulative, the layers and the frame rate as the speed
+        (`plugins.file.scan_for_stack`); its output is taken for a recording."""
+        from ..plugins.file import scan_for_stack
+        scan = scan_for_stack(settings)
+        self._fill_coordinates()
+        if self.coordinate.findText(scan["coordinate"]) < 0:
+            raise ValueError(f"nothing to play along {scan['coordinate']}: the table "
+                             "has no such attribute")
+        self.stop()
+        widgets = (self.coordinate, self.window_, self.step, self.cumulative, self.speed)
+        for w in widgets:
+            w.blockSignals(True)
+        self.coordinate.setCurrentText(scan["coordinate"])
+        self.window_.setValue(scan["window"])
+        self.step.setValue(scan["step"])
+        self.cumulative.setChecked(scan["cumulative"])
+        self.speed.setValue(int(np.clip(round(scan["fps"]), self.speed.minimum(),
+                                        self.speed.maximum())))
+        for w in widgets:
+            w.blockSignals(False)
+        which = scan["layers"]
+        self._unscanned = (set() if which is None
+                           else {i for i in range(len(self.session.layers)) if i not in which})
+        self._layer_text()
+        self.output = settings.output
+        self.record_from.setCurrentIndex(self.record_from.findData("2D"))
+        if scan["cumulative"]:
+            self.more_section.set_expanded(True)     # where the tick is
+        self._changed()
+        self.show_step(0)
+        self.play.setChecked(True)
+        self.used.emit()
+
+    def stack_settings(self):
+        """This scan as *Save stack*'s settings (`plugins.file.
+        stack_settings_for_scan`), the window and step as *auto* resolves them."""
+        from ..plugins.file import ExportStackSettings, stack_settings_for_scan
+        coordinate = self.coordinate.currentText()
+        if coordinate == NONE:
+            raise ValueError("the view path alone moves the 3D view: Save stack "
+                             "draws the 2D view; record it here")
+        self.prepare()
+        window, step = self._resolved
+        return stack_settings_for_scan(coordinate, window, step,
+                                       self.cumulative.isChecked(), self.scanned_layers(),
+                                       self.speed.value(),
+                                       ExportStackSettings(output=self.output))
+
+    def open_as_stack(self) -> None:
+        opener = self.session.window_openers.get("save stack")
+        if opener is None:
+            raise ValueError("no Save stack window in this program")
+        opener(self.stack_settings())
+
     # --------------------------------------------------------------- record
     def record(self) -> None:
-        """Every step, as the chosen window shows it, written to a file."""
+        """Every step, as the chosen window shows it, written to a file: the
+        output options asked first (`ask_output`)."""
         try:
-            self._record()
+            if self.ask_output():
+                self._record()
         except Exception as error:
             traceback.print_exc()
             QMessageBox.warning(self, "Record", str(error))
+
+    def ask_output(self) -> bool:
+        """*Save stack*'s output part in a dialog, filled with the last
+        recording's; whether it was accepted."""
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+        from .params import SettingsForm
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Record")
+        layout = QVBoxLayout(dialog)
+        form = SettingsForm(type(self.output))
+        form.set(self.output)
+        layout.addWidget(form)
+        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        box.button(QDialogButtonBox.Ok).setText("Record...")
+        box.accepted.connect(dialog.accept)
+        box.rejected.connect(dialog.reject)
+        layout.addWidget(box)
+        if dialog.exec() != QDialog.Accepted:
+            return False
+        self.output = form.value()
+        return True
 
     def _record(self) -> None:
         from ..layer_state import snapshot_layers
@@ -762,11 +855,15 @@ class ScanPlayer(QWidget):
             projections = [v.apply(frame.projection) for v in views]
             if self.box_moves():
                 slabs = [v.slab for v in views]
+        o = self.output
         pictures = sc.scan_pictures(layers, frame, None if coordinate == NONE else coordinate,
                                     steps, line,
-                                    text=lambda s: sc.step_text(coordinate, s, ft),
+                                    text=(lambda s: sc.step_text(coordinate, s, ft))
+                                    if o.stamp else None,
+                                    pixelsize=o.pixelsize_nm,
                                     which=self.scanned_layers(), projections=projections,
-                                    slabs=slabs)
+                                    slabs=slabs, scale_bar=o.scale_bar,
+                                    colour_bars=o.colour_bars, labels=o.labels)
         progress = QProgressDialog("Recording...", "Cancel", 0, len(steps), self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(300)
@@ -781,8 +878,8 @@ class ScanPlayer(QWidget):
 
         try:
             written = write_stack(path, counted(), len(steps), fps=self.speed.value(),
-                                  pixel_nm=frame.pixelsize, description=str(self.session.scan
-                                                                             or coordinate))
+                                  quality=o.quality, pixel_nm=o.pixelsize_nm or frame.pixelsize,
+                                  description=str(self.session.scan or coordinate))
         except InterruptedError:
             Path(path).unlink(missing_ok=True)
             self._say("recording cancelled")

@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.lut.id_index, smappy.lut.offers_ids, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z, smappy.handoff.view_settings, smappy.handoff.apply_view_settings, smappy.gui.attribute_menu.add_actions]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.lut.id_index, smappy.lut.offers_ids, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z, smappy.handoff.view_settings, smappy.handoff.apply_view_settings, smappy.gui.attribute_menu.add_actions, smappy.scan.scan_steps]
 ---
 
 ## What it does
@@ -356,8 +356,12 @@ windows overlap, so the picture changes smoothly.  With the 3D window
 following a line ROI, *across the line* moves a thin slice through the
 structure as it is seen from the side.  Under *more*, the window can
 narrow some layers and leave the others whole: tracks drawn as they grow,
-over all the localizations they came from.  *Record...* writes every step, as the 2D or
-the 3D window shows it, to a movie.
+over all the localizations they came from; *cumulative* keeps everything
+from the start, so a structure builds up.  *Record...* writes every step, as the 2D or
+the 3D window shows it, to a movie.  [Save stack](plugin:File/Export/Stack)
+makes the same movie from a form, with the same renderer: its *Play* plays
+its settings here, and *Save as stack...* hands what plays here to it -- to
+keep the settings, run them in a chain, or put the camera frames beside.
 
 The player can be driven from the picture, without the slider.  Space, in
 the render window or the 3D window, plays and pauses it once it is the
@@ -1100,15 +1104,30 @@ and its pixel) or the 3D view (its projection and its slab), which must be
 open.
 
 ### Record...
-Asks for a file and writes every step to it -- an MP4, a TIFF stack or a
-GIF, by the extension -- drawn by the same renderer as *Save image*, with
-the step written in a corner.  With the view path playing, a recording of the
+First asks how the frames are drawn and written -- *Save stack*'s *output*:
+the pixel (the window's on *auto*), the MP4's quality, the step written in a
+corner, the scale bar, the colour bars and the labels, kept for the next
+recording -- then for a file, and writes every step to it -- an MP4, a TIFF
+stack or a GIF, by the extension -- drawn by the same renderer as *Save
+image* and *Save stack*.  With the view path playing, a recording of the
 3D view follows its path; its pixel size is written for the first step,
 since a zoom changes it.  It can be cancelled.
 
 ### more
 Closed by default, so the player is first of all a window moved through
-the data.  Opened: which layers it narrows, and the 3D view's path.
+the data.  Opened: which layers it narrows, *cumulative*, *Save as
+stack...*, and the 3D view's path.
+
+### cumulative
+Every step shows everything from the start of the range on, so the picture
+fills in: a structure building up over the acquisition.  The window then
+only sets how far each step reaches.
+
+### Save as stack...
+Opens *Save stack* set to what plays here: frames as a movie, z as slices,
+anything else as *another attribute*, with *auto*'s window and step as
+they are now, the layers, the speed as the frame rate and the last
+recording's output.  Not for the view path alone, which moves the 3D view.
 
 ### layers
 Which layers the window narrows; the others are shown whole, with their

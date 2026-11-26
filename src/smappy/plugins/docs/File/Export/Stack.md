@@ -1,6 +1,6 @@
 ---
-version: "1"
-covers: [smappy.movie.frame_steps, smappy.movie.z_steps, smappy.movie.restrict, smappy.movie.stack_frames, smappy.movie.raw_plane, smappy.movie.raw_panel, smappy.movie.write_stack, smappy.movie.estimate_size, smappy.plugins.file.stack_plan, smappy.picture.render_picture]
+version: "2"
+covers: [smappy.scan.scanned, smappy.scan.scan_steps, smappy.scan.coordinate_range, smappy.plugins.file.stack_layers, smappy.plugins.file.scan_for_stack, smappy.plugins.file.stack_settings_for_scan, smappy.movie.frame_steps, smappy.movie.z_steps, smappy.movie.restrict, smappy.movie.stack_frames, smappy.movie.raw_plane, smappy.movie.raw_panel, smappy.movie.write_stack, smappy.movie.estimate_size, smappy.plugins.file.stack_plan, smappy.picture.render_picture]
 ---
 
 ## What it does
@@ -23,9 +23,23 @@ or to go through a 3D structure slice by slice.
   everything from the first frame on, so the picture fills in.
 * **Along z** -- a z-stack.  Slices of a *thickness*, one every *step*,
   from *from* to *to*.  It needs a table with z (`z_nm`).
+* **Along another attribute** -- any attribute of the table (photons, a
+  fit's quality, an id), or the position along or across a line ROI.  A
+  *window* of it is shown, moved by a *step*; both are found from the
+  range on *auto*.
 * **Camera frames beside** -- on the left, the frames the fit kept with
   the localizations; on the right, the localizations of the same frames.
-  What a single-molecule movie looks like next to what it gives.
+  What a single-molecule movie looks like next to what it gives.  Along
+  frames only.
+
+**Save stack and the player.**  The Render tab's
+[player](plugin:Panels/Render tab) moves the same window through the data
+live, and its *Record...* writes what it shows with the same renderer.
+This plugin is the quick way to a movie of an acquisition, in a chain or a
+batch too; the player is for looking through the data first, in the 3D
+view as well.  *Play*, beside *Run*, plays these settings in the player --
+the preview of the movie -- and the player's *Save as stack...* (under its
+*more*) brings what it plays back here.
 
 It writes a TIFF stack (lossless: every pixel as rendered, with the pixel
 size and the time or z step, which Fiji reads), an MP4 (H.264: plays in
@@ -54,7 +68,8 @@ overlapping the next (SMAP's default was a step of 1000 and a window of
 5000).  Along z, slices from *from* upwards until one reaches *to*.
 
 **2. Each frame.**  Every layer is narrowed to the step's localizations --
-its own filter, and the frame (or z) inside the step -- and the picture is
+its own filter, and the frame (or z, or the attribute) inside the step --
+and the picture is
 drawn as *Export Image* draws it.  Each frame's brightness is set by its
 own contrast, as in the window, so a cumulative movie is visible from its
 first frame rather than starting black.
@@ -108,6 +123,12 @@ $f_0 + k s + w$, or from $f_0$ when *cumulative*.  Along z the same, with
 $z$ from *from* to *to*, the step and the thickness.  The last window or
 slice may reach beyond the data.
 
+**Which layers move.**  *layers* names the layers that are narrowed, by
+their number in the Render tab (*1, 3*); the others are shown whole in
+every frame -- tracks drawn over all the localizations they came from, say.
+A layer whose table lacks the attribute (a second file without z) is shown
+whole too.
+
 **Merged blinks.**  A layer that shows merged blinks (one localization per
 blink) places each blink at its first frame.
 
@@ -157,11 +178,23 @@ fills with old paths.
 Thicker than the step makes overlapping slices.  About the axial
 precision (50 to 100 nm) is as thin as is useful.
 
+### attribute.window
+A twentieth of the range on *auto*, moved by a quarter of itself: a smooth
+scan.  Equal to the step for frames that do not overlap.
+
+### attribute.step
+Smaller than the window overlaps the frames; for a whole-number attribute
+(an id, a count) it is rounded to a whole number.
+
+### layers
+Leave it empty to move every layer.  Numbers that are not layers are
+ignored.
+
 ### fps
 10 to 25 frames per second for a smooth movie; slower to look at each
 frame.
 
-### quality
+### output.quality
 *medium* is close to what the eye can tell from the TIFF on a picture of
 localizations; *high* for a movie that will be zoomed into.
 

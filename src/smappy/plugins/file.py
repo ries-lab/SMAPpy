@@ -753,10 +753,47 @@ class StackZSettings:
                                            "highest z shown")
 
 
-_ALONG = (("frames", "frames: a movie"), ("z", "z: slices"))
+@dataclass
+class StackAttributeSettings:
+    column: str = param("", label="attribute", choices=lambda: [("", "-")],
+                        help="what moves: an attribute, or the position along or "
+                             "across the line ROI")
+    window: Optional[float] = param(None, label="window", min=0.0,
+                                    help="the width of what each frame shows; auto: "
+                                         "a twentieth of the range")
+    step: Optional[float] = param(None, label="step", min=0.0,
+                                  help="from one frame to the next; auto: a quarter "
+                                       "of the window")
+    cumulative: bool = param(False, label="cumulative",
+                             help="each frame shows everything from the start on")
+
+
+@dataclass
+class StackOutputSettings:
+    """How each frame is drawn and written: *Save stack*'s, and what the
+    Render tab player's *Record...* asks (`gui.scan_player`)."""
+
+    pixelsize_nm: Optional[float] = param(None, label="pixel", unit="nm", min=0.01,
+                                          help="the picture's pixel; auto: as "
+                                               "the window displays it")
+    quality: str = param("medium", choices=(("high", "high"), ("medium", "medium"),
+                                            ("low", "small file")),
+                         help="MP4: how faithful, against how large")
+    stamp: bool = param(True, label="write time / z",
+                        help="the frames or seconds, or the range shown, on each frame")
+    scale_bar: bool = param(True, label="scale bar",
+                            help="a bar of a round length, bottom right")
+    colour_bars: bool = param(True, label="colour bars",
+                              help="the colour scale of each layer coloured by "
+                                   "an attribute, top right")
+    labels: bool = param(True, label="labels",
+                         help="each panel's name, top left")
+
+
+_ALONG = (("frames", "frames: a movie"), ("z", "z: slices"),
+          ("attribute", "another attribute"))
 _LAYOUTS = (("view", "as the view"), ("composite", "composite only"),
             ("raw", "camera frames beside"))
-_QUALITIES = (("high", "high"), ("medium", "medium"), ("low", "small file"))
 
 
 @dataclass
@@ -769,6 +806,8 @@ class ExportStackSettings:
     frames: StackFramesSettings = param(default_factory=StackFramesSettings,
                                         label="frames")
     z: StackZSettings = param(default_factory=StackZSettings, label="z")
+    attribute: StackAttributeSettings = param(default_factory=StackAttributeSettings,
+                                              label="attribute")
     layout: str = param("view", choices=_LAYOUTS,
                         help="the panels as the window shows them, the layers "
                              "added up, or the camera frames the fit kept on "
@@ -776,22 +815,93 @@ class ExportStackSettings:
     region: str = param("view", label="area", choices=_REGIONS,
                         help="what the window shows, the drawn ROI's box, or "
                              "all the data")
-    pixelsize_nm: Optional[float] = param(None, label="pixel", unit="nm", min=0.01,
-                                          help="the picture's pixel; auto: as "
-                                               "the window displays it")
     fps: float = param(10.0, label="frame rate", unit="1/s", min=0.1, max=120.0,
                        help="frames per second of the movie")
-    quality: str = param("medium", choices=_QUALITIES,
-                         help="MP4: how faithful, against how large")
-    stamp: bool = param(True, label="write time / z",
-                        help="the frames or seconds, or the z range, on each frame")
-    scale_bar: bool = param(True, label="scale bar",
-                            help="a bar of a round length, bottom right")
-    colour_bars: bool = param(True, label="colour bars",
-                              help="the colour scale of each layer coloured by "
-                                   "an attribute, top right")
-    labels: bool = param(True, label="labels",
-                         help="each panel's name, top left")
+    layers: str = param("", label="layers", advanced=True,
+                        help="the layers that move, as 1, 3; empty: all -- the "
+                             "others are shown whole, tracks over their "
+                             "localizations, say")
+    output: StackOutputSettings = param(default_factory=StackOutputSettings,
+                                        label="output", collapsed=True)
+
+
+def stack_layers(text: str) -> Optional[tuple]:
+    """*layers* as `Scan.layers`: "1, 3" the positions 0 and 2, "" all (None)."""
+    text = (text or "").replace(";", ",").strip()
+    if not text:
+        return None
+    try:
+        out = tuple(sorted({int(t) - 1 for t in text.split(",") if t.strip()}))
+    except ValueError:
+        raise ValueError(f"layers {text!r}: numbers, as 1, 3") from None
+    if any(i < 0 for i in out):
+        raise ValueError(f"layers {text!r}: they count from 1")
+    return out
+
+
+def layers_text(which: Optional[tuple]) -> str:
+    return "" if which is None else ", ".join(str(i + 1) for i in which)
+
+
+def stack_settings_for_scan(coordinate: str, window: float, step: float,
+                            cumulative: bool = False, which: Optional[tuple] = None,
+                            fps: float = 10.0,
+                            base: Optional["ExportStackSettings"] = None
+                            ) -> "ExportStackSettings":
+    """*Save stack*'s settings for what the player scans (its *Save as
+    stack...*): frames as a movie, z as slices, anything else by attribute.
+    ``window`` and ``step`` are the ones the player resolved, not *auto*.
+    What is not about the scan -- the file, the layout, the output -- is
+    ``base``'s."""
+    import copy
+    out = copy.deepcopy(base) if base is not None else ExportStackSettings()
+    if coordinate == "frame":
+        out.along = "frames"
+        out.frames.step = max(1, int(round(step)))
+        out.frames.window = max(1, int(round(window)))
+        out.frames.cumulative = cumulative
+    elif coordinate == "z_nm":
+        out.along = "z"
+        out.z.step_nm = float(step)
+        out.z.thickness_nm = float(window)
+        out.z.z_min_nm = out.z.z_max_nm = None
+        if cumulative:          # slices pile up: the attribute form says so
+            out.along = "attribute"
+    if out.along == "attribute" or coordinate not in ("frame", "z_nm"):
+        out.along = "attribute"
+        out.attribute.column = coordinate
+        out.attribute.window = float(window)
+        out.attribute.step = float(step)
+        out.attribute.cumulative = cumulative
+    out.layers = layers_text(which)
+    out.fps = float(fps)
+    return out
+
+
+def scan_for_stack(settings: "ExportStackSettings") -> Dict[str, Any]:
+    """What the player plays for *Save stack*'s settings (its *Play*): the
+    coordinate, window, step (0 for *auto*), cumulative, the layers and the
+    speed.  The z range is not the player's: it runs over what is shown."""
+    if settings.along == "frames":
+        f = settings.frames
+        out = dict(coordinate="frame", window=float(f.window or f.step),
+                   step=float(f.step), cumulative=f.cumulative)
+    elif settings.along == "z":
+        z = settings.z
+        out = dict(coordinate="z_nm", window=float(z.thickness_nm or z.step_nm),
+                   step=float(z.step_nm), cumulative=False)
+    else:
+        a = settings.attribute
+        if not a.column:
+            raise ValueError("choose the attribute that moves")
+        out = dict(coordinate=a.column, window=float(a.window or 0.0),
+                   step=float(a.step or 0.0), cumulative=a.cumulative)
+    out["layers"] = stack_layers(settings.layers)
+    out["fps"] = settings.fps
+    return out
+
+
+STACK_PATH = "File/Export/Stack"
 
 
 @register("File/Export/Stack")
@@ -803,11 +913,16 @@ class ExportStack(Plugin):
     name = "Save stack"
     changes_locs = False
     logged = True
-    version = "1"
+    # 2: any attribute or the line ROI's coordinates, the layers that move,
+    # the output options a part of their own (the player's *Record...* asks
+    # them too), one renderer with the player
+    version = "2"
+    # *Play*: these settings in the Render tab's player, which is the
+    # preview (`gui.app` registers the "player" window)
+    window_buttons = (("Play", "player"),)
 
     def describe(self, ctx: Optional[Context], settings: ExportStackSettings) -> FormState:
         from ..movie import estimate_size, has_encoder, kind_of
-        frames = settings.along == "frames"
         try:
             kind = kind_of(settings.path) if settings.path else "tiff"
         except ValueError:
@@ -821,16 +936,26 @@ class ExportStack(Plugin):
             try:
                 plan = stack_plan(ctx, settings)
                 h, w = plan.shape
-                size = estimate_size(kind, h, w, len(plan.steps), settings.quality)
+                size = estimate_size(kind, h, w, len(plan.steps), settings.output.quality)
                 about = "" if kind == "tiff" else "about "
                 notice = Notice(f"{len(plan.steps)} frames of {w} x {h}: "
                                 f"{about}{_megabytes(size)}", kind="info")
             except Exception:
                 pass
-        return FormState(
+        state = FormState(
             notice=notice,
-            shown={"frames": frames, "z": not frames,
-                   "quality": kind == "mp4", "fps": kind != "tiff"})
+            shown={"frames": settings.along == "frames", "z": settings.along == "z",
+                   "attribute": settings.along == "attribute",
+                   "output.quality": kind == "mp4", "fps": kind != "tiff"})
+        if ctx is not None and ctx.session is not None and ctx.session.locs is not None:
+            from ..scan import LINE_COORDINATES
+            locs = ctx.session.locs
+            names = [c for c in locs.columns
+                     if np.asarray(locs[c]).ndim == 1
+                     and np.asarray(locs[c]).dtype.kind in "iuf"]
+            state.choices["attribute.column"] = (
+                [("", "-")] + [(c, c) for c in names] + [(c, c) for c in LINE_COORDINATES])
+        return state
 
     def preflight(self, ctx: Context, settings: ExportStackSettings):
         """The number of frames and how long they will take: one is rendered
@@ -870,8 +995,9 @@ class ExportStack(Plugin):
         path = Path(settings.path)
         try:
             written = write_stack(path, frames(), n, fps=settings.fps,
-                                  quality=settings.quality, pixel_nm=plan.fov.pixelsize,
-                                  interval=plan.interval, along=settings.along,
+                                  quality=settings.output.quality,
+                                  pixel_nm=plan.fov.pixelsize, interval=plan.interval,
+                                  along="z" if settings.along == "z" else "frames",
                                   description=description_text(described))
         except BaseException:
             path.unlink(missing_ok=True)       # half a movie is no movie
@@ -895,21 +1021,27 @@ class StackPlan:
     shape: tuple                 # (height, width) of a frame
     interval: Optional[float]    # seconds between frames, or the z step in nm
     frame_time_ms: Optional[float]
+    line: Any = None             # the line ROI, for its coordinates
+    which: Optional[tuple] = None   # the layers that move (`Scan.layers`)
 
     def frames(self, steps):
         from ..movie import stack_frames
         s = self.settings
+        o = s.output
         tail = s.frames.tail if s.along == "frames" else None
         panels = self.frame.panels if self.frame is not None else ("overlay",)
         return stack_frames(
             self.layers, self.fov, steps, column=self.column,
             what="composite" if s.layout != "view" else "view", panels=panels,
             stacked=self.frame.stacked if self.frame is not None else False,
-            tail=tail, raw=self.raw, scale_bar=s.scale_bar,
-            colour_bars=s.colour_bars, labels=s.labels,
-            text=self.text if s.stamp else None)
+            tail=tail, raw=self.raw, scale_bar=o.scale_bar,
+            colour_bars=o.colour_bars, labels=o.labels,
+            text=self.text if o.stamp else None, line=self.line, which=self.which)
 
     def text(self, step) -> str:
+        if self.settings.along == "attribute":
+            from ..scan import step_text
+            return step_text(self.column, step, self.frame_time_ms)
         if self.column != "frame":
             return f"z {step.lo:g} to {step.hi:g} nm"
         if self.frame_time_ms:
@@ -921,9 +1053,35 @@ def stack_plan(ctx: Context, settings: ExportStackSettings) -> StackPlan:
     """The layers, grid and steps of a stack, from the view (`picture_setup`)."""
     from ..metadata import file_frame_time
     from ..movie import frame_steps, shown_range, z_steps
-    layers, fov, frame = picture_setup(ctx, "2D", settings.region, settings.pixelsize_nm)
+    layers, fov, frame = picture_setup(ctx, "2D", settings.region,
+                                       settings.output.pixelsize_nm)
     raw = []
-    if settings.along == "frames":
+    line = None
+    which = stack_layers(settings.layers)
+    if settings.layout == "raw" and settings.along != "frames":
+        raise ValueError("the camera frames go beside a movie along frames, "
+                         "not a stack along z or another attribute")
+    if settings.along == "attribute":
+        from ..scan import (AUTO_OVERLAP, LINE_COORDINATES, auto_window,
+                            coordinate_range, is_integer, scan_steps)
+        a = settings.attribute
+        column = a.column
+        if not column:
+            raise ValueError("choose the attribute that moves")
+        session = ctx.session
+        line = session.roi if (session is not None and column in LINE_COORDINATES) else None
+        lo, hi = coordinate_range(layers, column, line, which)
+        integer = is_integer(layers, column)
+        window, step = auto_window(lo, hi, integer)
+        window = a.window or window
+        step = a.step or (window / AUTO_OVERLAP if a.window else step)
+        if integer:
+            step = max(1.0, round(step))
+        steps = scan_steps(lo, hi, window, step, integer, a.cumulative)
+        interval = None
+        frame_time = file_frame_time(getattr(session.locs if session is not None
+                                             else ctx.locs, "metadata", None))
+    elif settings.along == "frames":
         column = "frame"
         first, last = shown_range(layers, column)
         f = settings.frames
@@ -940,9 +1098,6 @@ def stack_plan(ctx: Context, settings: ExportStackSettings) -> StackPlan:
                                  "localization file it wrote has them")
     else:
         column = "z_nm"
-        if settings.layout == "raw":
-            raise ValueError("the camera frames go beside a movie along frames, "
-                             "not a stack along z")
         z = settings.z
         lo, hi = shown_range(layers, column)
         z0 = lo if z.z_min_nm is None else z.z_min_nm
@@ -960,7 +1115,7 @@ def stack_plan(ctx: Context, settings: ExportStackSettings) -> StackPlan:
     else:
         shape = (fov.ny, fov.nx)
     return StackPlan(layers, fov, frame, steps, column, settings, raw, shape,
-                     interval, frame_time)
+                     interval, frame_time, line, which)
 
 
 def _megabytes(size: float) -> str:
