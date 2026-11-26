@@ -53,3 +53,58 @@ def test_a_gallery_of_the_longest_traces():
 
 def test_it_runs_per_region():
     assert plugins.get(PLUGIN).per_region
+
+
+def marked_table():
+    locs = table()
+    tail = np.zeros(600, np.int8)
+    tail[:40] = 1                         # trace 1's first 40 localizations
+    return Localizations({**locs.columns, "in_tail": tail}, {})
+
+
+def test_the_tail_trace_statistics_wrote_is_shaded_and_said():
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    session = Session(marked_table())
+    session.show_grouped(0, False)
+    cls = plugins.get(PLUGIN)
+    r = session.run(cls(), cls.Settings())
+    assert "tail (Trace statistics): 40 of 500" in r.text
+    figure = Figure()
+    r.plot.draw(figure)
+    shaded = [p for p in figure.axes[0].patches]
+    assert len(shaded) == 1
+    x0, x1 = shaded[0].get_x(), shaded[0].get_x() + shaded[0].get_width()
+    assert x0 == pytest.approx(0.0) and x1 == pytest.approx(0.040)
+
+
+def test_the_numbers_stay_those_of_the_whole_trace():
+    session = Session(marked_table())
+    session.show_grouped(0, False)
+    cls = plugins.get(PLUGIN)
+    with_marks = session.run(cls(), cls.Settings()).values
+    plain = Session(table())
+    plain.show_grouped(0, False)
+    assert with_marks["n_locs"] == plain.run(cls(), cls.Settings()).values["n_locs"] == 500
+
+
+def test_spans_are_the_runs_of_a_flag():
+    from smappy.plugins.trace_inspector import spans
+    t = np.arange(10.0)
+    flag = np.array([1, 1, 0, 0, 1, 0, 0, 0, 1, 1], bool)
+    assert spans(t, flag) == [(0.0, 2.0), (4.0, 5.0), (8.0, 9.0)]
+    assert spans(t, np.zeros(10, bool)) == []
+
+
+def test_a_trace_without_marks_draws_no_shading():
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    session = Session(table())
+    session.show_grouped(0, False)
+    cls = plugins.get(PLUGIN)
+    r = session.run(cls(), cls.Settings())
+    figure = Figure()
+    r.plot.draw(figure)
+    assert not figure.axes[0].patches and "Trace statistics" not in r.text

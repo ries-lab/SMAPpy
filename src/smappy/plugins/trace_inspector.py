@@ -9,6 +9,14 @@ trace and its numbers go to the region table; on the view it takes the
 longest trace the selection holds (or the one *trace* names), or, with
 *gallery*, the longest few side by side.  The numbers are
 `smappy.traces`'.
+
+**What Trace statistics marked is drawn, not measured.**  Where *Trace
+statistics* wrote its marks onto the localizations (*write the tail*:
+`in_tail`, and `after_cfr` past a cfr cut), the inspector shades those
+stretches of time and greys their points, so the tail rule can be judged on
+the trace it was applied to.  The numbers stay those of the whole trace: the
+inspector is where one looks at what a rule would leave out, and leaving it
+out here would hide exactly that.
 """
 from __future__ import annotations
 
@@ -21,6 +29,11 @@ from . import Context, FormState, Plot, Plugin, Result, param, register
 from .id_statistics import _id_choices, id_column
 
 QUALITY = ("efo", "cfr", "photons", "fbg")
+#: the marks *Trace statistics* writes (*write the tail*), drawn as shaded
+#: stretches of time: column, what the legend calls it, its shade
+MARKS = (("in_tail", "tail", "0.82"), ("after_cfr", "after cfr", "#e8a39c"))
+#: the colour of a marked localization's points
+MARKED = "0.65"
 
 
 @dataclass
@@ -117,9 +130,13 @@ class TraceInspector(Plugin):
         # an attribute never measured here (NaN) or not used (0) is not drawn
         quality = {q: v for q, v in quality.items()
                    if np.isfinite(v).any() and np.nanmax(np.abs(v)) > 0}
+        marks = trace_marks(locs, rows)
+        for label, flag in marks.items():
+            lines.append(f"{label} (Trace statistics): {int(flag.sum())} of {len(rows)} "
+                         "localizations, shaded")
 
         def draw(figure):
-            draw_trace(figure, t, pos, quality, settings.window, unit)
+            draw_trace(figure, t, pos, quality, settings.window, unit, marks)
 
         n_panels = 2 + bool(quality)
         return Result(text="\n".join(lines), values=values,
@@ -135,18 +152,25 @@ class TraceInspector(Plugin):
         a = T.axes(r, x, y)
         xr, yr = T.rotate(r, x, y, a)
         pick = np.argsort(-r.n)[:settings.gallery]
-        shown = [(int(r.ids[i]), time[r.order][r.start[i]:r.start[i] + r.n[i]],
-                  xr[r.start[i]:r.start[i] + r.n[i]], yr[r.start[i]:r.start[i] + r.n[i]])
+
+        def run_of(i):
+            return slice(int(r.start[i]), int(r.start[i] + r.n[i]))
+
+        shown = [(int(r.ids[i]), time[r.order][run_of(i)], xr[run_of(i)], yr[run_of(i)],
+                  marked(trace_marks(locs, r.order[run_of(i)]), int(r.n[i])))
                  for i in pick]
 
         def draw(figure):
             n = len(shown)
             grid = figure.subplots(2, n, squeeze=False)
-            for k, (tid, t, u, v) in enumerate(shown):
-                grid[0, k].plot(u, v, ".", ms=1.5, color="0.3")
+            for k, (tid, t, u, v, off) in enumerate(shown):
+                on = ~off
+                grid[0, k].plot(u[off], v[off], ".", ms=1.5, color=MARKED)
+                grid[0, k].plot(u[on], v[on], ".", ms=1.5, color="0.3")
                 grid[0, k].set_aspect("equal", adjustable="datalim")
                 grid[0, k].set_title(f"{column} {tid}", fontsize=7)
-                grid[1, k].plot(t - t[0], u, ".", ms=1.5, color="0.3")
+                grid[1, k].plot((t - t[0])[off], u[off], ".", ms=1.5, color=MARKED)
+                grid[1, k].plot((t - t[0])[on], u[on], ".", ms=1.5, color="0.3")
                 grid[1, k].tick_params(labelsize=6)
                 grid[0, k].tick_params(labelsize=6)
             grid[0, 0].set_ylabel("across (nm)", fontsize=7)
@@ -178,6 +202,48 @@ def trace_values(t, positions, quality) -> dict:
     return out
 
 
+def trace_marks(locs, rows) -> dict:
+    """``{label: flag}`` for the marks of `MARKS` the table has, over the
+    trace's ``rows`` in time order; a mark no row of the trace carries is
+    left out, so an untouched trace draws as it did."""
+    out = {}
+    for column, label, _ in MARKS:
+        if column in locs:
+            flag = np.asarray(locs[column])[rows] > 0
+            if flag.any():
+                out[label] = flag
+    return out
+
+
+def marked(marks: dict, n: int) -> np.ndarray:
+    """Any mark, per localization: the points drawn grey."""
+    out = np.zeros(n, bool)
+    for flag in marks.values():
+        out |= flag
+    return out
+
+
+def spans(t, flag) -> list:
+    """The stretches of time ``flag`` is on, as ``(start, end)`` pairs: each
+    run of marked localizations from its first time to the next unmarked
+    one's, so the shading meets the trace where the mark ends."""
+    flag = np.asarray(flag, bool)
+    if not flag.any():
+        return []
+    edges = np.diff(np.r_[0, flag.astype(np.int8), 0])
+    starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
+    return [(float(t[a]), float(t[min(b, len(t) - 1)])) for a, b in zip(starts, ends)]
+
+
+def shade(ax, t0, marks: dict) -> None:
+    """Each mark's stretches behind the curves, labelled once."""
+    shades = {label: colour for _, label, colour in MARKS}
+    for label, flag in marks.items():
+        for k, (a, b) in enumerate(spans(t0, flag)):
+            ax.axvspan(a, b, color=shades[label], alpha=0.5, lw=0, zorder=0,
+                       label=label if k == 0 else None)
+
+
 def running_median(v, window: int):
     """The median over ``window`` points centred on each (fewer at the ends)."""
     v = np.asarray(v, np.float64)
@@ -187,13 +253,18 @@ def running_median(v, window: int):
     return median_filter(v, size=min(window, len(v)), mode="nearest")
 
 
-def draw_trace(figure, t, pos, quality, window: int, unit: str) -> None:
+def draw_trace(figure, t, pos, quality, window: int, unit: str,
+               marks: Optional[dict] = None) -> None:
+    marks = marks or {}
     n = 2 + bool(quality)
     axs = np.atleast_1d(figure.subplots(1, n))
     t0 = t - t[0]
+    shade(axs[0], t0, marks)
+    off = marked(marks, len(t))
     for k, (a, v) in enumerate(pos.items()):
         c = f"C{k}"
-        axs[0].plot(t0, v - np.nanmean(v), ".", ms=1.5, color=c, alpha=0.5)
+        axs[0].plot(t0[~off], (v - np.nanmean(v))[~off], ".", ms=1.5, color=c, alpha=0.5)
+        axs[0].plot(t0[off], (v - np.nanmean(v))[off], ".", ms=1.5, color=MARKED, alpha=0.5)
         axs[0].plot(t0, running_median(v, window) - np.nanmean(v), color=c, lw=1, label=a)
     axs[0].set_xlabel(f"time ({unit}{'s' if unit == 'frame' else ''})")
     axs[0].set_ylabel("position - mean (nm)")
@@ -215,6 +286,7 @@ def draw_trace(figure, t, pos, quality, window: int, unit: str) -> None:
     axs[1].legend(fontsize=6, frameon=False)
     if quality:
         ax = axs[2]
+        shade(ax, t0, marks)
         for k, (q, v) in enumerate(quality.items()):
             ok = np.isfinite(v)
             if not ok.any():

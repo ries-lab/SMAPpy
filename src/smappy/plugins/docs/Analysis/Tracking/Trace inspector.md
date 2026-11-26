@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.plugins.trace_inspector.TraceInspector.run, smappy.plugins.trace_inspector.trace_values, smappy.plugins.trace_inspector.running_median, smappy.plugins.trace_inspector.draw_trace]
+covers: [smappy.plugins.trace_inspector.TraceInspector.run, smappy.plugins.trace_inspector.trace_values, smappy.plugins.trace_inspector.running_median, smappy.plugins.trace_inspector.draw_trace, smappy.plugins.trace_inspector.trace_marks, smappy.plugins.trace_inspector.spans]
 ---
 
 ## What it does
@@ -58,6 +58,23 @@ draw_trace(fig, t, {"x": x, "y": y}, {"cfr": cfr}, 50, "s")
 
 The wander raises x's standard deviation to about 6 nm, while the
 precision from consecutive localizations stays at the 3 nm of the noise.
+
+**4. What Trace statistics marked.**  When
+[Trace statistics](plugin:Analysis/Tracking/Trace statistics) has written
+its marks onto the localizations (its *write the tail*: `in_tail`, and
+`after_cfr` after a cfr cut), those stretches of time are shaded in the
+position and quality panels and their points drawn grey, here and in the
+*gallery*.  The text says how many of the trace's localizations each mark
+covers.  This is where a tail rule is checked by eye: does the shading end
+where the trace settles?  The numbers above are still those of the whole
+trace, marks included, so the inspector shows what a rule would leave out
+rather than hiding it.
+
+```figure The same trace with its first 0.3 s marked as the tail: the shaded stretch and the grey points are what Trace statistics would leave out of its numbers.
+fig.set_size_inches(10.0, 2.8)
+tail = t < 0.3
+draw_trace(fig, t, {"x": x, "y": y}, {"cfr": cfr}, 50, "s", {"tail": tail})
+```
 
 ## Parameters
 
