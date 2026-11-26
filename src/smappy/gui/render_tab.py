@@ -1826,10 +1826,14 @@ class RenderTab(QWidget):
 
     def _colour_by_track(self) -> None:
         """The first time a layer draws tracks, and only if it is not coloured
-        by a column already: each track its own colour, by its id on *rainbow*.
-        One intensity LUT made every track the same colour, and which line
-        was which track could not be told where they cross.  Once per layer,
-        so a colouring chosen afterwards is not undone by a mode switch."""
+        by a column already: each track its own colour, by its id on the ids
+        table (`lut.IDS_LUT`).  One intensity LUT made every track the same
+        colour, and which line was which track could not be told where they
+        cross; *rainbow*, until 2026-11, spread the id range over one ramp,
+        so of thousands of tracks the neighbouring ids -- tracks that start
+        close in time and place -- had one colour, the colour bar was a scale
+        of ids, and a filter moved every colour.  Once per layer, so a
+        colouring chosen afterwards is not undone by a mode switch."""
         state = self.layer.state
         if state.settings.color_field is not None or id(state) in self._tracks_coloured:
             return
@@ -1849,7 +1853,12 @@ class RenderTab(QWidget):
             w.blockSignals(False)
         # through the handlers, so the range and the LUT follow as on a click
         self._on_color()
-        self.lut.setCurrentText(FIELD_LUT)
+        # an id column offers the ids table (`lut.offers_ids`); a track column
+        # named otherwise is drawn on the ramp
+        if self.lut.findText(luts.IDS_LUT) >= 0:
+            self.lut.setCurrentText(luts.IDS_LUT)
+        else:
+            self.lut.setCurrentText(FIELD_LUT)
 
     def _chosen_track_column(self, fallback: str) -> str:
         """The column the list says: "" for *auto*; ``fallback`` while the

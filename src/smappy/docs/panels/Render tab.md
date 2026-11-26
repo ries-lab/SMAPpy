@@ -920,9 +920,10 @@ different densities at once, or to judge densities by eye; the picture of
 a layer with millions of localizations takes a while the first time.
 
 The first time a layer is set to *tracks*, and if it is not coloured by an
-attribute already, it is coloured by its track id on the *rainbow* LUT, so that
-each track has a colour of its own; choose *intensity* to draw them all in
-one.  Choosing *tracks* also unticks *merge blinks* on that layer: merging joins a
+attribute already, it is coloured by its track id on the *ids* LUT, so that
+each track has a colour of its own however many there are, and neighbouring
+tracks differ; choose the *ids* LUT again for other colours, *intensity* to
+draw them all in one.  Choosing *tracks* also unticks *merge blinks* on that layer: merging joins a
 slow particle's localizations in consecutive frames into one, and the line
 through the blinks is coarser than the track.  Tick it again to draw the
 blinks.

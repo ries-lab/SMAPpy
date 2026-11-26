@@ -233,7 +233,7 @@ def test_covering_lines_keep_their_colour_where_they_overlap():
     assert np.allclose(mean, 0.5 * (one + two), atol=1e-5)
 
 
-def test_tracks_are_coloured_by_their_id_on_turbo_the_first_time_only():
+def test_tracks_are_coloured_by_their_id_on_the_ids_table_the_first_time_only():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     QApplication.instance() or QApplication([])
@@ -246,7 +246,8 @@ def test_tracks_are_coloured_by_their_id_on_turbo_the_first_time_only():
     assert not tab._more_form.isRowVisible(tab.lines_add)
     tab.set_mode("tracks")
     assert state.settings.color_field == "track_id"
-    assert state.display.lut == "rainbow"
+    assert state.display.lut == "ids"
+    assert not tab.invert.isEnabled()               # the ids table takes no range
     assert tab._more_form.isRowVisible(tab.lines_add)
     tab.lines_add.setChecked(True)
     assert state.settings.lines_add
