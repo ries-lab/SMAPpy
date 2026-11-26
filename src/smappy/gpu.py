@@ -462,9 +462,12 @@ class GPUEngine:
     # ------------------------------------------------------------- caches
     def table(self, key, x, y, z=None, precision=None, weights=None, cvalues=None):
         """Upload a table once; ``key`` says which (the table object and the
-        column names).  Returns the number of points."""
+        column names).  Returns the number of points.  ``cvalues`` may be a
+        function that makes them, called only when the table is uploaded."""
         if key in self._tables:
             return self._tables[key][1]
+        if callable(cvalues):
+            cvalues = cvalues()
         n = len(x)
         rec = np.zeros((n, 8), np.float32)
         rec[:, 0], rec[:, 1] = x, y

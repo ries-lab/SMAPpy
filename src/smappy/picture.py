@@ -146,6 +146,8 @@ def colour_scales(layers: Sequence[LayerSnapshot]) -> List[tuple]:
         field = layer.settings.color_field
         if field is None or layer.locs is None or field not in layer.locs:
             continue
+        if luts.is_ids(layer.display.lut):
+            continue                 # a colour per id is no scale to read off
         lo, hi = layer.settings.color_range or finite_range(layer.locs[field])
         try:
             table = luts.get(layer.display.lut, luts.field_inversion(layer.display.invert))

@@ -53,6 +53,21 @@ def test_tilted_slab_matches_the_cpu_engine():
             assert np.abs(cpu - gpu_).max() < tolerance, (settings, extra)
 
 
+def test_the_ids_table_draws_on_the_gpu_what_it_draws_on_the_cpu():
+    from smappy import lut as luts
+    locs = _table()
+    locs.columns["cluster_id"] = (np.arange(len(locs)) // 50 - 1).astype(np.int64)
+    s = Session(locs)
+    s.set_slab(Slab.from_bounds(100, 900, 100, 700, -150, 150))
+    s.layers[0].state.settings = RenderSettings(color_field="cluster_id")
+    s.layers[0].set_display(DisplaySettings(lut=luts.IDS_LUT, ids_offset=0.4, invert=True))
+    proj = Projection(azimuth=35, elevation=50, pivot=s.slab.center, zoom=5.0)
+    fov = proj.fov(200, 160)
+    cpu = render_3d(s.layers, proj, s.slab, fov)
+    proj.engine = "gpu"
+    assert np.abs(cpu - render_3d(s.layers, proj, s.slab, fov, engine=ENGINE)).max() < 0.02
+
+
 def test_points_mode_draws_something():
     locs = _table(2000)
     s = Session(locs)

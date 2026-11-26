@@ -1451,7 +1451,11 @@ class Assistant:
           lut={"type": "string", "description": "the colour map, by group (for "
                  "intensity: one colour, several colours; for colouring by a "
                  "column: attribute): " + "; ".join(
-                     f"{heading}: {', '.join(names)}" for heading, names in lut_groups())},
+                     f"{heading}: {', '.join(names)}" for heading, names in lut_groups())
+                 + ".  'ids' is for a column that is an id (cluster_id, track_id, "
+                 "tid, filenumber, channel): a colour per value, neighbouring ids "
+                 "far apart, -1 grey, no range; display.ids_offset (0 to 1) "
+                 "turns every colour, a new value new colours"},
           contrast={"type": "number",
                     "description": "saturate 10^-contrast of the pixels: higher, darker"},
           visible={"type": "boolean"},

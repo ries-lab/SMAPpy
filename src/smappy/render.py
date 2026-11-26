@@ -664,6 +664,9 @@ class DisplaySettings:
     # once, with `white_background=False` per layer -- but it is kept here so
     # that a single-layer render (an export, a script) needs nothing else.
     white_background: bool = False
+    # the ids table's turn (`lut.id_index`): a new one on choosing the table
+    # again, kept so that the same picture comes back from a saved session
+    ids_offset: float = 0.0
 
     def apply(self, rendered: RenderedImage,
               white_background: Optional[bool] = None) -> np.ndarray:
@@ -826,7 +829,8 @@ def _render_locs(locs: Localizations, fov: FieldOfView, settings: RenderSettings
         values = locs[settings.color_field]
         values = values if select is None else values[select]
         lo, hi = settings.color_range or finite_range(values)
-        colors = luts.colors(values, display.lut, lo, hi, display.invert)
+        colors = luts.colors(values, display.lut, lo, hi, display.invert,
+                             display.ids_offset)
 
     if settings.mode == "dl":
         if not settings.axes.is_default:
@@ -1056,9 +1060,10 @@ def render_tracks(locs: Localizations, fov: FieldOfView, settings: "RenderSettin
     colors = None
     if settings.color_field is not None:
         values = np.asarray(locs[settings.color_field], np.float64)
-        mid = 0.5 * (values[a] + values[b])
+        # an id is not averaged: the mean of two ids is a third one's colour
+        mid = values[a] if luts.is_ids(display.lut) else 0.5 * (values[a] + values[b])
         lo, hi = settings.color_range or finite_range(values)
-        colors = luts.colors(mid, display.lut, lo, hi, display.invert)
+        colors = luts.colors(mid, display.lut, lo, hi, display.invert, display.ids_offset)
     out = render_segments(x[a], y[a], x[b], y[b], fov, settings.line_width, weights,
                           colors, n_threads, use_extension)
     if not settings.lines_add:
@@ -1291,7 +1296,8 @@ def render_voronoi(locs: Localizations, fov: FieldOfView, settings: "RenderSetti
     small = np.isfinite(cells.area) & (cells.area < pixel_area)
     counted = small[cells.cell] if len(cells.cell) else np.zeros(0, bool)
     colors = (None if values is None else
-              luts.colors(values[counted], display.lut, lo, hi, display.invert))
+              luts.colors(values[counted], display.lut, lo, hi, display.invert,
+                          display.ids_offset))
     mass = render_histogram(x[counted], y[counted], fov, colors=colors)
     share = cells.area[cells.cell[counted]] / cells.repeats[cells.cell[counted]]
     covered = render_histogram(x[counted], y[counted], fov, weights=share).weight
@@ -1322,7 +1328,8 @@ def render_voronoi(locs: Localizations, fov: FieldOfView, settings: "RenderSetti
             flat_w[chunk[use]] += add
             if flat_c is not None:
                 flat_c[chunk[use]] += add[:, None] * luts.colors(
-                    site_values[site[use]], display.lut, lo, hi, display.invert)
+                    site_values[site[use]], display.lut, lo, hi, display.invert,
+                    display.ids_offset)
     inside = ((x >= fov.x0) & (x < fov.x1) & (y >= fov.y0) & (y < fov.y1))
     return RenderedImage(fov, weight.astype(np.float32),
                          None if color is None else color.astype(np.float32),

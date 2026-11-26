@@ -303,3 +303,68 @@ def test_f1_help_opens_its_page_and_keeps_no_widget_alive(app, monkeypatch):
     del widget, shortcut
     gc.collect()
     assert alive() is None
+
+
+def _clustered_tab():
+    from smappy.gui.render_tab import RenderTab
+    locs = table()
+    locs.columns["cluster_id"] = np.arange(len(locs), dtype=np.int64) % 40 - 1
+    session = Session(locs)
+    tab = RenderTab(session)
+    tab.color.setCurrentIndex(tab.color.findData("field"))
+    return session, tab
+
+
+def _listed(combo):
+    return [combo.itemText(i) for i in range(combo.count())]
+
+
+def test_the_ids_table_is_offered_for_an_id_attribute_and_not_for_x(app):
+    from smappy import lut as luts
+    _, tab = _clustered_tab()
+    tab.color_field.setCurrentText("x_nm")
+    assert luts.IDS_LUT not in _listed(tab.lut)
+    tab.color_field.setCurrentText("cluster_id")
+    assert luts.IDS_LUT in _listed(tab.lut)
+
+
+def test_choosing_the_ids_table_greys_the_range_and_invert(app):
+    from smappy import lut as luts
+    _, tab = _clustered_tab()
+    tab.color_field.setCurrentText("cluster_id")
+    assert tab.color_range_row.isEnabled() and tab.invert.isEnabled()
+    tab.lut.setCurrentText(luts.IDS_LUT)
+    assert not tab.color_range_row.isEnabled() and not tab.invert.isEnabled()
+    tab.lut.setCurrentText("rainbow")
+    assert tab.color_range_row.isEnabled() and tab.invert.isEnabled()
+
+
+def test_choosing_the_ids_table_again_draws_new_colours(app):
+    from smappy import lut as luts
+    session, tab = _clustered_tab()
+    tab.color_field.setCurrentText("cluster_id")
+    index = tab.lut.findText(luts.IDS_LUT)
+    tab.lut.setCurrentIndex(index)
+    tab.lut.activated.emit(index)               # what a pick from the list sends
+    first = session.layers[0].get_display()
+    assert first.lut == luts.IDS_LUT
+    tab.lut.activated.emit(index)               # the same table picked again
+    again = session.layers[0].get_display()
+    assert again.lut == luts.IDS_LUT and again.ids_offset != first.ids_offset
+    ids = np.arange(1, 30)
+    assert not np.array_equal(luts.colors(ids, luts.IDS_LUT, 0, 1, offset=first.ids_offset),
+                              luts.colors(ids, luts.IDS_LUT, 0, 1, offset=again.ids_offset))
+
+
+def test_colouring_by_an_attribute_that_is_no_id_goes_back_to_the_table_before(app):
+    from smappy import lut as luts
+    session, tab = _clustered_tab()
+    tab.color_field.setCurrentText("cluster_id")
+    tab.lut.setCurrentText("blue-yellow")
+    tab.lut.setCurrentText(luts.IDS_LUT)
+    assert session.layers[0].get_display().lut == luts.IDS_LUT
+    tab.color_field.setCurrentText("photons")
+    assert tab.lut.currentText() == "blue-yellow"
+    assert session.layers[0].get_display().lut == "blue-yellow"
+    assert luts.IDS_LUT not in _listed(tab.lut)
+    assert tab.color_range_row.isEnabled() and tab.invert.isEnabled()

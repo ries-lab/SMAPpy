@@ -8,6 +8,7 @@ layer strip at the top.
 from __future__ import annotations
 
 import dataclasses
+import random
 import traceback
 from typing import Dict, List, Optional, Tuple
 
@@ -97,18 +98,20 @@ def lut_icon(name: str) -> QIcon:
     return _lut_icons[name]
 
 
-def fill_luts(combo: QComboBox, attribute: bool) -> None:
+def fill_luts(combo: QComboBox, attribute: bool, ids: bool = False) -> None:
     """The LUTs under their groups' headings (`lut.groups`), the ones for what
     the layer is coloured by first: intensity, or with ``attribute`` a column.
-    Every LUT is offered either way -- z on a hue circle is a fair choice --
-    only the order says which suit.  The headings cannot be chosen; the
-    choice is kept and no signal fires."""
+    Every ramp is offered either way -- z on a hue circle is a fair choice --
+    only the order says which suit.  The ids table is the exception, offered
+    only with ``ids``, a column that is an id (`lut.offers_ids`): on x or a
+    frame it would scatter values that are meant to look alike.  The
+    headings cannot be chosen; the choice is kept and no signal fires."""
     chosen = combo.currentText()
     blocked = combo.signalsBlocked()
     combo.blockSignals(True)
     combo.clear()
     model = combo.model()
-    for heading, names in luts.groups(attribute):
+    for heading, names in luts.groups(attribute, ids=ids):
         combo.addItem(f"\u2014 {heading} \u2014")
         item = model.item(combo.count() - 1)
         item.setFlags(Qt.NoItemFlags)
@@ -1241,6 +1244,9 @@ class RenderTab(QWidget):
         self.merger = merger_for(session, self)
         # the layers (their states) already coloured by track (`_colour_by_track`)
         self._tracks_coloured: set = set()
+        # per layer state, the table it had before the ids table: what it
+        # goes back to when it is coloured by a column that is not an id
+        self._before_ids: Dict[int, str] = {}
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         # Copy settings / Paste settings of the layers on a right-click where
@@ -1525,6 +1531,9 @@ class RenderTab(QWidget):
         self.color.currentIndexChanged.connect(self._on_color)
         self.color_field.currentIndexChanged.connect(self._on_color)
         self.lut.currentTextChanged.connect(self._on_display)
+        # every pick, the same one again too: choosing the ids table anew
+        # draws new colours (`_on_lut_chosen`)
+        self.lut.activated.connect(self._on_lut_chosen)
         self.invert.toggled.connect(self._on_display)
         self.white.toggled.connect(self._on_white)
         self.contrast.valueChanged.connect(self._on_display)
@@ -1680,6 +1689,7 @@ class RenderTab(QWidget):
             fill_luts(self.lut, attribute=False)
             self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "gray")
             self._show_invert(display.invert)
+            self.invert.setEnabled(True)
             self.white.setChecked(display.white_background)
             self._show_scale(display)
             self.gamma.setValue(display.gamma)
@@ -1705,9 +1715,11 @@ class RenderTab(QWidget):
         self.sigma_y.set(settings.sigma_y)
         self.factor.setValue(settings.sigma_settings.factor)
         self._show_sigma_rows()
-        fill_luts(self.lut, attribute=settings.color_field is not None)
+        fill_luts(self.lut, attribute=settings.color_field is not None,
+                  ids=luts.offers_ids(settings.color_field))
         self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else INTENSITY_LUT)
         self._show_invert(display.invert)
+        self._grey_for_ids()
         self.white.setChecked(display.white_background)
         self._show_scale(display)
         self.gamma.setValue(display.gamma)
@@ -1862,8 +1874,20 @@ class RenderTab(QWidget):
         self.color_lo.set(lo)
         self.color_hi.set(hi)
         if (was is None) != (field is None):            # switching kind: a fitting LUT
-            fill_luts(self.lut, attribute=field is not None)
+            fill_luts(self.lut, attribute=field is not None, ids=luts.offers_ids(field))
             self.lut.setCurrentText(INTENSITY_LUT if field is None else FIELD_LUT)
+            self._take_lut()
+        elif field != was:
+            ids = luts.offers_ids(field)
+            if luts.is_ids(self.lut.currentText()) and not ids:
+                # the ids table on a column that is not an id: back to the
+                # table the layer had before it
+                fill_luts(self.lut, attribute=True, ids=False)
+                self.lut.setCurrentText(self._before_ids.get(id(state), FIELD_LUT))
+                self._take_lut()
+            else:
+                fill_luts(self.lut, attribute=True, ids=ids)
+        self._grey_for_ids()
         self.session.changed("layer")
 
     def _field_range(self, field: str, shown: bool = False):
@@ -1924,9 +1948,46 @@ class RenderTab(QWidget):
     def _show_invert(self, invert) -> None:
         self.invert.setChecked(bool(invert))
 
+    def _grey_for_ids(self) -> None:
+        """The range and *invert* greyed while the ids table is chosen: it
+        gives each value its own colour, whatever the range, and has no
+        direction to turn round."""
+        ids = luts.is_ids(self.lut.currentText())
+        self.invert.setEnabled(not ids)
+        layer = self.layer
+        field = None if layer.is_image else layer.state.settings.color_field
+        self.color_range_row.setEnabled(field is not None and not ids)
+
+    def _take_lut(self) -> None:
+        """The list's table onto the layer when the list changed it with its
+        signals blocked: `fill_luts` falls back to a default when the chosen
+        table is no longer offered (the ids table), and says nothing."""
+        if self.layer.get_display().lut != self.lut.currentText():
+            self._on_display()
+
+    def _on_lut_chosen(self, index: int) -> None:
+        """A table picked from the list, the one already chosen too: the ids
+        table picked draws a new offset, so the colours shuffle -- picking
+        it again is the way to new colours, with no button of its own."""
+        if not luts.is_ids(self.lut.itemText(index)):
+            return
+        self.new_ids_colours()
+
+    def new_ids_colours(self) -> None:
+        """A new random turn of the ids table for this layer (`lut.id_index`)."""
+        layer = self.layer
+        layer.set_display(dataclasses.replace(layer.get_display(),
+                                              ids_offset=random.random()))
+        self._on_display()
+
     def _on_display(self) -> None:
         layer = self.layer
-        layer.set_display(dataclasses.replace(layer.get_display(), lut=self.lut.currentText(),
+        chosen = self.lut.currentText()
+        was = layer.get_display().lut
+        if luts.is_ids(chosen) and not luts.is_ids(was) and isinstance(was, str):
+            self._before_ids[id(layer.state)] = was
+        self._grey_for_ids()
+        layer.set_display(dataclasses.replace(layer.get_display(), lut=chosen,
                                               invert=self.invert.isChecked(),
                                               contrast=self.contrast.value(),
                                               absolute=bool(self.scale.currentData()),

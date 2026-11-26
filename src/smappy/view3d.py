@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import Optional, Tuple
 
 import numpy as np
@@ -762,6 +763,10 @@ def table_token(locs: Localizations) -> object:
     return token
 
 
+def _id_places(values, lut, offset):
+    return luts.as_ramp(values, lut, 0.0, 1.0, False, offset)[0]
+
+
 def _table_key(locs: Localizations, *extra):
     """A key that dies with the table: an object stored on it, not a bare id."""
     return (id(table_token(locs)), len(locs)) + extra
@@ -799,9 +804,16 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
     settings, _ = projected_settings(locs, settings)
     prec_name = "xy_err_nm" if "xy_err_nm" in locs else None
     color_field = "depth" if projection.color_by_depth else settings.color_field
-    key = _table_key(locs, prec_name, settings.weight_field, color_field)
     cvalues = (locs[color_field] if color_field and color_field != "depth" and color_field in locs
                else None)
+    ids = cvalues is not None and luts.is_ids(display.lut)
+    if ids:
+        # the GPU looks colours up on a range: each id's entry made a place
+        # on one (`lut.as_ramp`), so it draws what the CPU draws -- worked
+        # out only when the table is uploaded, not on every frame of a drag
+        cvalues = partial(_id_places, cvalues, display.lut, display.ids_offset)
+    key = _table_key(locs, prec_name, settings.weight_field, color_field,
+                     *(("ids", display.ids_offset) if ids else ()))
     engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
                  locs[settings.weight_field] if settings.weight_field else None, cvalues)
     idx = selection_rows(locs, select, slab, index)
@@ -811,6 +823,8 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
         color_mode, color_range = 2, (settings.color_range or drange)
     elif cvalues is not None:
         color_mode, color_range = 1, (settings.color_range or column_range(locs, color_field))
+        if ids:
+            color_range = (0.0, float(luts.N - 1))
     else:
         color_mode, color_range = 0, (0.0, 1.0)
     radius_nm = point_radius_nm(locs, select, prec_name, projection)
@@ -835,6 +849,8 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
         depth_range=(drange[0] - pad, drange[1] + pad),
         ssao_radius=ssao_nm / fov.pixelsize, ssao_strength=projection.ssao_strength)
     invert = luts.field_inversion(display.invert) if color_mode > 0 else bool(display.invert)
+    if ids:
+        invert = False                       # the ids table is not turned round
     return (key, sel, params, display.lut, invert), params
 
 
@@ -851,9 +867,16 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
     median_precision = median_precision / precision_scale
     prec_name = "xy_err_nm" if "xy_err_nm" in locs else None
     color_field = "depth" if projection.color_by_depth else settings.color_field
-    key = _table_key(locs, prec_name, settings.weight_field, color_field)
     cvalues = (locs[color_field] if color_field and color_field != "depth" and color_field in locs
                else None)
+    ids = cvalues is not None and luts.is_ids(display.lut)
+    if ids:
+        # the GPU looks colours up on a range: each id's entry made a place
+        # on one (`lut.as_ramp`), so it draws what the CPU draws -- worked
+        # out only when the table is uploaded, not on every frame of a drag
+        cvalues = partial(_id_places, cvalues, display.lut, display.ids_offset)
+    key = _table_key(locs, prec_name, settings.weight_field, color_field,
+                     *(("ids", display.ids_offset) if ids else ()))
     engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
                  locs[settings.weight_field] if settings.weight_field else None, cvalues)
     sel_key = (key, id(select), _slab_key(slab), budget)
@@ -862,7 +885,8 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
         color_mode, color_range = 2, (settings.color_range or drange)
     elif cvalues is not None:
         color_mode = 1
-        color_range = settings.color_range or column_range(locs, color_field)
+        color_range = (0.0, float(luts.N - 1)) if ids else (
+            settings.color_range or column_range(locs, color_field))
     else:
         color_mode, color_range = 0, (0.0, 1.0)
     ss = settings.sigma_settings
@@ -880,6 +904,8 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
     # a coded column is turned round to invert it, an intensity ramp is not
     lut = display.lut
     invert = luts.field_inversion(display.invert) if color_mode > 0 else bool(display.invert)
+    if ids:
+        invert = False                       # the ids table is not turned round
     idx = thinned(selection_rows(locs, select, slab, index), budget)
     if projection.engine == "points":
         if not preview and idx.size <= PREVIEW_POINTS:
@@ -977,12 +1003,13 @@ def render_tracks_3d(locs: Localizations, select: np.ndarray, projection: Projec
     colors = None
     if projection.color_by_depth:
         lo, hi = settings.color_range or drange
-        colors = luts.colors(depth, display.lut, lo, hi, display.invert)
+        colors = luts.colors(depth, display.lut, lo, hi, display.invert, display.ids_offset)
     elif settings.color_field and settings.color_field in locs:
         values = np.asarray(locs[settings.color_field], np.float64)
         lo, hi = settings.color_range or column_range(locs, settings.color_field)
-        colors = luts.colors(0.5 * (values[a] + values[b]), display.lut, lo, hi,
-                             display.invert)
+        # an id is not averaged, as in 2D (`render.render_tracks`)
+        mid = values[a] if luts.is_ids(display.lut) else 0.5 * (values[a] + values[b])
+        colors = luts.colors(mid, display.lut, lo, hi, display.invert, display.ids_offset)
     # the width is in pixels of the full picture: a drag's grid is coarser
     width = settings.line_width * projection.zoom / fov.pixelsize
     rendered = render_segments(xa, ya, xb, yb, fov, width, weights, colors, n_threads)

@@ -216,6 +216,7 @@ papers and in other software.
   numbers that names regions, the
   localizations sharing a value being one region -- `cluster_id`,
   `tid`, `track_id`.  Every value is an id, 0 included; -1 is "in none".
+  The Render tab's *ids* colour table gives each id its own colour.
 * **region table**: what was measured in a set of regions, a row per region
   and a column per number.
 * **per-region steps**: plugins run once in every region, what each measures

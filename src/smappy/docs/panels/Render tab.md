@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z, smappy.handoff.view_settings, smappy.handoff.apply_view_settings]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.lut.id_index, smappy.lut.offers_ids, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z, smappy.handoff.view_settings, smappy.handoff.apply_view_settings]
 ---
 
 ## What it does
@@ -566,6 +566,29 @@ first colour, for angles.  The diverging ramps go through black
 middle of the range, for an attribute about a middle value; the first two avoid
 blue, which is dark on black.
 
+**The ids table.**  An [id attribute](plugin:Panels/Glossary) -- `cluster_id`,
+`track_id`, `tid`, and also `filenumber` and `channel` -- numbers clusters
+or tracks in the order they were found, so neighbouring ids are often
+neighbouring structures, and on a ramp they get nearly the same colour.  The
+*ids* table, offered only when the layer is coloured by such an attribute,
+gives each value a colour of its own instead.  Id $k$ takes the entry
+$\lfloor \mathrm{frac}(k \varphi + o) \cdot 255 \rfloor$ of a table of 255
+colours, where $\varphi = 0.618...$ is the golden ratio's fractional part and
+$o$ an offset between 0 and 1.  One id to the next moves 0.38 of the way
+round the table, so neighbouring ids land far apart.  The table's colours run
+round the hue circle, its entries in turn the full colour, a paler one and a
+darker one, so two ids whose hues do land close still differ in lightness
+(the darker ones read a little sparser, the price of telling them apart).  The
+colour of an id depends on the id and the offset alone: not on the range,
+not on which other ids are there, so a cluster keeps its colour when the
+filter or the view changes.  Localizations in no id (-1) and values that
+are not numbers are grey.  The range and *invert* mean nothing for it and are
+greyed.  Choosing *ids* in the list again -- even when it is already chosen --
+draws a new random offset, and so new colours; the offset is kept with the
+layer, so a saved session comes back with the same colours.  Tracks drawn as
+lines take the colour of a segment's first localization, not the mean of two
+ids.
+
 ```figure The LUTs by group.  The intensity ramps rise from black; the attribute ramps are shown as they colour a picture, the colour across and the density falling from top to bottom, so a ramp with a dark part of its own would look sparse there.  Right: each on white paper, where the ramps of several colours run backwards from white.
 from smappy import lut as luts
 rows = [(name, heading) for heading, names in luts.groups() for name in names]
@@ -924,7 +947,8 @@ copied.
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the
 colours over the part of the range that matters -- for z, the depth of the
-structure rather than of the outliers.
+structure rather than of the outliers.  Greyed with the *ids* table, which
+colours each value whatever the range; a layer on it draws no colour bar.
 
 ### auto
 Sets the colour range to the attribute's 0.5th to 99.5th percentile of what the
@@ -938,12 +962,16 @@ Red hot for intensity, rainbow for an attribute.  For several layers, one pure c
 each (red, green, cyan, magenta) adds up legibly; red hot and blue cold do
 too, with more visible steps.  A diverging ramp suits an attribute with a
 meaningful middle, such as a difference; hue circle and four-hue circle an
-angle.
+angle.  *ids*, listed only for an id attribute (`cluster_id`, `track_id`,
+`tid`, `filenumber`, `channel`), gives every id its own colour, neighbouring
+ids far apart; choose it again for new colours.  Colouring by an attribute
+that is not an id, the layer goes back to the table it had before.
 
 ### invert
 By intensity, the opposite colour at the same brightness: red becomes cyan.
 By an attribute, the LUT turned round: on z, near and far swap colours.  For black
-on white, use *white background* instead.
+on white, use *white background* instead.  Greyed with the *ids* table, which
+has no direction.
 
 ### contrast
 *quantile*: the default, 3.5, is a good start.  Too low, and the structure saturates into

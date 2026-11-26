@@ -94,7 +94,7 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 |---|---|---|---|
 | B1 | **Neighbourhood** (the renamed `SpatialFilterLocs` / `density_calculator`): per localization, the number of neighbours within r (local density), the mean/median/min/max/quantile of a field around it, and the Voronoi cell density (area⁻¹, SharpViSu). Writes columns (recipes), which can be filtered and coloured, and which Find clusters' Voronoi threshold can use. | #70 #93 (density) #94 | done (step 9) |
 | B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part; only the selected algorithm's part is **shown**, the others hidden (step 1 below adds that to the form). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | done (step 10): DBSCAN, Voronoi, HDBSCAN in `Regions/Find clusters` |
-| B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | done (step 7): `Analysis/Process/Shuffle ids` |
+| B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | done (step 7): `Analysis/Process/Shuffle ids`; since 2026-11 the Render tab's *ids* colour table instead, the plugin removed |
 | B2b | Statistics on clusters, also inside ROIs | #96 #120 | done by the structure (a block over `cluster_id`). The cluster-shape measurement is **done** (`Measure/Cluster shape`, step 12). |
 | B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | decided (`wave4_design.md`): one plugin with a list of approaches, steps 17a-c; the radial approaches **done** (`Measure/Spatial statistics`, step 17a), their summary over regions too (`Summarize/Curves`, step 17b), the directional ones (correlation image, correlation along a line, step 17c) |
 | B4 | **Counting**: a `per_region` measurement plus a `Summarize` histogram fit | #98 #121 | decided (`wave4_design.md`): *Blinking*, a `per_region` measurement (step 18); the counting fit later, on top of the NPC model; DNA-PAINT / qPAINT later, after looking at Picasso |
@@ -230,7 +230,7 @@ S ≤ a day, M a few days, L a week or more.
 | **4** ✅ | **Histogram of any column**, per layer, with mean/median/std; `per_region`, so it also gives one per ROI or per cluster | `Analysis/Measure/Histogram` | S | test on simulated data; page |
 | **5** ✅ | **Time course**: any columns against frame (photons, locs per frame, precision, background), several in one graph, beside the image tags | extend `image_tags.py`, or `Analysis/Measure/Time course` sharing its drawing | S–M | test and page; Image Tags' page updated if it changes |
 | **6** ✅ | **Export the region table** to CSV: the columns chosen by the user, ROIs or clusters through `region_results` | `Analysis/Regions/Summarize/Export table` | S | a CSV of an NPC Corners run, the ROI annotations and `roi_id` included |
-| **7** ✅ | **Shuffle ids**: for any integer column (`cluster_id`, `roi_id`, `tid`, `frame`, ...), write `<column>_shuffled` with the ids permuted, so colouring by it separates neighbouring ids; a new seed per run | `Analysis/Process/Shuffle ids` | S | the permutation keeps id 0 / noise at 0; grouping keeps a blink's value (recipe with rule `max`) |
+| **7** ✅ | **Shuffle ids**: for any integer column (`cluster_id`, `roi_id`, `tid`, `frame`, ...), write `<column>_shuffled` with the ids permuted, so colouring by it separates neighbouring ids; a new seed per run | `Analysis/Process/Shuffle ids` | S | the permutation keeps id 0 / noise at 0; grouping keeps a blink's value (recipe with rule `max`).  Replaced in 2026-11 by the Render tab's *ids* colour table (`lut.IDS_LUT`): a colour per value through the golden ratio, re-chosen for new colours, no column written; the plugin removed |
 | **8** ✅ | **Fit region**: fit only inside / exclude regions drawn on the camera frame | the fitters' detection part (`plugins/fit.py`), a mask on the candidates | S–M | candidates outside the region are dropped; the Localize tutorial still runs |
 
 ### Wave 2 -- the design is in `wave2_design.md` (decided 2026-10-14)
@@ -337,6 +337,9 @@ presets NPC, CME and Circles; the helpers in `smappy/segmentation.py`.
 * **Step 7** (2026-10-14): *Analysis/Process/Shuffle ids*: any integer
   column's ids permuted among themselves into `<column>_shuffled` (a
   recipe, `max` for merged blinks), 0 and below kept, the seed recorded.
+  It became the Render tab's *ids* colour table in 2026-11 (`lut.IDS_LUT`,
+  offered for an id column only; choosing it again draws new colours), and
+  the plugin was removed.
 * **Step 8** (2026-10-14): the fitters' *fit region*: rectangles and
   polygons drawn on the Preview's frame (fit in / leave out), kept in the
   settings in frame pixels, the candidates outside dropped before fitting.

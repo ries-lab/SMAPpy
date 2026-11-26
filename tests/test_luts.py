@@ -33,7 +33,7 @@ def group(heading):
 
 
 def test_every_lut_is_in_one_group_and_the_defaults_are_in_theirs():
-    listed = [name for _, names in luts.groups() for name in names]
+    listed = [name for _, names in luts.groups(ids=True) for name in names]
     assert sorted(listed) == sorted(luts.names()) and len(set(listed)) == len(listed)
     assert luts.kind(luts.INTENSITY_LUT) == "several colours"
     assert luts.kind(luts.FIELD_LUT) == "attribute"
@@ -110,3 +110,75 @@ def test_a_diverging_ramp_through_black_goes_through_white_on_white_paper():
     on_paper = luts.on_white(luts.get("magenta-black-green"))
     assert np.all(on_paper[127:129] > 0.99)
     assert np.allclose(on_paper[[0, -1]], luts.get("magenta-black-green")[[0, -1]])
+
+
+# ---------------------------------------------------------------- the ids table
+
+def test_neighbouring_ids_get_colours_far_apart_where_a_ramp_gives_them_alike():
+    ids = np.arange(1, 1001)
+    step = lambda c: np.linalg.norm(np.diff(c, axis=0), axis=1)
+    by_ids = step(luts.colors(ids, luts.IDS_LUT, 1, 1000))
+    by_rainbow = step(luts.colors(ids, "rainbow", 1, 1000))
+    assert by_ids.mean() > 0.7 and by_ids.mean() > 100 * by_rainbow.mean()
+    # and not only on average: no two neighbours share a colour
+    assert by_ids.min() > 0.05
+
+
+def test_ids_whose_hues_land_close_differ_in_lightness():
+    table = luts.get(luts.IDS_LUT)[1:]                   # entry 0 is "no id"
+    light = lightness(table)
+    # every three entries next to each other in hue span a third of L*
+    window = np.lib.stride_tricks.sliding_window_view(light, 3)
+    assert (window.max(axis=1) - window.min(axis=1)).min() > 30
+
+
+def test_minus_one_and_nan_are_grey_in_the_ids_table():
+    out = luts.colors(np.array([-1, np.nan, 3.0]), luts.IDS_LUT, 0, 10)
+    assert np.allclose(out[:2], luts.NO_VALUE)
+    assert not np.allclose(out[2], luts.NO_VALUE)
+
+
+def test_an_ids_colour_depends_on_the_id_and_the_offset_alone():
+    some = np.array([5, 17, 400])
+    alone = luts.colors(some, luts.IDS_LUT, 0, 1, offset=0.3)
+    among = luts.colors(np.r_[some, np.arange(1000, 1200)], luts.IDS_LUT, -50, 7000,
+                        invert=True, offset=0.3)[:3]
+    assert np.array_equal(alone, among)
+    assert not np.array_equal(alone, luts.colors(some, luts.IDS_LUT, 0, 1, offset=0.55))
+
+
+def test_the_ids_table_on_a_range_draws_what_its_colours_are():
+    """The GPU only looks up on a range: `as_ramp` makes the places so."""
+    values = np.r_[-1, np.arange(0, 3000)]
+    places, (lo, hi), invert = luts.as_ramp(values, luts.IDS_LUT, 0, 1, True, offset=0.7)
+    assert invert is False
+    table = luts.get(luts.IDS_LUT)
+    index = np.clip((places - lo) * (len(table) - 1) / (hi - lo), 0, len(table) - 1)
+    assert np.array_equal(table[index.astype(int)],
+                          luts.colors(values, luts.IDS_LUT, 0, 1, offset=0.7))
+
+
+def test_the_ids_table_is_offered_for_ids_the_file_and_the_channel_only():
+    for column in ("cluster_id", "track_id", "tid", "tid_file", "filenumber", "channel"):
+        assert luts.offers_ids(column), column
+    for column in ("x_nm", "frame", "n_in_group", "n_in_cluster", "photons", None):
+        assert not luts.offers_ids(column), column
+    assert luts.IDS_LUT not in dict(luts.groups(attribute=True))["attribute"]
+    assert dict(luts.groups(attribute=True, ids=True))["attribute"][-1] == luts.IDS_LUT
+
+
+def test_a_layer_drawn_with_the_ids_table_colours_each_cluster_its_own_way():
+    from smappy.locs import Localizations
+    from smappy.render import RenderSettings, render_locs
+    x = np.repeat([1000.0, 2000.0, 3000.0], 50)
+    locs = Localizations({"x_nm": x.astype(np.float32),
+                          "y_nm": np.full(150, 1000.0, np.float32),
+                          "cluster_id": np.repeat([1, 2, -1], 50)}, {"units": "nm"})
+    fov = FieldOfView(0.0, 0.0, 100.0, 40, 20)
+    settings = RenderSettings(mode="hist", color_field="cluster_id", color_range=(1, 2))
+    pixel = lambda r, x_nm: r.color[10, int(x_nm / 100)] / r.weight[10, int(x_nm / 100)]
+    one = render_locs(locs, fov, settings, DisplaySettings(lut=luts.IDS_LUT, ids_offset=0.2))
+    assert np.allclose(pixel(one, 1000), luts.colors([1], luts.IDS_LUT, 0, 1, offset=0.2)[0])
+    assert np.allclose(pixel(one, 3000), luts.NO_VALUE)
+    other = render_locs(locs, fov, settings, DisplaySettings(lut=luts.IDS_LUT, ids_offset=0.7))
+    assert not np.allclose(pixel(one, 1000), pixel(other, 1000))

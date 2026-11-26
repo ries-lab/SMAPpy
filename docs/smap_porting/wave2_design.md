@@ -97,7 +97,8 @@ the chosen part shown (`FormState.shown`, step 1):
   (a physically defined cluster size; speed on millions).
 
 All write `cluster_id` (1, 2, ... by size, 0 for none) and `n_in_cluster`
-as `with_clusters` does now, so Shuffle ids, Column to ROIs (soon a method
+as `with_clusters` does now, so Shuffle ids (since 2026-11 the Render
+tab's *ids* colour table), Column to ROIs (soon a method
 of Segment regions), blocks over `cluster_id` and Cluster shape work on
 every algorithm.  Per file, merged blinks or not as the layer shows, as now.
 

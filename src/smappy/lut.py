@@ -15,6 +15,10 @@ circle`` and ``gray`` follow MATLAB's hot, hsv and gray so images look the
 same as SMAP's.  The LUTs come in three groups -- one colour and several
 colours for intensity, attribute for a column (`groups`) -- and the names
 say the colours rather than where a table came from.
+
+One more table, *ids* (`IDS_LUT`), is for id columns and is not a ramp: it
+gives each value its own colour (`id_index`), so neighbouring ids -- which
+are neighbouring clusters or tracks -- are told apart.
 No matplotlib dependency: the tables are small and the interpolation is three
 lines.
 """
@@ -223,23 +227,118 @@ _TABLES: Dict[str, np.ndarray] = {name: table for group in _GROUPS.values()
 LUT = Union[str, np.ndarray]
 
 
+
+# ---------------------------------------------------------------- ids
+#
+# An id column -- clusters, tracks, files -- numbers things that lie side by
+# side in the order they were found, so on a ramp neighbouring ids, which are
+# often neighbouring structures, get nearly the same colour.  The ids table
+# maps each value to a colour of its own instead, whatever the range: the
+# value times the golden ratio, its fractional part the place in the table
+# (Weyl's sequence: consecutive ids land about 0.38 of the circle apart, and
+# no two of the first hundreds closer than a few hundredths).  The table runs
+# round the hue circle, its entries in turn the full colour, a paler one and a
+# darker one (`IDS_STEPS`), so two ids whose hues do land close still differ
+# in lightness.  Paler alone was not enough: near yellow every colour at full
+# value is light, and neighbours there differed by 1 in L* of 100; with the
+# darker step every three neighbours span at least 33.
+# An offset, kept with the layer's display (`render.DisplaySettings.
+# ids_offset`), turns every id's place by the same amount: a new one is a new
+# set of colours, the same one the same picture.
+#
+# It was a plugin until 2026-11, *Shuffle ids*, which wrote a permuted copy of
+# the column to colour by; a table needs no new column and no run.
+
+IDS_LUT = "ids"
+#: the golden ratio's fractional part, the step from one id to the next
+GOLDEN = 0.6180339887498949
+#: ``(saturation, value)`` the entries cycle through: full, paler, darker
+IDS_STEPS = ((1.0, 1.0), (0.45, 1.0), (1.0, 0.62))
+#: columns that are ids although `ids.is_id` does not say so by their name
+IDS_ALSO = ("filenumber", "channel")
+
+
+def _ids_table() -> np.ndarray:
+    """``N`` entries: the colour of no id (`NO_VALUE`) first, then ``N - 1``
+    colours round the hue circle, saturation and value cycling (`IDS_STEPS`)."""
+    n = N - 1
+    h = np.arange(n) / n * 6.0
+    i, f = np.floor(h).astype(int) % 6, h - np.floor(h)
+    up, down = f, 1.0 - f
+    one, zero = np.ones_like(f), np.zeros_like(f)
+    hue = np.stack([np.choose(i, [one, down, zero, zero, up, one]),
+                    np.choose(i, [up, one, one, down, zero, zero]),
+                    np.choose(i, [zero, zero, up, one, one, down])], axis=1)
+    steps = np.asarray(IDS_STEPS)[np.arange(n) % len(IDS_STEPS)]
+    colours = (1.0 - steps[:, :1] * (1.0 - hue)) * steps[:, 1:]
+    return np.concatenate([np.asarray([NO_VALUE]), colours]).astype(np.float32)
+
+
+def is_ids(lut: LUT) -> bool:
+    """Whether ``lut`` is the ids table, which maps values, not a range."""
+    return isinstance(lut, str) and lut == IDS_LUT
+
+
+def offers_ids(column) -> bool:
+    """Whether a layer coloured by ``column`` is offered the ids table: an id
+    column by its name (`ids.is_id`), the file and the channel -- not a
+    coordinate, a frame or a count, whose neighbouring values are meant to
+    look alike."""
+    from .ids import is_id
+    return bool(column) and (is_id(column) or column in IDS_ALSO)
+
+
+def id_index(values: np.ndarray, offset: float = 0.0) -> np.ndarray:
+    """Each value's entry of the ids table: ``1 + floor(frac(v GOLDEN +
+    offset) (N - 1))``, and 0 (`NO_VALUE`) for none -- -1 (`ids.NONE`),
+    any negative value, NaN.  A value's entry depends on it and the offset
+    alone, not on which other ids are there or on a range."""
+    values = np.asarray(values, dtype=np.float64)
+    missing = ~np.isfinite(values) | (values < 0)
+    place = np.mod(np.where(missing, 0.0, values) * GOLDEN + offset, 1.0)
+    index = 1 + np.minimum((place * (N - 1)).astype(np.int32), N - 2)
+    index[missing] = 0
+    return index
+
+
+def as_ramp(values: np.ndarray, lut: LUT, vmin: float, vmax: float, invert=False,
+            offset: float = 0.0):
+    """``(values, (vmin, vmax), invert)`` to look up on a range, as a renderer
+    that only knows ranges does (the GPU's, `gpu.py`), so that it draws what
+    `colors` draws.  Unchanged for a ramp; for the ids table each value
+    becomes the middle of its entry on the range ``(0, N - 1)``."""
+    if not is_ids(lut):
+        return values, (vmin, vmax), invert
+    return (id_index(values, offset).astype(np.float32) + np.float32(0.5),
+            (0.0, float(N - 1)), False)
+
+
 def names() -> list:
-    """Every LUT, group by group."""
+    """Every LUT, group by group, the ids table last."""
     return list(_TABLES)
 
 
-def groups(attribute: bool = False) -> list:
+def groups(attribute: bool = False, ids: bool = False) -> list:
     """``[(heading, names), ...]`` in the order a list shows them: the groups
-    for intensity first, or with ``attribute`` the one for a column first."""
+    for intensity first, or with ``attribute`` the one for a column first.
+    With ``ids`` -- the column is an id (`offers_ids`) -- the ids table ends
+    the attribute group; it is offered for nothing else."""
     order = list(_GROUPS)
     if attribute:
         order = order[-1:] + order[:-1]
-    return [(heading, list(_GROUPS[heading])) for heading in order]
+    out = [(heading, list(_GROUPS[heading])) for heading in order]
+    if ids:
+        for heading, members in out:
+            if heading == "attribute":
+                members.append(IDS_LUT)
+    return out
 
 
 def kind(lut: LUT) -> str:
     """The heading a LUT's name is under ("" for one that was registered or
     passed as an array)."""
+    if is_ids(lut):
+        return "attribute"
     for heading, group in _GROUPS.items():
         if isinstance(lut, str) and lut in group:
             return heading
@@ -350,15 +449,20 @@ def register(name: str, table: np.ndarray) -> None:
 
 
 def colors(values: np.ndarray, lut: LUT, vmin: float, vmax: float,
-           invert: bool = False) -> np.ndarray:
+           invert: bool = False, offset: float = 0.0) -> np.ndarray:
     """Map field values to ``(n, 3)`` colours, clamped to the range; inverted,
     the low values take the LUT's top end (`field_inversion`).
+
+    The ids table (`IDS_LUT`) takes neither range nor inversion: each value
+    has its own colour (`id_index`), turned by ``offset``, and -1 is grey.
 
     A value that is not a number -- a MINFLUX localization's `cfr` where its
     iterations did not measure one -- is drawn grey (`NO_VALUE`), not in a
     colour of the table: converted to an index it was the first colour on
     ARM and an index out of range on x86, and either way a value it is not.
     """
+    if is_ids(lut):
+        return get(IDS_LUT)[id_index(values, offset)]
     table = get(lut, field_inversion(invert))
     scale = (len(table) - 1) / (vmax - vmin) if vmax > vmin else 0.0
     values = np.asarray(values, dtype=np.float32)
@@ -373,3 +477,4 @@ def colors(values: np.ndarray, lut: LUT, vmin: float, vmax: float,
 
 # the colour of a localization whose colour column has no value: grey
 NO_VALUE = (0.5, 0.5, 0.5)
+_TABLES[IDS_LUT] = _ids_table()
