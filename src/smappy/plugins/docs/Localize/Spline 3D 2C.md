@@ -1,6 +1,6 @@
 ---
 version: "17"
-covers: [smappy.psf.GlobalSplinePSF, smappy.psf.signal_integral, smappy.psf.light_at_focus, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.pipeline.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus]
+covers: [smappy.psf.GlobalSplinePSF, smappy.psf.signal_integral, smappy.psf.light_at_focus, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.pipeline.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus, smappy.calibrate.depth.insitu_dual, smappy.calibrate.depth.judged, smappy.calibrate.insitu_dual.dual_movie_rois, smappy.calibrate.insitu_dual.dual_units, smappy.calibrate.insitu_dual.run_insitu_dual, smappy.plugins.fit.DualSplineFit.preflight]
 ---
 
 ## What it does
@@ -57,6 +57,10 @@ What it needs:
   the movie with a plain Gaussian, as Gaussian 2D 2C has: a Gaussian's
   centre is not the spline's, so such a map is off by a few nanometres in
   ways that change with z.
+  A calibration made with the pupil (Zernike) method can also be **learnt
+  again from the movie itself**, *in situ*: both channels' focus and blur,
+  and on request their aberrations and the map between them, from the
+  movie's own blinking molecules (*in the sample*'s *focus*, below).
 * **The camera**, as for any fit.
 * **Sparse data**, as for [Spline 3D](plugin:Localize/Spline 3D): a
   neighbour inside the [fit box](plugin:Panels/Glossary) (also called ROI
@@ -413,6 +417,44 @@ departs from the publication:
   ratio is the beads' split, or a typed *photon ratio*; colour comes only
   from the free photon split.
 
+**In situ, two channels.**  *focus* = *in situ* learns a two-channel model
+from the movie (`depth.insitu_dual`), as Spline 3D's *in situ* learns one,
+starting from the model the dual calibration carries.  The molecules are
+found in each half on its own, with in situ's detection, linking and
+overlap rules (`insitu_dual.dual_units`), and paired through the
+registration in force -- the calibration's map, or the file's, with the
+channel *move* on top when it is measured -- a main and a secondary spot of
+the same frame within 2 pixels of where the map puts it.  A spot found in one
+half only keeps the region the map puts in the other, its own half's other
+molecules masked there: a dye that sends little light to one half is still
+learnt from.  What the rounds choose by -- the z proxy and the shape -- is the
+main half's Gaussian, fitted on every molecule's main region.  Both regions
+are fitted together by one emitter (`uipsf.ForwardModel` of two channels):
+one x, y and height, the secondary at the map's place and its own focal
+plane, `ch1.dz` above or below the main one.  *learn* = *focus and blur*
+holds both pupils whole and the channels' offset in z, and learns the focus,
+each channel's blur and the molecules, in at most 2 rounds from 1000
+molecules.  *aberrations* holds each channel's γ and its phase above the
+model's order and learns the rest of both pupils and the offset; *everything*
+holds nothing, the focus then pinned by the coverslip's edge.  The map
+between the channels is held unless *learn registration* is ticked.  The
+light's share in the secondary half is one number for all molecules when
+*link photons* is on (biplane, one dye), and each molecule's own when it is
+off: two dyes send different shares, and one share for all would be wrong
+for both.  More than the focus is kept only where it explains the tenth of
+the blinks held out of both runs better than the focus alone does, as for one
+channel (`depth.judged`); else the fit uses the focus alone and warns.  The
+learnt model is drawn for its focus on the calibration's grid, the two
+channels normalised together as above, its map the model's
+(`dual_depth_calibration`).  A field-dependent calibration is learnt and
+drawn without its field: the nodes are left out.  On a simulated biplane
+movie -- 150 molecules, the secondary's plane 300 nm above the main one, a
+calibration with half the movie's astigmatism in both channels -- *learn* =
+*aberrations* brought both channels' astigmatism back to within 0.05 rad of
+the movie's, the offset to within 5 nm and the share to within 0.01; the
+fit's z scattered 26 nm about the truth (median absolute deviation) where
+the calibration drawn at the focus on auto scattered 33 nm.
+
 ## Parameters
 
 ### model.calibration
@@ -443,7 +485,30 @@ The focus found is written into the settings as typed, so the history and
 the file say what was fitted with, and a Preview finds it once for the Run
 after it.  *typed* takes it as typed; *as calibrated* fits the beads'
 splines as they are, z above their focus.  Without torch, *auto* fits as
-calibrated and warns.  Spline 3D's *in situ* is not offered here yet.
+calibrated and warns.  *in situ* learns the model again from the movie's
+molecules, in both channels (*In detail*), starting at the focus *auto*
+finds, and fits with it as calibrated, so the history names the file.  It
+takes minutes: the Run asks first, offering the focus on auto instead, and
+learns once for a movie and its settings -- what it learnt is kept in the
+configuration directory's `sample_depth` folder and in the fitted file.  A
+Preview never learns: it uses what a Run kept, and else fits with the focus
+on auto.  A live fit cannot use *auto* or *in situ*: the frames are not there
+yet.
+
+### model.learn
+How much of the two PSFs the movie teaches.  *focus and blur* for most data:
+seconds to a minute, the beads' aberrations trusted.  *aberrations* when the
+sample is not what the beads saw -- deep in a cell, another coverslip, a
+splitter realigned -- and the depth must be right.  *everything* rarely: the
+pupils' brightness profile trades with the focus, which the coverslip then
+has to pin, so the sample must touch it.
+
+### model.learn_registration
+Leave it off: the map is the beads', and a splitter that moved since is the
+channel *move*'s, which measures it with the fit itself.  Tick it for a map
+that is off in a way a move cannot correct -- turned or scaled since the
+beads -- and the molecules pair at all (within 2 pixels of the map).  The fit
+then uses the map learnt, whatever *map* says.
 
 ### model.sample.focus_nm
 How far the objective was moved up from the coverslip, as its focus drive

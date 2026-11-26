@@ -243,15 +243,25 @@ def depth_spline(cal, focus_nm: float, n_med: Optional[float] = None, learned=No
                              field_splines=field)
 
 
-def dual_depth_calibration(dual, focus_nm: float, n_med: Optional[float] = None):
+def dual_depth_calibration(dual, focus_nm: float, n_med: Optional[float] = None, learned=None):
     """`depth_spline` for a dual-colour calibration whose two-channel pupil model it carries (`pupil.save`):
     both channels drawn for the focus ``focus_nm`` on one grid of heights, normalised jointly as
     `pupil.dual_calibration` normalises them (`core.positive_pair_models`), so each keeps its photon share;
-    the calibration's map and split as they are.  z is the height above the coverslip, as `depth_spline`'s."""
+    the calibration's map and split as they are.  z is the height above the coverslip, as `depth_spline`'s.
+
+    ``learned`` (model, shared), a model learnt in situ from the calibration's (`insitu_dual`), is drawn in its
+    place, its map between the channels the registration -- learnt, or the calibration's held -- and the
+    calibration's split and grid kept."""
     from .core import CalibrationSettings, positive_pair_models
     from .dual import DualColorCalibration
     main = dual.main
-    learned = model_of(main, channels=2)
+    transformation = dual.transformation
+    insitu = learned is not None
+    if insitu:
+        from uipsf.model.channels import unpack_transform
+        H = unpack_transform(torch_tensor(learned.shared["ch1.transform"])).numpy()
+        transformation = H / H[2, 2]
+    learned = learned if learned is not None else model_of(main, channels=2)
     if learned is None:
         raise ValueError(f"{Path(main.source).name if main.source else 'the calibration'} carries no pupil "
                          f"model: a focus in the sample needs a dual calibration made with the pupil (Zernike) "
@@ -269,7 +279,8 @@ def dual_depth_calibration(dual, focus_nm: float, n_med: Optional[float] = None)
     record = {"focus_nm": float(focus_nm), "n_med": resolved_medium(learned, n_med),
               "in_focus_height_nm": focus, "heights_nm": [float(heights[-1]), float(high)], "method": "typed"}
     for c, (drawn, old) in enumerate(((first, main), (second, dual.secondary))):
-        field = getattr(old, "field_splines", None)
+        # two channels learnt in situ have no field (`insitu_dual`): the centre's spline, the nodes left out
+        field = None if insitu else getattr(old, "field_splines", None)
         if field is not None:
             # each channel's nodes where they were, drawn at this depth with the pair's joint normalisation;
             # a secondary node's field is where the model's map puts it on the main channel (`pupil.field_splines`)
@@ -288,8 +299,14 @@ def dual_depth_calibration(dual, focus_nm: float, n_med: Optional[float] = None)
         drawn.source, drawn.em_on, drawn.pixelsize_um = old.source, old.em_on, old.pixelsize_um
         drawn.parameters = {**(old.parameters or {}), **(drawn.parameters or {}), "sample_depth": record,
                             "z_reference": "the coverslip: z is the height above it"}
-    return DualColorCalibration(first, second, dual.transformation, dict(dual.geometry),
+    return DualColorCalibration(first, second, transformation, dict(dual.geometry),
                                 {**(dual.parameters or {}), "sample_depth": record})
+
+
+def torch_tensor(value):
+    """``value`` as a float64 CPU tensor, wherever it was learnt."""
+    import torch
+    return torch.as_tensor(value).detach().cpu().double()
 
 
 _DUAL: dict = {}
@@ -486,30 +503,12 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
     if learn == "focus":
         return _insitu(cal, paths, camera, n_med, focus_nm, "focus", InSituSettings(molecules=molecules), rounds,
                        progress, cancel)
-    from .insitu_run import InSituModelSettings, heldout_deviance
+    from .insitu_run import InSituModelSettings
     detection = InSituSettings()
     first = _insitu(cal, paths, camera, n_med, focus_nm, "focus", detection, rounds, progress, cancel)
     second = _insitu(cal, paths, camera, n_med, first.focus_nm, learn, detection, InSituModelSettings().max_rounds,
                      progress, cancel, rois=first.result.rois)
-    if progress is not None:
-        progress("in situ: judging both models on the molecules held out")
-    held = {"focus": heldout_deviance(first.result), learn: heldout_deviance(second.result)}
-    second.heldout = first.heldout = held
-    if held["focus"] is None or held[learn] is None:
-        second.messages.append(f"no molecules held out to judge the {learn} learnt against the focus alone: "
-                               f"kept unjudged")
-        return second
-    n = len(first.result.rois.ids("held out"))
-    gain = (held["focus"] - held[learn]) / 2 / n            # nats per molecule held out (deviance: 2 × nats)
-    if gain > 0:
-        second.notes.append(f"the {learn} learnt explain the {n} molecules held out better than the start's "
-                            f"with the focus learnt, by {gain:.2f} nats each")
-        return second
-    first.messages.append(f"the {learn} learnt explain the {n} molecules held out no better than the start's "
-                          f"with the focus learnt ({gain:+.2f} nats each): fitted with the start's aberrations "
-                          f"and the focus learnt")
-    first.fallback = learn
-    return first
+    return judged(first, second, learn, progress)
 
 
 def _insitu(cal, paths, camera, n_med, focus_nm, learn: str, detection, rounds: int, progress, cancel,
@@ -576,6 +575,112 @@ def _insitu(cal, paths, camera, n_med, focus_nm, learn: str, detection, rounds: 
     return out
 
 
+def insitu_dual(dual, paths, camera, n_med: Optional[float] = None, focus_nm: Optional[float] = None,
+                learn: str = "focus", registration: bool = False, share_per_molecule: bool = False,
+                molecules: int = 1000, rounds: int = 2, progress=None, cancel=None) -> AutoDepth:
+    """`insitu_focus` for a dual-colour pupil calibration and the split movies at ``paths`` (Spline 3D 2C): the
+    two-channel model learnt from them (`insitu_dual.run_insitu_dual`), starting from the model ``dual``
+    carries, its molecules paired by ``dual``'s registration.  The result's ``spline`` is the learnt model drawn
+    as `dual_depth_calibration` draws a bead model -- a `DualColorCalibration`, z the height above the
+    coverslip, its registration the model's (``registration``: learnt, else the calibration's).
+
+    The same decision as one channel's: ``learn = "focus"`` holds both pupils whole; more is learnt after a
+    focus-only run from the same molecules, both judged on the molecules held out of both, and kept only if
+    it explains them better -- else the focus alone, with a warning."""
+    from .insitu import InSituSettings
+    if learn not in LEARN_HOLDS:
+        raise ValueError(f"learn: one of {', '.join(LEARN_HOLDS)}, not {learn!r}")
+    start = model_of(dual.main, channels=2)
+    if start is None:
+        raise ValueError("two-channel in situ needs a dual calibration made with the pupil (Zernike) method: "
+                         "its two pupils are the start")
+    kw = {"registration": registration, "share_per_molecule": share_per_molecule, "progress": progress,
+          "cancel": cancel}
+    if learn == "focus":
+        return _insitu_dual(dual, start, paths, camera, n_med, focus_nm, "focus",
+                            InSituSettings(molecules=molecules), rounds, **kw)
+    from .insitu_run import InSituModelSettings
+    detection = InSituSettings()
+    first = _insitu_dual(dual, start, paths, camera, n_med, focus_nm, "focus", detection, rounds, **kw)
+    second = _insitu_dual(dual, start, paths, camera, n_med, first.focus_nm, learn, detection,
+                          InSituModelSettings().max_rounds, rois=first.result.rois, **kw)
+    return judged(first, second, learn, progress)
+
+
+def judged(first: AutoDepth, second: AutoDepth, learn: str, progress=None) -> AutoDepth:
+    """The focus-only run ``first`` or the run that learnt ``learn`` too, ``second``, by their deviance on the
+    molecules held out of both (`insitu_run.heldout_deviance`): ``second`` only if it explains them better,
+    else ``first`` with a warning and ``fallback`` set (docs/insitu-fitting-plan.md §2)."""
+    from .insitu_run import heldout_deviance
+    if progress is not None:
+        progress("in situ: judging both models on the molecules held out")
+    held = {"focus": heldout_deviance(first.result), learn: heldout_deviance(second.result)}
+    second.heldout = first.heldout = held
+    if held["focus"] is None or held[learn] is None:
+        second.messages.append(f"no molecules held out to judge the {learn} learnt against the focus alone: "
+                               f"kept unjudged")
+        return second
+    n = len(first.result.rois.ids("held out"))
+    gain = (held["focus"] - held[learn]) / 2 / n            # nats per molecule held out (deviance: 2 × nats)
+    if gain > 0:
+        second.notes.append(f"the {learn} learnt explain the {n} molecules held out better than the start's "
+                            f"with the focus learnt, by {gain:.2f} nats each")
+        return second
+    first.messages.append(f"the {learn} learnt explain the {n} molecules held out no better than the start's "
+                          f"with the focus learnt ({gain:+.2f} nats each): fitted with the start's aberrations "
+                          f"and the focus learnt")
+    first.fallback = learn
+    return first
+
+
+def _insitu_dual(dual, start, paths, camera, n_med, focus_nm, learn: str, detection, rounds: int, registration,
+                 share_per_molecule, progress, cancel, rois=None) -> AutoDepth:
+    """One two-channel in situ run for `insitu_dual`, drawn at the focus it learnt."""
+    from types import SimpleNamespace
+
+    import torch
+
+    from .insitu_dual import run_insitu_dual
+    word = "two channels in situ" + ("" if learn == "focus" else f", {learn}")
+
+    def tell(entry):
+        if progress is None:
+            return
+        text = entry.get("message") if isinstance(entry, dict) else str(entry)
+        if text:
+            progress(f"{word}: {text}")
+    result = run_insitu_dual(start, paths, camera, learn, n_med, focus_nm, detection, rounds, registration,
+                             share_per_molecule, rois=rois, transform=dual, progress=tell, cancel=cancel)
+    dtype = result.model.psf.grid.rho.dtype
+    shared = {k: v.detach().cpu().to(dtype) for k, v in result.cal.shared().items()}
+    each = result.cal.result.params.physical().get("emitter.ch1.share")
+    if each is not None:
+        # a share per molecule: the pair is drawn with their median, which only the linked photons read
+        shared["ch1.share"] = each.detach().cpu().to(dtype).median()
+    focus = float(shared["geometry.focus"])
+    drawn = SimpleNamespace(model=result.model, shared=shared, config=None)
+    spline = dual_depth_calibration(dual, focus, learned=drawn)
+    sigma = [shared.get(p + "psf.sigma") for p in ("", "ch1.")]
+    blur = None if sigma[0] is None else float(torch.as_tensor(sigma[0]).mean())
+    record = {"method": LEARN_METHODS[learn], "blur_nm": blur, "learnt": learn,
+              "registration_learnt": bool(registration),
+              "blur_ch1_nm": None if sigma[1] is None else float(torch.as_tensor(sigma[1]).mean())}
+    if "ch1.dz" in shared:
+        record["ch1_dz_nm"] = float(shared["ch1.dz"])
+    for c in (spline, spline.main, spline.secondary):
+        c.parameters["sample_depth"] = {**c.parameters.get("sample_depth", {}), **record}
+    last = result.run.rounds[-1]
+    h = np.asarray(last.heights if last.heights is not None else [], float)
+    err = np.asarray(last.heights_sd if last.heights_sd is not None else np.full(len(h), np.nan), float)
+    edge = last.edge
+    out = AutoDepth(focus, np.nan if edge is None else edge.sd_nm, 0.0 if edge is None else edge.spike,
+                    len(last.used), heights=h - (0.0 if edge is None else edge.shift_nm), errors=err,
+                    method="in situ", spline=spline, blur_nm=blur)
+    out.notes += list(result.messages)
+    out.cal, out.drawn, out.result = result.cal, drawn, result
+    return out
+
+
 # ------------------------------------------------------------------ what was found, kept
 
 _FOUND: dict = {}
@@ -622,14 +727,19 @@ def keep(key, result: AutoDepth) -> Optional[Path]:
         return None
 
 
-def kept(key) -> Optional[AutoDepth]:
-    """An in situ result `keep` saved under ``key``, or None."""
+def kept(key, dual: bool = False) -> Optional[AutoDepth]:
+    """An in situ result `keep` saved under ``key``, or None; ``dual``: a two-channel one (`insitu_dual`), its
+    spline a `DualColorCalibration`."""
     path = kept_path(key)
     if not path.is_file():
         return None
     try:
-        from ..io.calibration import load_spline_calibration
-        spline = load_spline_calibration(path)
+        if dual:
+            from .dual import load_dual_color_calibration
+            spline = load_dual_color_calibration(path)
+        else:
+            from ..io.calibration import load_spline_calibration
+            spline = load_spline_calibration(path)
         record = spline.parameters.get("sample_depth") or {}
         if record.get("key") != _jsonable(key):
             return None

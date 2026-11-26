@@ -3151,6 +3151,36 @@ matched to each frame's defocus and the selection, is `smappy.calibrate.molecule
 split chip).  The design, the reuse of in situ and the comparison with the prototype on M5's AF647:
 `molecule-stacks.md`.
 
+## In situ on a split chip (November 2026; `smappy/calibrate/insitu_dual.py`, `docs/insitu-fitting-plan.md` phase 3)
+
+Spline 3D 2C learns its two-channel model from the movie it fits.  No new workflow: the single-channel rounds
+(`insitu_rounds.calibrate_insitu`, `learn_insitu`, the twin test) run on a model of two `Channel`s, since they
+talk to the model and to `rois.batch(ids)` only.  What it took:
+
+- `workflows.calibrate.insitu_model` builds several channels: one `Optics`, one `Held` per channel (each its
+  own pupil from a two-channel bead model), the secondaries' transforms and `Channel` options.
+- `Channel(fit_dz=False)` holds the defocus offset at the bead model's (*learn* = focus and blur), and
+  `Channel(share_per_emitter=True)` gives each emitter its own share of the light, ``emitter.ch1.share``: two
+  dyes on a ratiometric split send different shares, and one share for all is wrong for both
+  (`ForwardModel._photons` broadcasts it; `rough_start` and `localise_from_starts` carry each emitter's start
+  as ``share_each`` [E, C]; drawn without emitters, `sample_psf` uses the shared share or an even split).
+- The placeholders the rounds build their specs from (`_blank`, `_placeholder`) have a background per channel.
+- `movie.simulate_movie` draws a model of several channels: each molecule in every channel where its transform
+  puts it, ``ch1.dz`` added, its photons split by the model's share or by its dye's (``dyes``), the molecules in
+  ``region`` (the main half).
+
+smappy's side: each half detected on its own with in situ's steps, units of the same frames paired within 2 px of
+where the map puts them, a lone unit's partner cut where the map puts it with that half's molecules masked; the
+selection is the main half's Gaussian (`DualInSituROIs`, `dual_movie_rois`).  On a simulated biplane movie (150
+molecules, 64 × 128 px, ``ch1.dz`` = −300 nm, share 0.45), a start with half the astigmatism in both channels
+and pupils of 16 samples: the aberrations learnt came back to 0.665 / 0.568 rad (truth 0.70 / 0.60), the coma
+and spherical within 0.02, ``ch1.dz`` −297 nm, the share 0.458, the focus 667 nm (700), and the molecules held
+out gained 17 nats each over the start with the focus learnt; 100 s on a CPU.  With two dyes (shares 0.2, 0.8)
+and a share per emitter, the shares came out 0.24 / 0.75 and the rest as well.  Spline 3D 2C fitting with what
+it learnt scattered 26 nm in z about the truth (MAD) where the start at the focus on auto scattered 33 nm
+(`tests/uipsf_tests/test_insitu_dual.py`, `long`).  Not done: a field-dependent model (learnt and drawn without
+its field), real data (Zenodo `2ch_smlm_nup96_WGA`, M2's two-colour movies).
+
 ## The excitation beam (November 2026; `model/excitation.py`, S2 of `docs/uipsf/scanned-psfs.md`)
 
 The focal field of a laser beam focused by the objective, E(r) = Σ_k a(k)·[e_x h_x(k) + e_y h_y(k)]·exp(2πi k·r) Δk²,

@@ -255,8 +255,9 @@ and excitation (the donuts of MINFLUX and STED, above).
 
 ### Data and scope
 
-- **In situ with several channels**, then field dependent (Zenodo `2ch_smlm_nup96_WGA`,
-  `1ch_FD_smlm_nup96`).
+- **In situ with several channels**: done on simulated movies (November 2026, architecture.md "In situ on a
+  split chip"; Spline 3D 2C's *in situ*); next on real data (Zenodo `2ch_smlm_nup96_WGA`, M2's two colours),
+  then field dependent (`1ch_FD_smlm_nup96`).
 - **In situ, after M5:** an initial pupil model as the first fit, for PSFs a Gaussian cannot sort by z
   (double helix, tetrapod: Zenodo `1ch_smlm_TP`); the number of emitters per bin from the CRLB; selection
   stratified in the field too; splines at other depths; stage tilt (`FocalSurface`).

@@ -500,7 +500,9 @@ def heldout_deviance(result: InSituRunResult) -> Optional[float]:
     heights = np.arange(FOCUS_SEARCH_NM[0], FOCUS_SEARCH_NM[1] + 1, FOCUS_SEARCH_STEP_NM)
     found = localise_units(result.model, shared, result.rois, ids, noise, heights)
     # the mean per pixel back to the sum over the pixels each region uses
-    pixels = np.asarray(result.rois.units.masks[ids], bool).reshape(len(ids), -1).sum(1)
+    counted = getattr(result.rois, "masked_pixels", None)          # both channels' on a split chip
+    pixels = counted(ids) if counted is not None else np.asarray(result.rois.units.masks[ids], bool).reshape(
+        len(ids), -1).sum(1)
     return float(np.nansum(np.asarray(found["deviance"], float) * pixels))
 
 
