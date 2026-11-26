@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from smappy import chain, plugins
-from smappy.chain import ChainError, ChainSkipped, ChainSpec, Step, chain_class
+from smappy.chain import ChainError, ChainSkipped, ChainSpec, chain_class
 from smappy.locs import Localizations
 from smappy.plugins import Context, Plugin, Result, register
 from smappy.session import Session
