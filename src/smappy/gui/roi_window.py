@@ -893,6 +893,10 @@ class ROIManagerWindow(QMainWindow):
             lambda *_: QApplication.mouseButtons() == Qt.NoButton and self._on_select())
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._list_menu)
+        # a right click on the header sorts by one keyword list: the click
+        # on *annotations* sorts by the first three together
+        header.setContextMenuPolicy(Qt.CustomContextMenu)
+        header.customContextMenuRequested.connect(self._header_menu)
         # a click on a column sorts by it, again the other way; on *ROI*, back
         # to the numbers.  The same order as Sort regions sets, and kept with it
         header.setSectionsClickable(True)
@@ -2340,17 +2344,121 @@ class ROIManagerWindow(QMainWindow):
         """The list's right-click menu: what *use* and *Remove* do, on every
         selected ROI.  A right click on a selected row keeps the selection
         (Qt's), one on another row selects that row alone."""
-        from PySide6.QtWidgets import QMenu
         ids = self.selected_ids()
         if not ids:
             return
+        index = self.table.indexAt(position)
+        clicked = (self.rows.ids[index.row()]
+                   if index.isValid() and index.row() < len(self.rows.ids) else ids[0])
+        self.list_menu(ids, clicked).exec(self.table.viewport().mapToGlobal(position))
+
+    def list_menu(self, ids, clicked):
+        """The list's menu for these selected ROIs, the clicked one's
+        keywords beneath (`_list_menu`), built but not shown."""
+        from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
         n = f" {len(ids)} ROIs" if len(ids) > 1 else ""
         menu.addAction(f"Use{n}", lambda: self.set_use(ids, True))
         menu.addAction(f"Don't use{n}", lambda: self.set_use(ids, False))
         menu.addSeparator()
         menu.addAction(f"Remove{n}", self._remove)
-        menu.exec(self.table.viewport().mapToGlobal(position))
+        # the keywords of the ROI clicked: a quick filter and sort on each,
+        # without typing a condition into Filter ROIs or Sort ROIs
+        keywords = self._keywords_of(clicked)
+        if keywords:
+            menu.addSeparator()
+        for name, keyword in keywords:
+            sub = menu.addMenu(f"{name}: {keyword}")
+            sub.addAction("Use only these",
+                          lambda n=name, k=keyword: self.use_keyword(n, k, "only"))
+            sub.addAction("Use these too",
+                          lambda n=name, k=keyword: self.use_keyword(n, k, "also"))
+            sub.addAction("Don't use these",
+                          lambda n=name, k=keyword: self.use_keyword(n, k, "not"))
+            sub.addAction("Select these", lambda n=name, k=keyword: self.select_keyword(n, k))
+            sub.addSeparator()
+            sub.addAction(f"Sort by {name}", lambda n=name: self.sort_by_list(n, False))
+            sub.addAction(f"Sort by {name}, reversed",
+                          lambda n=name: self.sort_by_list(n, True))
+        return menu
+
+    def _header_menu(self, position) -> None:
+        header = self.table.horizontalHeader()
+        self.header_menu().exec(header.mapToGlobal(position))
+
+    def header_menu(self):
+        """The header's right-click menu: sort by one keyword list, either
+        way, or back to the numbers; built but not shown."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        for name in self.project.annotation_lists:
+            menu.addAction(f"Sort by {name}", lambda n=name: self.sort_by_list(n, False))
+            menu.addAction(f"Sort by {name}, reversed",
+                           lambda n=name: self.sort_by_list(n, True))
+        if self.project.annotation_lists:
+            menu.addSeparator()
+        menu.addAction("Order by number", self.unsort)
+        return menu
+
+    def _keywords_of(self, roi_id) -> list:
+        """``[(list, keyword)]`` of an ROI, in the order of the lists."""
+        roi = self.project.rois.get(roi_id)
+        if roi is None:
+            return []
+        order = list(self.project.annotation_lists)
+        names = sorted((n for n, k in roi.annotations.items() if k), key=lambda n: (
+            order.index(n) if n in order else len(order), n))
+        return [(n, roi.annotations[n]) for n in names]
+
+    def with_keyword(self, name: str, keyword: str) -> list:
+        """Every ROI of the project, all files, with this keyword, in the
+        list's order."""
+        return [i for i in self.project.ordered_ids()
+                if self.project.rois[i].annotations.get(name) == keyword]
+
+    def use_keyword(self, name: str, keyword: str, how: str) -> None:
+        """*use* by a keyword, in one undo step: ``"only"`` the ROIs with
+        it and no other, ``"also"`` them besides those already used,
+        ``"not"`` all but them as they were.  Over every ROI of the project,
+        as Filter ROIs with no selection, but never logged: a quick look,
+        where Filter ROIs is the step to record."""
+        having = set(self.with_keyword(name, keyword))
+        if how == "only":
+            wanted = {i: i in having for i in self.project.rois}
+        else:
+            wanted = {i: how == "also" for i in having}
+        changed = [i for i, use in wanted.items() if self.project.rois[i].use != use]
+        if not changed:
+            return
+        what = {"only": "Use only", "also": "Use", "not": "Exclude"}[how]
+        with self.project.edit(f"{what} {name} = {keyword}"):
+            for roi_id in changed:
+                self.project.rois[roi_id].use = wanted[roi_id]
+        self._fill_table()
+        self.redraw()
+        self.changed.emit()
+
+    def select_keyword(self, name: str, keyword: str) -> None:
+        """Select the ROIs with this keyword that the list shows, so its
+        other actions -- *Remove*, the space bar, Write results -- take them."""
+        ids = [i for i in self.with_keyword(name, keyword) if i in self.rows.row_of]
+        if ids:
+            self._select_rows(ids)
+
+    def unsort(self) -> None:
+        """Back to the order of the ROI numbers."""
+        self.project.unsort()
+        self._sorted_column = None
+        self._fill_table()
+        self.changed.emit()
+
+    def sort_by_list(self, name: str, descending: bool) -> None:
+        """Order the list by one keyword list (`ROIProject.sort`): its
+        keywords in the list's order, ROIs without one last."""
+        self.project.sort([(name, descending)])
+        self._sorted_column = None
+        self._fill_table()
+        self.changed.emit()
 
     def _label(self, what: str, ids) -> str:
         """An undo step's name: *Exclude ROI 4*, or *Exclude 12 ROIs*."""

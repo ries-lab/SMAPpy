@@ -219,10 +219,20 @@ where an analysis can read them.  They are no part of what is measured: giving
 one puts no result out of date.  An annotation is undone with the other ROI
 edits.
 
+A right click on an annotated ROI in the list adds its keywords to the menu,
+*quality: bad* say, each with *Use only these* (every ROI with that keyword
+used, every other not), *Use these too*, *Don't use these* (the others left
+as they are), *Select these*, and a sort by that list either way.  They act
+on every ROI of every file, as one step of *Undo*, and are not logged: for a
+step the history should keep, write the same condition in
+[Filter ROIs](plugin:Analysis/Regions/Filter ROIs) (`quality == "bad"`).
+
 **Order.**  The list is in the order of the ROI numbers until it is sorted:
 by [Sort ROIs](plugin:Analysis/Regions/Sort ROIs), on what was measured or
 the keywords, or by a click on a column of the list (again for the other
-way round; on *ROI*, back to the numbers).  The results table and the
+way round; on *ROI*, back to the numbers).  A click on *annotations* sorts by
+the first three keyword lists together; a right click on the list's header
+sorts by any one of them, or back to the numbers.  The results table and the
 summaries follow the same order, which is saved with the ROIs.  Sorting
 never changes an ROI's number.
 

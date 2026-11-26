@@ -684,6 +684,52 @@ def test_space_excludes_and_includes_every_selected_roi_in_one_undo_step(app):
     window.close()
 
 
+def test_the_lists_menu_uses_selects_and_sorts_by_a_keyword_in_one_undo_step(app):
+    window, project, rois = _manager_of_six(app)
+    project.set_annotation_lists({"quality": ["good", "bad"]})
+    for roi, word in zip(rois, ["bad", "good", None, "good", "bad", None]):
+        project.annotate(roi.id, "quality", word)
+    window._fill_table()
+    used = lambda: [project.rois[r.id].use for r in rois]
+    assert window._keywords_of(rois[1].id) == [("quality", "good")]
+    assert window._keywords_of(rois[2].id) == []
+    # the menus: the clicked ROI's keyword, and every list
+    texts = lambda menu: [(x.text(), [y.text() for y in x.menu().actions()]
+                           if x.menu() else None) for x in menu.actions()]
+    assert ("quality: good", ["Use only these", "Use these too", "Don't use these",
+                              "Select these", "", "Sort by quality",
+                              "Sort by quality, reversed"]) in texts(
+        window.list_menu([rois[1].id], rois[1].id))
+    assert not any(t.startswith("quality") for t, _ in texts(
+        window.list_menu([rois[2].id], rois[2].id)))
+    assert [t for t, _ in texts(window.header_menu())] == [
+        "Sort by quality", "Sort by quality, reversed", "", "Order by number"]
+
+    window.use_keyword("quality", "good", "only")    # every other ROI off
+    assert used() == [False, True, False, True, False, False]
+    assert window.undo_button.toolTip() == "undo: Use only quality = good"
+    window.use_keyword("quality", "bad", "also")     # the good ones stay
+    assert used() == [True, True, False, True, True, False]
+    window.use_keyword("quality", "good", "not")     # the rest as they were
+    assert used() == [True, False, False, False, True, False]
+    window.undo()
+    window.undo()
+    window.undo()
+    assert all(used())
+
+    window.select_keyword("quality", "bad")
+    assert window.selected_ids() == [rois[0].id, rois[4].id]
+
+    # in the list's order, ROIs without a keyword last either way
+    window.sort_by_list("quality", False)
+    assert window.rows.ids == [rois[i].id for i in (1, 3, 0, 4, 2, 5)]
+    window.sort_by_list("quality", True)
+    assert window.rows.ids == [rois[i].id for i in (0, 4, 1, 3, 2, 5)]
+    window.unsort()
+    assert window.rows.ids == [r.id for r in rois]
+    window.close()
+
+
 def test_remove_takes_every_selected_roi_in_one_undo_step(app):
     from PySide6.QtCore import Qt
     window, project, rois = _manager_of_six(app)
