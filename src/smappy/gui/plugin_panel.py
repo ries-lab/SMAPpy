@@ -183,6 +183,9 @@ class PluginPanel(QWidget):
         # what Run says, and comes back to after a run: a panel that runs
         # something more particular names it (the per-region steps' *Measure all*)
         self.run_text, self.run_tip = "Run", ""
+        # the text Run had before a plugin's `FormState.run_label` replaced
+        # it, to go back to when it no longer does
+        self._own_run_text: Optional[str] = None
         self.run_button = QPushButton("Run")
         buttons.addWidget(self.run_button)
         # a preview sits next to Run because it answers the question Run asks:
@@ -519,7 +522,21 @@ class PluginPanel(QWidget):
             self.form.set_titles(state.titles)
         if state.shown:
             self.form.set_shown(state.shown)
+        self._label_run(state.run_label)
         self._show_notice(state.notice)
+
+    def _label_run(self, label: str) -> None:
+        """Run says what the plugin says a click will do (`FormState.run_label`),
+        or its own text again; never while a run holds the button as Stop."""
+        if label and self._own_run_text is None:
+            self._own_run_text = self.run_text
+        elif not label and self._own_run_text is not None:
+            label, self._own_run_text = self._own_run_text, None
+        if not label or label == self.run_text:
+            return
+        self.run_text = label
+        if self._stop is None and not self.plugin.window:
+            self.run_button.setText(label)
 
     def _shapes_drawn(self, field: str, shapes) -> None:
         """Shapes drawn on a preview's figure (`ShapeEdit`), into the form:

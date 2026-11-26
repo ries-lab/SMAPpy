@@ -9,6 +9,11 @@ What a finished fit wants depends on what was fitted, so the steps are fixed
 rather than a chain of anything, each shown only where it applies, its
 settings only while it is chosen:
 
+* *pixel equalisation* -- a network's pull toward the camera's pixels
+  taken out of the picture (`pixel_equalisation.py`): shown only for a
+  network's fit (DECODE), and first of all, since the place within a pixel
+  is the camera's only for positions as they were fitted.  Its shifts are
+  kept as columns, so it stays revertible after everything below.
 * *field correction* -- the bias of a fit with the centre spline of a
   field-dependent calibration subtracted (`field_correction.py`): shown only
   where the calibration has a field, and first, since it reads the fitted
@@ -58,6 +63,7 @@ from .field_correction import FieldCorrectionSettings
 from .astigmatic_z import WIDTHS, AstigmaticZSettings
 from .fourpi_z import NEEDS as PHASE, FourPiZSettings
 from .overlay_channels import OverlaySettings
+from .pixel_equalisation import PixelEqualisationSettings
 
 CHAIN_FILTER = "Chains (*.chain.yaml);;All files (*)"
 
@@ -65,6 +71,13 @@ CHAIN_FILTER = "Chains (*.chain.yaml);;All files (*)"
 @dataclass
 class AfterFitSettings:
     """The steps in the order they run; each step's settings follow its switch."""
+    pixel_equalisation: bool = param(False, label="pixel equalisation",
+                                     help="flatten where the localizations sit within their camera "
+                                          "pixels, the grid a network draws into the image; cosmetic, "
+                                          "and revertible (Analysis/After fit/Pixel equalisation)")
+    equalisation: PixelEqualisationSettings = param(default_factory=PixelEqualisationSettings,
+                                                    label="pixel equalisation settings",
+                                                    collapsed=True)
     field_correction: bool = param(False, label="field correction",
                                    help="fit with the calibration's centre spline and subtract the "
                                         "field's bias afterwards, measured from its field at the "
@@ -112,6 +125,10 @@ class AfterFitSettings:
         themselves not until somebody runs one.
         """
         out = []
+        if self.pixel_equalisation:
+            from .pixel_equalisation import PixelEqualisation
+            # always a correction here: a fresh fit has nothing to revert
+            out.append((PixelEqualisation(), replace(self.equalisation, action="correct")))
         if self.field_correction:
             from .field_correction import CorrectField
             out.append((CorrectField(), self.correction))
@@ -139,11 +156,13 @@ class AfterFitSettings:
         return out
 
     def summary(self, two_channel: bool = True, widths: bool = True,
-                phase: bool = False, split: bool = False, field: bool = False) -> str:
+                phase: bool = False, split: bool = False, field: bool = False,
+                network: bool = False) -> str:
         """What the folded part's title says: the steps that are on, of those
         the table can take (`applicable`)."""
-        on = applicable(self, two_channel, widths, phase, split, field)
-        names = (["field"] if on.field_correction else []) + \
+        on = applicable(self, two_channel, widths, phase, split, field, network)
+        names = (["pixels"] if on.pixel_equalisation else []) + \
+            (["field"] if on.field_correction else []) + \
             (["astigmatic z"] if on.astigmatic_z else []) + \
             (["4Pi z"] if on.fourpi_z else []) + \
             (["overlay"] if on.overlay else []) + \
@@ -174,12 +193,14 @@ def _chain_name(path: str) -> str:
 
 def applicable(settings: AfterFitSettings, two_channel: bool,
                widths: bool, phase: bool = False, split: bool = False,
-               field: bool = False) -> AfterFitSettings:
+               field: bool = False, network: bool = False) -> AfterFitSettings:
     """``settings`` with the steps the table cannot take turned off: colours
     without two channels' photons, astigmatic z without the widths, 4Pi z
     without a phase, the overlay without a two-channel fit's halves, the
-    field correction without a field-dependent calibration."""
+    field correction without a field-dependent calibration, the pixel
+    equalisation without a network's fit -- a fit of a PSF model has no grid."""
     return replace(settings, assign_colors=settings.assign_colors and two_channel,
+                   pixel_equalisation=settings.pixel_equalisation and network,
                    field_correction=settings.field_correction and field,
                    astigmatic_z=settings.astigmatic_z and widths,
                    fourpi_z=settings.fourpi_z and phase,
@@ -189,8 +210,9 @@ def applicable(settings: AfterFitSettings, two_channel: bool,
 def table_can(locs: Localizations, colors: AssignColorSettings) -> Dict[str, bool]:
     """What the table has for the steps that need something: two channels'
     photons (as Assign colours finds them), the elliptical widths, a phase,
-    the halves of a two-channel fit (``camera_channel``), and a
-    field-dependent calibration it was fitted with."""
+    the halves of a two-channel fit (``camera_channel``), a
+    field-dependent calibration it was fitted with, and whether a network
+    fitted it (DECODE's record, ``decode``)."""
     from .assign_colors import channel_columns
     from .field_correction import can_correct
     try:
@@ -200,15 +222,20 @@ def table_can(locs: Localizations, colors: AssignColorSettings) -> Dict[str, boo
         two = False
     return {"two_channel": two, "widths": all(c in locs for c in WIDTHS),
             "phase": all(c in locs for c in PHASE), "split": "camera_channel" in locs,
-            "field": can_correct(locs.metadata)}
+            "field": can_correct(locs.metadata), "network": "decode" in locs.metadata}
 
 
 def shown(settings: AfterFitSettings, two_channel: bool, widths: bool,
-          phase: bool = False, split: bool = False, field: bool = False) -> Dict[str, bool]:
+          phase: bool = False, split: bool = False, field: bool = False,
+          network: bool = False) -> Dict[str, bool]:
     """Which fields the form shows: a step only where it applies, its
     settings only while it is on, and inside them what their own plugin
     shows (the file or the typed curves of Astigmatic z)."""
-    out = {"field_correction": field, "correction": field and settings.field_correction,
+    out = {"pixel_equalisation": network,
+           "equalisation": network and settings.pixel_equalisation,
+           # a fresh fit is always corrected: the action is the plugin's own
+           "equalisation.action": False,
+           "field_correction": field, "correction": field and settings.field_correction,
            "astigmatic_z": widths,
            "astigmatic": widths and settings.astigmatic_z,
            "fourpi_z": phase, "fourpi": phase and settings.fourpi_z,
@@ -312,7 +339,7 @@ class AfterFit(Plugin):
         locs = getattr(ctx, "locs", None) if ctx is not None else None
         can = (table_can(locs, settings.colors) if locs is not None and len(locs)
                else {"two_channel": True, "widths": True, "phase": True, "split": True,
-                  "field": True})
+                  "field": True, "network": True})
         state = FormState(shown=shown(settings, **can))
         from ..drift import merge_values
         dx, dt = merge_values(ctx.session if ctx is not None else None)

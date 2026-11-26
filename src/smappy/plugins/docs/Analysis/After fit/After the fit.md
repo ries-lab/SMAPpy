@@ -31,31 +31,39 @@ and one line of the history, under the name *After the fit*.
 plugin's settings, so a fit that finishes itself and a table finished by
 hand give the same numbers:
 
-1. ***field correction*** -- the bias of a fit with the centre spline of a
+1. ***pixel equalisation*** -- a network's pull toward the camera's pixels
+   taken out of the picture
+   ([Pixel equalisation](plugin:Analysis/After fit/Pixel equalisation)).
+   Shown only in [DECODE](plugin:Localize/DECODE), whose network draws the
+   camera's grid into the image; a fit of a PSF model has none.  First of
+   all, because the place within a pixel is the camera's only for the
+   positions as they were fitted.  Each move is kept in the table, so the
+   plugin's *Revert* undoes it at any time later.
+2. ***field correction*** -- the bias of a fit with the centre spline of a
    field-dependent calibration subtracted
    ([Field correction](plugin:Analysis/After fit/Field correction)).  Shown
-   only where the calibration has a field, and first: it reads the chip
+   only where the calibration has a field, and before the rest: it reads the chip
    position and z as fitted, before anything moves them.  In Spline 3D,
    ticking it makes the fit use the centre spline instead of the node
    splines.
-2. ***astigmatic z*** -- z from the widths of an elliptical Gaussian
+3. ***astigmatic z*** -- z from the widths of an elliptical Gaussian
    ([Astigmatic z](plugin:Analysis/After fit/Astigmatic z)).  It comes
    first, so that a drift correction after it can correct z too.
-3. ***4Pi z*** -- z from the interference phase of a 4Pi fit, unwrapped by
+4. ***4Pi z*** -- z from the interference phase of a 4Pi fit, unwrapped by
    its envelope z ([4Pi z](plugin:Analysis/After fit/4Pi z)).  Also before
    the drift correction, for the same reason.
-4. ***overlay channels*** -- for two dyes each seen in one half of a split
+5. ***overlay channels*** -- for two dyes each seen in one half of a split
    camera: the second half's localizations moved onto the first by a
    registration from beads
    ([Overlay channels](plugin:Analysis/After fit/Overlay channels)).
    Before the drift correction, because the drift is the same in both
    halves and is best measured on the overlaid table.
-5. ***drift correction*** -- none, [RCC](plugin:Analysis/Drift/RCC) or
+6. ***drift correction*** -- none, [RCC](plugin:Analysis/Drift/RCC) or
    [COMET](plugin:Analysis/Drift/COMET).
-6. ***assign colours*** -- a colour per localization from how its photons
+7. ***assign colours*** -- a colour per localization from how its photons
    split between the two channels
    ([Assign colours](plugin:Analysis/After fit/Assign colours)).
-7. ***then chain*** -- a saved chain: plugins in order, with their
+8. ***then chain*** -- a saved chain: plugins in order, with their
    settings, that run as one.  It is for whatever else your lab does to
    every fit.  A chain is made with the + of the Analysis tab and its *Save
    chain*, and is what the [batch window](plugin:Panels/Batch window) runs
@@ -106,6 +114,12 @@ chain with a fitting step in it is refused, because it would open the movie
 and fit it again.  The other steps still run.
 
 ## Parameters
+
+### pixel_equalisation
+Off by default: it changes what the image looks like, not how precise the
+localizations are, so tick it where a grid would show or would disturb a
+correlation at the scale of a pixel.  Its settings, under *pixel
+equalisation settings*, are those of the plugin; here it always corrects.
 
 ### field_correction
 For a DECODE fit with a field-dependent calibration.  In Spline 3D, leave it

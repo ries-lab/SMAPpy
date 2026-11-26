@@ -434,6 +434,8 @@ class DecodeFit(_FitPlugin):
     Settings = DecodeFitSettings
     version = "2"
     channel_part = "none"
+    # a network: its table has a grid within the pixels for *after the fit* to equalise
+    network = True
     # a model is trained for these data in the Train window (`plugins/train_decode.py`), handed
     # the movie, microscope, PSF calibration and *run on*; the hosts are Preferences' (`HostsPage`)
     part_windows = (("model", "Model info...", "decode model"), ("model", "Train a model...", "decode training"),
@@ -596,7 +598,7 @@ class DecodeFit(_FitPlugin):
             from .after_fit import shown
             state.shown.update({f"finish.{name}": on for name, on in shown(
                 settings.finish, two_channel=False, widths=False, phase=True, split=False,
-                field=self.field_dependent(settings)).items()})
+                field=self.field_dependent(settings), network=True).items()})
         state.shown.update(move_shown("two_channels.move", settings.two_channels.move))
         if settings.model.run_on == "here" and not torch_here():
             state.notice = Notice(NO_TORCH)        # said before the run, not after it

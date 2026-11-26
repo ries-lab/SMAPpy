@@ -99,6 +99,10 @@ papers and in other software.
   distribution that is a sum of several bell curves, each with its weight;
   DECODE describes where the molecules of a frame are as such a sum, one
   bell curve a pixel, weighted by the pixel's detection probability.
+* **pixelation** (also called pixel locking, or a sub-pixel bias): the
+  localizations crowding toward the centres (or the edges) of the camera's
+  pixels instead of lying evenly within them, which draws the camera's grid
+  into a rendered image; networks do it most where they are least sure.
 * **Jaccard index** (also called the Jaccard score): how well a fit finds the
   molecules of a simulation, the molecules found divided by those found,
   missed and invented together -- 1 when every molecule is found and nothing

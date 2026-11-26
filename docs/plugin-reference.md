@@ -209,7 +209,9 @@ rather than something already drawn.
 
 `Plugin.describe(ctx, settings)` returns a `FormState`: `hints` (what fields
 on *auto* resolve to), `active` (the fields the settings read; the rest are
-greyed), `choices` (lists the session decides) and a `notice`.  A
+greyed), `choices` (lists the session decides), a `run_label` (what the
+Run button says, for a run whose effect the table decides: *Correct* or
+*Revert*) and a `notice`.  A
 `Notice(text, action, window, settings, kind)` is a line under the form and,
 when the GUI has the window named in `window` (`session.window_openers`), a
 button `action` that opens it.  `kind` is `"warning"` (the default, orange and
@@ -254,6 +256,7 @@ merging.  The column vocabulary:
 | `photons`, `background` | per localization |
 | `xy_err_nm` | lateral precision, the RMS of `x_err_nm` and `y_err_nm` |
 | `z_err_nm` | axial precision, when the fit produced one (or `Analysis/After fit/Astigmatic z`, from the widths) |
+| `x_pixel_shift_nm`, `y_pixel_shift_nm` | how far *Pixel equalisation* moved each localization within its camera pixel; its *Revert* takes them off and drops them |
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row; -1 for a localization left out by `group_use` |
 | `group_use` | made by the user (usually by Math Parser), rarely there: where it is, a localization with 0 takes no part in grouping -- in no group, not in the grouped table, kept in the localizations (`group.USE`); e.g. `trace_index > 20` merges MINFLUX traces without their creeping start |

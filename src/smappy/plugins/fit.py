@@ -1027,7 +1027,9 @@ class _FitPlugin(Plugin):
                    # the halves of a 1C fit on two channels, for the overlay
                    "split": not self.two_channel and bool(getattr(channels, "two", False)),
                    # a field-dependent calibration: its centre spline and the bias subtracted
-                   "field": self.field_dependent(settings)}
+                   "field": self.field_dependent(settings),
+                   # a network's pull toward the pixels, equalised
+                   "network": self.network}
             state.shown.update({f"finish.{name}": on
                                 for name, on in shown(finish, **can).items()})
             # the overlay's beads are fitted in this fitter's own arrangement (`finish`)
@@ -1320,6 +1322,10 @@ class _FitPlugin(Plugin):
             # next file inherited the last one's values.
             return updates or None
         return None
+
+    # whether a network localizes, with no PSF model fitted: its table has a pixel grid to
+    # equalise (*after the fit*'s pixel equalisation)
+    network = False
 
     def field_dependent(self, settings) -> bool:
         """Whether this fit's calibration has a field (`field_splines`), for *after the fit*'s

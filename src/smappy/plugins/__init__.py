@@ -754,6 +754,10 @@ class FormState:
       past.  A hidden field keeps its value, as a greyed one does, so it
       cannot change what a run does; what can change a run is shown.
     * ``keys`` -- settings shown again at the top, ``{dotted name: label}``.
+    * ``run_label`` -- what the Run button says, for a plugin whose run does
+      one of two things the table decides: *Pixel equalisation* reads
+      *Correct* on a table it has not moved and *Revert* on one it has, so
+      the button says what a click will do.  Empty: the panel's own text.
     """
     hints: Dict[str, Any] = field(default_factory=dict)
     active: Dict[str, bool] = field(default_factory=dict)
@@ -769,6 +773,7 @@ class FormState:
     # ones it is about, and the rest stay folded below.  Editing one edits
     # the setting itself.  Empty leaves the form without such a section.
     keys: Dict[str, str] = field(default_factory=dict)
+    run_label: str = ""
 
     def under(self, key: str, title: str = "", settings: Any = None) -> "FormState":
         """This state as part ``key`` of a larger form -- a chain's step: the
