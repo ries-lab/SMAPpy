@@ -711,14 +711,10 @@ def model_path(path) -> Path:
 
 
 def carries_model(path) -> bool:
-    """Whether the calibration at ``path`` carries its model (`save`), read with h5py alone."""
-    import h5py
-    try:
-        with h5py.File(path, "r") as f:
-            group = f.get(MODEL_GROUP)
-            return isinstance(group, h5py.Group) and group.attrs.get("format") == "uipsf-model"
-    except (OSError, ValueError):
-        return False
+    """Whether the calibration at ``path`` carries its model (`save`), or the localization file at ``path``
+    carries a copy of one with the calibration it was fitted with (`io.embedded`); read with h5py alone."""
+    from ..io.embedded import model_group
+    return model_group(path) is not None
 
 
 def save(path, cal, calibration, overwrite: bool = False) -> Path:
@@ -940,8 +936,9 @@ def load_start(path):
     beside = model_path(path)
     if not carries_model(path) and not path.name.endswith(".uipsf.h5") and beside.exists():
         path = beside
+    from ..io.embedded import model_group
     try:
-        return uipsf.load_model(path)
+        return uipsf.load_model(path, group=model_group(path))
     except ValueError as error:
         raise ValueError(f"{path.name} is not a uipsf model and carries none, and no model file is beside "
                          f"it") from error

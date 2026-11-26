@@ -1,6 +1,6 @@
 ---
 version: "11"
-covers: [smappy.psf.SplinePSF, smappy.pipeline.one_per_molecule, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.io.calibration.matched_to_em, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of, smappy.calibrate.depth.in_beads_orientation]
+covers: [smappy.psf.SplinePSF, smappy.pipeline.one_per_molecule, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.io.calibration.matched_to_em, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.io.embedded.image, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of, smappy.calibrate.depth.in_beads_orientation]
 ---
 
 ## What it does
@@ -443,9 +443,13 @@ this is never taken on *auto*: one of another lens state fits, badly, without
 an error.  ▾ beside the field, or a right click in it, lists every
 calibration found, those that do not match marked, and *auto*.
 
-A fitted `.h5` works here too: the fit uses the calibration that file was
-fitted with, as its file recorded it.  A calibration moved or deleted since
-is refused, naming it.
+A fitted `.h5` works here too: every fit keeps the calibration it used inside
+the localization file -- the spline's knots, from which the spline is made
+again exactly, and the pupil model it was drawn from, about half a megabyte --
+so a file fitted once is the calibration of the next data set, with nothing
+else to find.  A file fitted before calibrations were kept in it stands for
+the calibration it recorded, which is refused, naming it, if it has been
+moved or deleted since.
 
 The menu's last line, *M2's pupil, 3DA: on · far red*, is the microscope's
 pupil (above, "Without a bead calibration"): the field then reads

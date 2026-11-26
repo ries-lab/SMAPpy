@@ -125,7 +125,9 @@ blink, written as a whole number; a blink with none is written as -1.
 ## Output
 
 The file, and a line saying how many localizations went where, in which
-format; for Picasso, also what was left out or written as 0.  The export is
+format; for Picasso, also what was left out or written as 0.  None of these
+formats carries the calibration a fit kept with its localizations: smappy's
+own HDF5 file does.  The export is
 written into the history, since where a file went is not visible in the
 file.
 

@@ -402,47 +402,17 @@ def save_spline_calibration(path, cal, diagnostics=None, overwrite=False):
     Arrays stay in fitter order. JSON records carry settings and acquisition
     provenance without Python pickles or MATLAB-specific structures.
     """
-    import json
     import os
     import tempfile
     import h5py
     path = Path(path)
-    if cal.psf is not None and cal.psf.shape != tuple(n + 1 for n in cal.coeff.shape[1:]):
-        # a SMAP file's PSF is its averaged bead stack, not this spline's
-        # knots, and the format holds only the knots
-        cal = replace(cal, psf=None)
-    _validate_native_calibration(cal)
     if path.exists() and not overwrite:
         raise FileExistsError(path)
     fd, tmp = tempfile.mkstemp(prefix='.'+path.name, suffix='.tmp', dir=path.parent)
     os.close(fd)
     try:
         with h5py.File(tmp, 'w') as f:
-            f.attrs.update(format='smappy-spline-calibration', version=1,
-                           coefficient_order='64,z,y,x;16*pz+4*py+px',
-                           lateral_unit='pixel', axial_unit='nm',
-                           dz=cal.dz, z0=cal.z0)
-            if cal.x0 is not None:
-                f.attrs['x0'] = cal.x0
-            if cal.em_on is not None:
-                f.attrs['em_on'] = bool(cal.em_on)
-            f.create_dataset('coeff', data=cal.coeff, compression='gzip')
-            if cal.psf is not None:
-                f.create_dataset('psf', data=cal.psf, compression='gzip')
-            f.create_dataset('parameters_json',
-                             data=json.dumps(cal.parameters, default=_jsonable))
-            fs = getattr(cal, 'field_splines', None)
-            if fs is not None:
-                # optional, so the version stays: a reader that does not know it fits with ``coeff``,
-                # the grid's centre, as with any calibration of one spline
-                write_field_splines(f, fs)
-            g = f.create_group('diagnostics')
-            for key, value in (diagnostics or {}).items():
-                if key.endswith('_json'):
-                    g.create_dataset(key, data=json.dumps(value))
-                else:
-                    a = np.asarray(value)
-                    g.create_dataset(key, data=a, compression='gzip' if a.ndim else None)
+            write_native(f, cal, diagnostics or {})
         if overwrite:
             os.replace(tmp, path)
         else:
@@ -450,6 +420,107 @@ def save_spline_calibration(path, cal, diagnostics=None, overwrite=False):
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
+
+
+#: how close the knots' spline must come to the stored coefficients, of their largest, for the knots to stand
+#: for them (`knots_rebuild`): float32 rounding -- coefficients computed from float64 knots and the float32 knots
+#: stored -- leaves 1e-6 of it on dual calibrations (`calibrate.dual`) and 1e-12 on in situ ones; anything
+#: fitted otherwise (SMAP's, a smoothed spline) differs by percent
+KNOTS_TOLERANCE = 1e-5
+
+
+def knots_rebuild(coeff, psf) -> bool:
+    """Whether ``coeff`` is what `calibrate.core.spline_coefficients` makes of the knots ``psf``, within
+    float32 rounding (`KNOTS_TOLERANCE`): then the knots alone are the spline, 1/64 of its size (a
+    localization file's copy, `io.embedded`).  Checked, never assumed."""
+    if psf is None or psf.shape != tuple(n + 1 for n in coeff.shape[1:]):
+        return False
+    from ..calibrate.core import spline_coefficients
+    try:
+        rebuilt = spline_coefficients(psf)
+    except ValueError:
+        return False
+    scale = float(np.abs(coeff).max())
+    return bool(np.abs(rebuilt - coeff).max() <= KNOTS_TOLERANCE * scale) if scale > 0 else not rebuilt.any()
+
+
+def spline_knots(coeff) -> np.ndarray:
+    """The knots ``(nz+1, ny+1, nx+1)`` of the spline with coefficients ``coeff`` ``(64, nz, ny, nx)``: its
+    values on the grid -- each cell's constant term, and on the far faces the last cell at its far end, the sum
+    of its coefficients along that axis -- one axis at a time.  `calibrate.core.spline_coefficients` of them
+    gives ``coeff`` back where it was made that way."""
+    nz, ny, nx = coeff.shape[1:]
+    c = np.asarray(coeff, np.float64).reshape(4, 4, 4, nz, ny, nx)          # [pz, py, px, z, y, x]
+    along_x = np.concatenate([c[:, :, 0], c[:, :, :, :, :, -1:].sum(axis=2)], axis=-1)
+    along_y = np.concatenate([along_x[:, 0], along_x[:, :, :, -1:, :].sum(axis=1)], axis=-2)
+    knots = np.concatenate([along_y[0], along_y[:, -1:].sum(axis=0)], axis=0)
+    return knots.astype(np.float32)
+
+
+def field_splines_of(group):
+    """A calibration group's field-dependent node splines (`write_field_splines`), or None: stored as
+    coefficients, or as each node's knots (a localization file's copy, `io.embedded`) and splined again."""
+    if 'field' not in group:
+        return None
+    from ..field_splines import FieldSplines
+    g = group['field']
+    if 'coeff' in g:
+        coeff = g['coeff'][...]
+    else:
+        from ..calibrate.core import spline_coefficients
+        coeff = np.stack([spline_coefficients(k) for k in g['knots'][...]])
+    return FieldSplines(coeff, g['xs'][...], g['ys'][...])
+
+
+def write_native(group, cal, diagnostics=None, knots_only=False):
+    """``cal`` into the open HDF5 ``group`` (a file's root, or a localization file's calibration group,
+    `io.embedded`) in the native layout.  ``knots_only``: the coefficients left out where the knots rebuild
+    them exactly (`knots_rebuild`), which `read_native` then does."""
+    import json
+    if cal.psf is not None and cal.psf.shape != tuple(n + 1 for n in cal.coeff.shape[1:]):
+        # a SMAP file's PSF is its averaged bead stack, not this spline's
+        # knots, and the format holds only the knots
+        cal = replace(cal, psf=None)
+    _validate_native_calibration(cal)
+    group.attrs.update(format='smappy-spline-calibration', version=1,
+                       coefficient_order='64,z,y,x;16*pz+4*py+px',
+                       lateral_unit='pixel', axial_unit='nm',
+                       dz=cal.dz, z0=cal.z0)
+    if cal.x0 is not None:
+        group.attrs['x0'] = cal.x0
+    if cal.em_on is not None:
+        group.attrs['em_on'] = bool(cal.em_on)
+    if knots_only and knots_rebuild(cal.coeff, cal.psf):
+        group.attrs['coeff_from'] = 'psf'
+    else:
+        group.create_dataset('coeff', data=cal.coeff, compression='gzip')
+    if cal.psf is not None:
+        group.create_dataset('psf', data=cal.psf, compression='gzip')
+    group.create_dataset('parameters_json',
+                         data=json.dumps(cal.parameters, default=_jsonable))
+    fs = getattr(cal, 'field_splines', None)
+    if fs is not None:
+        # optional, so the version stays: a reader that does not know it fits with ``coeff``,
+        # the grid's centre, as with any calibration of one spline
+        write_field_splines(group, fs)
+    if diagnostics is not None:      # a file always has the group, empty or not
+        g = group.create_group('diagnostics')
+        for key, value in diagnostics.items():
+            if key.endswith('_json'):
+                g.create_dataset(key, data=json.dumps(value))
+            else:
+                a = np.asarray(value)
+                g.create_dataset(key, data=a, compression='gzip' if a.ndim else None)
+
+
+def coefficients_of(group) -> np.ndarray:
+    """A native spline's coefficients from ``group``: stored, or rebuilt from its knots (`write_native`)."""
+    if 'coeff' in group:
+        return np.ascontiguousarray(group['coeff'][...], dtype=np.float32)
+    if group.attrs.get('coeff_from') == 'psf' and 'psf' in group:
+        from ..calibrate.core import spline_coefficients
+        return spline_coefficients(group['psf'][...])
+    raise ValueError('calibration has neither coefficients nor the knots they are made from')
 
 
 def write_field_splines(group, fs) -> None:
@@ -480,29 +551,36 @@ def _jsonable(value):
 
 
 def _load_native_calibration(path):
-    import json
     import h5py
     with h5py.File(path, 'r') as f:
-        if f.attrs.get('format') == 'smappy-dual-color-calibration':
-            raise ValueError('Dual-color calibration: use load_dual_color_calibration() and select .main or .secondary')
-        if f.attrs.get('format') != 'smappy-spline-calibration' or f.attrs.get('version') != 1:
-            raise ValueError(f'{path}: unsupported HDF5 calibration format/version')
-        if f.attrs.get('coefficient_order') != '64,z,y,x;16*pz+4*py+px':
-            raise ValueError('unsupported calibration coefficient convention')
-        if f.attrs.get('lateral_unit') != 'pixel' or f.attrs.get('axial_unit') != 'nm':
-            raise ValueError('unsupported calibration coordinate units')
-        cal = SplineCalibration(
-            coeff=np.ascontiguousarray(f['coeff'][...], dtype=np.float32),
-            dz=float(f.attrs['dz']), z0=float(f.attrs['z0']),
-            x0=f.attrs.get('x0'), psf=f['psf'][...] if 'psf' in f else None,
-            source=Path(path),
-            em_on=bool(f.attrs['em_on']) if 'em_on' in f.attrs else None,
-            parameters=json.loads(f['parameters_json'][()]))
-        if 'field' in f:
-            from ..field_splines import FieldSplines
-            cal.field_splines = FieldSplines(f['field/coeff'][...], f['field/xs'][...], f['field/ys'][...])
-        # written by versions that kept a mirrored spline as it was
-        mirrored = bool(f.attrs.get('em_mirror', False))
+        if f.attrs.get('format') == 'smappy-localizations':
+            from .embedded import calibration_group
+            f = calibration_group(f, path)
+        return read_native(f, Path(path))
+
+
+def read_native(f, source):
+    """A native spline calibration from the open HDF5 group ``f`` (a file's root, or a localization file's
+    copy, `io.embedded`); ``source`` is the file it is in."""
+    import json
+    if f.attrs.get('format') == 'smappy-dual-color-calibration':
+        raise ValueError('Dual-color calibration: use load_dual_color_calibration() and select .main or .secondary')
+    if f.attrs.get('format') != 'smappy-spline-calibration' or f.attrs.get('version') != 1:
+        raise ValueError(f'{source}: unsupported HDF5 calibration format/version')
+    if f.attrs.get('coefficient_order') != '64,z,y,x;16*pz+4*py+px':
+        raise ValueError('unsupported calibration coefficient convention')
+    if f.attrs.get('lateral_unit') != 'pixel' or f.attrs.get('axial_unit') != 'nm':
+        raise ValueError('unsupported calibration coordinate units')
+    cal = SplineCalibration(
+        coeff=coefficients_of(f),
+        dz=float(f.attrs['dz']), z0=float(f.attrs['z0']),
+        x0=f.attrs.get('x0'), psf=f['psf'][...] if 'psf' in f else None,
+        source=Path(source),
+        em_on=bool(f.attrs['em_on']) if 'em_on' in f.attrs else None,
+        parameters=json.loads(f['parameters_json'][()]))
+    cal.field_splines = field_splines_of(f)
+    # written by versions that kept a mirrored spline as it was
+    mirrored = bool(f.attrs.get('em_mirror', False))
     _validate_native_calibration(cal)
     return _unmirror_x(cal) if mirrored else cal
 

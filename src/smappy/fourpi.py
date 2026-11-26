@@ -396,7 +396,6 @@ def save_fourpi_calibration(path, cal: FourPiCalibration, overwrite: bool = Fals
 
     import h5py
 
-    from .io.calibration import _jsonable
     path = Path(path)
     if cal.volumes is None:
         raise ValueError("only a calibration made from its knots (from_volumes) can be saved")
@@ -406,51 +405,76 @@ def save_fourpi_calibration(path, cal: FourPiCalibration, overwrite: bool = Fals
     os.close(fd)
     try:
         with h5py.File(tmp, "w") as f:
-            f.attrs.update(format=FORMAT, version=VERSION,
-                           knots="C,IAB,z,y,x", lateral_unit="pixel", axial_unit="nm", dz=cal.dz, z0=cal.z0,
-                           period_nm=cal.period_nm, phase_per_nm=cal.phase_per_nm)
-            if cal.pixelsize_nm is not None:
-                f.attrs["pixelsize_nm"] = np.asarray(cal.pixelsize_nm, float)
-            f.create_dataset("volumes", data=cal.volumes, compression="gzip")
-            if cal.transforms is not None:
-                f.create_dataset("transforms", data=np.asarray(cal.transforms, float))
-            if cal.layout is not None:
-                f.create_dataset("layout_json", data=json.dumps(cal.layout))
-            f.create_dataset("parameters_json", data=json.dumps(cal.parameters,
-                                                                default=_jsonable))
+            write_fourpi(f, cal)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
 
 
+def write_fourpi(f, cal) -> None:
+    """``cal``, made from its knots, into the open HDF5 group ``f`` (a file's root, or a localization file's
+    copy, `io.embedded`)."""
+    from .io.calibration import _jsonable
+    if cal.volumes is None:
+        raise ValueError("only a calibration made from its knots (from_volumes) can be saved")
+    f.attrs.update(format=FORMAT, version=VERSION,
+                   knots="C,IAB,z,y,x", lateral_unit="pixel", axial_unit="nm", dz=cal.dz, z0=cal.z0,
+                   period_nm=cal.period_nm, phase_per_nm=cal.phase_per_nm)
+    if cal.pixelsize_nm is not None:
+        f.attrs["pixelsize_nm"] = np.asarray(cal.pixelsize_nm, float)
+    f.create_dataset("volumes", data=cal.volumes, compression="gzip")
+    if cal.transforms is not None:
+        f.create_dataset("transforms", data=np.asarray(cal.transforms, float))
+    if cal.layout is not None:
+        f.create_dataset("layout_json", data=json.dumps(cal.layout))
+    f.create_dataset("parameters_json", data=json.dumps(cal.parameters, default=_jsonable))
+
+
 def load_fourpi_calibration(path) -> FourPiCalibration:
-    """Read a native 4Pi calibration, or a uiPSF v1 4Pi model (`load_uipsf_v1`)."""
+    """Read a native 4Pi calibration, a uiPSF v1 4Pi model (`load_uipsf_v1`), or the one a localization file
+    was fitted with (`io.embedded`)."""
     import h5py
     path = Path(path)
     with h5py.File(path, "r") as f:
+        if f.attrs.get("format") == "smappy-localizations":
+            from .io.embedded import calibration_group
+            return read_fourpi(calibration_group(f, path), path)
         if f.attrs.get("format") != FORMAT:
             if "res" in f and "channel0" in f["res"] and "A_model" in f["res/channel0"]:
                 return load_uipsf_v1(path)
             raise ValueError(f"{path.name} is not a 4Pi calibration")
-        if f.attrs.get("version") != VERSION:
-            raise ValueError(f"{path.name}: unsupported 4Pi calibration version")
-        volumes = f["volumes"][...]
-        return from_volumes(
-            volumes[:, 0], volumes[:, 1], volumes[:, 2],
-            dz=float(f.attrs["dz"]), z0=float(f.attrs["z0"]),
-            period_nm=float(f.attrs["period_nm"]),
-            phase_per_nm=float(f.attrs["phase_per_nm"]),
-            transforms=f["transforms"][...] if "transforms" in f else None,
-            layout=json.loads(f["layout_json"][()]) if "layout_json" in f else None,
-            pixelsize_nm=tuple(f.attrs["pixelsize_nm"]) if "pixelsize_nm" in f.attrs else None,
-            source=path, parameters=json.loads(f["parameters_json"][()]))
+        return read_fourpi(f, path)
+
+
+def read_fourpi(f, path) -> FourPiCalibration:
+    """A native 4Pi calibration from the open HDF5 group ``f``; ``path`` is the file it is in."""
+    path = Path(path)
+    if f.attrs.get("format") != FORMAT:
+        raise ValueError(f"{path.name} holds no 4Pi calibration")
+    if f.attrs.get("version") != VERSION:
+        raise ValueError(f"{path.name}: unsupported 4Pi calibration version")
+    volumes = f["volumes"][...]
+    return from_volumes(
+        volumes[:, 0], volumes[:, 1], volumes[:, 2],
+        dz=float(f.attrs["dz"]), z0=float(f.attrs["z0"]),
+        period_nm=float(f.attrs["period_nm"]),
+        phase_per_nm=float(f.attrs["phase_per_nm"]),
+        transforms=f["transforms"][...] if "transforms" in f else None,
+        layout=json.loads(f["layout_json"][()]) if "layout_json" in f else None,
+        pixelsize_nm=tuple(f.attrs["pixelsize_nm"]) if "pixelsize_nm" in f.attrs else None,
+        source=path, parameters=json.loads(f["parameters_json"][()]))
 
 
 def is_fourpi_calibration(path) -> bool:
+    """Whether ``path`` is a 4Pi calibration: native, uiPSF v1's, or carried by a localization file fitted
+    with one (`io.embedded`)."""
     import h5py
     try:
         with h5py.File(path, "r") as f:
+            if f.attrs.get("format") == "smappy-localizations":
+                group = f.get("calibration")
+                return isinstance(group, h5py.Group) and group.attrs.get("format") == FORMAT
             return (f.attrs.get("format") == FORMAT or
                     ("res" in f and "channel0" in f["res"] and "A_model" in f["res/channel0"]))
     except OSError:

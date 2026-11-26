@@ -295,7 +295,13 @@ only those may be written over from regions again (`region_runs.check_writable`)
 A fitted table also carries `metadata["frame_tags"]` (the image tags that
 changed, per frame: `smappy.frametags`) and `metadata["acquisition"]` (the
 Micro-Manager summary, devices and comment); both are written beside `/locs`,
-not in the metadata attribute.
+not in the metadata attribute.  And the calibration it was fitted with
+(`io.embedded`): the spline's knots, its pupil model, a dual calibration's
+registration or a 4Pi model, as the group `/calibration` laid out as the
+calibration's own file, so that `load_spline_calibration` (and the dual and 4Pi
+loaders) read a fitted file as a calibration.  In memory it is
+`metadata["calibration_h5"]`, an HDF5 image in bytes, never in the JSON; a
+second file's is in its `metadata["files"]` entry, as base64.
 
 **Several files.**  The table's metadata is the first file's once several
 are open.  Each file's own -- its camera, its acquisition, a MINFLUX

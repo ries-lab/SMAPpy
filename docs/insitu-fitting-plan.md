@@ -37,14 +37,20 @@ A fitted file records only `metadata["calibration"] = {"file": ...}` (`_FitPlugi
   (`calibrate/dual.py` `save_dual_color_calibration`'s content).
 * **A 4Pi model**: its `volumes` (already knots only), `transforms`, `layout_json`, parameters -- the
   whole of what `fourpi.save` writes.
-* **Field-dependent splines**: the node splines are stored as float16 coefficients
-  (`write_field_splines`).  Open: keep the nodes' knots instead (64 × smaller) if the learning has them;
-  else embed the coefficients and measure the size on Zenodo's 13 × 13 grid.
+* **Field-dependent splines**: each node's knots, read off its coefficients (`io.calibration.spline_knots`)
+  and splined again on reading (`field_splines_of`).  On `synthetic_x1_3dcal.h5` (7 × 7 nodes) 14 MB in
+  place of 368 MB, the nodes back to 5e-9.  Nodes kept in half precision are checked by their values
+  (at each cell's centre, `embedded._centre_values`): the knots' spline is 4e-4 of the peak from the
+  original, as close as the half-precision coefficients are.
 * **The context**: the focus and sample index it was drawn at, how it was made (bead average, pupil,
   in situ and from which start, the check of section 2), the source file's name and sha256.
 
 **Where.**  A group `/calibration` in the localization file, laid out exactly as the calibration file it
-stands for (the same `format` attribute and datasets), so one reader serves both.  The readers
+stands for (the same `format` attribute and datasets), so one reader serves both.  "The knots rebuild the
+coefficients" is checked, never assumed (`io.calibration.knots_rebuild`), within 1e-5 of the largest
+coefficient: float32 rounding leaves 1e-6 on dual calibrations and 1e-12 on in situ ones, so exact equality
+kept the coefficients of every dual file.  Measured: bead and pupil calibrations 0.4-0.5 MB, an in situ
+one 1.5 MB, a dual one 0.5 MB (32 MB as stored).  The readers
 (`io.calibration._load_native_calibration`, `dual.load_dual_color_calibration`,
 `fourpi.load_fourpi_calibration`) are refactored to read from an h5py group, and the path-taking
 functions open the file and pass `/` or `/calibration`.
@@ -57,10 +63,11 @@ search localization files; it is offered by naming one.
 
 **Carried through.**  The table keeps it across what happens after the fit:
 
-* on load, the group is read into memory as a small in-memory HDF5 image (`h5py` core driver, a few
-  hundred kB) kept beside the metadata; *Save localizations* copies it back into `/calibration`.
-* several files in one table, each fitted with its own: one per file, `/calibration/<file index>`,
-  following `metadata["files"]`; *Combine files* and *add* keep each file's.
+* on load, the group is read into memory as an HDF5 image in bytes, `metadata["calibration_h5"]`
+  (`embedded.KEY`); the writer puts it back as `/calibration`, never in the JSON.
+* several files in one table: the table's metadata is the first file's, so `/calibration` is the first
+  file's; each other file's is in its `metadata["files"]` entry (`FileInfo.metadata`) as base64
+  (`embedded.plain`), the first file's written there once only, as `"the table's"`.
 * *Open in a new window* (`handoff`) passes it with the rest.
 * Picasso and the other exporters do not carry it.
 
@@ -122,7 +129,10 @@ with a warning; the cache is used on a second run.  Slow tier.
 ## Phases
 
 0. **Embedding** (section 1): single, dual, 4Pi, model; read back; carried through; tests; the pages
-   (*Save localizations*, the fitters' *calibration* notes, `docs/plugin-reference.md`).
+   (*Save localizations*, the fitters' *calibration* notes, `docs/plugin-reference.md`).  **Done
+   2026-11-26** (`io/embedded.py`, `tests/test_embedded_calibration.py`): the fitter embeds the file its
+   *calibration* field names once resolved, before the focus is drawn, so a fitted file loaded as a
+   calibration gives the beads' spline and the model, and *focus* draws it again for the new data.
 1. **Spline 3D in situ** (section 2), *focus in situ* folded in; its page and version bumped; the
    PSF calibration window's in situ kept as the place to make a calibration for many data sets.
 2. **Spline 4Pi in situ**: the same part over `fourpi_insitu`.
@@ -131,6 +141,5 @@ with a warning; the cache is used on a second run.  Slow tier.
 
 ## Open
 
-* Field-dependent calibrations: embed knots or float16 coefficients (size on a 13 × 13 grid).
 * The held-out check for single channel: which fraction, and the threshold for "better".
 * Whether *auto* should one day also find recent fitted files of the same microscope.

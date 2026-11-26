@@ -1225,24 +1225,7 @@ def save_dual_color_calibration(path, calibration, result=None, overwrite=False)
     os.close(fd)
     try:
         with h5py.File(temporary, 'w') as f:
-            f.attrs.update(format='smappy-dual-color-calibration', version=1)
-            f['geometry_json'] = json.dumps(calibration.geometry)
-            f['parameters_json'] = json.dumps(calibration.parameters)
-            f['transformation'] = calibration.transformation
-            for name, model in zip(('main', 'secondary'), (calibration.main, calibration.secondary)):
-                g = f.create_group(name)
-                g.attrs.update(dz=model.dz, z0=model.z0, x0=model.x0)
-                if model.em_on is not None:
-                    g.attrs['em_on'] = bool(model.em_on)
-                g['parameters_json'] = json.dumps(model.parameters)
-                g.create_dataset('coeff', data=model.coeff, compression='gzip')
-                g.create_dataset('psf', data=model.psf, compression='gzip')
-                fs = getattr(model, 'field_splines', None)
-                if fs is not None:
-                    # each channel's node splines over its own part of the chip, as a single
-                    # calibration keeps them (`io.calibration`): optional, so the version stays
-                    from ..io.calibration import write_field_splines
-                    write_field_splines(g, fs)
+            write_dual(f, calibration)
             if result is not None:
                 g = f.create_group('diagnostics')
                 r = result.registration
@@ -1280,30 +1263,63 @@ def save_dual_color_calibration(path, calibration, result=None, overwrite=False)
             os.unlink(temporary)
 
 
+def write_dual(f, calibration, knots_only=False):
+    """``calibration`` into the open HDF5 group ``f`` (a file's root, or a localization file's copy,
+    `io.embedded`); ``knots_only`` as `io.calibration.write_native`'s."""
+    from ..io.calibration import knots_rebuild, write_field_splines
+    f.attrs.update(format='smappy-dual-color-calibration', version=1)
+    f['geometry_json'] = json.dumps(calibration.geometry)
+    f['parameters_json'] = json.dumps(calibration.parameters)
+    f['transformation'] = calibration.transformation
+    for name, model in zip(('main', 'secondary'), (calibration.main, calibration.secondary)):
+        g = f.create_group(name)
+        g.attrs.update(dz=model.dz, z0=model.z0, x0=model.x0)
+        if model.em_on is not None:
+            g.attrs['em_on'] = bool(model.em_on)
+        g['parameters_json'] = json.dumps(model.parameters)
+        if knots_only and knots_rebuild(model.coeff, model.psf):
+            g.attrs['coeff_from'] = 'psf'
+        else:
+            g.create_dataset('coeff', data=model.coeff, compression='gzip')
+        g.create_dataset('psf', data=model.psf, compression='gzip')
+        fs = getattr(model, 'field_splines', None)
+        if fs is not None:
+            # each channel's node splines over its own part of the chip, as a single
+            # calibration keeps them (`io.calibration`): optional, so the version stays
+            write_field_splines(g, fs)
+
+
 def load_dual_color_calibration(path):
     import h5py
     with h5py.File(path, 'r') as f:
-        if f.attrs.get('format') != 'smappy-dual-color-calibration' or f.attrs.get('version') != 1:
-            raise ValueError('unsupported dual-color calibration format/version')
-        models = []
-        for name in ('main', 'secondary'):
-            g = f[name]
-            model = SplineCalibration(np.ascontiguousarray(g['coeff'][...]), float(g.attrs['dz']),
-                    float(g.attrs['z0']), x0=float(g.attrs['x0']), psf=g['psf'][...],
-                    source=Path(path), parameters=json.loads(g['parameters_json'][()]),
-                    em_on=bool(g.attrs['em_on']) if 'em_on' in g.attrs else None)
-            if 'field' in g:
-                from ..field_splines import FieldSplines
-                model.field_splines = FieldSplines(g['field/coeff'][...], g['field/xs'][...], g['field/ys'][...])
-            _validate_native_calibration(model)
-            models.append(model)
-        if models[0].z0 != models[1].z0 or models[0].dz != models[1].dz or models[0].shape != models[1].shape:
-            raise ValueError('dual PSFs must share exactly the same grid and z origin')
-        h = f['transformation'][...]
-        if h.shape != (3, 3) or not np.isfinite(h).all() or np.linalg.matrix_rank(h) != 3:
-            raise ValueError('invalid projective transformation')
-        return DualColorCalibration(*models, h, json.loads(f['geometry_json'][()]),
-                                    json.loads(f['parameters_json'][()]))
+        if f.attrs.get('format') == 'smappy-localizations':
+            from ..io.embedded import calibration_group
+            f = calibration_group(f, path)
+        return read_dual(f, Path(path))
+
+
+def read_dual(f, source):
+    """A dual-colour calibration from the open HDF5 group ``f``; ``source`` is the file it is in."""
+    from ..io.calibration import coefficients_of, field_splines_of
+    if f.attrs.get('format') != 'smappy-dual-color-calibration' or f.attrs.get('version') != 1:
+        raise ValueError('unsupported dual-color calibration format/version')
+    models = []
+    for name in ('main', 'secondary'):
+        g = f[name]
+        model = SplineCalibration(coefficients_of(g), float(g.attrs['dz']),
+                float(g.attrs['z0']), x0=float(g.attrs['x0']), psf=g['psf'][...],
+                source=Path(source), parameters=json.loads(g['parameters_json'][()]),
+                em_on=bool(g.attrs['em_on']) if 'em_on' in g.attrs else None)
+        model.field_splines = field_splines_of(g)
+        _validate_native_calibration(model)
+        models.append(model)
+    if models[0].z0 != models[1].z0 or models[0].dz != models[1].dz or models[0].shape != models[1].shape:
+        raise ValueError('dual PSFs must share exactly the same grid and z origin')
+    h = f['transformation'][...]
+    if h.shape != (3, 3) or not np.isfinite(h).all() or np.linalg.matrix_rank(h) != 3:
+        raise ValueError('invalid projective transformation')
+    return DualColorCalibration(*models, h, json.loads(f['geometry_json'][()]),
+                                json.loads(f['parameters_json'][()]))
 
 
 def channel_result(result, channel):

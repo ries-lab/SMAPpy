@@ -19,6 +19,7 @@ import h5py
 import numpy as np
 
 from ..locs import Localizations
+from . import embedded
 
 FORMAT_VERSION = 1
 
@@ -64,8 +65,9 @@ class LocalizationWriter:
     def _write_metadata(self) -> None:
         # a key with a leading underscore is the process's own -- the 3D
         # view's cache token (`view3d.table_token`) -- and meaningless on disk
+        # the calibration the table was fitted with is bytes, an HDF5 image: a group of its own (`embedded`)
         small = {k: v for k, v in self._metadata.items()
-                 if k not in LARGE and not k.startswith("_")}
+                 if k not in LARGE and k != embedded.KEY and not k.startswith("_")}
         rois = small.get("roi_project")
         if isinstance(rois, dict) and "tables" in rois:
             # the ROI results are columns: datasets of their own, not text in
@@ -78,7 +80,12 @@ class LocalizationWriter:
                                                   default=_json_default, indent=1)
         for key in LARGE:
             if key in self._metadata:
-                _write_large(self._file, key, self._metadata[key])
+                value = self._metadata[key]
+                if key == "files":
+                    value = _files_without_table_calibration(value, self._metadata.get(embedded.KEY))
+                _write_large(self._file, key, value)
+        if embedded.KEY in self._metadata:
+            embedded.write(self._file, self._metadata[embedded.KEY])
 
     def append(self, locs: Localizations) -> None:
         if len(locs) == 0:
@@ -145,6 +152,25 @@ class LocalizationWriter:
 # into `metadata` under the same keys, so nothing else knows the difference.
 
 LARGE = ("frame_tags", "acquisition", "files")
+
+
+#: a file entry's calibration that is the table's (`embedded.GROUP`), written once rather than twice
+SAME_AS_TABLE = "the table's"
+
+
+def _files_without_table_calibration(files, table):
+    """The file list (``metadata["files"]``) with each entry's calibration that is the table's -- the first
+    file's always is -- replaced by `SAME_AS_TABLE`: it is in the file once, as `embedded.GROUP`."""
+    if not table or not isinstance(files, list):
+        return files
+    same = embedded.plain({embedded.KEY: table})[embedded.KEY]
+    out = []
+    for entry in files:
+        own = entry.get("metadata") if isinstance(entry, dict) else None
+        if isinstance(own, dict) and own.get(embedded.KEY) in (same, table):
+            entry = dict(entry, metadata=dict(own, **{embedded.KEY: SAME_AS_TABLE}))
+        out.append(entry)
+    return out
 
 
 def _write_large(f, key: str, value) -> None:
@@ -514,6 +540,13 @@ def load_localizations(path, columns=None) -> Localizations:
         if "metadata" in f.attrs:
             metadata = json.loads(f.attrs["metadata"])
         metadata.update(_read_large(f))
+        carried = embedded.read(f)
+        if carried is not None:
+            metadata[embedded.KEY] = carried
+            for entry in metadata.get("files") or []:
+                own = entry.get("metadata") if isinstance(entry, dict) else None
+                if isinstance(own, dict) and own.get(embedded.KEY) == SAME_AS_TABLE:
+                    own[embedded.KEY] = carried
         if isinstance(metadata.get("roi_project"), dict):
             tables = _read_regions(f)
             if tables:
@@ -534,4 +567,8 @@ def _json_default(obj):
         return obj.tolist()
     if isinstance(obj, Path):
         return str(obj)
+    if isinstance(obj, (bytes, bytearray)):
+        # an embedded calibration nested where it was not expected: never a megabyte of repr in the JSON;
+        # it has a place of its own (`embedded`)
+        return None
     return str(obj)

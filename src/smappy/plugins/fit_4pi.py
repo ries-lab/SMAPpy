@@ -68,7 +68,8 @@ class FourPiRegistrationSettings:
 class FourPiModelSettings:
     calibration: str = param("", label="4Pi model", kind="open_file",
                              file_filter=MODEL_FILTER,
-                             help="a 4Pi model (.h5): this program's or uiPSF v1's")
+                             help="a 4Pi model (.h5): this program's or uiPSF v1's, or a file "
+                                   "fitted with one, which keeps it")
     link_xy: bool = param(True, label="link x, y",
                           help="one position for every channel; off measures each "
                                "channel's own, to check the registration")

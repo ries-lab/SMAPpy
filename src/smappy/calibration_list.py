@@ -128,7 +128,11 @@ def describe(path) -> Optional[Entry]:
         return Entry(str(path), dual=False, made=made, method="SMAP")
     try:
         import h5py
-        with h5py.File(path, "r") as f:
+        with h5py.File(path, "r") as root:
+            # a fitted file stands for the calibration it carries (`io.embedded`)
+            f = root.get("calibration") if root.attrs.get("format") == "smappy-localizations" else root
+            if f is None:
+                return None
             kind = f.attrs.get("format")
             if kind == "smappy-spline-calibration":
                 parameters = json.loads(f["parameters_json"][()])

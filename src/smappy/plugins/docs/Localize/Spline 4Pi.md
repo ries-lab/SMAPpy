@@ -272,7 +272,9 @@ in-situ models with opposite signs; each is read with its own.
 ### model.calibration
 A 4Pi model made from beads of the same microscope, with the dye's filter.
 uiPSF v1's bead model (`psfmodel_zernike_4pi.h5`) and in-situ model
-(`psfmodel_iter*_insitu_zernike_4pi.h5`) both work.
+(`psfmodel_iter*_insitu_zernike_4pi.h5`) both work.  So does a file fitted
+with Spline 4Pi: every fit keeps its model -- knots, maps and layout -- inside
+the localization file.
 
 ### channels.layout
 *auto* takes the file's own layout where it has one: MATLAB quadrant files

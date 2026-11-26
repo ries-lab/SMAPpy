@@ -75,6 +75,18 @@ def _plain(value):
     return value
 
 
+def _carried_out(metadata: dict) -> dict:
+    """The calibration the table was fitted with is bytes (`io.embedded`): base64 in the JSON."""
+    from .io.embedded import plain
+    return plain(metadata)
+
+
+def _carried_in(metadata: dict) -> dict:
+    """`_carried_out` undone."""
+    from .io.embedded import unplain
+    return unplain(metadata)
+
+
 def _json_default(value):
     out = _plain(value)
     if out is value:
@@ -383,7 +395,7 @@ def session_state(session, gui_state=None, view=None) -> Dict[str, Any]:
     """Everything the new instance opens with, but the table's columns."""
     return {
         "version": VERSION,
-        "metadata": _plain(session.file_metadata()),
+        "metadata": _carried_out(_plain(session.file_metadata())),
         "files": [_plain(f.to_dict()) for f in session.files],
         "results": _plain(session.results),
         "layers": layer_states(session),
@@ -568,7 +580,7 @@ def receive(path) -> Tuple[Localizations, Dict[str, Any]]:
     finally:
         block.close()
     path.unlink(missing_ok=True)
-    return Localizations(columns, dict(state.get("metadata") or {})), state
+    return Localizations(columns, _carried_in(dict(state.get("metadata") or {}))), state
 
 
 def take(path, group_settings=None, progress=None):

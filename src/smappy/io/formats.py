@@ -71,7 +71,8 @@ class FileInfo:
             out["columns"] = list(self.columns)
         own = own_metadata(self.metadata)
         if own:
-            out["metadata"] = own
+            from .embedded import plain
+            out["metadata"] = plain(own)     # its calibration as base64 (`io.embedded`)
         return out
 
     @classmethod
@@ -81,6 +82,9 @@ class FileInfo:
         known = {"name", "path", "format", "pixelsize_nm", "metadata", "frame_time_ms",
                  "columns"}
         out = cls(**{k: v for k, v in d.items() if k in known})
+        if isinstance(out.metadata, dict):
+            from .embedded import unplain
+            out.metadata = unplain(dict(out.metadata))
         if out.columns is not None:
             out.columns = [str(c) for c in out.columns]
         return out

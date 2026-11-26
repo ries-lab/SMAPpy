@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from ..detect import AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter, PeakFinder
+from ..io import embedded
 from ..locs import Localizations
 from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
 from ..calibrate.dual import (RegisterSettings, layout_param, main_channel_param,
@@ -695,6 +696,10 @@ class _FitPlugin(Plugin):
             tell(f"calibration: {scope.get('name')}'s pupil, {path.name}")
             return replace(settings, model=replace(settings.model, calibration=str(path)))
         if chosen:
+            if embedded.carried_format(chosen) is not None:
+                # a fitted file that carries its calibration is one (`io.embedded`): read as it is
+                tell(f"calibration: the one {Path(chosen).name} was fitted with, kept in it")
+                return settings
             recorded = calibration_list.recorded_calibration(chosen)
             if recorded is None:
                 return settings
@@ -830,6 +835,24 @@ class _FitPlugin(Plugin):
         """The fitted file's record of how it was fitted (`pipeline.provenance`); a fitter
         without a peak finder or a PSF fit (DECODE) records its own."""
         return provenance(camera, finder, model, settings.fit, source=source)
+
+    def carried_calibration(self, ctx: Context, settings) -> Optional[bytes]:
+        """The calibration this run fits with, as the fitted file keeps it (`io.embedded`): the file the
+        *calibration* field names once resolved (`with_calibration`), knots and pupil model, so that the
+        localizations stand without it and serve as the calibration of another data set.  None for a
+        fitter without a calibration; a calibration that cannot be copied is said, and the fit goes on
+        with its path recorded as before."""
+        if self.calibration_kind is None:
+            return None
+        path = getattr(settings.model, "calibration", "")
+        if not path:
+            return None
+        try:
+            return embedded.image(path)
+        except Exception as error:
+            ctx.warn(f"the calibration could not be kept in the fitted file ({error}): it records "
+                     f"the path {path} alone")
+            return None
 
     def checks(self, ctx: Context, settings, locs: Localizations) -> List[str]:
         """Warnings about the fit as a whole, made when its last block is in and before its file
@@ -1507,6 +1530,9 @@ class _FitPlugin(Plugin):
         if self.calibration_kind is not None and "calibration" not in record:
             # a two-channel model is two splines and records neither: the file it came from
             record["calibration"] = {"file": str(settings.model.calibration)}
+        carried = self.carried_calibration(ctx, settings)
+        if carried is not None:
+            record[embedded.KEY] = carried
         record["acquisition"] = acquisition(source)
         writer = None
         if out is not None:
@@ -1632,7 +1658,7 @@ class _FitPlugin(Plugin):
         # (2026-11).  The calibration and DECODE's model too: *Field correction* draws the spline
         # the fit used again from them
         for key in ("camera", "frame_tags", "acquisition", "warnings", "channels", "calibration",
-                    "decode"):
+                    embedded.KEY, "decode"):
             if record.get(key):
                 collected.metadata[key] = record[key]
         seconds = time.perf_counter() - started

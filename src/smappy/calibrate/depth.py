@@ -78,7 +78,7 @@ def model_file(cal) -> Optional[Path]:
         return None
     from .pupil import carries_model
     source = Path(cal.source)
-    if source.suffix.lower() == ".h5" and carries_model(source):
+    if source.suffix.lower() in (".h5", ".hdf5") and carries_model(source):
         return source
     name = (cal.parameters or {}).get("model_file")
     if not name:
@@ -123,7 +123,9 @@ def load(path, channels: int = 1):
     key = (str(path), path.stat().st_mtime)
     if key not in _LOADED:
         _LOADED.clear()
-        learned = uipsf.load_model(path, device=torch.device("cpu"), dtype=torch.float64)
+        from ..io.embedded import model_group
+        # a calibration carrying its model, a localization file carrying a copy, or a model file at its root
+        learned = uipsf.load_model(path, device=torch.device("cpu"), dtype=torch.float64, group=model_group(path))
         _LOADED[key] = learned
     learned = _LOADED[key]
     if learned.n_channels != channels:

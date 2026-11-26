@@ -420,7 +420,8 @@ Made once per microscope configuration: the same objective, dichroic,
 filters, camera settings and split as the data.  Empty, it is *auto*, the
 dual-colour calibration listed for this microscope and state, as in
 [Spline 3D](plugin:Localize/Spline 3D); ▾ or a right click lists all found,
-and a fitted `.h5` stands for the calibration it was fitted with.  It records whether the beads
+and a fitted `.h5` stands for the calibration it was fitted with, which every
+fit keeps inside the localization file (both channels and their registration).  It records whether the beads
 were taken with EM gain, and data taken the other way is warned about (an EM
 register mirrors the image, and the PSF with it).  Its halves are rectangles
 on the camera chip, so a movie from another camera ROI is cut where its
