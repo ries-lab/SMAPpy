@@ -135,11 +135,29 @@ with a warning; the cache is used on a second run.  Slow tier.
    calibration gives the beads' spline and the model, and *focus* draws it again for the new data.
 1. **Spline 3D in situ** (section 2), *focus in situ* folded in; its page and version bumped; the
    PSF calibration window's in situ kept as the place to make a calibration for many data sets.
+   **Done 2026-11-26**, otherwise than section 2 said in three places:
+   * **No *source* field.**  *focus* already had `in situ`, which is what *source* = in situ with *learn* =
+     focus would have been; *learn* (`focus and blur` / `aberrations` / `everything`) is shown under it.
+     Nothing to migrate, one field fewer, and saved settings keep meaning what they meant.
+   * **The start needs a pupil model**: a pupil calibration, or the microscope's pupil (*calibration* =
+     `microscope`), which covers "no bead calibration".  Starting from a bead average and the nominal
+     astigmatism, as the PSF window can, is left for when someone asks.
+   * **Saved where the focus in situ was**: the configuration directory's `sample_depth` cache (keyed by the
+     movie, the calibration, the index and *learn*), and -- since phase 0 -- inside the fitted file, which is
+     the copy to keep and reuse.  Not beside the movie: *calibration* on *auto* would take it for a bead
+     calibration there.
+   The check: a focus-only run first (from `InSituSettings`' 2000 molecules), the pupil learnt from the same
+   molecules at its focus, both scored on the tenth of the blinks held out of both by their summed deviance
+   (`insitu_run.heldout_deviance`); the pupil kept only if better, else the focus alone with a warning
+   (`depth.insitu_focus`).  A preflight asks before the first such run.  Not done: Preview's model-against-data
+   figure (it draws the heights, as before).
 2. **Spline 4Pi in situ**: the same part over `fourpi_insitu`.
 3. **Spline 3D 2C in situ**, when it fits the plan: needs a dual in situ workflow in uipsf (biplane first:
    the same molecules in both channels; colour split later) and its benchmark.
 
 ## Open
 
-* The held-out check for single channel: which fraction, and the threshold for "better".
+* The held-out check: any gain keeps the pupil learnt.  On the 100-molecule test movie only 3 molecules are
+  held out; measure on real data (M2) how large the gain is and whether a threshold in nats per molecule is
+  needed.
 * Whether *auto* should one day also find recent fitted files of the same microscope.

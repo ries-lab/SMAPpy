@@ -1,6 +1,6 @@
 ---
 version: "11"
-covers: [smappy.psf.SplinePSF, smappy.pipeline.one_per_molecule, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.io.calibration.matched_to_em, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.io.embedded.image, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of, smappy.calibrate.depth.in_beads_orientation]
+covers: [smappy.psf.SplinePSF, smappy.pipeline.one_per_molecule, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.io.calibration.matched_to_em, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.io.embedded.image, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.heldout_deviance, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of, smappy.calibrate.depth.in_beads_orientation]
 ---
 
 ## What it does
@@ -208,9 +208,14 @@ and the objective's focus moved *focus depth* into the sample.  z is then the
   It takes a second or two.
 * *in situ* learns it from the molecules, as the
   [PSF calibration](plugin:Panels/PSF calibration)'s in situ method does,
-  but with every aberration held from the beads.  Only the focus and the blur
-  are learnt, the coverslip's edge guiding the focus.  It takes minutes, and
-  is for when the depth has to be right.
+  starting from the calibration's pupil model.  *learn* says how much of the
+  PSF the molecules teach.  On *focus and blur* every aberration is held from
+  the beads, and only the focus and the blur are learnt, the coverslip's edge
+  guiding the focus.  On *aberrations* the sample's own aberrations are
+  learnt too -- a refractive-index mismatch, a coverslip of another
+  thickness, the beads' day against today's -- and on *everything* the pupil's
+  brightness profile as well.  It takes minutes, and is for when the depth or
+  the PSF has to be right.
 * *typed* takes it as given.
 * *as calibrated* fits with the beads' spline as it is.
 
@@ -380,8 +385,8 @@ above it, and the position comes out short by their distance: on simulated
 heights starting 250 nm above the coverslip, by about 200 nm.  The run says so
 in its log.  So little depends on the depth there that it rarely matters.
 
-*in situ* runs the in situ calibration (`insitu_run.run_insitu`) with *hold*
-set to every aberration.  The bead model's whole pupil, phase and magnitude,
+*in situ* runs the in situ calibration (`insitu_run.run_insitu`).  On *learn*
+*focus and blur*, *hold* is set to every aberration.  The bead model's whole pupil, phase and magnitude,
 is held -- a *minimal* model's γ, a Zernike model's magnitude modes -- and a
 phase mode up to its order that it lacks is held at 0.  The beads' SAF
 damping is not: it is the beads', and a molecule's light beyond the critical
@@ -393,6 +398,23 @@ above, at the learnt focus.  It is kept in the configuration directory's
 `sample_depth` folder (not beside the data, where *calibration* on *auto*
 would take it for a bead calibration), and the run fits with it as
 *as calibrated*, so the history names the file.
+
+**Learning the aberrations, and checking them.**  On *learn* *aberrations*
+(*hold* the start's: γ, the pupil's brightness profile, and the phase above
+the model's order are the beads') or *everything* (*hold* nothing), the focus
+is learnt first, as above, but from the molecules a calibration in situ
+chooses (2000 of them, spread over heights).  The pupil is then learnt from
+the same molecules, starting at that focus, in at most 4 rounds with the twin
+test.  A tenth of the blinks were set aside before either learning saw them.
+Each of them is localised on both models, from heights 0 to 3000 nm in steps
+of 250 nm, and the deviance of its region -- twice the log-likelihood it loses
+-- is summed (`insitu_run.heldout_deviance`).  The pupil learnt is kept only if
+it explains the molecules held out better; the log says by how many nats per
+molecule.  If it does not, the fit uses the focus learnt alone, with the beads'
+aberrations, and warns: more freedom that the held-out molecules do not
+support is fitting the noise or a few odd molecules.  Before the first such
+run for a file and its settings the fitter asks, since it takes minutes,
+offering the focus alone instead.
 
 **A PSF that varies over the field.**  A calibration learnt with *field
 dependence* in the [PSF calibration](plugin:Panels/PSF calibration) holds one
@@ -500,6 +522,15 @@ there too, or to compare with an older fit.  Drawing needs torch (`pip install
 smappy-smlm[uipsf]`): without it, *auto* fits as calibrated and warns, and the
 others stop and say so.  A live fit
 cannot use *auto* or *in situ*: the frames they need are not there yet.
+
+### model.learn
+*focus and blur* is right when the beads were imaged in the same medium and on
+the same kind of coverslip as the sample.  *aberrations* when they were not
+-- beads in water, cells in a mounting medium; an old calibration -- or when
+fits deep in the sample show z compressed or skewed; it needs a few hundred
+molecules held out to judge, so a few thousand blinks in the movie.
+*everything* rarely: the brightness profile is the objective's, and learnt from
+molecules it trades with the focus, which is then pinned to the coverslip.
 
 ### model.focus_nm
 How far the objective was moved up from the coverslip, as its focus drive

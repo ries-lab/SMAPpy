@@ -27,7 +27,7 @@ from ..locs import Localizations
 from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
 from ..calibrate.dual import (RegisterSettings, layout_param, main_channel_param,
                               split_position_param)
-from ..calibrate.depth import SampleSettings
+from ..calibrate.depth import LEARN_CHOICES, SampleSettings
 from ..calibrate.medium import (cleared, differs, for_drawing, index_field, medium_field, mismatch_text, resolve,
                                settle)
 from ..pipeline import FitSettings, fit_stack, provenance
@@ -466,6 +466,12 @@ class SplineModelSettings:
                             "model, z then the height above the coverslip: auto, from the lowest "
                             "localizations; in situ, learnt from the molecules with the beads' "
                             "aberrations; typed; or as calibrated, the beads' PSF at the coverslip")
+    # in situ only (`SplineFit._focus_form`): how much of the PSF the data's own molecules teach, the rest held
+    # from the calibration's pupil model, the start (`calibrate.depth.insitu_focus`)
+    learn: str = param("focus", label="learn", choices=LEARN_CHOICES,
+                       help="in situ: the focus and the blur alone, every aberration the calibration's; "
+                            "the aberrations too, kept only where they explain molecules held out "
+                            "better; or everything, the pupil's magnitude too")
     focus_nm: float = param(0.0, label="focus depth", unit="nm", min=0.0,
                             help="how far into the sample the objective was moved from the "
                                  "coverslip; typed here, else found at Preview or Run")
@@ -2224,6 +2230,26 @@ class SplineFit(_FitPlugin):
             pass
         return state
 
+    def preflight(self, ctx: Context, settings):
+        """The camera's question first; then, for in situ learning more than the focus that has not been learnt
+        for these settings before, its cost -- minutes, where the focus alone takes seconds -- with the focus
+        alone as the other answer."""
+        asked = super().preflight(ctx, settings)
+        m = settings.model
+        if asked is not None or m.focus != "insitu" or m.learn == "focus":
+            return asked
+        from ..calibrate import depth
+        key = self._focus_key(settings)
+        if depth.found(key) is not None or depth.kept(key) is not None:
+            return None
+        return PreflightQuestion(
+            f"Learning the {m.learn} in situ fits the movie's molecules in rounds before the fit: several "
+            f"minutes, longer on a CPU.  It is kept for these settings, so it is learnt once.",
+            run_label="Learn them", choices=(
+                PreflightChoice("Learn the focus alone",
+                                settings=replace(settings, model=replace(m, learn="focus")),
+                                help="the calibration's aberrations, the focus and the blur learnt: seconds"),))
+
     def _focus_form(self, settings, state) -> None:
         """*focus* and its rows only for a calibration with a pupil model beside it: a bead average
         has no model to draw at another place.  *position* is typed only on *typed*; on *auto* and
@@ -2234,6 +2260,7 @@ class SplineFit(_FitPlugin):
         has = drawable is not None
         shown = has or m.focus in ("typed", "insitu")
         state.shown["model.focus"] = shown
+        state.shown["model.learn"] = shown and m.focus == "insitu"
         state.shown["model.focus_nm"] = shown and m.focus != "calibrated"
         state.shown["model.medium"] = shown and m.focus != "calibrated"
         state.shown["model.sample_index"] = shown and m.focus != "calibrated"
@@ -2289,6 +2316,8 @@ class SplineFit(_FitPlugin):
             except OSError:
                 return (str(path), None)
         key = [m.focus, stamp(src.path), stamp(m.calibration), m.n_med()]
+        if m.focus == "insitu" and m.learn != "focus":
+            key.append(m.learn)        # a focus alone keeps the key it had, and what was kept under it
         if m.focus == "auto":
             key += [src.start, src.stop, repr(settings.detection), settings.fit.roisize,
                     repr(getattr(settings, "region", None)), repr(settings.camera)]
@@ -2368,12 +2397,13 @@ class SplineFit(_FitPlugin):
             except ValueError:
                 pass
             found = depth.insitu_focus(cal, [settings.source.path], camera, m.n_med(), start,
-                                       progress=ctx.report, cancel=ctx.stop)
+                                       progress=ctx.report, cancel=ctx.stop, learn=m.learn)
             if depth.keep(key, found) is None:
                 raise ValueError("the focus learnt in situ could not be kept for the fit: see the "
                                  "configuration directory's sample_depth folder")
+            learnt = ("" if m.learn == "focus" or found.fallback else f", the {m.learn} learnt")
             ctx.report(f"focus in situ: {found.focus_nm:.0f} nm above the coverslip, blur "
-                       f"{found.blur_nm:.0f} nm, from {found.n} molecules")
+                       f"{found.blur_nm:.0f} nm{learnt}, from {found.n} molecules")
         for note in found.notes:
             ctx.report(f"focus {found.method}: {note}")
         for message in found.messages:

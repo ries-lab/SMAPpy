@@ -481,6 +481,29 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     return result
 
 
+def heldout_deviance(result: InSituRunResult) -> Optional[float]:
+    """How well ``result``'s learnt model explains the molecules held out of its learning (``held out``,
+    `insitu.select`: a tenth of the blinks, all their frames): each localised on the model from a grid of
+    heights, as the focus is searched for (`uipsf.workflows.insitu_rounds.focus_from_data`), and its deviance
+    summed over its pixels and over them -- twice the log-likelihood lost, lower is better.  Two runs on the same molecules (`rois`) compare by
+    it: what a model learnt that the data do not support shows here, where the molecules it learnt from
+    cannot.  None without any held out."""
+    import torch
+
+    from uipsf.workflows.insitu_rounds import FOCUS_SEARCH_NM, FOCUS_SEARCH_STEP_NM, localise_units
+    ids = result.rois.ids("held out")
+    if not len(ids):
+        return None
+    dtype = result.model.psf.grid.rho.dtype
+    shared = {k: torch.as_tensor(v).detach().to(dtype) for k, v in result.cal.shared().items()}
+    _, noise = result.rois.batch(ids=ids[:1])
+    heights = np.arange(FOCUS_SEARCH_NM[0], FOCUS_SEARCH_NM[1] + 1, FOCUS_SEARCH_STEP_NM)
+    found = localise_units(result.model, shared, result.rois, ids, noise, heights)
+    # the mean per pixel back to the sum over the pixels each region uses
+    pixels = np.asarray(result.rois.units.masks[ids], bool).reshape(len(ids), -1).sum(1)
+    return float(np.nansum(np.asarray(found["deviance"], float) * pixels))
+
+
 def field_edges(cal, pixel_size_nm):
     """The coverslip's edge over the field (`uipsf.workflows.insitu_rounds.edge_over_field`) from the heights
     ``cal`` (a uipsf `Calibration`) learnt its molecules at, with their CRLBs and chip positions; None

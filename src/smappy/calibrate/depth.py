@@ -382,6 +382,10 @@ class AutoDepth:
     method: str = "auto"
     spline: object = None               # in situ: the spline of the learnt model at its focus
     blur_nm: Optional[float] = None     # in situ: the learnt blur
+    # in situ with more than the focus learnt (`insitu_focus`): each model's deviance on the molecules held out,
+    # and what was learnt but not kept, for explaining them no better
+    heldout: Optional[dict] = None
+    fallback: Optional[str] = None
 
 
 def _next_focus(passes, paraxial: float) -> float:
@@ -451,28 +455,75 @@ def auto_focus(cal, images: np.ndarray, n_med: Optional[float] = None, iteration
 
 # ------------------------------------------------------------------ in situ, every aberration held
 
+#: *learn*'s choices (`plugins.fit.SplineModelSettings.learn`): what in situ learns beside the focus and the blur,
+#: as `insitu_run.InSituModelSettings.hold` holds the rest of the start's pupil
+LEARN_CHOICES = (("focus", "focus and blur"), ("aberrations", "aberrations"), ("everything", "everything"))
+LEARN_HOLDS = {"focus": "all", "aberrations": "start", "everything": "nothing"}
+LEARN_METHODS = {"focus": "in situ, every aberration held",
+                 "aberrations": "in situ, the aberrations learnt",
+                 "everything": "in situ, the pupil learnt"}
+
+
 def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Optional[float] = None,
-                 molecules: int = 1000, rounds: int = 2, progress=None, cancel=None) -> AutoDepth:
-    """The focus learnt in situ from the movies at ``paths`` with every aberration held from ``cal``'s pupil
-    model (`insitu_run.run_insitu` with *hold* every aberration): only the focus, the blur and the molecules
-    are learnt, the bead model's own blur the start.  ``focus_nm`` is where it starts, typically the auto
+                 molecules: int = 1000, rounds: int = 2, progress=None, cancel=None,
+                 learn: str = "focus") -> AutoDepth:
+    """The focus, and with ``learn`` more of the PSF, learnt in situ from the movies at ``paths``, starting
+    from ``cal``'s pupil model (`insitu_run.run_insitu`).  ``focus_nm`` is where it starts, typically the auto
     depth's; on None the in situ run estimates one.  The result's ``spline`` is the learnt model drawn as
     `depth_spline` draws a bead model, z the height above the coverslip.
 
-    Fewer molecules and rounds than a calibration in situ (`InSituSettings`, `InSituModelSettings`): with
-    nothing of the pupil to learn, a thousand molecules fix the focus and the blur, and the rounds stop once
-    the focus stops moving."""
-    from dataclasses import fields
+    * ``learn = "focus"``: every aberration held (*hold* every aberration), only the focus, the blur and the
+      molecules learnt.  Fewer molecules and rounds than a calibration in situ: with nothing of the pupil to
+      learn, a thousand molecules fix the focus and the blur, and the rounds stop once the focus stops moving.
+    * ``"aberrations"`` (γ and the phase above the model's order held, *hold* the start's) and
+      ``"everything"`` (*hold* nothing): the focus alone is learnt first, as above, from the molecules a
+      calibration in situ takes; then the pupil, from the same molecules and that focus.  Both are judged
+      on the molecules held out of both (`insitu_run.heldout_deviance`), and the pupil learnt is kept only
+      if it explains them better -- else the focus alone, with a warning (docs/insitu-fitting-plan.md §2)."""
+    from .insitu import InSituSettings
+    if learn not in LEARN_HOLDS:
+        raise ValueError(f"learn: one of {', '.join(LEARN_HOLDS)}, not {learn!r}")
+    if learn == "focus":
+        return _insitu(cal, paths, camera, n_med, focus_nm, "focus", InSituSettings(molecules=molecules), rounds,
+                       progress, cancel)
+    from .insitu_run import InSituModelSettings, heldout_deviance
+    detection = InSituSettings()
+    first = _insitu(cal, paths, camera, n_med, focus_nm, "focus", detection, rounds, progress, cancel)
+    second = _insitu(cal, paths, camera, n_med, first.focus_nm, learn, detection, InSituModelSettings().max_rounds,
+                     progress, cancel, rois=first.result.rois)
+    if progress is not None:
+        progress("in situ: judging both models on the molecules held out")
+    held = {"focus": heldout_deviance(first.result), learn: heldout_deviance(second.result)}
+    second.heldout = first.heldout = held
+    if held["focus"] is None or held[learn] is None:
+        second.messages.append(f"no molecules held out to judge the {learn} learnt against the focus alone: "
+                               f"kept unjudged")
+        return second
+    n = len(first.result.rois.ids("held out"))
+    gain = (held["focus"] - held[learn]) / 2 / n            # nats per molecule held out (deviance: 2 × nats)
+    if gain > 0:
+        second.notes.append(f"the {learn} learnt explain the {n} molecules held out better than the start's "
+                            f"with the focus learnt, by {gain:.2f} nats each")
+        return second
+    first.messages.append(f"the {learn} learnt explain the {n} molecules held out no better than the start's "
+                          f"with the focus learnt ({gain:+.2f} nats each): fitted with the start's aberrations "
+                          f"and the focus learnt")
+    first.fallback = learn
+    return first
+
+
+def _insitu(cal, paths, camera, n_med, focus_nm, learn: str, detection, rounds: int, progress, cancel,
+            rois=None) -> AutoDepth:
+    """One in situ run for `insitu_focus`: ``learn`` says what is held (`LEARN_HOLDS`)."""
     from types import SimpleNamespace
 
-    from .insitu import InSituSettings
     from .insitu_run import InSituModelSettings, run_insitu
     from .pupil import BeadSettings, OpticsSettings, RunSettings
     path = model_file(cal)
     learned = model_of(cal)
     if learned is None:
-        raise ValueError("in situ with the beads' aberrations needs a calibration made with the pupil (Zernike) "
-                         "method, or the microscope's pupil: its model is the start")
+        raise ValueError("in situ needs a calibration made with the pupil (Zernike) method, or the microscope's "
+                         "pupil: its model is the start")
     o = learned.model.channels[0].psf.grid.optics
     # the objective's NA: a minimal pupil's grid reaches beyond it (`MinimalPupil`)
     na = float(getattr(learned.model.channels[0].psf.pupil, "na", o.NA))
@@ -484,6 +535,7 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
 
     from .psf_methods import LearningProgress, duration
     bar, last = LearningProgress(), [""]
+    word = "focus in situ" if learn == "focus" else f"in situ, {learn}"
 
     def tell(entry):
         # the window's own reading of the entries: a round's line, or its learning's iterations, with
@@ -494,13 +546,14 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
         if "message" in entry:
             last[0] = entry["message"]
             text = ""
-        progress("focus in situ: " + "; ".join(filter(None, [last[0], text]))
+        progress(f"{word}: " + "; ".join(filter(None, [last[0], text]))
                  + ("" if left is None else f", about {duration(left)} left"))
     result = run_insitu(paths, optics, model,
-                        InSituModelSettings(focus_nm=focus_nm, hold="all", max_rounds=rounds, spline_z="height"),
-                        InSituSettings(molecules=molecules),
+                        InSituModelSettings(focus_nm=focus_nm, hold=LEARN_HOLDS[learn], max_rounds=rounds,
+                                            spline_z="height"),
+                        detection,
                         run=RunSettings(start_from=str(path) if path is not None else "", save_model=False),
-                        camera=camera, progress=tell, cancel=cancel,
+                        camera=camera, progress=tell, cancel=cancel, rois=rois,
                         # the microscope's pupil held, where there is no model file to start from
                         pupil=None if path is not None else cal.parameters["pupil"]["pupil"])
     dtype = result.model.psf.grid.rho.dtype                  # the model's own, as it was learnt
@@ -510,7 +563,7 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
     spline = depth_spline(cal, focus, learned=drawn)
     sigma = shared.get("psf.sigma")
     blur = None if sigma is None else float(sigma.mean())
-    spline.parameters["sample_depth"].update(method="in situ, every aberration held", blur_nm=blur)
+    spline.parameters["sample_depth"].update(method=LEARN_METHODS[learn], blur_nm=blur, learnt=learn)
     last = result.run.rounds[-1]
     h = np.asarray(last.heights if last.heights is not None else [], float)
     err = np.asarray(last.heights_sd if last.heights_sd is not None else np.full(len(h), np.nan), float)
@@ -519,7 +572,7 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
                     len(last.used), heights=h - (0.0 if edge is None else edge.shift_nm), errors=err,
                     method="in situ", spline=spline, blur_nm=blur)
     out.notes += list(result.messages)
-    out.cal, out.drawn = result.cal, drawn
+    out.cal, out.drawn, out.result = result.cal, drawn, result
     return out
 
 
@@ -561,7 +614,8 @@ def keep(key, result: AutoDepth) -> Optional[Path]:
         path.parent.mkdir(parents=True, exist_ok=True)
         result.spline.parameters["sample_depth"].update(key=_jsonable(key), heights=result.heights.tolist(),
                                                        errors=result.errors.tolist(), notes=result.notes,
-                                                       n=result.n)
+                                                       messages=result.messages, n=result.n,
+                                                       heldout=result.heldout, fallback=result.fallback)
         save(path, result.cal, result.spline, overwrite=True)
         return path
     except Exception:
@@ -582,8 +636,10 @@ def kept(key) -> Optional[AutoDepth]:
         out = AutoDepth(float(record["focus_nm"]), np.nan, 0.0, int(record.get("n", 0)),
                         heights=np.asarray(record.get("heights", []), float),
                         errors=np.asarray(record.get("errors", []), float), method="in situ", spline=spline,
-                        blur_nm=record.get("blur_nm"))
+                        blur_nm=record.get("blur_nm"), heldout=record.get("heldout"),
+                        fallback=record.get("fallback"))
         out.notes = list(record.get("notes", [])) + [f"kept from an earlier run: {path}"]
+        out.messages = list(record.get("messages", []))
         return out
     except Exception:
         return None

@@ -552,3 +552,93 @@ def test_spline_3d_in_situ_learns_the_focus_with_the_beads_aberrations_and_keeps
     assert used.focus == "calibrated" and "sample_depth" in used.calibration
     assert used.focus_nm == pytest.approx(found.focus_nm, abs=0.1)
     assert np.quantile(np.asarray(result.locs["z_nm"]), 0.05) > -150    # heights above the coverslip
+
+
+def test_in_situ_keeps_what_it_learnt_only_where_the_molecules_held_out_agree(monkeypatch):
+    # the decision alone: the focus learnt first, the aberrations from the same molecules, the better on the
+    # molecules held out kept -- here twice, once each way
+    from types import SimpleNamespace
+
+    from smappy.calibrate import depth, insitu_run
+    runs = []
+
+    def one(cal, paths, camera, n_med, focus_nm, learn, detection, rounds, progress, cancel, rois=None):
+        rois = rois or SimpleNamespace(ids=lambda state: np.arange(7))
+        out = depth.AutoDepth(650.0 if learn == "focus" else 700.0, 10.0, 0.1, 50, method="in situ")
+        out.result = SimpleNamespace(learn=learn, rois=rois)
+        runs.append((learn, focus_nm, rois))
+        return out
+    monkeypatch.setattr(depth, "_insitu", one)
+    for better, kept in ((5.0, "aberrations"), (20.0, "focus")):
+        runs.clear()
+        monkeypatch.setattr(insitu_run, "heldout_deviance",
+                            lambda result, b=better: 10.0 if result.learn == "focus" else b)
+        found = depth.insitu_focus(None, ["movie.tif"], CAMERA, learn="aberrations")
+        # the pupil learnt from the focus alone's focus and molecules: both judged on the same ones held out
+        assert [r[0] for r in runs] == ["focus", "aberrations"] and runs[1][1] == 650.0
+        assert runs[1][2] is runs[0][2]
+        assert found.heldout == {"focus": 10.0, "aberrations": better}
+        if kept == "aberrations":
+            assert found.focus_nm == 700.0 and found.fallback is None
+            # (10 - 5) / 2 / 7 nats per molecule
+            assert any("explain the 7 molecules held out better than the start's with the focus learnt, by 0.36 "
+                       "nats each" in n for n in found.notes)
+        else:
+            assert found.focus_nm == 650.0 and found.fallback == "aberrations"
+            assert any("no better" in m for m in found.messages)
+
+
+@pytest.mark.long
+def test_in_situ_learns_the_astigmatism_a_start_lacks_and_explains_the_held_out_molecules_better(movie_file,
+                                                                                                  tmp_path,
+                                                                                                  monkeypatch):
+    # a start with half the movie's astigmatism: the focus alone cannot make up for it; the aberrations learnt
+    # do, which the molecules held out of both runs show
+    from smappy.calibrate import depth
+    from smappy.calibrate import pupil as pupil_module
+    from smappy.calibrate.pupil import spline_calibration
+
+    import uipsf.workflows
+    import uipsf.workflows.insitu as insitu_module
+    from uipsf.export import LearnedPSF, describe
+    monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
+    monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
+    model, shared = model_and_shared()
+    shared = dict(shared, **{"pupil.phase": shared["pupil.phase"].clone()})
+    shared["pupil.phase"][1] *= 0.5
+    start = LearnedPSF(model, shared, {}, describe(model),
+                       options={"psf": {"zernike_order": 4, "blur_nm": 30.0, "pixel_blur": False}})
+    monkeypatch.setattr(depth, "load", lambda path, channels=1: start)
+    monkeypatch.setattr(pupil_module, "load_start", lambda path: start)
+    cal = spline_calibration(start, 20.0, 700.0, 17)
+    cal.source = tmp_path / "beads_3dcal.h5"
+    cal.parameters = dict(cal.parameters, model_file="beads_3dcal.uipsf.h5")
+    (tmp_path / "beads_3dcal.uipsf.h5").write_bytes(b"")
+    path, _ = movie_file
+    found = depth.insitu_focus(cal, [path], CAMERA, focus_nm=FOCUS, learn="aberrations")
+    assert found.fallback is None, found.messages
+    assert found.heldout["aberrations"] < found.heldout["focus"]
+    assert found.spline.parameters["sample_depth"]["learnt"] == "aberrations"
+    assert found.focus_nm == pytest.approx(FOCUS, abs=150)
+
+
+def test_spline_3d_asks_before_learning_more_than_the_focus_and_hands_learn_on(monkeypatch, tmp_path):
+    # *learn* shown only for a focus in situ; more than the focus asks first (minutes), offering the focus
+    # alone; a run hands *learn* to the learning and keys what it keeps by it
+    from smappy.calibrate import depth
+    from smappy.plugins import Context, PreflightQuestion
+    from smappy.plugins.fit import SplineFit, SplineFitSettings, SplineModelSettings
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
+    plugin = SplineFit()
+    focus = SplineFitSettings(model=SplineModelSettings(focus="insitu"))
+    more = SplineFitSettings(model=SplineModelSettings(focus="insitu", learn="aberrations"))
+    monkeypatch.setattr(SplineFit, "unknown_camera", lambda self, settings: None)
+    assert plugin.preflight(Context(), focus) is None
+    asked = plugin.preflight(Context(), more)
+    assert isinstance(asked, PreflightQuestion) and "minutes" in asked.text
+    assert asked.choices[0].settings.model.learn == "focus"
+    assert plugin._focus_key(focus) != plugin._focus_key(more)
+    # a focus alone keeps the key it always had: what earlier runs kept is found again
+    assert "aberrations" not in plugin._focus_key(focus) and "aberrations" in plugin._focus_key(more)
+    monkeypatch.setattr(depth, "found", lambda key: object() if "aberrations" in key else None)
+    assert plugin.preflight(Context(), more) is None                       # learnt before: no question
