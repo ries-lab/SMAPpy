@@ -14,6 +14,12 @@ for them.  It changes the table, so it is one step of the undo.
 Attribute selectors in the other plugins follow at once: they list the
 attributes the table has now.
 
+The quick way is a right-click on an attribute in the
+[Render tab](plugin:Panels/Render tab) -- the filter's drop-down or the
+*colour by* attribute -- which offers *Rename...* and *Remove* and runs
+this plugin with them.  The plugin itself is for a chain or a script, and
+for removing several attributes at once.
+
 ## How it works
 
 **Rename.**  The attribute keeps its values and its place under the new name.

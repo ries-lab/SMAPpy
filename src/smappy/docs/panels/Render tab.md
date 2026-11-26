@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.lut.id_index, smappy.lut.offers_ids, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z, smappy.handoff.view_settings, smappy.handoff.apply_view_settings]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.lut.id_index, smappy.lut.offers_ids, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z, smappy.handoff.view_settings, smappy.handoff.apply_view_settings, smappy.gui.attribute_menu.add_actions]
 ---
 
 ## What it does
@@ -788,6 +788,12 @@ edit it, × to remove it, so a bound on an attribute not on show is not
 forgotten.  The status bar says how much the filters hide.  The count reads
 *shown / all*, and how many are in the ROI when one is drawn.  For `filenumber` the histogram is replaced by a
 list of the files to tick; right-click a file to remove it from the session.
+Right-click the drop-down to *rename* or *remove* the attribute it shows:
+it is [Edit attributes](plugin:Analysis/Process/Edit attributes) run on
+the table, so Edit > Undo takes it back, the log keeps it, and a renamed
+attribute keeps its bounds and its place as a layer's colour.  The
+positions, the frame, the file and the grouping attributes are offered
+greyed: the program finds them by their names.
 A session of several files opens on the first: tick the others to see them
 too.  A file added to a session keeps the layers on the files they showed.
 Shown together, every file is filtered and its blinks merged before the
@@ -942,7 +948,8 @@ stacked one under the other; layers with the same attribute, LUT, inversion
 and range share one, labelled with all of them.  A picture saved or copied
 from the render window draws the same bars into it (*Save image*).  The
 toolbar's *options* menu hides the bar, on screen and in what is saved or
-copied.
+copied.  A right-click on the attribute renames or removes it, as on the
+filter's drop-down.
 
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the

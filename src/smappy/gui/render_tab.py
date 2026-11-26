@@ -235,6 +235,11 @@ class FilterWidget(QWidget):
         field_row = QHBoxLayout()
         self.field = QComboBox()
         self.field.setMinimumWidth(110)
+        # right-click: rename or remove the attribute shown (`attribute_menu`)
+        self.field.setToolTip("the attribute whose histogram and bounds are "
+                              "shown; right-click to rename or remove it")
+        self.field.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.field.customContextMenuRequested.connect(self._field_menu)
         field_row.addWidget(self.field)
         self.count = QLabel("")
         field_row.addWidget(self.count, 1, Qt.AlignRight)
@@ -384,6 +389,11 @@ class FilterWidget(QWidget):
     def refresh(self) -> None:
         """The filter changed elsewhere (undo, new table): redraw."""
         self._show_field()
+
+    def _field_menu(self, at) -> None:
+        if self.session is not None:
+            from .attribute_menu import show_menu
+            show_menu(self.session, self.current_field(), self.field, at)
 
     def current_field(self) -> str:
         """The column shown, without the marker a bounded field carries."""
@@ -1378,7 +1388,11 @@ class RenderTab(QWidget):
         self.color.addItem("intensity", None)
         self.color.addItem("attribute", "field")
         self.color_field = QComboBox()
-        self.color_field.setToolTip("the attribute the colour encodes")
+        self.color_field.setToolTip("the attribute the colour encodes; "
+                                    "right-click to rename or remove it")
+        self.color_field.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.color_field.customContextMenuRequested.connect(
+            lambda at: self._attribute_menu(self.color_field, at))
         color_row = QHBoxLayout()
         color_row.setContentsMargins(0, 0, 0, 0)
         color_row.addWidget(self.color)
@@ -1732,6 +1746,11 @@ class RenderTab(QWidget):
             # tracking`): coloured as choosing the mode here colours it, once
             layer.colour_tracks = False
             self._colour_by_track()
+
+    def _attribute_menu(self, combo: QComboBox, at) -> None:
+        from .attribute_menu import show_menu
+        if combo.isEnabled() and combo.currentText():
+            show_menu(self.session, combo.currentText(), combo, at)
 
     def set_mode(self, key: str) -> None:
         """Choose a render mode by its stored key ("precision", "gauss", ...)."""
