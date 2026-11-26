@@ -151,7 +151,15 @@ with a warning; the cache is used on a second run.  Slow tier.
    (`insitu_run.heldout_deviance`); the pupil kept only if better, else the focus alone with a warning
    (`depth.insitu_focus`).  A preflight asks before the first such run.  Not done: Preview's model-against-data
    figure (it draws the heights, as before).
-2. **Spline 4Pi in situ**: the same part over `fourpi_insitu`.
+2. **Spline 4Pi in situ**: the same part over `fourpi_insitu`.  **Done 2026-11-26**: *in situ* (off / maps,
+   misalignment, channels / everything) with *frames fitted* and *molecules*, resolved before the fit in
+   `FourPiFit.with_focus` as Spline 3D's focus is.  A Run fits the first frames with this fitter's own settings
+   and the bead model, learns from them (`fourpi_insitu.run_insitu`), and keeps the model only where
+   `fourpi_insitu.warnings_of` finds nothing -- held-out molecules no better, molecules on another fringe,
+   the period moved -- else the bead model with the warnings; the model kept with its record in the
+   configuration directory's `fourpi_insitu` (`fit_4pi.insitu_path`), the registration then the model's.
+   A Preview takes what a Run kept and never learns (a fit of 20000 frames is no Preview).  The end-to-end
+   test is `long`.
 3. **Spline 3D 2C in situ**, when it fits the plan: needs a dual in situ workflow in uipsf (biplane first:
    the same molecules in both channels; colour split later) and its benchmark.
 

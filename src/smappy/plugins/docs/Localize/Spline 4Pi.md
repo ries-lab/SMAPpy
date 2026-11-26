@@ -1,6 +1,6 @@
 ---
 version: "5"
-covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.channels.detection_lookup, smappy.channels.onto_reference, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.multichannel.cached_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.plugins.fit_4pi.model_geometry, smappy.microscope_db.Microscope.channel_layout, smappy.io.dcimg.DcimgSource.watch, smappy.plugins.fit_4pi.FourPiFit.watch_blocks, smappy.plugins.fit_4pi.brightest_molecule, smappy.plugins.fit_4pi.draw_molecule, smappy.fourpi.molecule_model, smappy.fourpi.roi_photons]
+covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.plugins.fit_4pi.learn_insitu, smappy.calibrate.fourpi_insitu.run_insitu, smappy.calibrate.fourpi_insitu.warnings_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.channels.detection_lookup, smappy.channels.onto_reference, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.multichannel.cached_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.plugins.fit_4pi.model_geometry, smappy.microscope_db.Microscope.channel_layout, smappy.io.dcimg.DcimgSource.watch, smappy.plugins.fit_4pi.FourPiFit.watch_blocks, smappy.plugins.fit_4pi.brightest_molecule, smappy.plugins.fit_4pi.draw_molecule, smappy.fourpi.molecule_model, smappy.fourpi.roi_photons]
 ---
 
 ## What it does
@@ -151,6 +151,27 @@ for ax, d, err, unit, scale in ((axes[0], dx * 100, locs["x_err_nm"][loc], "x - 
 fourpi.pi_axis(axes[2], "x")
 ```
 
+**4. Optionally, the model learnt from the movie first.**  A bead model is
+measured on beads, on another day, in another medium: the channels' maps
+move, the two arms drift out of line, and each channel's interference
+(how much of its light interferes, and at which phase) changes.  With *in
+situ* on, the Run first fits the first *frames fitted* frames with the bead
+model, chooses *molecules* of those localizations spread over z and the
+movie, and learns from them what *in situ* names: by default the maps, the
+misalignment and each channel's interference, the pupils held; on
+*everything* the pupils and the blur too.  This is the
+[PSF calibration](plugin:Panels/PSF calibration)'s *4Pi in situ* method, run
+for this movie.  A fifth of the molecules are held out of the learning, and
+the learnt model is kept only if they are explained better by it than by the
+bead model, none of them lands on another fringe than the bead model puts it
+(at most 5 %), and the fringe period moved by at most 2 %: a better
+likelihood alone has measured z worse.  Otherwise the fit uses the bead
+model, and warns with the reason.  What was learnt is kept for this movie and
+these settings, so a second Run fits at once; a Preview uses it if a Run has
+learnt it, and the bead model otherwise.  The fit then uses the learnt
+model's own maps (*registration* the model's), and the fitted file keeps the
+learnt model.
+
 ## In detail
 
 **The model.**  Channel $c$ sees
@@ -292,6 +313,26 @@ takes the model's: a model made in the
 [PSF calibration](plugin:Panels/PSF calibration) keeps the rectangles its
 bead scans were cut by, the movie's chip, so its movie is read with nothing
 typed -- as long as they fit the frames.
+
+### model.insitu
+Off for data imaged as the beads were, on the same day.  *maps, misalignment,
+channels* (the default when on) for a measurement on another day, or when
+the uncertain fringes are many: on the 2017 tubulin it explained held-out
+molecules better than learning everything, which let the pupils take up the
+neighbours' light.  *everything* rarely.  It costs a fit of *frames fitted*
+frames and minutes of learning, before the first Run asks; it needs torch
+(`pip install smappy-smlm[uipsf]`) and a 4Pi pupil model saved by this
+program's PSF calibration: a bead average or uiPSF v1's model have no pupil
+to start from.  A live fit cannot use it.
+
+### model.insitu_frames
+Enough frames for a few thousand bright, isolated molecules over the whole z
+range: 20000 for typical densities.  More frames choose better spread
+molecules; the learning itself takes *molecules*, whatever the frames.
+
+### model.insitu_molecules
+3000 by default; fewer than a thousand leave the channels' interference
+loose.  A fifth of them is held out to judge the model learnt.
 
 ### model.registration.source
 Use the model's: the PSF of each channel was learned centred where its map

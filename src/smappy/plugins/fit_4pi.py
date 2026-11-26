@@ -35,6 +35,9 @@ MODEL_FILTER = "4Pi models (*.h5)"
 REGISTRATION_FILTER = "Channel registrations (*.json)"
 REGISTRATIONS = (("model", "the model's"), ("beads", "from beads"),
                  ("file", "from a registration file"), ("none", "none"))
+#: *in situ*'s choices: the model as calibrated, or learnt from this movie's molecules starting from it --
+#: `calibrate.fourpi_insitu.LEARN_CHOICES`' two (docs/insitu-fitting-plan.md, phase 2)
+INSITU_CHOICES = (("off", "off"), ("channels", "maps, misalignment, channels"), ("everything", "everything"))
 
 
 def maps_learnt_in_situ(calibration) -> bool:
@@ -90,6 +93,19 @@ class FourPiModelSettings:
     drift_over_time: bool = param(True, label="over time",
                                   help="follow the drift over the acquisition as a smooth curve; off: one "
                                        "offset per channel for the whole acquisition")
+    # learnt before the fit from the movie's own molecules, starting from the model (`FourPiFit.with_focus`,
+    # `calibrate.fourpi_insitu`), and kept only where none of in situ's checks speaks against it
+    insitu: str = param("off", label="in situ", choices=INSITU_CHOICES,
+                        help="learn the model from this movie's molecules, starting from the 4Pi pupil "
+                             "model above: the channels' maps, the arms' misalignment and each channel's "
+                             "interference, or everything; kept only if it explains molecules held out "
+                             "better and measures z as the beads do")
+    insitu_frames: int = param(20000, label="frames fitted", unit="frames", min=100, advanced=True,
+                               help="in situ: how many frames from the start are fitted with the model to "
+                                    "choose the molecules from")
+    insitu_molecules: int = param(3000, label="molecules", min=100, advanced=True,
+                                  help="in situ: how many molecules are learnt from, chosen over z and the "
+                                       "movie")
     registration: FourPiRegistrationSettings = param(
         default_factory=FourPiRegistrationSettings, label="registration", collapsed=True)
 
@@ -440,7 +456,7 @@ class FourPiFit(_FitPlugin):
     _drift = None
     _drift_kept = False
 
-    def run(self, ctx: Context, settings) -> Result:
+    def _run(self, ctx: Context, settings) -> Result:
         """The fit; with *channel drift*, its figure beside the run's, channel by channel, as the two-channel
         fitters draw their channel move (`channel_move.draw`)."""
         self._drift, self._drift_kept = None, False
@@ -458,9 +474,87 @@ class FourPiFit(_FitPlugin):
                                 f"channel {c + 1} drift": draw(curve, (drift.data or {}).get(c))}
         return result
 
+    # ----------------------------------------------------------- in situ, before the fit
+    def run(self, ctx: Context, settings) -> Result:
+        # a Run learns in situ; a Preview takes what a Run kept, and else shows the model as calibrated
+        self._may_learn = True
+        try:
+            return self._run(ctx, settings)
+        finally:
+            self._may_learn = False
+
+    def _insitu_key(self, settings) -> tuple:
+        """What a model learnt in situ depends on: the movie, the start model, what is learnt and from how
+        much, and how the movie is read -- the channels, the registration, the camera."""
+        from pathlib import Path
+
+        def stamp(path):
+            try:
+                return (str(path), Path(path).stat().st_mtime)
+            except OSError:
+                return (str(path), None)
+        m = settings.model
+        return (stamp(settings.source.path), stamp(m.calibration), m.insitu, int(m.insitu_frames),
+                int(m.insitu_molecules), repr(settings.channels), repr(m.registration), repr(settings.camera),
+                repr(settings.detection))
+
+    def kept_insitu(self, settings) -> Optional[dict]:
+        """What an earlier Run learnt in situ for these settings (`insitu_record`), or None."""
+        return insitu_record(insitu_path(self._insitu_key(settings)), self._insitu_key(settings))
+
+    def with_focus(self, ctx: Context, settings, source, camera, finder):
+        """*in situ* resolved before the fit, as Spline 3D resolves its focus: the model learnt from this movie
+        (`learn_insitu`), or kept from an earlier Run, written in as the calibration -- with the registration
+        the model's, whose maps were learnt -- so that the history and the fitted file name what was fitted
+        with; or, where in situ's checks speak against it, the model as calibrated, with a warning."""
+        from dataclasses import replace
+        m = settings.model
+        if m.insitu == "off":
+            return settings
+        if settings.source.live:
+            raise ValueError("in situ needs the movie before the fit: turn it off for a live fit")
+        key = self._insitu_key(settings)
+        path = insitu_path(key)
+        record = insitu_record(path, key)
+        if record is None:
+            if not getattr(self, "_may_learn", False):
+                ctx.report("in situ: learnt at Run; this Preview fits with the model as calibrated")
+                return replace(settings, model=replace(m, insitu="off"))
+            record = learn_insitu(ctx, settings, camera, path, key)
+        else:
+            ctx.report(f"in situ: the model learnt before for this movie, {path.name}")
+        for line in record.get("warnings", []):
+            ctx.warn(f"in situ: {line}")
+        if record.get("fallback"):
+            return replace(settings, model=replace(m, insitu="off"))
+        ctx.report(f"in situ: {record['summary']}")
+        return replace(settings, model=replace(m, insitu="off", calibration=str(path),
+                                               registration=replace(m.registration, source="model")))
+
+    def preflight(self, ctx: Context, settings):
+        """The camera's question first; then, for *in situ* not learnt before for these settings, its cost: a
+        fit of *frames fitted* and minutes of learning, with the model as calibrated as the other answer."""
+        from dataclasses import replace
+
+        from . import PreflightChoice, PreflightQuestion
+        asked = super().preflight(ctx, settings)
+        m = settings.model
+        if asked is not None or m.insitu == "off" or self.kept_insitu(settings) is not None:
+            return asked
+        return PreflightQuestion(
+            f"In situ fits the first {int(m.insitu_frames)} frames with the model, then learns from "
+            f"{int(m.insitu_molecules)} of their molecules before the fit: minutes, longer on a CPU.  It is "
+            f"kept for these settings, so it is learnt once.",
+            run_label="Learn it", choices=(
+                PreflightChoice("Fit with the model as it is",
+                                settings=replace(settings, model=replace(m, insitu="off")),
+                                help="the 4Pi model as calibrated, nothing learnt"),))
+
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
         part, registration = settings.channels, settings.model.registration
+        insitu = settings.model.insitu != "off"
+        state.shown.update({"model.insitu_frames": insitu, "model.insitu_molecules": insitu})
         state.shown.update({"model.registration.beads": registration.source == "beads",
                             "model.registration.path": registration.source == "file",
                             **{f"channels.{n}": flag for n, flag in part.shown().items()}})
@@ -561,3 +655,79 @@ class FourPiFit(_FitPlugin):
                       plot=Plot(draw, panels=layout.n_channels + 1,
                                 size=(3 * (layout.n_channels + 1), 3.2),
                                 edit=ShapeEdit("region.shapes", panel=0, shapes=shapes)))
+
+
+# ---------------------------------------------------------------- in situ, the module-level work
+
+def insitu_path(key):
+    """Where a model learnt in situ is kept: the configuration directory, named by its key -- not beside the
+    data, where it would be taken for a calibration of every movie there."""
+    import hashlib
+    import json
+
+    from ..config import config_dir
+    name = hashlib.sha1(json.dumps(key, default=str).encode()).hexdigest()[:16]
+    return config_dir() / "fourpi_insitu" / f"{name}_4pi.h5"
+
+
+def insitu_record(path, key) -> Optional[dict]:
+    """The record `learn_insitu` kept beside the model at ``path`` for ``key`` -- whether it was kept or fell
+    back, what was warned, the summary -- or None: not learnt, or for other settings."""
+    import json
+    record_path = path.with_suffix(".json")
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if record.get("key") != json.loads(json.dumps(key, default=str)):
+        return None
+    if not record.get("fallback") and not path.is_file():
+        return None
+    return record
+
+
+def learn_insitu(ctx: Context, settings, camera, path, key) -> dict:
+    """The model learnt in situ from the movie, for `FourPiFit.with_focus`: the first *frames fitted* frames
+    fitted with this fitter's own settings and the model as calibrated, *molecules* of them chosen and learnt
+    from (`calibrate.fourpi_insitu.run_insitu`), saved at ``path`` and judged as the PSF calibration window
+    judges it (`fourpi_insitu.warnings_of`): any of its warnings -- held-out molecules explained no better,
+    molecules put on other fringes, the period moved -- and the fit keeps the model as calibrated, saying so.
+    The record is kept beside, so a later Run neither learns again nor forgets why."""
+    import json
+    import tempfile
+    from dataclasses import replace
+    from pathlib import Path
+
+    from ..calibrate import fourpi_insitu as fi
+    m = settings.model
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fitted = Path(tempfile.mkdtemp()) / "insitu_fit_locs.hdf5"
+    start = int(settings.source.start or 0)
+    stop = start + int(m.insitu_frames)
+    if settings.source.stop:
+        stop = min(stop, int(settings.source.stop))
+    first = replace(settings, source=replace(settings.source, start=start, stop=stop),
+                    model=replace(m, insitu="off", channel_drift=False),
+                    output=replace(settings.output, save=True, path=str(fitted)))
+    FourPiFit().run(Context(progress=lambda text: ctx.report(f"in situ, fitting with the model: {text}"),
+                            stop=ctx.stop), first)
+
+    def tell(entry):
+        if isinstance(entry, dict) and entry.get("message"):
+            ctx.report(f"in situ: {entry['message']}")
+    s = fi.FourPiInSituSettings(bead_model=str(m.calibration), localizations=str(fitted),
+                                fit_frames=int(m.insitu_frames), channels=settings.channels,
+                                molecules=int(m.insitu_molecules), learn=m.insitu)
+    result = fi.run_insitu([settings.source.path], s, camera, save_to=path, progress=tell, cancel=ctx.stop)
+    if result.calibration is None:
+        raise ValueError("in situ was stopped before it learnt a model")
+    warnings = fi.warnings_of(result)
+    gain = result.gain_nats
+    summary = (f"learnt {dict(INSITU_CHOICES)[m.insitu]} from {len(result.molecules) - len(result.held)} molecules"
+               f" ({len(result.held)} held out)"
+               + ("" if gain is None else f"; {gain:+.1f} nats per held-out molecule against the model"))
+    record = {"key": json.loads(json.dumps(key, default=str)), "fallback": bool(warnings),
+              "warnings": warnings + (["fitted with the model as calibrated"] if warnings else []),
+              "summary": summary, "gain_nats": gain}
+    path.with_suffix(".json").write_text(json.dumps(record, indent=1), encoding="utf-8")
+    return record

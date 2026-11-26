@@ -99,3 +99,108 @@ def test_the_window_method_learns_a_4pi_movie_and_its_held_out_molecules_prefer_
     assert model_from_calibration(saved) is not None                   # in situ can start from it again
     assert [p.title for p in method.pages(run)] == ["Pupils", "Bead model's pupils", "Model", "Molecules",
                                                     "Parameters"]
+
+
+def test_spline_4pi_fits_with_what_in_situ_learnt_or_with_the_model_where_its_checks_speak_against_it(
+        tmp_path, monkeypatch):
+    # the fitter's decisions alone, the learning stubbed: a Run learns and fits with the model learnt, the
+    # registration then the model's; a Preview with nothing kept fits as calibrated; what a Run kept is found
+    # again; a learning in situ's checks speak against keeps the model and says why
+    from dataclasses import replace
+
+    from smappy.plugins import Context, PreflightQuestion
+    from smappy.plugins import fit_4pi
+    from smappy.plugins.fit import SourceSettings
+    from smappy.plugins.fit_4pi import FourPiFit, FourPiFitSettings, FourPiModelSettings
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(FourPiFit, "unknown_camera", lambda self, settings: None)
+    (tmp_path / "movie.h5").write_bytes(b"")
+    (tmp_path / "beads_4pi.h5").write_bytes(b"")
+    settings = FourPiFitSettings(source=SourceSettings(path=str(tmp_path / "movie.h5")),
+                                 model=FourPiModelSettings(calibration=str(tmp_path / "beads_4pi.h5"),
+                                                           insitu="channels"))
+    settings.model.registration.source = "beads"
+    plugin = FourPiFit()
+    learnt = []
+    warned = []
+
+    def learn(ctx, s, camera, path, key, fallback=False):
+        learnt.append(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"model")
+        record = {"key": __import__("json").loads(__import__("json").dumps(key, default=str)),
+                  "fallback": fallback, "warnings": ["held-out no better"] if fallback else [],
+                  "summary": "learnt maps from 300 molecules (100 held out)"}
+        path.with_suffix(".json").write_text(__import__("json").dumps(record))
+        return record
+    monkeypatch.setattr(fit_4pi, "learn_insitu", learn)
+    ctx = Context()
+    ctx.warn = warned.append
+    asked = plugin.preflight(ctx, settings)
+    assert isinstance(asked, PreflightQuestion) and "20000 frames" in asked.text
+    assert asked.choices[0].settings.model.insitu == "off"
+    # a Preview learns nothing: the model as calibrated
+    preview = plugin.with_focus(ctx, settings, None, None, None)
+    assert not learnt and preview.model.insitu == "off" and preview.model.calibration == settings.model.calibration
+    plugin._may_learn = True
+    used = plugin.with_focus(ctx, settings, None, None, None)
+    assert len(learnt) == 1 and used.model.calibration == str(learnt[0]) and used.model.insitu == "off"
+    assert used.model.registration.source == "model"                  # the maps learnt are the model's
+    assert plugin.with_focus(ctx, settings, None, None, None).model.calibration == str(learnt[0])
+    assert len(learnt) == 1 and plugin.preflight(ctx, settings) is None      # kept: not learnt again
+    # learnt for other settings: learnt again, and this time its checks speak against it
+    other = replace(settings, model=replace(settings.model, insitu_molecules=500))
+    monkeypatch.setattr(fit_4pi, "learn_insitu", lambda *a: learn(*a, fallback=True))
+    back = plugin.with_focus(ctx, other, None, None, None)
+    assert back.model.calibration == settings.model.calibration and back.model.registration.source == "beads"
+    assert warned == ["in situ: held-out no better"]
+
+
+@pytest.mark.long
+def test_spline_4pi_in_situ_learns_a_movie_and_fits_it_with_the_model_learnt(tmp_path, monkeypatch):
+    """The bead model a day off, as above; Spline 4Pi with *in situ* fits the first frames with it, learns,
+    keeps the model learnt -- the held-out molecules prefer it -- and fits the movie with it, the fitted
+    file carrying it."""
+    from smappy.io import embedded
+    from smappy.plugins import Context
+    from smappy.plugins.fit import CameraSettings, OutputSettings, SourceSettings
+    from smappy.plugins.fit_4pi import FourPiFit, FourPiFitSettings, FourPiModelSettings
+    from tests.test_fourpi_channels import _write_quadrant_series
+    import functools
+
+    from smappy.calibrate import fourpi_insitu
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
+    # one round on the model's own box, as the window's test learns: minutes fewer
+    monkeypatch.setattr(fourpi_insitu, "FourPiInSituSettings",
+                        functools.partial(fourpi_insitu.FourPiInSituSettings, roi_size=R, rounds=1,
+                                          held_out=0.25, min_photons=1.0))
+    model = build_model(_recipe())
+    truth = _shared(model, 0.5, -0.3, 0.9, 80.0)
+    bead = _shared(model, 0.35, -0.45, 0.7, 30.0)
+    truth_cal = calibration((model, truth), z_range_nm=500, dz_nm=25)
+    _bead_model_file(tmp_path / "beads_4pi.h5", model, bead)
+    layout = side_by_side(4, SIZE, SIZE)
+    rng = np.random.default_rng(0)
+    n_frames = 300
+    frame = np.repeat(np.arange(n_frames), 2)
+    x, y = rng.uniform(8, SIZE - 8, (2, len(frame)))
+    x[1::2] = np.where(np.abs(x[1::2] - x[::2]) < 14, (x[::2] + 20) % (SIZE - 16) + 8, x[1::2])
+    z = rng.uniform(-350, 350, len(frame))
+    drift = fourpi.cavity_drift(n_frames, rate_rad=0.01, start_rad=0.3)
+    frames = fourpi.render_frames(truth_cal, layout, frame, x, y, z, 5000, phase0=drift[frame],
+                                  n_frames=n_frames, background=10)
+    adu = (frames / CAMERA.adu_to_photons + CAMERA.offset).astype(np.uint16)
+    paths = _write_quadrant_series(tmp_path, [layout.cut(adu)[:, c] for c in range(4)], files=1)
+    settings = FourPiFitSettings(
+        source=SourceSettings(path=str(paths[0])),
+        camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.129),
+        model=FourPiModelSettings(calibration=str(tmp_path / "beads_4pi.h5"), insitu="channels",
+                                  insitu_frames=n_frames, insitu_molecules=250),
+        output=OutputSettings(path=str(tmp_path / "out_locs.hdf5")))
+    result = FourPiFit().run(Context(), settings)
+    used = result.settings.model
+    assert used.insitu == "off" and "fourpi_insitu" in used.calibration, result.text
+    assert used.registration.source == "model"
+    kept = fourpi.load_fourpi_calibration(tmp_path / "out_locs.hdf5")
+    assert kept.parameters["method"] == "uiPSF v2 4Pi in-situ model"
+    assert embedded.carried_format(tmp_path / "out_locs.hdf5") == "smappy-4pi-calibration"
