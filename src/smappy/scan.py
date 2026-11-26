@@ -56,6 +56,9 @@ class Scan:
     hi: float
     line: Optional[object] = None        # a `regions.Region` of kind "line"
     layers: Optional[Tuple[int, ...]] = None
+    #: a layer drawn as *tracks* shows ``hi - tail <= coordinate < hi``
+    #: instead, so its tracks grow up to "now" (*Save stack*'s *track tail*)
+    tail: Optional[float] = None
 
     def __str__(self) -> str:
         return f"{self.coordinate} {self.lo:g} to {self.hi:g}"
@@ -169,12 +172,15 @@ def scanned(layers: Sequence[LayerSnapshot], scan: Optional[Scan],
                 (scan.layers is not None and i not in scan.layers):
             out.append(layer)
             continue
+        lo = scan.lo
+        if scan.tail is not None and getattr(layer.settings, "mode", None) == "tracks":
+            lo = scan.hi - scan.tail
         try:
             if cache is None:
                 v = values(layer.locs, scan.coordinate, scan.line)
-                rows = np.flatnonzero((v >= scan.lo) & (v < scan.hi))
+                rows = np.flatnonzero((v >= lo) & (v < scan.hi))
             else:
-                rows = cache.rows(layer.locs, scan.coordinate, scan.line, scan.lo, scan.hi)
+                rows = cache.rows(layer.locs, scan.coordinate, scan.line, lo, scan.hi)
         except KeyError:
             out.append(layer)
             continue
@@ -215,6 +221,21 @@ def shown_range(layers: Sequence[LayerSnapshot], coordinate: str, line=None,
     return lo, hi
 
 
+def coordinate_range(layers: Sequence[LayerSnapshot], coordinate: str, line=None,
+                     which: Optional[Sequence[int]] = None,
+                     cache: Optional[ValueCache] = None) -> Tuple[float, float]:
+    """The range a scan of ``coordinate`` runs over: the line ROI's length or
+    width about its middle for the line's coordinates, else what the layers
+    show (`shown_range`)."""
+    if coordinate in LINE_COORDINATES:
+        if line is None or getattr(line, "kind", None) != "line":
+            raise ValueError(f"{coordinate}: draw a line ROI first")
+        p0, p1 = line.ends()
+        half = (float(np.hypot(*(p1 - p0))) if coordinate == ALONG else line.width) / 2
+        return -half, half
+    return shown_range(layers, coordinate, line, cache, which)
+
+
 def auto_window(lo: float, hi: float, integer: bool = False) -> Tuple[float, float]:
     """``(window, step)`` when none is set: a twentieth of the range, moved
     by a quarter of itself; whole numbers for frames."""
@@ -226,15 +247,17 @@ def auto_window(lo: float, hi: float, integer: bool = False) -> Tuple[float, flo
 
 
 def scan_steps(lo: float, hi: float, window: float, step: float,
-               integer: bool = False) -> List[Step]:
+               integer: bool = False, cumulative: bool = False) -> List[Step]:
     """Windows of ``window``, one every ``step``, from ``lo`` until a window
     reaches ``hi``.  For a whole-number coordinate (frames) the windows end
-    one past ``hi``, so the last frame is shown."""
+    one past ``hi``, so the last frame is shown.  ``cumulative``: each
+    from ``lo`` on, so what was shown stays."""
     if not window > 0 or not step > 0:
         raise ValueError("the window and the step must be above 0")
     top = hi + 1.0 if integer else hi
     n = max(1, int(np.ceil((top - lo - window) / step - 1e-9)) + 1)
-    return [Step(lo + k * step, lo + k * step + window) for k in range(n)]
+    return [Step(lo if cumulative else lo + k * step, lo + k * step + window)
+            for k in range(n)]
 
 
 def is_integer(layers: Sequence[LayerSnapshot], coordinate: str) -> bool:
@@ -263,39 +286,22 @@ def scan_pictures(layers: Sequence[LayerSnapshot], frame, coordinate: Optional[s
                   pixelsize: Optional[float] = None,
                   which: Optional[Sequence[int]] = None,
                   projections: Optional[Sequence] = None,
-                  slabs: Optional[Sequence] = None) -> Iterator[np.ndarray]:
+                  slabs: Optional[Sequence] = None, **decorations) -> Iterator[np.ndarray]:
     """Each step's picture, as the window ``frame`` (a `picture.ViewFrame`)
     shows it: the 2D window's view and panels, or the 3D window's
     projection.  ``which`` are the layers scanned (`Scan.layers`).  A
     coordinate of None narrows nothing (the view path alone moves);
     ``projections``, one per step, are the 3D view's path
     (`view_path.projections`) in place of the window's one projection, and
-    ``slabs`` its boxes in place of the window's one box.
+    ``slabs`` its boxes in place of the window's one box.  ``decorations``
+    are `movie.stack_frames`' (the bars, the labels, the tail), which this
+    is: one renderer for the player and *Save stack*.
     8-bit RGB, in order, for `movie.write_stack`."""
-    from .picture import frame_fov, render_picture, stamp
-    from .render import FieldOfView
+    from .movie import stack_frames
+    from .picture import frame_fov
     fov = frame_fov(frame, "view", pixelsize)
-    cache = ValueCache()
-    white = any(l.display.white_background for l in layers if l.visible)
-    for k, step in enumerate(steps):
-        shown = layers if coordinate is None else scanned(
-            layers, Scan(coordinate, step.lo, step.hi, line,
-                         None if which is None else tuple(which)), cache)
-        if frame.projection is not None:
-            projection, grid = frame.projection, fov
-            if projections is not None:
-                # the same canvas, on this step's pan and zoom
-                projection = projections[k]
-                px = fov.pixelsize * projection.zoom / frame.projection.zoom
-                grid = FieldOfView(projection.offset[0] - fov.nx * px / 2,
-                                   projection.offset[1] - fov.ny * px / 2, px, fov.nx, fov.ny)
-            slab = frame.slab if slabs is None else slabs[k]
-            picture, = render_picture(shown, grid, what="composite", projection=projection,
-                                      slab=slab)
-        else:
-            picture, = render_picture(shown, fov, what="view", panels=frame.panels,
-                                      stacked=frame.stacked)
-        image = picture.image
-        if text is not None and step is not None:
-            image = stamp(image, text(step), white)
-        yield image
+    return stack_frames(layers, fov, steps, column=coordinate, line=line, which=which,
+                        what="composite" if frame.projection is not None else "view",
+                        panels=frame.panels, stacked=frame.stacked,
+                        projection=frame.projection, slab=frame.slab,
+                        projections=projections, slabs=slabs, text=text, **decorations)

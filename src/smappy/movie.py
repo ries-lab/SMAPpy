@@ -1,6 +1,7 @@
 """Movies and z-stacks: the view rendered while one coordinate moves in steps.
 
-A movie and a z-stack are one operation (*File/Export/Stack*): the picture
+A movie and a z-stack are one operation (*File/Export/Stack*), and the
+Render tab's player records with the same function (`stack_frames`): the picture
 *Export Image* draws (`picture.render_picture`), once per step, with every
 layer narrowed to a range of one column -- frames for a movie, z for a
 stack of slices.  Nothing is rendered a second way, so a movie's frame is
@@ -98,24 +99,14 @@ def restrict(layers: Sequence[LayerSnapshot], column: str, step: Step,
     """The layers with only the localizations of ``step`` shown: their
     filters, and ``lo <= column < hi``.  A layer in the *tracks* mode shows
     ``now - tail <= column < now`` instead, when a ``tail`` is given.
-    Image layers are left as they are."""
-    out = []
-    for layer in layers:
-        if not layer.visible or layer.is_image or layer.locs is None:
-            out.append(layer)
-            continue
-        if column not in layer.locs:
-            raise KeyError(f"layer {layer.name!r} has no attribute {column!r}; it has "
-                           f"{', '.join(layer.locs.columns)}")
-        values = np.asarray(layer.locs[column], np.float64)
-        lo = step.lo
-        if tail is not None and layer.settings.mode == "tracks":
-            lo = step.now - tail
-        keep = (values >= lo) & (values < step.hi)
-        mask = layer.mask
-        mask = keep if mask is None else np.asarray(mask, bool) & keep[:len(mask)]
-        out.append(replace(layer, mask=mask, known_indices=None, memo={}))
-    return tuple(out)
+    Image layers, and a layer without the column, are left as they are.
+
+    The player's narrowing (`scan.scanned`), so the two cannot drift apart;
+    a layer without the column was an error here until 2026-11, and is
+    shown whole there -- a second file without z is not emptied by a stack
+    of z slices."""
+    from .scan import Scan, scanned
+    return scanned(layers, Scan(column, step.lo, step.hi, tail=tail))
 
 
 def shown_range(layers: Sequence[LayerSnapshot], column: str) -> Tuple[float, float]:
@@ -169,25 +160,54 @@ def raw_panel(image, plane: int, fov: FieldOfView) -> np.ndarray:
     return np.repeat(grey[..., None], 3, axis=2)
 
 
-def stack_frames(layers: Sequence[LayerSnapshot], fov: FieldOfView, steps: Sequence[Step],
-                 column: str = "frame", what: str = "view", panels: Sequence = ("overlay",),
+def stack_frames(layers: Sequence[LayerSnapshot], fov: FieldOfView,
+                 steps: Sequence[Optional[Step]], column: Optional[str] = "frame",
+                 what: str = "view", panels: Sequence = ("overlay",),
                  stacked: bool = False, tail: Optional[float] = None,
                  raw: Sequence = (), scale_bar: bool = True,
                  scale_bar_length: Optional[float] = None, colour_bars: bool = True,
-                 labels: bool = True, text: Optional[Callable[[Step], str]] = None
-                 ) -> Iterator[np.ndarray]:
+                 labels: bool = True, text: Optional[Callable[[Step], str]] = None,
+                 line=None, which: Optional[Sequence[int]] = None,
+                 projection=None, slab=None, projections: Optional[Sequence] = None,
+                 slabs: Optional[Sequence] = None) -> Iterator[np.ndarray]:
     """Each step's picture as 8-bit RGB, in order: `render_picture` of the
-    layers narrowed to the step (`restrict`), as the view or the composite,
-    with the kept camera frame beside it when ``raw`` holds the images to
-    take it from, and ``text(step)`` written in a corner."""
+    layers narrowed to the step, as the view or the composite, with the kept
+    camera frame beside it when ``raw`` holds the images to take it from,
+    and ``text(step)`` written in a corner.
+
+    The one renderer of *Save stack* and the Render tab's player
+    (`scan.scan_pictures`): the narrowing is the player's (`scan.scanned`),
+    on any ``column`` or a ``line`` ROI's coordinates, of the layers
+    ``which`` (None: all); a ``column`` of None, or a step of None, narrows
+    nothing.  ``projection`` and ``slab`` draw the 3D view, and
+    ``projections`` / ``slabs``, one per step, move it along a view path.
+    """
+    from .scan import Scan, ValueCache, scanned
+    cache = ValueCache()
     white = any(l.display.white_background for l in layers if l.visible)
-    for step in steps:
-        shown = restrict(layers, column, step, tail)
-        picture, = render_picture(shown, fov, what=what, panels=panels, stacked=stacked,
-                                  scale_bar=scale_bar, scale_bar_length=scale_bar_length,
-                                  colour_bars=colour_bars, labels=labels)
+    which = None if which is None else tuple(which)
+    for k, step in enumerate(steps):
+        shown = layers if column is None or step is None else scanned(
+            layers, Scan(column, step.lo, step.hi, line, which, tail), cache)
+        if projection is not None:
+            here, grid = projection, fov
+            if projections is not None:
+                # the same canvas, on this step's pan and zoom
+                here = projections[k]
+                px = fov.pixelsize * here.zoom / projection.zoom
+                grid = FieldOfView(here.offset[0] - fov.nx * px / 2,
+                                   here.offset[1] - fov.ny * px / 2, px, fov.nx, fov.ny)
+            picture, = render_picture(shown, grid, what="composite", projection=here,
+                                      slab=slab if slabs is None else slabs[k],
+                                      scale_bar=scale_bar,
+                                      scale_bar_length=scale_bar_length,
+                                      colour_bars=colour_bars, labels=labels)
+        else:
+            picture, = render_picture(shown, fov, what=what, panels=panels, stacked=stacked,
+                                      scale_bar=scale_bar, scale_bar_length=scale_bar_length,
+                                      colour_bars=colour_bars, labels=labels)
         image = picture.image
-        if raw:
+        if raw and step is not None:
             found = raw_plane(raw, step.now - 1)
             camera = (raw_panel(found[0], found[1], fov) if found is not None
                       else np.zeros(image.shape, np.uint8))
@@ -195,7 +215,7 @@ def stack_frames(layers: Sequence[LayerSnapshot], fov: FieldOfView, steps: Seque
                 from .picture import _decorate
                 camera, _ = _decorate(camera, fov, "camera", 0.0, picture.unit, (), False)
             image = _join([camera, image], False)
-        if text is not None:
+        if text is not None and step is not None:
             image = stamp(image, text(step), white and not raw)
         yield image
 
