@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.transformation.typed, smappy.transformation.transform_table, smappy.transformation.from_channel_transform, smappy.transformation.check_same_frames, smappy.transformation.save_transformation, smappy.transformation.load_transformation, smappy.transformation.transform_image, smappy.transformation.channel_regions, smappy.transformation.region_nm, smappy.plugins.transform.recorded_moves, smappy.plugins.transform.recorded_transformation, smappy.plugins.transform.channel_rects, smappy.drift.Drift.apply, smappy.drift.Drift.referenced, smappy.plugins.transform.Transform.run, smappy.plugins.transform.drift_of]
+covers: [smappy.transformation.typed, smappy.transformation.transform_table, smappy.transformation.from_channel_transform, smappy.transformation.check_same_frames, smappy.transformation.save_transformation, smappy.transformation.load_transformation, smappy.transformation.transform_image, smappy.transformation.channel_regions, smappy.transformation.region_nm, smappy.plugins.transform.recorded_moves, smappy.plugins.transform.recorded_transformation, smappy.plugins.transform.channel_rects, smappy.drift.Drift.apply, smappy.drift.Drift.referenced, smappy.plugins.transform.Transform.run, smappy.plugins.transform.drift_of, smappy.plugins.transform.layer_target, smappy.plugins.register_layers.measure_layers]
 ---
 
 ## What it does
@@ -21,7 +21,10 @@ layer, so that it lies where it should.  Some typical cases:
   the stage moved, and should sit under the localizations;
 * two cameras recorded at the same time, and the
   [drift](plugin:Panels/Glossary) measured in one file is the drift of the
-  other too.
+  other too;
+* two colours imaged one after the other, or a widefield image and its
+  localizations, are a little shifted against each other, and the shift is
+  to be read off the data and taken out at once.
 
 What moves is the **target**.  For localizations the coordinates themselves
 change: `x_nm`, `y_nm` and, if the table has it, `z_nm`.  The change is
@@ -34,8 +37,11 @@ onto the main one -- the half of the chip a channel map is about.
 What it is moved by is the **source**: values typed in (shift, rotation,
 scale, mirror), a **named transformation** the session keeps, a **move
 recorded in a loaded file** (the overlay of a two-channel fit), a
-**transformation file** (such as a bead calibration), or the **drift of
-another file**.
+**transformation file** (such as a bead calibration), the **drift of
+another file**, or a shift **measured from the layers** -- one layer against
+another, by cross-correlation, as
+[Register layers](plugin:Analysis/Register/Register layers) measures it --
+which measures and applies in one step.
 
 ## How it works
 
@@ -117,7 +123,29 @@ and saved, its drift curve, kept in the file, is subtracted from the target fram
 each localization is moved by the drift of its own frame.  The two files
 must cover the same frames; one of other frames is refused.
 
-**6. Images.**  An image is resampled: each pixel of the new image is taken
+**6. Measured from the layers.**  The shift of the *measured* layer against
+the *reference* layer is found by cross-correlation -- both pictured on one
+grid of *bin*-sized pixels, the peak of their correlation within *max
+shift*, and, with *z too*, the shift in z -- exactly as
+[Register layers](plugin:Analysis/Register/Register layers) finds it; its
+page explains the measurement.  The target is moved by minus that shift, so
+it lands on the reference.  Press **Preview** first: it shows the two
+pictures over each other and their correlation with its peak, and moves
+nothing.  A single clear peak is a shift to trust.
+
+What moves is, by default (*what moves*: *what it shows*), what the measured
+layer shows: its image, or its file -- and only one channel of it if the
+layer's filter keeps one channel.  The form says underneath which file and
+channel that is, and hides *target*, *file* and *channel* meanwhile.  When
+the layer shows more than that -- two files, or two of a file's three
+channels -- nothing is guessed: the form says so, naming the files or
+channels, and a run is refused.  Show one file in the layer, or set *what
+moves* to *the target above* and choose *target*, *file* and *channel*
+yourself; the shift is then measured from the layers as they are and
+applied to what you chose.  *keep as* keeps the measured shift as a named
+transformation, to apply to other files later.
+
+**7. Images.**  An image is resampled: each pixel of the new image is taken
 back through the transformation to where it came from, and the original is
 read there, interpolated between its four nearest pixels.  Every kind of
 transformation can do that, a projective or polynomial bead map too.  The
@@ -170,14 +198,21 @@ left.set_ylabel("y (nm)")
 
 The **Preview** draws the target before (pale) and after (strong) over the
 rest of the table, or the new image -- the main channel green and the moved
-one magenta -- under the localizations, without adding anything.
+one magenta -- under the localizations, without adding anything.  For a
+shift measured from the layers it draws the measurement instead -- the
+reference (red) and the measured layer (cyan) over each other, and their
+correlation with the peak marked -- and says what a run would move.
 
 ## In detail
 
 **Which table.**  The localizations, whatever the layer shows: every
 localization of the chosen *file* (or all files) and *channel* (or all)
 moves, whatever the layers' filters show, and merged blinks are merged again
-from the moved table.
+from the moved table.  A shift measured from the layers is measured on what
+the two layers' filters let through, as localizations: a layer that shows
+merged blinks is measured on the localizations of those blinks (Register
+layers measures the merged blinks themselves), the same structure with more
+points.
 
 **The typed transformation.**  With $c$ the centre, $M$ the mirror, $S$ the
 scale, $R$ the rotation by the angle $a$ and $t$ the shift,
@@ -271,7 +306,22 @@ The middle of the target turns it in place; the origin is right for a
 pixel-size correction, which scales the coordinates themselves.
 
 ### keep_as
-A name already in the list is replaced.
+A name already in the list is replaced.  For a shift measured from the
+layers, left empty, the move is still recorded in the table under the
+measured layer's name onto the reference's, but not added to the list.
+
+### measured.moves
+*what it shows* for the usual case, a layer per file; *the target above*
+when the layer mixes files or channels, or to apply the shift measured on
+part of a file to all of it.
+
+### measured.bin_nm
+As in Register layers: about the localization precision, or the image's
+pixel when one layer is an image.
+
+### measured.max_shift_nm
+Above the largest offset expected; auto searches the whole field and gives a
+false peak more room.
 
 ### write_to
 The `_T.h5` file holds the transformation as text (JSON) in an HDF5
@@ -285,7 +335,8 @@ or with h5py and json alone.
   and for a split chip the main channel, `<name>_main`.
 * **The text**: which file and channel, how many localizations, and the
   transformation -- its shift, rotation and scale.
-* **The figure**: the target before and after, as the Preview shows it.  A
+* **The figure**: the target before and after, as the Preview shows it (for
+  a shift measured from the layers, the Preview shows the correlation).  A
   good registration lays the moved channel onto the other; one that is off
   shows two copies of each structure side by side.  For an image, the moved
   channel in magenta on the main in green: where they agree it is white.

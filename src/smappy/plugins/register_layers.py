@@ -13,7 +13,11 @@ session's named transformations (`Result.transformations`) under *name*,
 and *Transform* applies it.  This plugin changes no coordinates: the form's
 notice offers **Apply with Transform**, which opens Transform set to the new
 name and to the target layer's file (or image) -- the one place a
-transformation is applied (`transform.settings_for`).
+transformation is applied (`transform.settings_for`).  To measure and apply
+in one step, Transform's source *measured from the layers* calls the same
+`measure_layers` and draws the same figure (`plot_registration`); this
+plugin stays for measuring alone, and for keeping a shift to apply to other
+files later.
 
 Departures from SMAP: a shift only (no rotation or scale: later); one
 correlation for both kinds of layer, where SMAP's RegisterLocs rendered
@@ -69,20 +73,11 @@ def default_name(session, settings: RegisterLayersSettings) -> str:
 
 def transform_target(session, layer: int) -> dict:
     """Transform's *target*, *file* and *channel* that move what layer
-    ``layer`` (from 1) shows: the image, or the layer's file when it shows
-    one (else all files) and its channel when its filter keeps one."""
-    shown = session.layers[layer - 1]
-    if shown.is_image:
-        return {"target": layer, "file": 0, "channel": -1}
-    files = shown.files
-    if files is not None and len(files) == 1:
-        file = int(files[0])
-    else:
-        file = 0 if len(session.files) <= 1 else -1
-    lo, hi = shown.ranges.get("channel", (None, None))
-    channel = (int(lo) if lo is not None and hi is not None
-               and int(np.ceil(lo)) == int(np.floor(hi)) else -1)
-    return {"target": 0, "file": file, "channel": channel}
+    ``layer`` (from 1) shows (`transform.layer_target`); where that is not
+    one file, all files, for the user to narrow in Transform's form."""
+    from .transform import layer_target
+    found, _ = layer_target(session, layer)
+    return found
 
 
 @register("Analysis/Register/Register layers")
@@ -120,51 +115,63 @@ class RegisterLayers(Plugin):
         return state
 
     def run(self, ctx: Context, settings: RegisterLayersSettings) -> Result:
-        from ..layer_registration import register as measure
-        if settings.reference == settings.target:
-            raise ValueError("the reference and the target are the same layer")
-        reference = self._layer(ctx, settings.reference, settings.use_z)
-        target = self._layer(ctx, settings.target, settings.use_z)
-        ctx.report("correlating")
-        found = measure(reference, target, settings.bin_nm, settings.max_shift_nm,
-                        settings.use_z, settings.z_bin_nm, settings.max_z_shift_nm)
+        found = measure_layers(ctx, settings.reference, settings.target,
+                               settings.bin_nm, settings.max_shift_nm,
+                               settings.use_z, settings.z_bin_nm,
+                               settings.max_z_shift_nm)
         name = settings.name.strip() or default_name(ctx.session, settings)
         t = found.transformation(name, {"reference": settings.reference,
                                         "target": settings.target,
                                         "bin_nm": settings.bin_nm})
         text = f"{name}: {found}; kept as {name!r}, applied with Transform"
-        return Result(text=text, plot=_plot(found), settings=settings,
+        return Result(text=text, plot=plot_registration(found), settings=settings,
                       data={"registration": found, "transformation": t,
                             "shift_nm": found.shift_nm},
                       transformations={name: t})
 
-    @staticmethod
-    def _layer(ctx: Context, number: int, use_z: bool) -> dict:
-        """Layer ``number`` (from 1) as `layer_registration.register` takes it."""
-        session = ctx.session
-        if session is None:
-            if number != 1:
-                raise ValueError("other layers need a session")
-            locs, selection = ctx.locs, ctx.selection
-        else:
-            if not 1 <= number <= len(session.layers):
-                raise ValueError(f"there is no layer {number}")
-            layer = session.layers[number - 1]
-            if layer.is_image:
-                if layer.image is None or layer.image.is_empty:
-                    raise ValueError(f"layer {number} shows no image yet")
-                return {"image": layer.image, "frame": layer.frame}
-            locs, selection = ctx.table(number - 1)
-        shown = selection.apply(locs)
-        if not len(shown):
-            raise ValueError(f"layer {number} shows no localizations")
-        out = {"x": np.asarray(shown["x_nm"], float), "y": np.asarray(shown["y_nm"], float)}
-        if use_z and "z_nm" in shown:
-            out["z"] = np.asarray(shown["z_nm"], float)
-        return out
+
+def measure_layers(ctx: Context, reference: int, target: int, bin_nm: float = 20.0,
+                   max_shift_nm: Optional[float] = 2500.0, use_z: bool = False,
+                   z_bin_nm: float = 10.0, max_z_shift_nm: float = 300.0):
+    """The `layer_registration.Registration` of layer ``target`` against layer
+    ``reference`` (from 1), each as it shows: what this plugin measures and
+    what Transform's source *measured from the layers* applies."""
+    from ..layer_registration import register as measure
+    if reference == target:
+        raise ValueError("the reference and the target are the same layer")
+    a = layer_input(ctx, reference, use_z)
+    b = layer_input(ctx, target, use_z)
+    ctx.report("correlating")
+    return measure(a, b, bin_nm, max_shift_nm, use_z, z_bin_nm, max_z_shift_nm)
 
 
-def _plot(found) -> Plot:
+def layer_input(ctx: Context, number: int, use_z: bool) -> dict:
+    """Layer ``number`` (from 1) as `layer_registration.register` takes it:
+    the localizations it shows, or its image."""
+    session = ctx.session
+    if session is None:
+        if number != 1:
+            raise ValueError("other layers need a session")
+        locs, selection = ctx.locs, ctx.selection
+    else:
+        if not 1 <= number <= len(session.layers):
+            raise ValueError(f"there is no layer {number}")
+        layer = session.layers[number - 1]
+        if layer.is_image:
+            if layer.image is None or layer.image.is_empty:
+                raise ValueError(f"layer {number} shows no image yet")
+            return {"image": layer.image, "frame": layer.frame}
+        locs, selection = ctx.table(number - 1)
+    shown = selection.apply(locs)
+    if not len(shown):
+        raise ValueError(f"layer {number} shows no localizations")
+    out = {"x": np.asarray(shown["x_nm"], float), "y": np.asarray(shown["y_nm"], float)}
+    if use_z and "z_nm" in shown:
+        out["z"] = np.asarray(shown["z_nm"], float)
+    return out
+
+
+def plot_registration(found) -> Plot:
     """The two pictures over each other, and the correlation with its peak."""
     def draw(figure) -> None:
         both, corr = figure.subplots(1, 2)

@@ -9,7 +9,8 @@ resampled into a new image, `<name>_T`, which the layers that showed the
 original then show.  What it is moved by is the *source*: typed
 values, a named transformation of the session, a move a loaded file records
 (a two-channel fit's *Overlay channels*), a transformation file (`_2ct.h5`,
-or this plugin's own `_T.h5`), or the drift of another file.  The maths is in `smappy.transformation`, and a
+or this plugin's own `_T.h5`), the drift of another file, or a shift
+*measured from the layers*.  The maths is in `smappy.transformation`, and a
 drift is applied by `Drift.apply`: nothing applies a transformation twice.
 
 Departures from SMAP:
@@ -37,7 +38,26 @@ Departures from SMAP:
 
 Step 5b (*Register layers*) adds what it measured to the session's named
 transformations through `Result.transformations` and opens this plugin on it
-with `settings_for` and the GUI's ``"transform"`` window.
+with `settings_for` and the GUI's ``"transform"`` window.  Users who missed
+that notice thought nothing had happened, so the same measurement is also a
+source here, **measured from the layers**: measure and apply in one panel,
+the shift found by `register_layers.measure_layers` -- the one function both
+call, `layer_registration.register` underneath -- and Preview showing Register
+layers' figure (the two pictures, the correlation and its peak) without
+moving anything.
+
+**What moves, when the shift is measured.**  Register layers measures
+*layers*, as they are filtered; this plugin moves a *file* (and a channel) or
+an image.  So the measured layer names what moves, by default (*what moves*:
+*what it shows*): its image, or the one file it shows, and the one channel
+its channel bound keeps (`layer_target`, which also gives Register layers'
+notice its settings).  Where that is not one thing -- a layer over two
+files, a channel bound keeping two of a file's three channels -- nothing is
+guessed: the form's notice and the run's error say what the layer shows, and
+*the target above* hands the choice back to *target*, *file* and *channel*,
+which are hidden while the layer decides.  Transform reads every table
+ungrouped (`grouping`), so a measured layer that shows merged blinks is
+measured on its localizations: the same structure, more points.
 """
 from __future__ import annotations
 
@@ -54,7 +74,11 @@ from ..locs import Localizations
 PATH = "Analysis/Process/Transform"
 SOURCES = (("typed", "typed"), ("named", "named transformation"),
            ("recorded", "recorded in a loaded file"),
-           ("file", "transformation file"), ("drift", "drift of another file"))
+           ("file", "transformation file"), ("drift", "drift of another file"),
+           ("measured", "measured from the layers"))
+# what moves under *measured from the layers*: what the measured layer shows,
+# or the target, file and channel chosen by hand
+MEASURED_MOVES = (("layer", "what it shows"), ("target", "the target above"))
 # what of an image moves: a channel map takes the secondary half of the chip
 # onto the main one, so by default only that half is read
 PARTS = (("secondary", "secondary channel onto main"),
@@ -96,6 +120,36 @@ class TypedSettings:
                                help="the centre, when typed")
     centre_y_nm: float = param(0.0, label="centre y", unit="nm",
                                help="the centre, when typed")
+
+
+def _layers():
+    return [(i, f"layer {i}") for i in range(1, 7)]
+
+
+@dataclass
+class MeasuredSettings:
+    """*Register layers*' measurement, as a source: the same fields, the
+    target layer called *measured* here since *target* is what moves."""
+    reference: int = param(1, label="reference", choices=_layers,
+                           help="the layer that stays")
+    layer: int = param(2, label="measured", choices=_layers,
+                       help="the layer whose shift is measured")
+    moves: str = param("layer", label="what moves", choices=MEASURED_MOVES,
+                       help="what the measured layer shows, or the target, "
+                            "file and channel above")
+    bin_nm: float = param(20.0, label="bin", unit="nm", min=1,
+                          help="the pixel of the pictures that are correlated")
+    max_shift_nm: Optional[float] = param(2500.0, label="max shift", unit="nm",
+                                          min=1,
+                                          help="the farthest the peak is looked "
+                                               "for; auto: anywhere")
+    use_z: bool = param(False, label="z too",
+                        help="also the shift in z; localizations with z only")
+    z_bin_nm: float = param(10.0, label="z bin", unit="nm", min=0.1,
+                            help="the bin of the z histograms", advanced=True)
+    max_z_shift_nm: float = param(300.0, label="max z shift", unit="nm", min=1,
+                                  help="the farthest the z peak is looked for",
+                                  advanced=True)
 
 
 def _targets():
@@ -144,6 +198,7 @@ class TransformSettings:
     drift_path: str = param("", label="drift of", kind="open_file",
                             file_filter=DRIFT_FILTER,
                             help="a drift-corrected file of the same frames")
+    measured: MeasuredSettings = param(default_factory=MeasuredSettings)
     part: str = param("secondary", label="what moves", choices=PARTS,
                       advanced=True,
                       help="of an image: its secondary channel, cut by the "
@@ -166,6 +221,55 @@ def settings_for(name: str, target: int = 0, file: int = 0,
     Register layers opens it with (the GUI's ``"transform"`` window)."""
     return TransformSettings(target=target, file=file, channel=channel,
                              source="named", named=name)
+
+
+def layer_target(session, layer: int):
+    """``({"target", "file", "channel"}, problem)``: Transform's settings
+    that move what layer ``layer`` (from 1) shows -- its image; else its one
+    file and the one channel its channel bound keeps (-1: every channel, when
+    the bound keeps all the file has).  ``problem`` is None, or says why that
+    is not one thing (several files, some but not all channels); the dict
+    then holds the nearest guess, all files, which Register layers' notice
+    hands to the form for the user to narrow and a run here refuses."""
+    if session is None or not 1 <= layer <= len(session.layers):
+        return {"target": 0, "file": 0, "channel": -1}, f"there is no layer {layer}"
+    shown = session.layers[layer - 1]
+    if shown.is_image:
+        return {"target": layer, "file": 0, "channel": -1}, None
+    n = len(session.files)
+    files = shown.files
+    listed = list(range(n)) if files is None else [int(f) for f in files]
+    if len(listed) == 1:
+        file = listed[0]
+    else:
+        file = 0 if n <= 1 else -1
+    out = {"target": 0, "file": file, "channel": -1}
+    if n > 1 and len(listed) != 1:
+        names = ", ".join(f"{f + 1}: {session.files[f].name}"
+                          for f in listed if 0 <= f < n)
+        return out, (f"layer {layer} shows {len(listed)} files ({names}): show "
+                     "one file in it, or set *what moves* to the target above")
+    locs = session.locs
+    lo, hi = shown.ranges.get("channel", (None, None))
+    if (lo is None and hi is None) or "channel" not in locs:
+        return out, None
+    rows = target_rows(locs, file if n > 1 else -1)
+    values = np.unique(np.asarray(locs["channel"])[rows])
+    inside = np.ones(len(values), bool)
+    if lo is not None:
+        inside &= values >= lo
+    if hi is not None:
+        inside &= values <= hi
+    if "channel" in shown.inverted:
+        inside = ~inside
+    if inside.sum() == 1:
+        out["channel"] = int(values[inside][0])
+    elif not inside.all():
+        kept = ", ".join(str(int(v)) for v in values[inside]) or "none"
+        return out, (f"layer {layer} shows channels {kept} of "
+                     f"{', '.join(str(int(v)) for v in values)}: keep one "
+                     "channel in it, or set *what moves* to the target above")
+    return out, None
 
 
 # ---------------------------------------------------------------- the pieces
@@ -326,26 +430,40 @@ class Transform(Plugin):
 
     # -------------------------------------------------------------- the form
     def describe(self, ctx: Optional[Context], settings: TransformSettings) -> FormState:
-        image = int(settings.target) != 0
         source = settings.source
+        measured = source == "measured"
+        by_layer = measured and settings.measured.moves == "layer"
+        session = getattr(ctx, "session", None)
+        resolved, problem = (layer_target(session, int(settings.measured.layer))
+                             if by_layer and session is not None else ({}, None))
+        image = int(resolved.get("target", settings.target)) != 0
         typed = source == "typed"
+        use_z = measured and settings.measured.use_z
         state = FormState(shown={
-            "file": not image, "channel": not image,
+            "target": not by_layer,
+            "file": not image and not by_layer,
+            "channel": not image and not by_layer,
+            "measured": measured,
+            "measured.z_bin_nm": use_z, "measured.max_z_shift_nm": use_z,
             "typed": typed, "named": source == "named",
             "recorded": source == "recorded",
             "path": source == "file",
             "invert": source in ("named", "recorded", "file"),
             "drift_path": source == "drift",
-            "keep_as": source in ("typed", "recorded", "file"),
+            "keep_as": source in ("typed", "recorded", "file", "measured"),
             "write_to": source != "drift",
             "part": image and source in ("named", "recorded", "file"),
             "image_to": image,
             "typed.shift_z_nm": not image,
             "typed.centre_x_nm": typed and settings.typed.centre == "given",
             "typed.centre_y_nm": typed and settings.typed.centre == "given"})
-        session = getattr(ctx, "session", None)
         if session is None:
             return state
+        if measured:
+            layers = [(i + 1, f"{i + 1}: {layer.name}" + (" (image)" if layer.is_image else ""))
+                      for i, layer in enumerate(session.layers)]
+            state.choices["measured.reference"] = layers
+            state.choices["measured.layer"] = layers
         state.choices["target"] = [(0, "localizations")] + [
             (i + 1, f"image layer {i + 1}: {layer.name}")
             for i, layer in enumerate(session.layers)
@@ -370,6 +488,10 @@ class Transform(Plugin):
                                   "two channels and overlay them (Overlay "
                                   "channels), or choose a transformation file",
                                   kind="info")
+        elif by_layer and problem:
+            state.notice = Notice(problem)
+        elif by_layer:
+            state.notice = Notice("moves " + _what_moves(session, resolved), kind="info")
         elif image and source == "drift":
             state.notice = Notice("an image has no frames to follow a drift: "
                                   "choose the localizations")
@@ -384,8 +506,23 @@ class Transform(Plugin):
         return self._work(ctx, settings, apply=False)
 
     def _work(self, ctx: Context, settings: TransformSettings, apply: bool) -> Result:
+        measured = None
+        if settings.source == "measured":
+            settings, measured = self._measure(ctx, settings)
+            if not apply:
+                # Preview: the measurement, Register layers' figure; nothing moves
+                t = measured.transformation(self._kept_name(ctx, settings))
+                which = (_what_moves(ctx.session, {"target": settings.target,
+                                                    "file": settings.file,
+                                                    "channel": settings.channel})
+                         if ctx.session is not None else self._which(ctx, settings))
+                from .register_layers import plot_registration
+                return Result(text=f"{measured}; would move {which} by {t}",
+                              plot=plot_registration(measured), settings=settings,
+                              data={"registration": measured, "transformation": t,
+                                    "shift_nm": measured.shift_nm})
         if int(settings.target) != 0:
-            return self._move_image(ctx, settings, apply)
+            return self._move_image(ctx, settings, apply, measured)
         locs = ctx.locs
         rows = target_rows(locs, int(settings.file), int(settings.channel))
         if not rows.any():
@@ -394,7 +531,8 @@ class Transform(Plugin):
         if settings.source == "drift":
             moved, text, transformation = self._drift(locs, rows, settings, which)
         else:
-            transformation = self._transformation(ctx, settings, locs, rows)
+            transformation = self._transformation(ctx, settings, locs, rows,
+                                                  measured=measured)
             moved = self._apply(locs, rows, transformation, settings, which)
             text = f"{which}: {int(rows.sum()):,} localizations, {transformation}"
         plot = _plot_locs(locs, moved, rows)
@@ -405,11 +543,46 @@ class Transform(Plugin):
         if written:
             text += f"; written to {written}"
         kept = {}
-        if settings.keep_as.strip() and settings.source in ("typed", "file"):
+        if settings.keep_as.strip() and settings.source in ("typed", "file", "measured"):
             kept[settings.keep_as.strip()] = transformation
+        data = {"transformation": transformation}
+        if measured is not None:
+            data.update(registration=measured, shift_nm=measured.shift_nm)
         return Result(locs=moved, text=text, plot=plot, settings=settings,
-                      data={"transformation": transformation},
-                      transformations=kept, written=written)
+                      data=data, transformations=kept, written=written)
+
+    def _measure(self, ctx: Context, settings: TransformSettings):
+        """``(settings, registration)``: the shift of the measured layer
+        against the reference (`register_layers.measure_layers`), and the
+        settings with *target*, *file* and *channel* set to what that layer
+        shows when it decides (`layer_target`), refused where it shows more
+        than one thing."""
+        from .register_layers import measure_layers
+        m = settings.measured
+        if m.moves == "layer":
+            if ctx.session is None:
+                raise ValueError("measured from the layers needs a session")
+            found, problem = layer_target(ctx.session, int(m.layer))
+            if problem:
+                raise ValueError(f"what to move is not one thing: {problem}")
+            settings = replace(settings, **found)
+        registration = measure_layers(ctx, int(m.reference), int(m.layer), m.bin_nm,
+                                      m.max_shift_nm, m.use_z, m.z_bin_nm,
+                                      m.max_z_shift_nm)
+        return settings, registration
+
+    @staticmethod
+    def _kept_name(ctx: Context, settings: TransformSettings) -> str:
+        """The name the measured shift is recorded under: *keep as*, else
+        the measured layer onto the reference, as Register layers names it."""
+        if settings.keep_as.strip():
+            return settings.keep_as.strip()
+        layers = getattr(ctx.session, "layers", None) or []
+
+        def called(n: int) -> str:
+            return layers[n - 1].name if 1 <= n <= len(layers) else f"layer {n}"
+        m = settings.measured
+        return f"{called(int(m.layer))} onto {called(int(m.reference))}"
 
     @staticmethod
     def _which(ctx: Context, settings: TransformSettings) -> str:
@@ -427,10 +600,20 @@ class Transform(Plugin):
 
     def _transformation(self, ctx: Context, settings: TransformSettings,
                         locs: Optional[Localizations] = None, rows=None,
-                        image=None):
-        """The `Transformation` the settings name, inverted if asked."""
+                        image=None, measured=None):
+        """The `Transformation` the settings name, inverted if asked; for
+        *measured from the layers*, the opposite of ``measured``'s shift."""
         from ..transformation import load_transformation
         source = settings.source
+        if source == "measured":
+            if measured is None:
+                _, measured = self._measure(ctx, settings)
+            m = settings.measured
+            name = self._kept_name(ctx, settings)
+            return measured.transformation(name, {"reference": int(m.reference),
+                                                  "target": int(m.layer),
+                                                  "bin_nm": m.bin_nm,
+                                                  "name": name})
         if source == "typed":
             if image is not None:
                 typed = settings.typed
@@ -471,6 +654,9 @@ class Transform(Plugin):
     def _apply(locs, rows, transformation, settings, which):
         from ..transformation import transform_table
         name = settings.named if settings.source == "named" else settings.keep_as.strip()
+        if settings.source == "measured" and not name:
+            # recorded under the name the measurement was given
+            name = (transformation.origin.get("register layers") or {}).get("name", "")
         return transform_table(locs, transformation, rows, name=name, what=which)
 
     @staticmethod
@@ -510,7 +696,8 @@ class Transform(Plugin):
         return str(save_transformation(settings.write_to, transformation, name,
                                        overwrite=True))
 
-    def _move_image(self, ctx: Context, settings: TransformSettings, apply: bool):
+    def _move_image(self, ctx: Context, settings: TransformSettings, apply: bool,
+                    measured=None):
         from ..transformation import Transformation, transform_image
         session = ctx.session
         index = int(settings.target) - 1
@@ -523,7 +710,8 @@ class Transform(Plugin):
         layer = session.layers[index]
         image = layer.image
         locs = session.locs if len(session.locs) else None
-        transformation = self._transformation(ctx, settings, locs, None, image)
+        transformation = self._transformation(ctx, settings, locs, None, image,
+                                              measured=measured)
         if transformation.moves_z:
             raise ValueError("an image has no z: this transformation moves "
                              "localizations in z")
@@ -562,13 +750,31 @@ class Transform(Plugin):
         if settings.image_to:
             text += f"; the image saved as {write_tiff(settings.image_to, moved)}"
         kept = {}
-        if settings.keep_as.strip() and settings.source in ("typed", "recorded", "file"):
+        if settings.keep_as.strip() and settings.source in ("typed", "recorded", "file",
+                                                            "measured"):
             kept[settings.keep_as.strip()] = transformation
         # sources, not layers: the layers that showed the original show the
         # moved image now, and the rest pick it (or the main cut) as they like
         return Result(text=text, plot=plot, settings=settings, image_sources=made,
                       images_replaced=[(image, moved)],
                       transformations=kept, data=data, written=written)
+
+
+def _what_moves(session, target: dict) -> str:
+    """What `layer_target`'s settings move, in words."""
+    if int(target.get("target", 0)) != 0:
+        n = int(target["target"])
+        return f"image layer {n} ({session.layers[n - 1].name})"
+    file = int(target.get("file", 0))
+    if file < 0:
+        what = "all files"
+    elif file < len(session.files):
+        what = f"file {file + 1} ({session.files[file].name})"
+    else:
+        what = f"file {file + 1}"
+    if int(target.get("channel", -1)) >= 0:
+        what += f", channel {int(target['channel'])}"
+    return what
 
 
 # ------------------------------------------------------------------ images

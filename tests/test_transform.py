@@ -431,3 +431,67 @@ def test_an_image_an_old_file_placed_is_resampled_where_it_was_placed(tmp_path):
     x, y, _ = turn.apply(np.array([85.0]), np.array([55.0]))   # the blob's centre, placed
     assert back.values_at(x, y)[0] == pytest.approx(1.0)
     assert back.bounds == pytest.approx((0.0, -300.0, 200.0, 0.0))
+
+
+# ------------------------------------------------- measured from the layers
+def measured_session(shift=(37.0, -21.0, 0.0)):
+    """Two files of one structure, the second shifted by ``shift``: layer 1
+    shows the first, layer 2 the second (Register layers' test data)."""
+    from test_register_layers import two_files
+    return two_files(shift)
+
+
+def first_file_x(session):
+    from test_register_layers import structure
+    first = session.locs[np.asarray(session.locs["filenumber"]) == 0]
+    np.testing.assert_allclose(np.sort(first["x_nm"]),
+                               np.sort(structure(seed=1)[:, 0]), atol=1e-3)
+
+
+def test_a_measured_shift_moves_the_measured_layers_file_onto_the_reference():
+    session = measured_session()
+    plugin = plugins.get(PATH)()
+    result = session.run(plugin, TransformSettings(source="measured"))
+    assert result.data["shift_nm"][:2] == pytest.approx((37.0, -21.0), abs=2.0)
+    assert "file 2 (two)" in result.text
+    register = plugins.get("Analysis/Register/Register layers")()
+    after = session.run(register, register.Settings(name="check"))
+    assert np.hypot(*after.data["shift_nm"][:2]) < 2.0
+    first_file_x(session)                              # the reference stayed
+
+
+def test_the_preview_of_a_measured_shift_shows_the_correlation_and_moves_nothing():
+    session = measured_session()
+    before = xyz(session.locs).copy()
+    result = plugins.get(PATH)().preview(session.context(),
+                                         TransformSettings(source="measured"))
+    assert result.locs is None and not result.transformations
+    assert result.data["shift_nm"][:2] == pytest.approx((37.0, -21.0), abs=2.0)
+    assert result.plot is not None and "would move file 2" in result.text
+    np.testing.assert_array_equal(xyz(session.locs), before)
+    assert not session.transformations
+
+
+def test_a_measured_layer_showing_two_files_is_refused_naming_them():
+    session = measured_session()
+    session.layers[1].set_files(None)                  # layer 2: both files
+    plugin = plugins.get(PATH)()
+    settings = TransformSettings(source="measured")
+    notice = plugin.describe(session.context(), settings).notice
+    assert "1: one" in notice.text and "2: two" in notice.text
+    with pytest.raises(ValueError, match="shows 2 files.*1: one, 2: two"):
+        session.run(plugin, settings)
+    # the target chosen by hand moves what it names
+    by_hand = dataclasses.replace(settings, file=1, measured=dataclasses.replace(
+        settings.measured, moves="target"))
+    result = session.run(plugin, by_hand)
+    assert "file 2 (two)" in result.text
+
+
+def test_keep_as_stores_the_measured_shift_as_a_named_transformation():
+    session = measured_session()
+    session.run(plugins.get(PATH)(), TransformSettings(source="measured",
+                                                       keep_as="two onto one"))
+    kept = session.transformations["two onto one"]
+    x, y, _ = kept.apply([37.0], [-21.0])
+    np.testing.assert_allclose([x[0], y[0]], (0.0, 0.0), atol=2.0)

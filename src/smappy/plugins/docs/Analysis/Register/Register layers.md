@@ -22,6 +22,12 @@ opens, set to that transformation and to what the target layer shows (its
 file, its channel, or the image).  Look at the figure first; if the peak is
 clear, apply.
 
+To measure and apply in one step, use Transform's source *measured from the
+layers*: the same measurement and the same figure (its Preview), and the
+measured layer's file moved onto the reference by its Run.  This plugin is
+for measuring alone -- to look before deciding, or to keep a shift under a
+name and apply it to other files later.
+
 Only a shift is measured -- no rotation, no change of scale.  For the full
 map between two cameras or halves of a chip, use
 [Calibrate transform](plugin:Analysis/Register/Calibrate transform).
