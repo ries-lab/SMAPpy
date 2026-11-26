@@ -1,0 +1,14 @@
+# A tab set: View > Workspace > Add tabs > Tracking (`workspace.Workspace.add_tabs`).
+version: 1
+tabs:
+- name: Tracking
+  header: analysis
+  instances:
+  - plugin: Analysis/Tracking/Link tracks
+  - plugin: Analysis/Tracking/Tracking analysis
+    line_above: true
+  - plugin: Analysis/Tracking/Trace statistics
+    line_above: true
+  - plugin: Analysis/Tracking/Trace inspector
+  - plugin: Analysis/Tracking/Find steps
+    line_above: true

@@ -48,12 +48,17 @@ def test_the_default_workspace_is_the_shipped_gui_file():
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
     # drift, colours and z are each fitter's *after the fit*, not pins here
     assert [i.plugin for i in analysis.instances] == [
-        "Analysis/Measure/Line Profile", STATS]
+        STATS, "Analysis/Measure/Localization Precision", "Analysis/Measure/Histogram",
+        "Analysis/Measure/Time Course", "Analysis/Measure/Line Profile",
+        "Analysis/Process/Remove Localizations", "Analysis/Process/Math Parser",
+        "Analysis/Process/Neighbourhood", "Analysis/Measure/Spatial statistics"]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
     regions = next(t for t in ws.tabs if t.name == "Regions")
     assert regions.header == "roi"
     pinned = [i.plugin for i in regions.instances]
-    assert pinned == [SEGMENT, "Analysis/Regions/Sort ROIs",
+    assert pinned == [SEGMENT, "Analysis/Regions/Find clusters",
+                      "Analysis/Regions/Filter ROIs", "Analysis/Regions/Sort ROIs",
+                      "Analysis/Measure/Id statistics",
                       "Analysis/Regions/Summarize/Export table"]
     # every instance has an id of its own, given as it is read
     ids = [i.id for t in ws.tabs for i in t.instances]
@@ -115,8 +120,9 @@ def test_a_line_above_a_section_is_kept_and_said_only_where_drawn(tmp_path):
     localize = next(t for t in ws.tabs if t.name == "Localize")
     lined = [i.plugin for i in localize.instances if i.line_above]
     assert lined == ["Analysis/After fit/Assign colours"]
+    drawn = sum(i.line_above for t in ws.tabs for i in t.instances)
     path = ws.save(tmp_path / "w.yaml")
-    assert path.read_text().count("line_above") == 1
+    assert path.read_text().count("line_above") == drawn
     back = next(t for t in load(path).tabs if t.name == "Localize")
     assert [i.line_above for i in back.instances] == \
         [i.line_above for i in localize.instances]
@@ -428,7 +434,7 @@ def test_the_workspace_is_a_submenu_of_view_and_reset_gives_the_default(window, 
     assert "Workspace" in entries and not any("GUI" in e for e in entries)
     actions = {a.text(): a for a in window.workspace_menu.actions() if a.text()}
     assert list(actions) == ["Save", "Save as...", "Open...", "Recent", "Reset",
-                             "From data file..."]
+                             "Add tabs", "From data file..."]
     set_profile_value(window, 31)
     window.save_gui_to(tmp_path / "mine.gui.yaml")
     actions["Reset"].trigger()
@@ -481,10 +487,11 @@ def test_removing_and_reordering_from_the_tab_edits_the_workspace(window):
     first, second = tab.tab.instances[:2]
     tab.tab.move(first.id, 1)
     tab.rebuild()
-    assert [s.title for s in tab.sections][:2] == ["Localization Statistics", "Line Profile"]
+    name = {p: r.name for p, r in plugins.refs().items()}
+    assert [s.title for s in tab.sections][:2] == [name[second.plugin], name[first.plugin]]
     tab.tab.instances.remove(second)
     tab.rebuild()
-    assert "Localization Statistics" not in [s.title for s in tab.sections]
+    assert name[second.plugin] not in [s.title for s in tab.sections]
     assert second.id not in tab.slots            # its panel went with it
 
 
@@ -657,3 +664,48 @@ def test_a_chain_only_plugin_is_offered_where_chain_steps_are_picked_and_nowhere
     assert "File/Save/smappy HDF5" in hidden
     assert not set(hidden) & set(PluginTree().refs)
     assert set(hidden) <= set(PluginTree(chain_steps=True).refs)
+
+
+def test_every_shipped_tab_set_names_installed_plugins_and_settings_they_take():
+    """A renamed plugin or setting fails here, not in a user's Add tabs menu."""
+    from smappy import workspace
+    sets = workspace.tab_sets()
+    assert set(sets) >= {"MINFLUX", "DNA-PAINT", "Tracking", "4Pi"}
+    refs = plugins.refs()
+    for name, path in sets.items():
+        ws = workspace.load(path)
+        assert ws.tabs, name
+        for tab in ws.tabs:
+            for instance in tab.instances:
+                assert instance.plugin in refs, (name, instance.plugin)
+                if not instance.values:
+                    continue
+                from dataclasses import fields, is_dataclass
+                settings = plugins.get(instance.plugin).Settings()
+                for dotted, value in instance.values.items():
+                    target = settings
+                    *parts, leaf = dotted.split(".")
+                    for part in parts:
+                        target = getattr(target, part)
+                    assert is_dataclass(target) and leaf in {f.name for f in fields(target)}, \
+                        (name, instance.plugin, dotted)
+
+
+def test_adding_a_tab_set_keeps_the_tabs_there_are_and_adds_it_once():
+    from smappy import workspace
+    ws = Workspace.default()
+    before = [t.name for t in ws.tabs]
+    extra = workspace.load(workspace.tab_sets()["MINFLUX"])
+    assert ws.add_tabs(extra) == ["MINFLUX"]
+    assert [t.name for t in ws.tabs] == before + ["MINFLUX"]
+    assert ws.add_tabs(workspace.load(workspace.tab_sets()["MINFLUX"])) == []
+    # copies with their own identities: the set's file is not touched by edits
+    assert ws.tabs[-1].instances[0].id != extra.tabs[0].instances[0].id
+
+
+def test_add_tabs_in_the_window_adds_the_tab_and_shows_it(window):
+    added = window.add_tab_set("Tracking")
+    assert added == ["Tracking"]
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "Tracking"
+    assert window.add_tab_set("Tracking") == []
+    assert [t.name for t in window.workspace.tabs].count("Tracking") == 1

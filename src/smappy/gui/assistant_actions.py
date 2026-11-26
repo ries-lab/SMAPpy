@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from ..assistant.tools import Action, ToolError
+from ..workspace import tab_sets
 
 PATH = {"type": "string", "description": "the file"}
 PATHS = {"type": ["string", "array"], "items": {"type": "string"},
@@ -75,7 +76,7 @@ def menu_name(text: str) -> str:
 
 
 def menu_items(window) -> List[str]:
-    """Every item of the window's menus, by path ("File/Workspace/Open"):
+    """Every item of the window's menus, by path ("View/Workspace/Open"):
     what the test checks the actions and `LEFT_OUT` against."""
     out: List[str] = []
 
@@ -268,6 +269,11 @@ def actions_of(window) -> Dict[str, Action]:
                    _paths(path)[0]), {"path": PATH}, ("path",)),
         Action("View/Workspace/Reset", "The shipped workspace, now and at the "
                "next start.", window.load_default_gui),
+        Action("View/Workspace/Add tabs", "A shipped tab set -- the plugins of "
+               "one technique -- added beside the tabs there are.",
+               lambda name: window.add_tab_set(name),
+               {"name": {"type": "string",
+                         "enum": list(tab_sets())}}, ("name",)),
         Action("View/Workspace/From data file", "The workspace a localization "
                "file was saved with.", workspace_from, {"path": PATH}, ("path",)),
         Action("Plugins/Microscope manager", "The microscope entries' window.",

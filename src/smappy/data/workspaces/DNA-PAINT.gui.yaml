@@ -1,0 +1,23 @@
+# A tab set: View > Workspace > Add tabs > DNA-PAINT (`workspace.Workspace.add_tabs`).
+version: 1
+tabs:
+- name: DNA-PAINT
+  header: analysis
+  instances:
+  - plugin: Analysis/Regions/Find clusters
+    label: Find binding sites
+    values:
+      algorithm: local_maxima
+  - plugin: Analysis/DNA-PAINT/Binding kinetics
+    line_above: true
+  - plugin: Analysis/DNA-PAINT/qPAINT
+  - plugin: Analysis/DNA-PAINT/Molecular mapping
+    line_above: true
+  - plugin: Analysis/DNA-PAINT/SPINNA
+  - plugin: Analysis/Process/Remove Localizations
+    label: Remove binding-event edges
+    line_above: true
+    values:
+      region: edges
+  - plugin: Analysis/DNA-PAINT/Workflow
+    line_above: true

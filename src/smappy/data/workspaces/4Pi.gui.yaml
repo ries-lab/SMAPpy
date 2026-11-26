@@ -1,0 +1,21 @@
+# A tab set: View > Workspace > Add tabs > 4Pi (`workspace.Workspace.add_tabs`).
+# Both fitters finish with 4Pi z (on by default) and COMET on the phase z.
+version: 1
+tabs:
+- name: 4Pi
+  header: localize
+  instances:
+  - plugin: Localize/PSF calibration
+    values:
+      mode: 4Pi
+  - plugin: Localize/Camera noise calibration
+  - plugin: Localize/Spline 4Pi
+    line_above: true
+    values:
+      finish.fourpi_z: true
+      finish.drift: comet
+  - plugin: Localize/DECODE
+    label: DECODE (4Pi model)
+    values:
+      finish.fourpi_z: true
+      finish.drift: comet

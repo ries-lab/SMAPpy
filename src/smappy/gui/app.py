@@ -340,12 +340,19 @@ class ControlWindow(QMainWindow):
                 ("Recent", None, None),
                 ("Reset", self.load_default_gui,
                  "the shipped workspace, now and at the next start"),
+                ("Add tabs", None, None),
                 (None, None, None),
                 # a lambda: `triggered`'s checked would arrive as the path
                 ("From data file...", lambda: self.restore_state_from_file(),
                  "the workspace a localization file was saved with")):
             if text is None:
                 self.workspace_menu.addSeparator()
+            elif slot is None and text == "Add tabs":
+                # the shipped tab sets (`workspace.tab_sets`), beside the tabs
+                # one has: a technique's plugins without losing one's own
+                self.tab_sets_menu = _add_menu(self.workspace_menu, text, self)
+                self.tab_sets_menu.setToolTipsVisible(True)
+                self.tab_sets_menu.aboutToShow.connect(self._fill_tab_sets)
             elif slot is None:
                 # filled as it opens: a file saved in another window, or
                 # deleted since, is right without anything to keep in step
@@ -1645,6 +1652,37 @@ class ControlWindow(QMainWindow):
             action.triggered.connect(lambda _=False, p=path: self.load_gui_from(p))
         if not paths:
             menu.addAction("(none saved yet)").setEnabled(False)
+
+    def _fill_tab_sets(self) -> None:
+        """One entry per shipped tab set; a set already added is ticked."""
+        menu = self.tab_sets_menu
+        menu.clear()
+        have = {tab.name for tab in self.workspace.tabs}
+        for name, path in workspace_module.tab_sets().items():
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name in have)
+            action.setToolTip(f"a tab of the {name} plugins beside these tabs")
+            action.triggered.connect(lambda _=False, n=name: self.add_tab_set(n))
+
+    def add_tab_set(self, name: str) -> List[str]:
+        """The tab set ``name`` (`workspace.tab_sets`) beside the tabs there
+        are, and shown; a tab of that name already here is shown instead of
+        added twice.  The tabs added."""
+        sets = workspace_module.tab_sets()
+        if name not in sets:
+            raise ValueError(f"no tab set {name!r}: there are {', '.join(sets)}")
+        extra = workspace_module.load(sets[name])
+        extra.prune(list(plugins.refs()))
+        added = self.workspace.add_tabs(extra)
+        if added:
+            self.build_tabs()
+        wanted = added[0] if added else (extra.tabs[0].name if extra.tabs else "")
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == wanted:
+                self.tabs.setCurrentIndex(i)
+                break
+        return added
 
     def load_default_gui(self) -> None:
         """The shipped GUI, and the shipped GUI at the next start too."""

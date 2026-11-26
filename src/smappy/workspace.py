@@ -45,6 +45,21 @@ RECENT_MAX = 8
 #: lab sees first is a choice about the lab, not a property of a plugin.
 DEFAULT_GUI = Path(__file__).resolve().parent / "data" / "default.gui.yaml"
 
+#: Tabs for one technique -- MINFLUX, DNA-PAINT, tracking, 4Pi -- that
+#: *View > Workspace > Add tabs* puts beside the tabs one has, rather than in
+#: place of them: the default stays general, and a lab that also renders and
+#: clusters keeps what it built.  GUI files like any other, one or more tabs
+#: each, some plugins preset for the technique (`values`).
+TAB_SETS = Path(__file__).resolve().parent / "data" / "workspaces"
+
+
+def tab_sets() -> Dict[str, Path]:
+    """``{name: file}`` of the shipped tab sets, by the file's name."""
+    if not TAB_SETS.is_dir():
+        return {}
+    return {display_name(path): path
+            for path in sorted(TAB_SETS.glob(f"*{GUI_SUFFIX}"))}
+
 
 @dataclass
 class Instance:
@@ -183,6 +198,21 @@ class Workspace:
         return cls(tabs=tabs, layout=layout if isinstance(layout, dict) else {},
                    filters=_filters(data.get("filters")), windows=windows,
                    version=int(data.get("version") or VERSION), path=path)
+
+    def add_tabs(self, other: "Workspace") -> List[str]:
+        """``other``'s tabs appended to these, as copies with their own
+        identities; a tab whose name is here already is left out (adding a
+        set twice gives one tab, not two of a name).  The names added."""
+        have = {tab.name for tab in self.tabs}
+        added = []
+        for tab in other.tabs:
+            if tab.name in have:
+                continue
+            self.tabs.append(Tab(name=tab.name, kind=tab.kind, header=tab.header,
+                                 instances=[i.copy() for i in tab.instances]))
+            have.add(tab.name)
+            added.append(tab.name)
+        return added
 
     # ------------------------------------------------------------ the file
     def save(self, path=None) -> Path:

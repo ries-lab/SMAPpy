@@ -527,7 +527,11 @@ renders with its maths and figures (the figures in the slow tier).
 A plugin is in the tree as soon as it exists; which ones a fresh install
 pins to its tabs is a list, `src/smappy/data/default.gui.yaml` -- a GUI file
 like any other (*View > Workspace > Save* writes the same format), so a new
-plugin that belongs in the shipped GUI gets a line there.  Likewise the
+plugin that belongs in the shipped GUI gets a line there.  The tabs of one
+technique (MINFLUX, DNA-PAINT, Tracking, 4Pi) are GUI files of their own in
+`src/smappy/data/workspaces/`, added beside a workspace's tabs by *File >
+Workspace > Add tabs* (`workspace.tab_sets`, `Workspace.add_tabs`); their
+plugins and preset settings are checked by `tests/test_workspace.py`.  Likewise the
 per-region steps a new ROI project starts with are a list,
 `roi_manager.pipeline.DEFAULT_REGION_STEPS`.
 

@@ -1,0 +1,24 @@
+# A tab set: View > Workspace > Add tabs > MINFLUX adds this tab to the
+# workspace that is open, beside its own tabs (`workspace.Workspace.add_tabs`).
+# Same format as default.gui.yaml; `values` preset a plugin by dotted name.
+version: 1
+tabs:
+- name: MINFLUX
+  header: analysis
+  instances:
+  - plugin: Analysis/MINFLUX/Sequence table
+  - plugin: Analysis/MINFLUX/Sequence QC
+  - plugin: Analysis/MINFLUX/Quality filter
+    line_above: true
+  - plugin: Analysis/Drift/MBM
+  - plugin: Analysis/Register/MBM registration
+    line_above: true
+  - plugin: Analysis/MINFLUX/MINFLUX dual colour
+  - plugin: Analysis/Tracking/Trace statistics
+    line_above: true
+  - plugin: Analysis/Tracking/Trace inspector
+  - plugin: Analysis/Tracking/Find steps
+  - plugin: Analysis/Measure/Stability
+    line_above: true
+  - plugin: Analysis/MINFLUX/Workflow/MINFLUX kinesin
+    line_above: true

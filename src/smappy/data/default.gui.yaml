@@ -1,9 +1,11 @@
-# The GUI a fresh install opens, and File > Workspace > Reset.  Save on it asks
+# The GUI a fresh install opens, and View > Workspace > Reset.  Save on it asks
 # for a file of one's own (in the config folder): this one is never written.
-# The same format File > Workspace > Save writes: to change it, arrange the
+# The same format View > Workspace > Save writes: to change it, arrange the
 # tabs in the program, save the GUI, and put the tabs here.  A plugin named
 # here that is not installed is left out when it is read.  `line_above: true`
-# draws a line above a section (right-click it: *Line above*).
+# draws a line above a section (right-click it: *Line above*).  The tabs of
+# one technique are not here but in data/workspaces, added by File >
+# Workspace > Add tabs.
 version: 1
 tabs:
 - name: File
@@ -30,11 +32,25 @@ tabs:
 - name: Analysis
   header: analysis
   instances:
-  - plugin: Analysis/Measure/Line Profile
   - plugin: Analysis/Measure/Localization Statistics
+  - plugin: Analysis/Measure/Localization Precision
+  - plugin: Analysis/Measure/Histogram
+  - plugin: Analysis/Measure/Time Course
+  - plugin: Analysis/Measure/Line Profile
+  - plugin: Analysis/Process/Remove Localizations
+    line_above: true
+  - plugin: Analysis/Process/Math Parser
+  - plugin: Analysis/Process/Neighbourhood
+  - plugin: Analysis/Measure/Spatial statistics
+    line_above: true
 - name: Regions
   header: roi
   instances:
   - plugin: Analysis/Regions/Segment regions
+  - plugin: Analysis/Regions/Find clusters
+  - plugin: Analysis/Regions/Filter ROIs
+    line_above: true
   - plugin: Analysis/Regions/Sort ROIs
+  - plugin: Analysis/Measure/Id statistics
+    line_above: true
   - plugin: Analysis/Regions/Summarize/Export table
