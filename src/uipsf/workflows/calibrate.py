@@ -126,9 +126,10 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
 
 
 def insitu_model(optics, spec: PSFModelSettings, roi_shape, focus_nm: float, z_max_nm: float = 1000.0,
-                 device=None, dtype=torch.float32, held: Held | None = None, fit_focus: bool = True,
-                 fit_tilt: bool = False, field_centre_px=None) -> ForwardModel:
-    """The model in situ learning learns (plan §9, M5): one channel, the pupil and blur as ``spec``
+                 device=None, dtype=torch.float32, held: Held | list | None = None, fit_focus: bool = True,
+                 fit_tilt: bool = False, field_centre_px=None, transforms=None,
+                 channel_options: list | None = None) -> ForwardModel:
+    """The model in situ learning learns (plan §9, M5): the pupil and blur as ``spec``
     describes them for a point (`make_psf`; no bead's size, and no SAF damping, which is the beads': a
     molecule's light beyond the critical angle follows its own depth), molecules in the sample seen through
     ``focus_nm`` (`InSituGeometry`; held there with ``fit_focus`` off, the coverslip's tilt learnt with
@@ -141,15 +142,32 @@ def insitu_model(optics, spec: PSFModelSettings, roi_shape, focus_nm: float, z_m
     ``field_centre_px``: astigmatism and coma varying over the chip about it (`FieldPolynomial`, as beads
     learn them; `docs/uipsf/field-dependence.md` §13.3).  No focal surface: each molecule's height is free,
     and takes a tilted or curved focus up as a bead's z does -- the coverslip's edge measured per region of the
-    field says how far the focus varies over it (`insitu_rounds.edge_over_field`)."""
+    field says how far the focus varies over it (`insitu_rounds.edge_over_field`).
+
+    **Several channels** (a chip split in two, Spline 3D 2C): ``optics`` one `Optics` per channel, the main
+    one first, ``transforms`` each secondary's map to the main chip (as `bead_model`'s), ``held`` one `Held`
+    per channel (each channel's own pupil, from a two-channel bead model), and ``channel_options`` one dict of
+    `Channel` keywords per secondary channel: whether its transform and defocus offset are learnt or held at
+    the bead model's, its starting share, one share per molecule for two dyes.  The focus is the main
+    channel's; a secondary's own plane is its ``ch<c>.dz`` from it."""
     from dataclasses import replace as replaced
 
     from ..model import Bleaching, InSituGeometry
-    psf = make_psf(optics, replaced(spec, saf_damping=False), roi_shape, held=held, z_max_nm=z_max_nm,
-                   device=device, dtype=dtype)
-    field = None if field_centre_px is None else field_for(psf, field_centre_px, optics.pixel_size_nm)
-    return ForwardModel([Channel(psf, field=field)],
-                        geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
+    several = isinstance(optics, (list, tuple))
+    optics = list(optics) if several else [optics]
+    held = list(held) if isinstance(held, (list, tuple)) else [held] * len(optics)
+    transforms = list(transforms) if transforms is not None else [None] * len(optics)
+    options = [{}] + list(channel_options or [{}] * (len(optics) - 1))
+    if not (len(held) == len(transforms) == len(options) == len(optics)):
+        raise ValueError(f"{len(optics)} channels of optics, {len(held)} held, {len(transforms)} transforms and "
+                         f"{len(options) - 1} secondaries' options")
+    channels = []
+    for c, (o, h, H, opts) in enumerate(zip(optics, held, transforms, options, strict=True)):
+        psf = make_psf(o, replaced(spec, saf_damping=False), roi_shape, held=h, z_max_nm=z_max_nm,
+                       device=device, dtype=dtype)
+        field = None if field_centre_px is None else field_for(psf, field_centre_px, optics[0].pixel_size_nm)
+        channels.append(Channel(psf, field=field, transform=H, **(opts if c else {})))
+    return ForwardModel(channels, geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
                         intensity=Bleaching(order=0))
 
 

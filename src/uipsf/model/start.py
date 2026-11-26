@@ -57,4 +57,6 @@ def rough_start(batch, pixel_size_nm: tuple[float, float]) -> dict[str, torch.Te
     total = sum(f[1] for f in found)
     return {"xyz": xyz, "photons": total, "background": torch.stack([f[2] for f in found], 1),
             "shares": {c: float((found[c][1] / total).median()) for c in range(C)},
+            # each emitter's own, for a model with a share per emitter (`Channel.share_per_emitter`)
+            "share_each": torch.stack([(f[1] / total.clamp_min(1e-9)).clamp(0.02, 0.98) for f in found], 1),
             "dz": {c: float((found[c][0][:, 2] - xyz[:, 2]).median()) for c in range(C)}}

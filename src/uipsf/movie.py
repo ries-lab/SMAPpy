@@ -20,6 +20,11 @@ region it is 0.2–0.6 % of the peak off the movie, which has no wrap-around.
 - *Spots*: the model's PSF (main channel) with its learnt pupil, blur and focus, `InSituGeometry`'s
   defocus, in a region of ``spot_px`` pixels about the spot's pixel, added into the frame; light outside
   that region is lost, as the fit loses it outside its region.
+- *Several channels* (a model of `Channel`s, a split chip): every channel's spot drawn where its transform
+  puts the molecule (`channels.inverse_map` of the main channel's chip position), its height offset
+  ``ch<c>.dz`` added and its photons the channel's share of the molecule's.  The share is the model's, or
+  with ``dyes`` each fluorophore's dye's: the secondary channel's share for each dye of a ratiometric
+  pair, one dye drawn per fluorophore.  The molecules lie in ``region`` (the main channel's rectangle on the chip).
 - *Camera*: a flat background of ``background`` photons per pixel, Poisson noise, Gaussian read noise of
   variance ``read_noise_var`` (photons²).  Frames are in photons; SMAPpy's camera conversion is the
   loader's business, not the simulator's.
@@ -35,7 +40,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from .model.channels import view
+from .model.channels import inverse_map, unpack_transform, view
 from .model.forward import _split
 
 
@@ -52,6 +57,8 @@ class MovieSettings:
     read_noise_var: float = 0.0                 # photons²
     spot_px: int = 25                           # the region each spot is rendered in
     seed: int = 0
+    region: tuple | None = None                 # (x, y, width, height) chip pixels the molecules lie in; None: all
+    dyes: tuple | None = None                   # secondary channel's share per dye, one drawn per fluorophore
 
 
 @dataclass
@@ -64,12 +71,14 @@ class MovieTruth:
     y_nm: np.ndarray
     h_nm: np.ndarray             # [M] height above the coverslip
     photons: np.ndarray          # [M] expected photons in that frame, illumination included
+    share: np.ndarray | None = None   # [M] the secondary channel's share of them, with ``dyes``
 
     def __len__(self) -> int:
         return len(self.frame)
 
     def rows(self, index) -> MovieTruth:
-        return MovieTruth(*(getattr(self, f)[index] for f in self.__dataclass_fields__))
+        return MovieTruth(*(None if getattr(self, f) is None else getattr(self, f)[index]
+                            for f in self.__dataclass_fields__))
 
 
 @dataclass
@@ -99,15 +108,20 @@ def simulate_movie(model, shared: dict, settings: MovieSettings | None = None) -
     Y, X = s.size_px
     px, py = model.pixel_size_nm
     n = int(s.fluorophores)
-    xy_px = np.stack([rng.uniform(-0.5, X - 0.5, n), rng.uniform(-0.5, Y - 0.5, n)], 1)
+    x0, y0, w, hh = s.region if s.region is not None else (0, 0, X, Y)
+    xy_px = np.stack([rng.uniform(x0 - 0.5, x0 + w - 0.5, n), rng.uniform(y0 - 0.5, y0 + hh - 0.5, n)], 1)
     h = rng.uniform(*s.heights_nm, n)
     h[rng.random(n) < s.on_coverslip] = 0.0
+    # drawn after the rest, so that a movie without dyes is the one it always was
+    share = None
     blinks = blink(n, s.n_frames, s.blinking or BlinkingSettings(), rng)
     em = emission(blinks, s.n_frames)
     owner = em.owner
+    if s.dyes is not None:
+        share = np.asarray(s.dyes, float)[rng.integers(0, len(s.dyes), n)][owner]
     photons = em.photons * illumination(s, xy_px[owner, 0], xy_px[owner, 1])
     truth = MovieTruth(em.frame.astype(np.int64), owner, em.blink, xy_px[owner, 0] * px, xy_px[owner, 1] * py,
-                       h[owner], photons)
+                       h[owner], photons, share)
     expected = np.full((s.n_frames, Y, X), float(s.background))
     render(model, shared, truth, expected, s.spot_px)
     frames = rng.poisson(expected).astype(np.float64)
@@ -117,27 +131,47 @@ def simulate_movie(model, shared: dict, settings: MovieSettings | None = None) -
 
 
 def render(model, shared: dict, truth: MovieTruth, image: np.ndarray, spot_px: int, chunk: int = 512) -> None:
-    """Add every row of ``truth`` into ``image`` [T, Y, X], in place: the model's PSF in a region of
-    ``spot_px`` pixels about the spot's pixel, times its photons."""
-    base = model.psf
+    """Add every row of ``truth`` into ``image`` [T, Y, X], in place: each channel's PSF in a region of
+    ``spot_px`` pixels about the spot's pixel in that channel, times its share of the photons."""
+    for c in range(model.n_channels):
+        _render_channel(model, shared, truth, image, spot_px, chunk, c)
+
+
+def _render_channel(model, shared, truth, image, spot_px, chunk, c) -> None:
+    base = model.channels[c].psf
     psf = base.for_emitters((spot_px, spot_px), height_nm=shared.get("geometry.height") if base.saf_only_depth
                             else None)      # the molecules' view: the pixel's blur kept, no SAF damping
     dev, dt = base.grid.rho.device, base.grid.rho.dtype
-    p = view({k: torch.as_tensor(v, device=dev) for k, v in shared.items()}, 0)
+    p = view({k: torch.as_tensor(v, device=dev) for k, v in shared.items()}, c)
     px, py = model.pixel_size_nm
+    pxc, pyc = model.channels[c].pixel_size_nm
+    H = None if c == 0 else unpack_transform(torch.as_tensor(p["transform"], dtype=torch.float64))
     half = spot_px // 2
     T, Y, X = image.shape
     for a in range(0, len(truth), chunk):
         rows = truth.rows(slice(a, a + chunk))
         cx, cy = rows.x_nm / px, rows.y_nm / py
+        if H is not None:                        # the main chip position into this channel's (`ForwardModel.positions`)
+            q = inverse_map(H, torch.as_tensor(np.stack([cx, cy], 1), dtype=torch.float64)).numpy()
+            cx, cy = q[:, 0], q[:, 1]
         ix, iy = np.rint(cx).astype(int), np.rint(cy).astype(int)
         # x, y from the region's centre pixel; the geometry gives the defocus and the height
-        xyz = torch.as_tensor(np.stack([(cx - ix) * px, (cy - iy) * py, rows.h_nm], 1), dtype=dt, device=dev)
+        xyz = torch.as_tensor(np.stack([(cx - ix) * pxc, (cy - iy) * pyc, rows.h_nm], 1), dtype=dt, device=dev)
         q = dict(p, **{"emitter.xyz": xyz})
         batch = _FrameBatch(xyz.new_zeros(1))
-        pos, depth = _split(model.geometry(q, batch))
+        positions = model.geometry(q, batch)
+        if c > 0:
+            positions = torch.cat([positions[..., :2], positions[..., 2:3] + p["dz"], positions[..., 3:]], -1)
+        pos, depth = _split(positions)
+        if model.n_channels == 1:
+            share = 1.0
+        elif truth.share is not None:
+            share = rows.share if c else 1 - rows.share
+        else:
+            share = float(p["share"]) if c else 1 - float(shared["ch1.share"])
+        photons = torch.as_tensor(rows.photons * share, dtype=dt, device=dev)
         with torch.no_grad():
-            spots = (psf(p, pos, depth)[:, 0] * torch.as_tensor(rows.photons, dtype=dt, device=dev)[:, None, None])
+            spots = psf(p, pos, depth)[:, 0] * photons[:, None, None]
         spots = spots.cpu().double().numpy()
         for k in range(len(rows)):
             x0, y0 = ix[k] - half, iy[k] - half

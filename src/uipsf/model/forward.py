@@ -29,7 +29,7 @@ import torch
 from ..optics import layers
 from ..params import ParamSpec
 from .background import Constant
-from .channels import SHARED, Channel, inverse_map, prefix, unpack_transform, view
+from .channels import SHARED, Channel, inverse_map, prefix, share_name, unpack_transform, view
 from .geometry import BeadStackGeometry
 from .intensity import Bleaching
 from .start import rough_start
@@ -94,8 +94,20 @@ class ForwardModel:
         if self.n_channels == 1:
             return 1.0
         if c > 0:
-            return p[prefix(c) + "share"]
-        return 1 - sum(p[prefix(k) + "share"] for k in range(1, self.n_channels))
+            name = share_name(c, getattr(self.channels[c], "share_per_emitter", False))
+            if name in p:
+                return p[name]
+            # a share per emitter, drawn without emitters (`export.sample_psf`): the shared share if one is
+            # given, else an even split -- a drawn spline's own share is its normalisation's to set
+            return p.get(share_name(c, False), 1.0 / self.n_channels)
+        return 1 - sum(self.share(p, k) for k in range(1, self.n_channels))
+
+    def _photons(self, p, c: int, N: torch.Tensor) -> torch.Tensor:
+        """f_c·N, a share per emitter [E] broadcast over N's trailing axes."""
+        f = self.share(p, c)
+        if torch.is_tensor(f) and f.dim() == 1:
+            f = f.reshape(-1, *([1] * (N.dim() - 1)))
+        return f * N
 
     def positions(self, p, batch, xyz: torch.Tensor, c: int) -> torch.Tensor:
         """The emitter's position in channel ``c``, [E, K, 3] nm, from the main channel's ``xyz``."""
@@ -133,7 +145,7 @@ class ForwardModel:
         for c, ch in enumerate(self.channels):
             pos, depth = _split(self.positions(p, batch, xyz, c))
             I = ch.psf(self.channel_params(p, batch, c), pos, depth, z_step_nm=self._z_step(ch.psf, batch))
-            mu.append(self.share(p, c) * N * I)
+            mu.append(self._photons(p, c, N) * I)
         return torch.stack(mu, 1) + self.background(p, batch)
 
     def pupil_linearisation(self, p: dict[str, torch.Tensor], batch):
@@ -148,7 +160,7 @@ class ForwardModel:
             pc = self.channel_params(p, batch, c)
             pos, depth = _split(self.positions(p, batch, xyz, c))
             f = ch.psf.pupil_linearisation(pc, pos, depth, z_step_nm=self._z_step(ch.psf, batch))
-            Nc = self.share(p, c) * N
+            Nc = self._photons(p, c, N)
             names = [prefix(c) + s.name for s in ch.psf.pupil.specs() + _field_specs(ch)]
             groups.append((c, names, lambda q, c=c, ch=ch: ch.psf.pupil_field(self.channel_params(q, batch, c)),
                            lambda dA, f=f, Nc=Nc: Nc * f(dA)))
@@ -218,7 +230,7 @@ class ForwardModel:
             pos = torch.stack([self.positions(q, batch, xyz, c) for c in range(self.n_channels)], 1)
             if tilted:                      # the tilt as two coordinates more, for its columns (docstring)
                 pos = torch.cat([pos, q["geometry.tilt"].to(pos.dtype).expand(*pos.shape[:-1], 2)], -1)
-            Nc = torch.stack([self.share(q, c) * N for c in range(self.n_channels)], 1)
+            Nc = torch.stack([self._photons(q, c, N) for c in range(self.n_channels)], 1)
             return pos, Nc, self.background(q, batch)
 
         return I, dI, parts

@@ -554,4 +554,6 @@ def focus_from_data(model, rois, start: dict | None = None, noise=None, guess_nm
 
 def _blank(batch) -> dict:
     z = batch.data.new_zeros(batch.n_emitters)
-    return {"xyz": torch.stack([z, z, z], -1), "photons": z + 1, "background": z + 1}
+    C = batch.data.shape[1]                     # a background per channel on a split chip
+    background = z + 1 if C == 1 else (z + 1)[:, None].expand(-1, C).clone()
+    return {"xyz": torch.stack([z, z, z], -1), "photons": z + 1, "background": background}

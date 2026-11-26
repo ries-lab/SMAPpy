@@ -34,7 +34,7 @@ import numpy as np
 import torch
 
 from ..device import on_model_device
-from ..model.channels import prefix
+from ..model.channels import prefix, share_name
 from ..model.pupil import ZernikePupil
 from ..model.start import rough_start
 from ..noise import ShiftedPoisson
@@ -100,6 +100,10 @@ def localise_from_starts(model, shared: dict, batch, noise, starts) -> tuple[dic
         photons = phys["emitter.photons"] if "emitter.photons" in phys else phys["emitter.photons_per_slice"]
         here = {"xyz": phys["emitter.xyz"].detach(), "photons": photons.detach(),
                 "background": phys["emitter.background"].detach()}
+        if any(share_name(c, True) in phys for c in range(1, model.n_channels)):
+            # a share per emitter (`Channel.share_per_emitter`), [E, C] as `rough_start` gives it
+            here["share_each"] = torch.stack([torch.as_tensor(model.share(phys, c)).expand(len(photons))
+                                              for c in range(model.n_channels)], 1).detach()
         if best is None:
             best, found = obj, here
             continue
@@ -349,4 +353,6 @@ def _placeholder(batch) -> dict:
     """A start of the right shapes for building the specs before any emitter is localised."""
     E = batch.n_emitters
     z = batch.data.new_zeros(E)
-    return {"xyz": torch.stack([z, z, z], -1), "photons": z + 1, "background": z + 1}
+    C = batch.data.shape[1]                     # a background per channel on a split chip
+    background = z + 1 if C == 1 else (z + 1)[:, None].expand(-1, C).clone()
+    return {"xyz": torch.stack([z, z, z], -1), "photons": z + 1, "background": background}

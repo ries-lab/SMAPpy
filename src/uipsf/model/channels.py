@@ -23,6 +23,11 @@ three things that relate it to the main channel:
 The main channel (index 0) has none of them as parameters: its transform
 is the identity, its share is 1 − Σ the others', its offset 0.
 
+**A share per emitter** (``share_per_emitter``): two dyes on a ratiometric split send different
+fractions of their light to each channel, and the fraction is what tells them apart -- SMAPpy's two-colour
+fit leaves each molecule its own (*link photons* off).  The share is then an emitter parameter,
+``emitter.ch<c>.share`` [E], not a shared one; one share for all is right for biplane and one dye.
+
 **Positions.**  The emitter's (x, y) are the main channel's, in nm from the
 centre of its ROI.  In channel c they are where the inverse transform puts
 them, relative to that channel's ROI centre: with ``roi_xy[e, c]`` the
@@ -106,12 +111,15 @@ def inverse_map(H: torch.Tensor, xy: torch.Tensor) -> torch.Tensor:
 
 class Channel:
     def __init__(self, psf, transform=None, share: float | None = None, dz_nm: float | None = None,
-                 name: str | None = None, fit_transform: bool = True, field=None):
+                 name: str | None = None, fit_transform: bool = True, field=None, fit_dz: bool = True,
+                 share_per_emitter: bool = False):
         """``psf`` the channel's `VectorPSF`; ``transform`` its 3×3 map to the main channel's chip pixels
         (ignored for the main channel; default the identity); ``share`` and ``dz_nm`` the starting photon
         share and defocus offset, from the data when None (`model.start.rough_start`).
         ``fit_transform=False`` keeps the transform fixed (fewer than four pairs cannot fix eight entries).
-        ``field``, a coefficient field (`model.field`), makes the pupil depend on the emitter's chip position."""
+        ``field``, a coefficient field (`model.field`), makes the pupil depend on the emitter's chip position.
+        ``fit_dz=False`` holds the defocus offset at ``dz_nm``; ``share_per_emitter`` gives each emitter its
+        own share (module docstring), started from the start's ``share_each`` [E, C] where it has one."""
         self.psf = psf
         self.transform = normalised(np.eye(3) if transform is None else transform)
         self.share = None if share is None else float(share)
@@ -119,6 +127,8 @@ class Channel:
         self.name = name
         self.fit_transform = bool(fit_transform)
         self.field = field
+        self.fit_dz = bool(fit_dz)
+        self.share_per_emitter = bool(share_per_emitter)
 
     @property
     def pixel_size_nm(self) -> tuple[float, float]:
@@ -135,10 +145,22 @@ class Channel:
         start = start or {}
         share = self.share if self.share is not None else float(start.get("shares", {}).get(c, 0.5))
         dz = self.dz_nm if self.dz_nm is not None else float(start.get("dz", {}).get(c, 0.0))
+        # Bounded, so the share stays a fraction; shares of several secondary channels are not
+        # kept below 1 together (two channels need only this).
+        if self.share_per_emitter:
+            each = start.get("share_each")             # [E, C], `rough_start`'s or a localisation's
+            init = torch.as_tensor(share) if each is None else torch.as_tensor(each)[:, c]
+            share_spec = ParamSpec(share_name(c, True), (), "emitter", init=init.clamp(1e-3, 1 - 1e-3),
+                                   transform=Bounded(0.0, 1.0))
+        else:
+            share_spec = ParamSpec(pre + "share", (), init=min(max(share, 1e-3), 1 - 1e-3), transform=Bounded(0.0, 1.0))
         return specs + [
             ParamSpec(pre + "transform", (8,), init=torch.as_tensor(self.transform.reshape(-1)[:8]),
                       fixed=not self.fit_transform),
-            # Bounded, so the share stays a fraction; shares of several secondary channels are not
-            # kept below 1 together (two channels need only this).
-            ParamSpec(pre + "share", (), init=min(max(share, 1e-3), 1 - 1e-3), transform=Bounded(0.0, 1.0)),
-            ParamSpec(pre + "dz", (), init=dz)]
+            share_spec,
+            ParamSpec(pre + "dz", (), init=dz, fixed=not self.fit_dz)]
+
+
+def share_name(c: int, per_emitter: bool) -> str:
+    """Channel ``c``'s share parameter: ``ch<c>.share``, or ``emitter.ch<c>.share`` with one per emitter."""
+    return ("emitter." if per_emitter else "") + prefix(c) + "share"
