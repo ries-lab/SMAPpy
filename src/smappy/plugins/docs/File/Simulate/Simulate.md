@@ -662,9 +662,9 @@ microscope's pupil.  *typed* draws the frames with the PSF of a molecule in
 the sample with the focus *focus depth* above the coverslip, as
 [Spline 3D](plugin:Localize/Spline 3D)'s *focus* draws it; the scene's z is
 then the height above the coverslip, so a structure meant to sit in the
-sample wants z from 0 up.  *as calibrated*, the default, draws the beads'
-spline, z above its focus.  *auto* and *in situ* find a focus in a movie,
-which a simulation does not have.  *Fit this* hands the same focus to
+sample wants z from 0 up.  *beads' focus*, the default, draws the beads'
+spline, z above its focus.  *coverslip edge* finds a focus in a movie, which a
+simulation does not have, and nothing is learnt from frames that are drawn.  *Fit this* hands the same focus to
 Spline 3D.
 
 ### optics.sample.focus_nm

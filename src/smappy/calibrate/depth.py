@@ -403,6 +403,8 @@ class AutoDepth:
     # and what was learnt but not kept, for explaining them no better
     heldout: Optional[dict] = None
     fallback: Optional[str] = None
+    # in situ started from the coverslip's edge: the edge's focus, shown beside the one learnt (`focus_hint`)
+    edge_nm: Optional[float] = None
 
 
 def _next_focus(passes, paraxial: float) -> float:
@@ -472,47 +474,109 @@ def auto_focus(cal, images: np.ndarray, n_med: Optional[float] = None, iteration
 
 # ------------------------------------------------------------------ in situ, every aberration held
 
-#: *learn*'s choices (`plugins.fit.SplineModelSettings.learn`): what in situ learns beside the focus and the blur,
-#: as `insitu_run.InSituModelSettings.hold` holds the rest of the start's pupil
-LEARN_CHOICES = (("focus", "focus and blur"), ("aberrations", "aberrations"), ("everything", "everything"))
-LEARN_HOLDS = {"focus": "all", "aberrations": "start", "everything": "nothing"}
-LEARN_METHODS = {"focus": "in situ, every aberration held",
-                 "aberrations": "in situ, the aberrations learnt",
-                 "everything": "in situ, the pupil learnt"}
+#: *learn*'s choices, one vocabulary for Spline 3D, Spline 3D 2C, the sample part and the PSF window
+#: (docs/psf-model-parts-plan.md): what the movie's molecules teach of the model, the rest held from the start --
+#: nothing (the model as it is, no learning run); the focus and the blur, every aberration held; the pupil's phase
+#: up to the model's order too, γ (the apodisation) and the phase above the order held; or the apodisation too, the
+#: focus then held at the coverslip's edge or typed (`insitu_run.InSituModelSettings.hold` is the same seen as
+#: what is held)
+LEARN_CHOICES = (("nothing", "nothing"), ("blur", "focus and blur"), ("phase", "phase"),
+                 ("apodisation", "phase and apodisation"))
+LEARN_HOLDS = {"blur": "all", "phase": "start", "apodisation": "nothing"}
+LEARN_WORDS = dict(LEARN_CHOICES)
+LEARN_METHODS = {"blur": "in situ, every aberration held",
+                 "phase": "in situ, the phase learnt",
+                 "apodisation": "in situ, the pupil learnt"}
+#: the words *learn* had before 2026-11-27 (with *focus* = in situ): saved settings read through `settled_focus`,
+#: and a caller of `insitu_focus` / `insitu_dual` may still pass them
+LEGACY_LEARN = {"focus": "blur", "aberrations": "phase", "everything": "apodisation"}
+#: the depth guard (`judged`): a model that learnt more than the focus is refused when its focus moved further than
+#: this from the focus learnt alone.  On M2 (docs/insitu-fitting-plan.md, Open) the pupils that were right moved it
+#: by 143--289 nm; August's *everything*, which put every localization a micrometre too high, by 1026 nm
+DEPTH_GUARD_NM = 500.0
+
+
+def learn_word(learn: str) -> str:
+    """``learn`` in the words before 2026-11-27, for the keys what was learnt in situ is kept under (`kept_path`):
+    a key made of today's words would not find what was kept before."""
+    return {v: k for k, v in LEGACY_LEARN.items()}.get(learn, learn)
+
+
+def learn_key(learn: str) -> str:
+    """``learn`` in today's words: a word from before 2026-11-27 (`LEGACY_LEARN`) translated."""
+    return LEGACY_LEARN.get(learn, learn)
+
+
+def settled_focus(focus: str, learn: str) -> tuple:
+    """``(focus, learn)`` of a settings part in today's words, from either today's or the words before 2026-11-27,
+    when *focus* was auto / in situ / typed / as calibrated and *learn* (focus / aberrations / everything) was read
+    only on in situ: auto is the coverslip's edge with nothing learnt, in situ the edge with *learn* as it was; a
+    *learn* in the old words beside any other focus meant nothing.  Today's words pass through, so this is
+    called by every part's ``__post_init__``."""
+    if learn in LEGACY_LEARN:
+        learn = LEGACY_LEARN[learn] if focus == "insitu" else "nothing"
+    if focus == "insitu":
+        return "edge", (learn if learn in LEARN_HOLDS else "blur")
+    if focus == "auto":
+        return "edge", "nothing"
+    return focus, learn
+
+
+def focus_mode(focus: str, learn: str) -> str:
+    """How a run finds the focus from *focus* and *learn*: "calibrated" (the beads' spline as it is), "typed"
+    (drawn at the typed depth), "auto" (the coverslip's edge, from the lowest localizations, nothing learnt) or
+    "insitu" (learnt from the movie -- starting from the edge, or held at a typed depth: `holds_focus`)."""
+    if focus == "calibrated":
+        return "calibrated"
+    if learn and learn != "nothing":
+        return "insitu"
+    return "auto" if focus == "edge" else "typed"
+
+
+def holds_focus(focus: str) -> bool:
+    """Whether in situ holds the focus at the typed depth rather than learning it from the edge's estimate."""
+    return focus == "typed"
 
 
 def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Optional[float] = None,
                  molecules: int = 1000, rounds: int = 2, progress=None, cancel=None,
-                 learn: str = "focus") -> AutoDepth:
+                 learn: str = "blur", hold_focus: bool = False) -> AutoDepth:
     """The focus, and with ``learn`` more of the PSF, learnt in situ from the movies at ``paths``, starting
     from ``cal``'s pupil model (`insitu_run.run_insitu`).  ``focus_nm`` is where it starts, typically the auto
     depth's; on None the in situ run estimates one.  The result's ``spline`` is the learnt model drawn as
     `depth_spline` draws a bead model, z the height above the coverslip.
 
-    * ``learn = "focus"``: every aberration held (*hold* every aberration), only the focus, the blur and the
+    * ``learn = "blur"``: every aberration held (*hold* every aberration), only the focus, the blur and the
       molecules learnt.  Fewer molecules and rounds than a calibration in situ: with nothing of the pupil to
       learn, a thousand molecules fix the focus and the blur, and the rounds stop once the focus stops moving.
-    * ``"aberrations"`` (γ and the phase above the model's order held, *hold* the start's) and
-      ``"everything"`` (*hold* nothing): the focus alone is learnt first, as above, from the molecules a
+    * ``"phase"`` (γ and the phase above the model's order held, *hold* the start's) and
+      ``"apodisation"`` (*hold* nothing): the focus alone is learnt first, as above, from the molecules a
       calibration in situ takes; then the pupil, from the same molecules and that focus.  Both are judged
       on the molecules held out of both (`insitu_run.heldout_deviance`), and the pupil learnt is kept only
-      if it explains them better -- else the focus alone, with a warning (docs/insitu-fitting-plan.md §2)."""
+      if it explains them better and its focus stays within `DEPTH_GUARD_NM` of the focus learnt alone -- else
+      the focus alone, with a warning (docs/insitu-fitting-plan.md §2, docs/psf-model-parts-plan.md).
+
+    ``hold_focus`` holds the focus at ``focus_nm`` (a typed focus), the blur and the pupil learnt around it."""
     from .insitu import InSituSettings
+    learn = learn_key(learn)
     if learn not in LEARN_HOLDS:
         raise ValueError(f"learn: one of {', '.join(LEARN_HOLDS)}, not {learn!r}")
-    if learn == "focus":
-        return _insitu(cal, paths, camera, n_med, focus_nm, "focus", InSituSettings(molecules=molecules), rounds,
-                       progress, cancel)
+    if hold_focus and focus_nm is None:
+        raise ValueError("a focus held needs the focus: type it")
+    if learn == "blur":
+        return _insitu(cal, paths, camera, n_med, focus_nm, "blur", InSituSettings(molecules=molecules), rounds,
+                       progress, cancel, hold_focus=hold_focus)
     from .insitu_run import InSituModelSettings
     detection = InSituSettings()
-    first = _insitu(cal, paths, camera, n_med, focus_nm, "focus", detection, rounds, progress, cancel)
+    first = _insitu(cal, paths, camera, n_med, focus_nm, "blur", detection, rounds, progress, cancel,
+                    hold_focus=hold_focus)
     second = _insitu(cal, paths, camera, n_med, first.focus_nm, learn, detection, InSituModelSettings().max_rounds,
-                     progress, cancel, rois=first.result.rois)
+                     progress, cancel, rois=first.result.rois, hold_focus=hold_focus)
     return judged(first, second, learn, progress)
 
 
 def _insitu(cal, paths, camera, n_med, focus_nm, learn: str, detection, rounds: int, progress, cancel,
-            rois=None) -> AutoDepth:
+            rois=None, hold_focus: bool = False) -> AutoDepth:
     """One in situ run for `insitu_focus`: ``learn`` says what is held (`LEARN_HOLDS`)."""
     from types import SimpleNamespace
 
@@ -534,7 +598,7 @@ def _insitu(cal, paths, camera, n_med, focus_nm, learn: str, detection, rounds: 
 
     from .psf_methods import LearningProgress, duration
     bar, last = LearningProgress(), [""]
-    word = "focus in situ" if learn == "focus" else f"in situ, {learn}"
+    word = "focus in situ" if learn == "blur" else f"in situ, {LEARN_WORDS[learn]}"
 
     def tell(entry):
         # the window's own reading of the entries: a round's line, or its learning's iterations, with
@@ -549,7 +613,7 @@ def _insitu(cal, paths, camera, n_med, focus_nm, learn: str, detection, rounds: 
                  + ("" if left is None else f", about {duration(left)} left"))
     result = run_insitu(paths, optics, model,
                         InSituModelSettings(focus_nm=focus_nm, hold=LEARN_HOLDS[learn], max_rounds=rounds,
-                                            spline_z="height"),
+                                            spline_z="height", focus_fit="typed" if hold_focus else "learnt"),
                         detection,
                         run=RunSettings(start_from=str(path) if path is not None else "", save_model=False),
                         camera=camera, progress=tell, cancel=cancel, rois=rois,
@@ -576,18 +640,23 @@ def _insitu(cal, paths, camera, n_med, focus_nm, learn: str, detection, rounds: 
 
 
 def insitu_dual(dual, paths, camera, n_med: Optional[float] = None, focus_nm: Optional[float] = None,
-                learn: str = "focus", registration: bool = False, share_per_molecule: bool = False,
-                molecules: int = 1000, rounds: int = 2, progress=None, cancel=None) -> AutoDepth:
+                learn: str = "blur", registration: bool = False, share_per_molecule: bool = False,
+                molecules: int = 1000, rounds: int = 2, progress=None, cancel=None,
+                hold_focus: bool = False) -> AutoDepth:
     """`insitu_focus` for a dual-colour pupil calibration and the split movies at ``paths`` (Spline 3D 2C): the
     two-channel model learnt from them (`insitu_dual.run_insitu_dual`), starting from the model ``dual``
     carries, its molecules paired by ``dual``'s registration.  The result's ``spline`` is the learnt model drawn
     as `dual_depth_calibration` draws a bead model -- a `DualColorCalibration`, z the height above the
     coverslip, its registration the model's (``registration``: learnt, else the calibration's).
 
-    The same decision as one channel's: ``learn = "focus"`` holds both pupils whole; more is learnt after a
+    The same decision as one channel's: ``learn = "blur"`` holds both pupils whole; more is learnt after a
     focus-only run from the same molecules, both judged on the molecules held out of both, and kept only if
-    it explains them better -- else the focus alone, with a warning."""
+    it explains them better without moving the focus beyond the guard -- else the focus alone, with a warning.
+    ``hold_focus`` holds the focus at ``focus_nm``, typed."""
     from .insitu import InSituSettings
+    learn = learn_key(learn)
+    if hold_focus and focus_nm is None:
+        raise ValueError("a focus held needs the focus: type it")
     if learn not in LEARN_HOLDS:
         raise ValueError(f"learn: one of {', '.join(LEARN_HOLDS)}, not {learn!r}")
     start = model_of(dual.main, channels=2)
@@ -595,38 +664,50 @@ def insitu_dual(dual, paths, camera, n_med: Optional[float] = None, focus_nm: Op
         raise ValueError("two-channel in situ needs a dual calibration made with the pupil (Zernike) method: "
                          "its two pupils are the start")
     kw = {"registration": registration, "share_per_molecule": share_per_molecule, "progress": progress,
-          "cancel": cancel}
-    if learn == "focus":
-        return _insitu_dual(dual, start, paths, camera, n_med, focus_nm, "focus",
+          "cancel": cancel, "hold_focus": hold_focus}
+    if learn == "blur":
+        return _insitu_dual(dual, start, paths, camera, n_med, focus_nm, "blur",
                             InSituSettings(molecules=molecules), rounds, **kw)
     from .insitu_run import InSituModelSettings
     detection = InSituSettings()
-    first = _insitu_dual(dual, start, paths, camera, n_med, focus_nm, "focus", detection, rounds, **kw)
+    first = _insitu_dual(dual, start, paths, camera, n_med, focus_nm, "blur", detection, rounds, **kw)
     second = _insitu_dual(dual, start, paths, camera, n_med, first.focus_nm, learn, detection,
                           InSituModelSettings().max_rounds, rois=first.result.rois, **kw)
     return judged(first, second, learn, progress)
 
 
 def judged(first: AutoDepth, second: AutoDepth, learn: str, progress=None) -> AutoDepth:
-    """The focus-only run ``first`` or the run that learnt ``learn`` too, ``second``, by their deviance on the
-    molecules held out of both (`insitu_run.heldout_deviance`): ``second`` only if it explains them better,
-    else ``first`` with a warning and ``fallback`` set (docs/insitu-fitting-plan.md §2)."""
+    """The focus-only run ``first`` or the run that learnt ``learn`` too, ``second``: ``second`` only if it explains
+    the molecules held out of both better (`insitu_run.heldout_deviance`) and its focus stays within
+    `DEPTH_GUARD_NM` of ``first``'s -- else ``first`` with a warning and ``fallback`` set
+    (docs/insitu-fitting-plan.md §2).  The guard is the depth's own check: where no molecule marks the coverslip
+    the apodisation and the focus trade, and a better fit of the held-out molecules was bought on M2 with the
+    focus a micrometre off; a gain in nats cannot see that."""
     from .insitu_run import heldout_deviance
+    word = LEARN_WORDS.get(learn, learn)
     if progress is not None:
         progress("in situ: judging both models on the molecules held out")
-    held = {"focus": heldout_deviance(first.result), learn: heldout_deviance(second.result)}
+    held = {"blur": heldout_deviance(first.result), learn: heldout_deviance(second.result)}
     second.heldout = first.heldout = held
-    if held["focus"] is None or held[learn] is None:
-        second.messages.append(f"no molecules held out to judge the {learn} learnt against the focus alone: "
+    moved = second.focus_nm - first.focus_nm
+    if abs(moved) > DEPTH_GUARD_NM:
+        first.messages.append(f"the {word} learnt moved the focus by {moved:+.0f} nm from the focus learnt "
+                              f"alone ({first.focus_nm:.0f} nm), more than the {DEPTH_GUARD_NM:.0f} nm a "
+                              f"right pupil moves it: fitted with the start's aberrations and the focus learnt; "
+                              f"type the focus if it is known")
+        first.fallback = learn
+        return first
+    if held["blur"] is None or held[learn] is None:
+        second.messages.append(f"no molecules held out to judge the {word} learnt against the focus alone: "
                                f"kept unjudged")
         return second
     n = len(first.result.rois.ids("held out"))
-    gain = (held["focus"] - held[learn]) / 2 / n            # nats per molecule held out (deviance: 2 × nats)
+    gain = (held["blur"] - held[learn]) / 2 / n            # nats per molecule held out (deviance: 2 × nats)
     if gain > 0:
-        second.notes.append(f"the {learn} learnt explain the {n} molecules held out better than the start's "
+        second.notes.append(f"the {word} learnt explain the {n} molecules held out better than the start's "
                             f"with the focus learnt, by {gain:.2f} nats each")
         return second
-    first.messages.append(f"the {learn} learnt explain the {n} molecules held out no better than the start's "
+    first.messages.append(f"the {word} learnt explain the {n} molecules held out no better than the start's "
                           f"with the focus learnt ({gain:+.2f} nats each): fitted with the start's aberrations "
                           f"and the focus learnt")
     first.fallback = learn
@@ -634,14 +715,14 @@ def judged(first: AutoDepth, second: AutoDepth, learn: str, progress=None) -> Au
 
 
 def _insitu_dual(dual, start, paths, camera, n_med, focus_nm, learn: str, detection, rounds: int, registration,
-                 share_per_molecule, progress, cancel, rois=None) -> AutoDepth:
+                 share_per_molecule, progress, cancel, rois=None, hold_focus: bool = False) -> AutoDepth:
     """One two-channel in situ run for `insitu_dual`, drawn at the focus it learnt."""
     from types import SimpleNamespace
 
     import torch
 
     from .insitu_dual import run_insitu_dual
-    word = "two channels in situ" + ("" if learn == "focus" else f", {learn}")
+    word = "two channels in situ" + ("" if learn == "blur" else f", {LEARN_WORDS[learn]}")
 
     def tell(entry):
         if progress is None:
@@ -650,7 +731,8 @@ def _insitu_dual(dual, start, paths, camera, n_med, focus_nm, learn: str, detect
         if text:
             progress(f"{word}: {text}")
     result = run_insitu_dual(start, paths, camera, learn, n_med, focus_nm, detection, rounds, registration,
-                             share_per_molecule, rois=rois, transform=dual, progress=tell, cancel=cancel)
+                             share_per_molecule, rois=rois, transform=dual, progress=tell, cancel=cancel,
+                             hold_focus=hold_focus)
     dtype = result.model.psf.grid.rho.dtype
     shared = {k: v.detach().cpu().to(dtype) for k, v in result.cal.shared().items()}
     each = result.cal.result.params.physical().get("emitter.ch1.share")
@@ -720,7 +802,8 @@ def keep(key, result: AutoDepth) -> Optional[Path]:
         result.spline.parameters["sample_depth"].update(key=_jsonable(key), heights=result.heights.tolist(),
                                                        errors=result.errors.tolist(), notes=result.notes,
                                                        messages=result.messages, n=result.n,
-                                                       heldout=result.heldout, fallback=result.fallback)
+                                                       heldout=result.heldout, fallback=result.fallback,
+                                                       edge_nm=result.edge_nm)
         save(path, result.cal, result.spline, overwrite=True)
         return path
     except Exception:
@@ -747,7 +830,7 @@ def kept(key, dual: bool = False) -> Optional[AutoDepth]:
                         heights=np.asarray(record.get("heights", []), float),
                         errors=np.asarray(record.get("errors", []), float), method="in situ", spline=spline,
                         blur_nm=record.get("blur_nm"), heldout=record.get("heldout"),
-                        fallback=record.get("fallback"))
+                        fallback=record.get("fallback"), edge_nm=record.get("edge_nm"))
         out.notes = list(record.get("notes", [])) + [f"kept from an earlier run: {path}"]
         out.messages = list(record.get("messages", []))
         return out
@@ -762,9 +845,15 @@ def _jsonable(value):
 
 # ------------------------------------------------------------------ the sample, one part for every consumer
 
-#: *focus*'s choices, Spline 3D's (`plugins.fit.FOCUS_CHOICES`) and the sample part's
-SAMPLE_FOCUS_CHOICES = (("auto", "auto"), ("insitu", "in situ"), ("typed", "typed"),
-                        ("calibrated", "as calibrated"))
+#: *focus*'s choices, Spline 3D's (`plugins.fit.FOCUS_CHOICES`) and the sample part's: one field, the same with
+#: or without learning, which learning only refines (`focus_mode`; docs/psf-model-parts-plan.md)
+SAMPLE_FOCUS_CHOICES = (("edge", "coverslip edge"), ("typed", "typed"), ("calibrated", "beads' focus"))
+FOCUS_HELP = ("where the focus is in the sample, for the PSF drawn there from the pupil model, z then the height "
+              "above the coverslip: coverslip edge, from the lowest molecules (refined when learning); typed; or "
+              "the beads' focus, their spline as it is")
+LEARN_HELP = ("what the movie's molecules teach before the fit, the rest held from the calibration: nothing; the "
+              "focus and the blur; the phase (aberrations) too; or the apodisation too -- a pupil kept only where it "
+              "explains molecules held out better")
 
 
 @dataclass
@@ -776,11 +865,9 @@ class SampleSettings:
     The bead's size is never drawn, nor the beads' damping of the supercritical ring (`VectorPSF.for_emitters`):
     the SAF comes from the emitter's depth alone, the magnitude being the model's as learnt."""
     from ..params import param as _param
-    focus: str = _param("auto", label="focus", choices=SAMPLE_FOCUS_CHOICES,
-                        help="where the focus is in the sample, for the PSF drawn there from the pupil model, z "
-                             "then the height above the coverslip: auto, from the lowest localizations; in situ, "
-                             "learnt from the molecules with the beads' aberrations; typed; or as calibrated, the "
-                             "beads' PSF at the coverslip")
+    focus: str = _param("edge", label="focus", choices=SAMPLE_FOCUS_CHOICES, help=FOCUS_HELP)
+    # what in situ learns (`focus_mode`): Spline 3D 2C's and the DECODE training's; Simulate never shows it
+    learn: str = _param("nothing", label="learn", choices=LEARN_CHOICES, help=LEARN_HELP)
     focus_nm: float = param(0.0, label="focus depth", unit="nm", min=0.0,
                              help="how far into the sample the objective was moved from the coverslip; typed "
                                   "here, else found from the movie")
@@ -790,10 +877,16 @@ class SampleSettings:
 
     def __post_init__(self):
         settle(self.medium, self.sample_index)      # refuses an unknown choice; the pair is read by `resolve`
+        # the part had no *learn* before 2026-11-27: in situ learnt the focus and the blur
+        self.focus, self.learn = settled_focus(self.focus, "focus" if self.focus == "insitu" else self.learn)
 
     def n_med(self):
         """What `depth` is handed as the sample's index (`medium.for_drawing`)."""
         return for_drawing(self.medium, self.sample_index)
+
+    @property
+    def mode(self) -> str:
+        return focus_mode(self.focus, self.learn)
 
 
 def sample_state(cal, sample, prefix: str = "sample.", found: Optional[AutoDepth] = None):
@@ -803,17 +896,27 @@ def sample_state(cal, sample, prefix: str = "sample.", found: Optional[AutoDepth
     has = cal is not None and has_model(cal)
     drawn = has and sample.focus != "calibrated"
     shown = {prefix + "focus": has, prefix + "focus_nm": drawn, prefix + "medium": drawn,
-             prefix + "sample_index": drawn}
+             prefix + "sample_index": drawn, prefix + "learn": drawn}
     active = {prefix + "focus_nm": sample.focus == "typed"}
     hints = {}
-    if drawn and sample.focus in ("auto", "insitu"):
-        word = "auto" if sample.focus == "auto" else "in situ"
-        hints[prefix + "focus_nm"] = (f"{word}: {found.focus_nm:.0f} nm" if found is not None
-                                      else f"{word}: found from the movie")
+    if drawn and sample.focus == "edge":
+        hints[prefix + "focus_nm"] = focus_hint(sample.mode, found)
     if drawn:
         hints[prefix + "medium"] = "as calibrated"
         hints[prefix + "sample_index"] = stands_for(cal, sample.medium)
     return shown, active, hints
+
+
+def focus_hint(mode: str, found: Optional[AutoDepth]) -> str:
+    """What the depth's field shows in grey on the coverslip's edge: what the edge and, learning, in situ found --
+    both, so that a focus learnt is never mistaken for the edge's ("edge 692 nm, learnt 705 nm")."""
+    if found is None:
+        return "edge: found from the movie" if mode == "auto" else "edge, then learnt: found from the movie"
+    if mode == "auto" or found.method == "auto":
+        return f"edge: {found.focus_nm:.0f} nm"
+    edge = getattr(found, "edge_nm", None)
+    learnt = f"learnt {found.focus_nm:.0f} nm" + (" (the focus alone)" if found.fallback else "")
+    return learnt if edge is None else f"edge {edge:.0f} nm, {learnt}"
 
 
 def stands_for(cal, medium_choice: str):
@@ -861,23 +964,24 @@ def for_sample(cal, sample, *, images=None, paths=None, camera=None, report=lamb
     """``(spline, found)``: ``cal`` drawn for the sample ``sample`` says (`SampleSettings`), and the
     `AutoDepth` that found its focus, or None.  The one way a consumer other than Spline 3D resolves the part:
 
-    * a calibration without a model, or *as calibrated*: ``cal`` itself;
-    * *typed*: drawn at the typed depth (`at_depth`);
-    * *auto*: the focus from ``images`` -- spots as the fit cuts them, photons with the read noise's variance
+    * a calibration without a model, or the beads' focus: ``cal`` itself;
+    * *typed*, nothing learnt: drawn at the typed depth (`at_depth`);
+    * the coverslip's edge, nothing learnt: the focus from ``images`` -- spots as the fit cuts them, photons with the read noise's variance
       added (`plugins.fit.sample_rois`), in the data's orientation, ``camera`` saying its EM gain
       (`in_beads_orientation`) -- by `auto_focus`, then drawn there;
-    * *in situ*: learnt from the movies at ``paths`` with ``camera`` (`insitu_focus`), started where *auto*
-      puts it when there are ``images``.
+    * something learnt: from the movies at ``paths`` with ``camera`` (`insitu_focus`), started where the edge
+      puts it when there are ``images``, or held at the typed depth.
 
     The spline records how its focus was found (``parameters["sample_depth"]["method"]``).  Without torch,
     *auto* is said through ``warn`` and falls back to the calibration as it is, as Spline 3D's does: the
     default must not stop work that ran before; the others refuse."""
-    if cal is None or not has_model(cal) or sample.focus == "calibrated":
+    mode = focus_mode(sample.focus, sample.learn)
+    if cal is None or not has_model(cal) or mode == "calibrated":
         return cal, None
     try:
         import torch  # noqa: F401 -- only asked whether it is there
     except ImportError:
-        if sample.focus == "auto":
+        if mode == "auto":
             (warn or report)("focus on auto needs torch to draw the PSF in the sample (pip install "
                              "smappy-smlm[uipsf]): the calibration as it is, z above the beads' focus")
             return cal, None
@@ -885,25 +989,29 @@ def for_sample(cal, sample, *, images=None, paths=None, camera=None, report=lamb
                          "smappy-smlm[uipsf]")
     n_med = sample.n_med()
     found = None
-    if sample.focus == "typed":
+    if mode == "typed":
         spline = at_depth(cal, sample.focus_nm, n_med)
-    elif sample.focus == "auto":
+    elif mode == "auto":
         if images is None or not len(images):
             raise ValueError("focus on auto needs spots from the movie: none were found; type the focus")
         found = auto_focus(cal, in_beads_orientation(images, cal, getattr(camera, "em_on", None)), n_med,
                            report=report)
         spline = at_depth(cal, found.focus_nm, n_med)
-    elif sample.focus == "insitu":
+    elif mode == "insitu":
         if not paths or camera is None:
             raise ValueError("a focus in situ is learnt from the movie: choose it")
-        start = None
-        if images is not None and len(images):
+        hold = holds_focus(sample.focus)
+        start = sample.focus_nm if hold else None
+        if not hold and images is not None and len(images):
             try:
                 start = auto_focus(cal, in_beads_orientation(images, cal, getattr(camera, "em_on", None)), n_med,
                                    report=report).focus_nm
             except ValueError:
                 pass
-        found = insitu_focus(cal, paths, camera, n_med, start, progress=report, cancel=cancel)
+        found = insitu_focus(cal, paths, camera, n_med, start, progress=report, cancel=cancel,
+                             learn=sample.learn, hold_focus=hold)
+        if start is not None and not hold:
+            found.edge_nm = start
         spline = found.spline
     else:
         raise ValueError(f"focus must be one of {[k for k, _ in SAMPLE_FOCUS_CHOICES]}, not {sample.focus!r}")
@@ -915,7 +1023,7 @@ def for_sample(cal, sample, *, images=None, paths=None, camera=None, report=lamb
     spline = copy.copy(spline)
     spline.parameters = dict(spline.parameters or {})
     record = dict(spline.parameters.get("sample_depth") or {})
-    record.setdefault("method", {"typed": "typed", "auto": "auto", "insitu": "in situ"}[sample.focus])
+    record.setdefault("method", {"typed": "typed", "auto": "auto", "insitu": "in situ"}[mode])
     spline.parameters["sample_depth"] = record
     return spline, found
 

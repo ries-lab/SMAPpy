@@ -155,29 +155,29 @@ def test_two_channel_in_situ_keeps_what_it_learnt_only_where_the_molecules_held_
     runs = []
 
     def one(dual, start, paths, camera, n_med, focus_nm, learn, detection, rounds, registration,
-            share_per_molecule, progress, cancel, rois=None):
+            share_per_molecule, progress, cancel, rois=None, hold_focus=False):
         rois = rois or SimpleNamespace(ids=lambda state: np.arange(7))
-        out = depth.AutoDepth(650.0 if learn == "focus" else 700.0, 10.0, 0.1, 50, method="in situ")
+        out = depth.AutoDepth(650.0 if learn == "blur" else 700.0, 10.0, 0.1, 50, method="in situ")
         out.result = SimpleNamespace(learn=learn, rois=rois)
         runs.append((learn, focus_nm, rois, registration, share_per_molecule))
         return out
     monkeypatch.setattr(depth, "_insitu_dual", one)
     monkeypatch.setattr(depth, "model_of", lambda cal, channels=1: object())
     dual = SimpleNamespace(main=None)
-    for better, kept in ((5.0, "aberrations"), (20.0, "focus")):
+    for better, kept in ((5.0, "phase"), (20.0, "blur")):
         runs.clear()
         monkeypatch.setattr(insitu_run, "heldout_deviance",
-                            lambda result, b=better: 10.0 if result.learn == "focus" else b)
-        found = depth.insitu_dual(dual, ["movie.tif"], CAMERA, learn="aberrations", registration=True,
+                            lambda result, b=better: 10.0 if result.learn == "blur" else b)
+        found = depth.insitu_dual(dual, ["movie.tif"], CAMERA, learn="phase", registration=True,
                                   share_per_molecule=True)
-        assert [r[0] for r in runs] == ["focus", "aberrations"] and runs[1][1] == 650.0
+        assert [r[0] for r in runs] == ["blur", "phase"] and runs[1][1] == 650.0
         assert runs[1][2] is runs[0][2]                       # the same molecules, the same held out
         assert all(r[3] and r[4] for r in runs)               # what is asked for reaches both runs
-        assert found.heldout == {"focus": 10.0, "aberrations": better}
-        if kept == "aberrations":
+        assert found.heldout == {"blur": 10.0, "phase": better}
+        if kept == "phase":
             assert found.focus_nm == 700.0 and found.fallback is None
         else:
-            assert found.focus_nm == 650.0 and found.fallback == "aberrations"
+            assert found.focus_nm == 650.0 and found.fallback == "phase"
             assert any("no better" in m for m in found.messages)
     with pytest.raises(ValueError, match="pupil"):
         monkeypatch.setattr(depth, "model_of", lambda cal, channels=1: None)
@@ -185,9 +185,9 @@ def test_two_channel_in_situ_keeps_what_it_learnt_only_where_the_molecules_held_
 
 
 def test_spline_3d_2c_learns_in_situ_at_run_never_at_preview_and_asks_first(monkeypatch, tmp_path):
-    # *in situ* in the sample part: *learn* and *learn registration* shown with it; the preflight asks, offering
-    # the focus on auto; a Preview fits with the focus on auto and learns nothing; a Run learns, keeps it, and
-    # fits with what it kept -- the registration the model's where it was learnt
+    # *learn* in the sample part, *learn registration* shown with it; the preflight asks, offering a fit
+    # without learning; a Preview fits from the edge and learns nothing; a Run learns, keeps it, and fits with
+    # what it kept -- the registration the model's where it was learnt
     from smappy.calibrate import depth
     from smappy.calibrate.depth import SampleSettings
     from smappy.plugins import Context, PreflightQuestion
@@ -200,12 +200,12 @@ def test_spline_3d_2c_learns_in_situ_at_run_never_at_preview_and_asks_first(monk
     calibration.write_bytes(b"")
     settings = DualSplineFitSettings(source=SourceSettings(path=str(movie_path)),
                                      model=DualModelSettings(calibration=str(calibration),
-                                                             sample=SampleSettings(focus="insitu"),
-                                                             learn="aberrations", learn_registration=True))
+                                                             sample=SampleSettings(focus="edge", learn="phase"),
+                                                             learn_registration=True))
     plugin = DualSplineFit()
     asked = plugin.preflight(Context(), settings)
     assert isinstance(asked, PreflightQuestion) and "minutes" in asked.text
-    assert asked.choices[0].settings.model.sample.focus == "auto"
+    assert asked.choices[0].settings.model.sample.learn == "nothing"
     linked = replace(settings, model=replace(settings.model, link_photons=True))
     assert plugin._insitu_key(settings) != plugin._insitu_key(linked)
 
@@ -213,7 +213,7 @@ def test_spline_3d_2c_learns_in_situ_at_run_never_at_preview_and_asks_first(monk
     calls = []
 
     def with_focus(self, ctx, s, source, camera, finder):
-        if s.model.sample.focus == "auto":
+        if s.model.sample.mode == "auto":
             calls.append("auto")
             return replace(s, model=replace(s.model, sample=replace(s.model.sample, focus="typed", focus_nm=600.0)))
         return original(self, ctx, s, source, camera, finder)
@@ -223,7 +223,7 @@ def test_spline_3d_2c_learns_in_situ_at_run_never_at_preview_and_asks_first(monk
     learnt = []
 
     def insitu_dual(dual, paths, camera, n_med, focus_nm, learn, registration, share_per_molecule, progress,
-                    cancel):
+                    cancel, hold_focus=False):
         learnt.append((focus_nm, learn, registration, share_per_molecule))
         out = depth.AutoDepth(710.0, 10.0, 0.1, 50, method="in situ", blur_nm=40.0)
         out.messages.append("a warning")
@@ -235,8 +235,8 @@ def test_spline_3d_2c_learns_in_situ_at_run_never_at_preview_and_asks_first(monk
     assert not learnt and calls == ["auto"] and previewed.model.sample.focus == "typed"
     plugin._may_learn = True
     used = plugin.with_focus(ctx, settings, None, CAMERA, None)
-    # started where auto put it; each molecule its own share, the photons not being linked
-    assert learnt == [(600.0, "aberrations", True, True)]
+    # started where the edge put it; each molecule its own share, the photons not being linked
+    assert learnt == [(600.0, "phase", True, True)]
     assert used.model.calibration == str(depth.kept_path(plugin._insitu_key(settings)))
     assert used.model.sample.focus == "calibrated" and used.model.sample.focus_nm == 710.0
     assert used.model.registration.map == "calibration"
@@ -249,19 +249,19 @@ def test_spline_3d_2c_learns_in_situ_at_run_never_at_preview_and_asks_first(monk
     assert plugin.preflight(Context(), settings) is None
 
 
-def test_the_form_offers_in_situ_with_learn_only_for_a_dual_calibration_with_a_model(monkeypatch):
+def test_the_form_offers_learn_registration_only_while_learning(monkeypatch):
     from smappy.calibrate.depth import SampleSettings
     from smappy.plugins import FormState
     from smappy.plugins.fit import DualModelSettings, DualSplineFit, DualSplineFitSettings
     plugin = DualSplineFit()
-    for focus, shown in (("insitu", True), ("auto", False)):
+    for learn, shown in (("phase", True), ("nothing", False)):
         state = FormState()
-        settings = DualSplineFitSettings(model=DualModelSettings(sample=SampleSettings(focus=focus)))
+        settings = DualSplineFitSettings(model=DualModelSettings(sample=SampleSettings(learn=learn)))
         monkeypatch.setattr("smappy.calibrate.depth.sample_state",
                             lambda main, sample, prefix, found: ({"model.sample.focus": True}, {}, {}))
         plugin._sample_form(settings, state)
-        assert ("insitu", "in situ") in state.choices["model.sample.focus"]
-        assert state.shown["model.learn"] is shown and state.shown["model.learn_registration"] is shown
+        assert ("edge", "coverslip edge") in state.choices["model.sample.focus"]
+        assert state.shown["model.learn_registration"] is shown
 
 
 @pytest.mark.long
@@ -308,25 +308,24 @@ def test_spline_3d_2c_learns_both_pupils_a_start_lacks_in_situ_keeps_them_and_fi
     monkeypatch.setattr(depth, "load", lambda p, channels=1: learned)
     plugin = DualSplineFit()
     scatter = {}
-    for focus in ("auto", "insitu"):
+    for learn in ("nothing", "phase"):
         settings = DualSplineFitSettings(source=SourceSettings(path=str(path)),
                                          camera=CameraSettings(conversion=2.0, offset=100.0, pixelsize_um=0.127,
                                                                pixelsize_y_um=0.116),
                                          # no channel move: the map the molecules are paired by and
                                          # held at is then the calibration's, exactly
                                          model=DualModelSettings(calibration=str(calibration), link_photons=True,
-                                                                 sample=SampleSettings(focus=focus),
-                                                                 learn="aberrations",
+                                                                 sample=SampleSettings(learn=learn),
                                                                  registration=SplineTransformSettings(move="none")),
                                          output=OutputSettings(save=False))
         result = plugin.run(Context(), settings)
-        scatter[focus] = _z_scatter(result.locs, m.truth)
+        scatter[learn] = _z_scatter(result.locs, m.truth)
     used = result.settings.model
     key = plugin._insitu_key(settings)
     assert used.sample.focus == "calibrated" and used.calibration == str(depth.kept_path(key))
     found = depth.found(key)
     assert found.fallback is None, found.messages
-    assert found.heldout["aberrations"] < found.heldout["focus"]
+    assert found.heldout["phase"] < found.heldout["blur"]
     got = found.drawn.shared
     for pre, truth_phase in zip(("", "ch1."), PHASE, strict=True):
         assert float(got[pre + "pupil.phase"][1]) == pytest.approx(float(truth_phase[1]), abs=0.1)  # from half
@@ -334,7 +333,7 @@ def test_spline_3d_2c_learns_both_pupils_a_start_lacks_in_situ_keeps_them_and_fi
     assert float(got["ch1.share"]) == pytest.approx(SHARE, abs=0.03)
     assert found.focus_nm == pytest.approx(FOCUS, abs=150)
     assert np.allclose(found.spline.transformation, H / H[2, 2], atol=1e-6)    # held: not asked to learn it
-    assert scatter["insitu"] < 0.9 * scatter["auto"], scatter
+    assert scatter["phase"] < 0.9 * scatter["nothing"], scatter
     # kept as a dual calibration with its model inside: a new session reads it back instead of learning again
     depth._FOUND.clear()
     again = depth.kept(key, dual=True)

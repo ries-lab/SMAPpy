@@ -59,8 +59,8 @@ def test_the_sample_part_is_shown_only_for_a_calibration_that_carries_a_model(fi
     assert not any(shown.values())
     shown, active, hints = depth.sample_state(pupil, SampleSettings())
     assert shown == {"sample.focus": True, "sample.focus_nm": True, "sample.medium": True,
-                     "sample.sample_index": True}
-    assert not active["sample.focus_nm"] and hints["sample.focus_nm"].startswith("auto")
+                     "sample.sample_index": True, "sample.learn": True}
+    assert not active["sample.focus_nm"] and hints["sample.focus_nm"].startswith("edge")
     # the number in grey: the index the calibration was learnt with -- read from its parameters, without the
     # model -- or the preset's
     assert hints["sample.sample_index"] == pytest.approx(1.33) and hints["sample.medium"] == "as calibrated"
@@ -97,7 +97,7 @@ def test_auto_finds_the_focus_from_the_lowest_spots_and_draws_it_there(files, le
     rng = np.random.default_rng(3)
     h = np.where(rng.random(1500) < 0.3, 0.0, rng.uniform(0, 1000, 1500))
     images = _spots(learned, 700.0, h, np.full(len(h), 8000.0), rng) + 1.0
-    spline, found = depth.for_sample(pupil, SampleSettings(focus="auto"), images=images)
+    spline, found = depth.for_sample(pupil, SampleSettings(focus="edge"), images=images)
     assert found.focus_nm == pytest.approx(700.0, abs=60)
     assert spline.parameters["sample_depth"]["method"] == "auto"
 
@@ -123,7 +123,7 @@ def test_a_simulation_draws_its_frames_at_the_typed_focus_and_fit_this_hands_it_
     optics = replace(optics, sample=SampleSettings(focus="typed", focus_nm=400.0))
     assert spline_for(optics).parameters["sample_depth"]["focus_nm"] == 400.0
     with pytest.raises(ValueError, match="type it"):
-        spline_for(replace(optics, sample=SampleSettings(focus="auto")))
+        spline_for(replace(optics, sample=SampleSettings(focus="edge")))
     recipe = write_recipe(replace(settings, optics=optics), tmp_path / "scene.sim.yaml")
     plugin = SplineFit()
     s = plugin.Settings()

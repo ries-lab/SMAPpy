@@ -367,10 +367,10 @@ def in_the_sample(settings: PrepareSettings, source, camera, report=lambda entry
     from ..io.calibration import load_spline_calibration
     cal = load_spline_calibration(settings.calibration)
     sample = settings.sample
-    if not depth.has_model(cal) or sample.focus in ("calibrated", "typed"):
+    if not depth.has_model(cal) or sample.mode in ("calibrated", "typed"):
         return depth.for_sample(cal, sample)
     from ..plugins.fit import DetectionSettings, FitSettings, SourceSettings, sample_rois
-    report({"message": f"focus {'on auto' if sample.focus == 'auto' else 'in situ'}: spots from the movie"})
+    report({"message": f"focus {'from the edge' if sample.mode == 'auto' else 'in situ'}: spots from the movie"})
     images = sample_rois(source, camera, DetectionSettings().finder(), FitSettings().roisize,
                          SourceSettings(path=str(settings.movie)))
 

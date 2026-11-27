@@ -27,7 +27,8 @@ from ..locs import Localizations
 from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
 from ..calibrate.dual import (RegisterSettings, layout_param, main_channel_param,
                               split_position_param)
-from ..calibrate.depth import LEARN_CHOICES, SampleSettings
+from ..calibrate.depth import (FOCUS_HELP, LEARN_CHOICES, LEARN_HELP, LEARN_WORDS, SAMPLE_FOCUS_CHOICES,
+                               SampleSettings, focus_mode, holds_focus, learn_word, settled_focus)
 from ..calibrate.medium import (cleared, differs, for_drawing, index_field, medium_field, mismatch_text, resolve,
                                settle)
 from ..pipeline import FitSettings, fit_stack, provenance
@@ -40,9 +41,8 @@ from .after_fit import AfterFitSettings, Finished, finish_localizations  # noqa:
 TIFF_FILTER = ("Image stacks (*.tif *.tiff *.ome.tif *.sim.yaml);;"
                "Simulations (*.sim.yaml);;All files (*)")
 #: Spline 3D's *focus*: where the focus is in the sample, and how it is known -- the pupil model drawn
-#: for it (`smappy.calibrate.depth`) -- or the beads' spline as it was calibrated, at the coverslip
-FOCUS_CHOICES = (("auto", "auto"), ("insitu", "in situ"), ("typed", "typed"),
-                 ("calibrated", "as calibrated"))
+#: for it (`smappy.calibrate.depth`) -- or the beads' spline as it was calibrated; the sample part's
+FOCUS_CHOICES = SAMPLE_FOCUS_CHOICES
 #: frames the auto focus reads, in blocks spread over the movie, before the fit
 AUTO_FOCUS_BLOCKS, AUTO_FOCUS_BLOCK_FRAMES = 10, 50
 
@@ -460,18 +460,13 @@ class SplineModelSettings:
                                   "A pupil (Zernike) calibration adds focus: the PSF drawn for the "
                                   "focus in the sample")
     # shown only for a calibration with a pupil model beside it (`SplineFit._focus_form`); one
-    # place in the sample, the focus, known three ways, or the beads' spline as it is
-    focus: str = param("auto", label="focus", choices=FOCUS_CHOICES,
-                       help="where the focus is in the sample, for the PSF drawn there from the pupil "
-                            "model, z then the height above the coverslip: auto, from the lowest "
-                            "localizations; in situ, learnt from the molecules with the beads' "
-                            "aberrations; typed; or as calibrated, the beads' PSF at the coverslip")
-    # in situ only (`SplineFit._focus_form`): how much of the PSF the data's own molecules teach, the rest held
-    # from the calibration's pupil model, the start (`calibrate.depth.insitu_focus`)
-    learn: str = param("focus", label="learn", choices=LEARN_CHOICES,
-                       help="in situ: the focus and the blur alone, every aberration the calibration's; "
-                            "the aberrations too, kept only where they explain molecules held out "
-                            "better; or everything, the pupil's magnitude too")
+    # place in the sample, the focus -- from the coverslip's edge or typed -- or the beads' spline as it is;
+    # the sample part's fields, names and meanings (`depth.SampleSettings`), kept here so that saved
+    # settings stay valid
+    focus: str = param("edge", label="focus", choices=FOCUS_CHOICES, help=FOCUS_HELP)
+    # how much of the PSF the data's own molecules teach before the fit, the rest held from the calibration's
+    # pupil model, the start (`calibrate.depth.insitu_focus`); learning refines the focus, never replaces it
+    learn: str = param("nothing", label="learn", choices=LEARN_CHOICES, help=LEARN_HELP)
     focus_nm: float = param(0.0, label="focus depth", unit="nm", min=0.0,
                             help="how far into the sample the objective was moved from the "
                                  "coverslip; typed here, else found at Preview or Run")
@@ -484,6 +479,13 @@ class SplineModelSettings:
 
     def __post_init__(self):
         settle(self.medium, self.sample_index)      # refuses an unknown choice; the pair is read by `resolve`
+        # the words before 2026-11-27: auto and in situ are the coverslip's edge, *learn* read on in situ only
+        self.focus, self.learn = settled_focus(self.focus, self.learn)
+
+    @property
+    def mode(self) -> str:
+        """How the focus is found: calibrated, typed, auto (the edge) or insitu (`depth.focus_mode`)."""
+        return focus_mode(self.focus, self.learn)
 
     def n_med(self):
         """What `depth` is handed as the sample's index (`medium.for_drawing`)."""
@@ -498,7 +500,7 @@ class SplineModelSettings:
         calibration = load_spline_calibration(self.calibration)
         start = 0.0
         if self.focus == "typed":
-            # a run resolves *auto* to typed first, and *in situ* to its own spline
+            # a run resolves the edge to typed first, and in situ to its own spline
             # (`SplineFit.with_focus`); a model without either is the beads' spline
             from ..calibrate.depth import at_depth, in_focus
             calibration = at_depth(calibration, self.focus_nm, self.n_med())
@@ -1312,7 +1314,8 @@ class _FitPlugin(Plugin):
                         from ..simulate.source import recipe_sample
                         sample = recipe_sample(settings.source.path)
                         updates.update({"model.focus": "calibrated"} if sample is None else
-                                       {"model.focus": "typed", "model.focus_nm": sample.focus_nm,
+                                       {"model.focus": "typed", "model.learn": "nothing",
+                                        "model.focus_nm": sample.focus_nm,
                                         "model.medium": sample.medium,
                                         "model.sample_index": sample.sample_index})
             # The camera is *not* copied in: a field on auto shows the file's
@@ -2092,18 +2095,16 @@ class DualModelSettings(_LinkedChannels):
                                   "calibration in Dual colour mode; or a fitted .h5, for the one it "
                                   "was fitted with")
     # a pupil (Zernike) calibration only (`DualSplineFit._sample_form`): both PSFs drawn for the focus in the
-    # sample (`calibrate.depth.dual_depth_calibration`), on *auto* found from the main channel's spots before
-    # the fit, *in situ* learnt from the movie's molecules in both channels (`DualSplineFit.with_focus`)
+    # sample (`calibrate.depth.dual_depth_calibration`), on the coverslip's edge found from the main channel's
+    # spots before the fit; with *learn*, the part's own, learnt from the movie's molecules in both channels
+    # (`DualSplineFit.with_focus`)
     sample: SampleSettings = param(default_factory=SampleSettings,
                                    label="in the sample",
                                    help="a pupil calibration's two PSFs drawn for a focus in the sample: z "
                                         "is then the height above the coverslip")
-    # in situ only: how much of the two PSFs the movie's molecules teach, the rest held from the calibration's
-    # model (`calibrate.depth.insitu_dual`), as Spline 3D's *learn*
-    learn: str = param("focus", label="learn", choices=LEARN_CHOICES,
-                       help="in situ: the focus and each channel's blur, every aberration the calibration's; "
-                            "the aberrations and the channels' offset in z too, kept only where they explain "
-                            "molecules held out better; or everything, the pupils' magnitude too")
+    # *learn* before 2026-11-27, now the sample part's (`sample.learn`): read once and folded in there
+    learn: str = param("", label="learn", hidden=True,
+                       help="before 2026-11-27: what in situ learnt; now in the sample part")
     learn_registration: bool = param(False, label="learn registration",
                                      help="in situ: the map between the channels learnt from the molecules "
                                           "too, and fitted with; off: the calibration's (or the file's)")
@@ -2120,6 +2121,15 @@ class DualModelSettings(_LinkedChannels):
     registration: SplineTransformSettings = param(default_factory=SplineTransformSettings,
                                                   label="channel registration", collapsed=True)
 
+    def __post_init__(self):
+        if self.learn:
+            # a map from before 2026-11-27: *learn* was read on in situ only, which the sample part translated
+            # into a *learn* of its own (the focus and the blur) -- the level is this field's
+            from ..calibrate.depth import learn_key
+            if self.sample.learn != "nothing":
+                self.sample.learn = learn_key(self.learn)
+            self.learn = ""
+
     def load(self):
         from ..calibrate.dual import load_dual_color_calibration
         if not self.calibration:
@@ -2127,7 +2137,7 @@ class DualModelSettings(_LinkedChannels):
         calibration = load_dual_color_calibration(self.calibration)
         # *auto* is resolved to typed before a fit (`DualSplineFit.with_focus`); what reads the calibration
         # before that -- its geometry, a registration measured -- reads the beads' splines
-        if self.sample.focus != "typed":
+        if self.sample.mode != "typed":
             return calibration
         from ..calibrate import depth
         if not depth.has_model(calibration.main):
@@ -2182,7 +2192,7 @@ class SplineFit(_FitPlugin):
     # 8: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`)
     # 9: beads taken with the other EM gain than the data: the spline mirrored in x (`matched_to_em`)
     # 10: and *focus* on auto's spots mirrored into the beads' orientation (`depth.in_beads_orientation`)
-    version = "11"
+    version = "12"
     calibration_kind = "single"
 
     def model(self, settings, camera):
@@ -2251,40 +2261,42 @@ class SplineFit(_FitPlugin):
         alone as the other answer."""
         asked = super().preflight(ctx, settings)
         m = settings.model
-        if asked is not None or m.focus != "insitu" or m.learn == "focus":
+        if asked is not None or m.mode != "insitu" or m.learn == "blur":
             return asked
         from ..calibrate import depth
         key = self._focus_key(settings)
         if depth.found(key) is not None or depth.kept(key) is not None:
             return None
         return PreflightQuestion(
-            f"Learning the {m.learn} in situ fits the movie's molecules in rounds before the fit: several "
-            f"minutes, longer on a CPU.  It is kept for these settings, so it is learnt once.",
+            f"Learning the {LEARN_WORDS[m.learn]} in situ fits the movie's molecules in rounds before the fit: "
+            f"several minutes, longer on a CPU.  It is kept for these settings, so it is learnt once.",
             run_label="Learn them", choices=(
                 PreflightChoice("Learn the focus alone",
-                                settings=replace(settings, model=replace(m, learn="focus")),
+                                settings=replace(settings, model=replace(m, learn="blur")),
                                 help="the calibration's aberrations, the focus and the blur learnt: seconds"),))
 
     def _focus_form(self, settings, state) -> None:
         """*focus* and its rows only for a calibration with a pupil model beside it: a bead average
-        has no model to draw at another place.  *position* is typed only on *typed*; on *auto* and
-        *in situ* it shows what the last Preview or Run found for this file, if it found it."""
+        has no model to draw at another place.  *focus depth* is typed only on *typed*; on the coverslip's
+        edge it shows what the last Preview or Run found for this file -- the edge, and what learning made
+        of it -- if it found it."""
         from ..calibrate import depth
         m = settings.model
         drawable = self.drawable(settings)
         has = drawable is not None
-        shown = has or m.focus in ("typed", "insitu")
+        shown = has or m.focus == "typed" or m.mode == "insitu"
+        drawn = shown and m.focus != "calibrated"
         state.shown["model.focus"] = shown
-        state.shown["model.learn"] = shown and m.focus == "insitu"
-        state.shown["model.focus_nm"] = shown and m.focus != "calibrated"
-        state.shown["model.medium"] = shown and m.focus != "calibrated"
-        state.shown["model.sample_index"] = shown and m.focus != "calibrated"
+        state.shown["model.learn"] = drawn
+        state.shown["model.focus_nm"] = drawn
+        state.shown["model.medium"] = drawn
+        state.shown["model.sample_index"] = drawn
         state.active["model.focus_nm"] = m.focus == "typed"
-        if m.focus in ("auto", "insitu"):
+        if m.focus == "edge":
             found = depth.found(self._focus_key(settings))
-            word = "auto" if m.focus == "auto" else "in situ"
-            state.hints["model.focus_nm"] = (f"{word}: {found.focus_nm:.0f} nm, found before"
-                                             if found is not None else f"{word}: found at Preview or Run")
+            hint = depth.focus_hint(m.mode, found)
+            state.hints["model.focus_nm"] = (f"{hint}, found before" if found is not None
+                                             else hint.replace("found from the movie", "found at Preview or Run"))
         if shown and has and m.focus != "calibrated":
             try:
                 immersion = None
@@ -2330,36 +2342,41 @@ class SplineFit(_FitPlugin):
                 return (str(path), Path(path).stat().st_mtime)
             except OSError:
                 return (str(path), None)
-        key = [m.focus, stamp(src.path), stamp(m.calibration), m.n_med()]
-        if m.focus == "insitu" and m.learn != "focus":
-            key.append(m.learn)        # a focus alone keeps the key it had, and what was kept under it
-        if m.focus == "auto":
+        # the mode, in the words the keys had before 2026-11-27, so that what was kept stays found
+        mode = m.mode
+        key = [mode, stamp(src.path), stamp(m.calibration), m.n_med()]
+        if mode == "insitu" and m.learn != "blur":
+            key.append({"phase": "aberrations", "apodisation": "everything"}[m.learn])
+        if mode == "insitu" and holds_focus(m.focus):
+            key.append(("typed", m.focus_nm))
+        if mode == "auto":
             key += [src.start, src.stop, repr(settings.detection), settings.fit.roisize,
                     repr(getattr(settings, "region", None)), repr(settings.camera)]
         return tuple(key)
 
     def with_focus(self, ctx: Context, settings, source, camera, finder):
-        """*focus* on *auto* or *in situ* found before the fit and written in, so that the history and
-        the file name what was fitted with, never "auto", as the calibration on auto is named: *auto*
-        as the position, typed (`calibrate.depth.auto_focus`); *in situ* as the spline it learnt, kept
-        in the configuration directory (`calibrate.depth.keep`), as calibrated.  Kept for the session
+        """The focus on the coverslip's edge, or anything learnt, found before the fit and written in, so
+        that the history and the file name what was fitted with, as the calibration on auto is named: the
+        edge as the position, typed (`calibrate.depth.auto_focus`); in situ as the spline it learnt, kept
+        in the configuration directory (`calibrate.depth.keep`), as the beads' focus.  Kept for the session
         (`calibrate.depth.remember`), so a Preview finds it once and the Run after it does not again.
-        A calibration without a pupil model has nothing to draw: *auto* fits it as calibrated."""
+        A calibration without a pupil model has nothing to draw: the edge fits it as calibrated."""
         from ..calibrate import depth
         m = settings.model
-        if m.focus not in ("auto", "insitu"):
+        mode = m.mode
+        if mode not in ("auto", "insitu"):
             return settings
         from ..io.calibration import load_spline_calibration
         cal = load_spline_calibration(m.calibration)
         if not depth.has_model(cal):
-            if m.focus == "auto":
+            if mode == "auto":
                 return replace(settings, model=replace(m, focus="calibrated"))
             raise ValueError("in situ needs a calibration made with the pupil (Zernike) method: its "
                              "aberrations are held")
         try:
             import torch  # noqa: F401 -- only asked whether it is there
         except ImportError:
-            if m.focus == "auto":
+            if mode == "auto":
                 # the default must not stop a fit that worked before: said, and fitted as calibrated
                 ctx.warn("focus on auto needs torch to draw the PSF in the sample (pip install "
                          "smappy-smlm[uipsf]): fitted as calibrated, z above the beads' focus")
@@ -2367,10 +2384,10 @@ class SplineFit(_FitPlugin):
             raise ValueError("a focus in situ draws the PSF with uipsf, which needs torch: pip install "
                              "smappy-smlm[uipsf]")
         if settings.source.live:
-            raise ValueError(f"a focus {'on auto' if m.focus == 'auto' else 'in situ'} needs the frames "
-                             f"before the fit: type it for a live fit")
+            raise ValueError(f"a focus {'from the edge' if mode == 'auto' else 'learnt'} needs the frames "
+                             f"before the fit: type it for a live fit, and learn nothing")
         found = self.found_focus(ctx, settings, source, camera, finder, cal)
-        if m.focus == "auto":
+        if mode == "auto":
             return replace(settings, model=replace(m, focus="typed", focus_nm=round(found.focus_nm, 1)))
         path = depth.kept_path(self._focus_key(settings))
         return replace(settings, model=replace(m, focus="calibrated", calibration=str(path),
@@ -2378,22 +2395,23 @@ class SplineFit(_FitPlugin):
 
     def focus_plots(self, settings, camera) -> dict:
         from ..calibrate import depth
-        if settings.model.focus not in ("auto", "insitu"):
+        if settings.model.mode not in ("auto", "insitu"):
             return {}
         found = depth.found(self._focus_key(settings))
         return {} if found is None or found.heights is None else {"focus": focus_plot(found, settings)}
 
     def found_focus(self, ctx: Context, settings, source, camera, finder, cal):
-        """The focus *auto* or *in situ* finds (`calibrate.depth.AutoDepth`), from this session's or
+        """The focus the edge or in situ finds (`calibrate.depth.AutoDepth`), from this session's or
         an earlier one's, or found now with what it does said as it goes."""
         from ..calibrate import depth
         m = settings.model
+        mode = m.mode
         key = self._focus_key(settings)
-        found = depth.found(key) or (depth.kept(key) if m.focus == "insitu" else None)
+        found = depth.found(key) or (depth.kept(key) if mode == "insitu" else None)
         if found is not None:
             ctx.report(f"focus {found.method}: {found.focus_nm:.0f} nm above the coverslip, as found before")
             return depth.remember(key, found)
-        if m.focus == "auto":
+        if mode == "auto":
             images = sample_rois(source, camera, finder, settings.fit.roisize, settings.source)
             if not len(images):
                 raise ValueError("no spots found in the frames the focus is looked for in: review "
@@ -2401,22 +2419,27 @@ class SplineFit(_FitPlugin):
             images = depth.in_beads_orientation(images, cal, camera.em_on)
             found = depth.auto_focus(cal, images, m.n_med(), n_threads=settings.fit.n_threads,
                                      report=ctx.report)
-            ctx.report(f"focus on auto: {found.focus_nm:.0f} nm above the coverslip, from the lowest "
+            ctx.report(f"focus from the edge: {found.focus_nm:.0f} nm above the coverslip, from the lowest "
                        f"of {found.n} localizations, {len(found.passes)} passes")
         else:
-            # in situ starts where auto puts it: seconds, where its own estimate takes minutes
-            start = None
-            try:
-                start = self.found_focus(ctx, replace(settings, model=replace(m, focus="auto")),
-                                         source, camera, finder, cal).focus_nm
-            except ValueError:
-                pass
+            # in situ starts where the edge puts it: seconds, where its own estimate takes minutes; a typed
+            # focus is held where it was typed
+            hold = holds_focus(m.focus)
+            start = m.focus_nm if hold else None
+            if not hold:
+                try:
+                    start = self.found_focus(ctx, replace(settings, model=replace(m, focus="edge", learn="nothing")),
+                                             source, camera, finder, cal).focus_nm
+                except ValueError:
+                    pass
             found = depth.insitu_focus(cal, [settings.source.path], camera, m.n_med(), start,
-                                       progress=ctx.report, cancel=ctx.stop, learn=m.learn)
+                                       progress=ctx.report, cancel=ctx.stop, learn=m.learn, hold_focus=hold)
+            if start is not None and not hold:
+                found.edge_nm = start
             if depth.keep(key, found) is None:
                 raise ValueError("the focus learnt in situ could not be kept for the fit: see the "
                                  "configuration directory's sample_depth folder")
-            learnt = ("" if m.learn == "focus" or found.fallback else f", the {m.learn} learnt")
+            learnt = ("" if m.learn == "blur" or found.fallback else f", the {LEARN_WORDS[m.learn]} learnt")
             ctx.report(f"focus in situ: {found.focus_nm:.0f} nm above the coverslip, blur "
                        f"{found.blur_nm:.0f} nm{learnt}, from {found.n} molecules")
         for note in found.notes:
@@ -3241,7 +3264,7 @@ class DualSplineFit(_TwoChannelFit):
     #     the main channel's lowest localizations, z the height above the coverslip (`calibrate.depth`)
     # 16: a SMAP two-channel calibration's photons as photons: each half's own light at focus its share
     #     (`psf.signal_integral`), a linked N the total over both halves (Jonas, 2026-11-22)
-    version = "17"
+    version = "18"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -3292,8 +3315,11 @@ class DualSplineFit(_TwoChannelFit):
             except OSError:
                 return (str(path), None)
         return ("2C in situ", stamp(settings.source.path), stamp(m.calibration),
-                stamp(registration_file(m.registration)), m.sample.n_med(), m.learn, bool(m.learn_registration),
-                bool(m.link_photons), repr(settings.camera), repr(getattr(settings, "channels", None)))
+                # *learn* in the words before 2026-11-27, so that what was kept stays found
+                stamp(registration_file(m.registration)), m.sample.n_med(), learn_word(m.sample.learn),
+                bool(m.learn_registration), bool(m.link_photons), repr(settings.camera),
+                repr(getattr(settings, "channels", None))) + (
+            (("typed", m.sample.focus_nm),) if holds_focus(m.sample.focus) else ())
 
     def kept_insitu(self, settings):
         """What this session or an earlier Run learnt in situ for these settings (`calibrate.depth.kept`), or None."""
@@ -3307,17 +3333,17 @@ class DualSplineFit(_TwoChannelFit):
         auto as the other answer."""
         asked = super().preflight(ctx, settings)
         m = settings.model
-        if asked is not None or m.sample.focus != "insitu" or self.kept_insitu(settings) is not None:
+        if asked is not None or m.sample.mode != "insitu" or self.kept_insitu(settings) is not None:
             return asked
-        what = "the focus and the blur" if m.learn == "focus" else f"the {m.learn}"
+        what = f"the {LEARN_WORDS[m.sample.learn]}"
         return PreflightQuestion(
             f"In situ learns {what} of both channels from the movie's molecules before the fit: minutes, longer "
             f"on a CPU.  It is kept for these settings, so it is learnt once.",
             run_label="Learn it", choices=(
-                PreflightChoice("Fit with the focus on auto",
-                                settings=replace(settings, model=replace(m, sample=replace(m.sample, focus="auto"))),
-                                help="the calibration's PSFs drawn at the focus the lowest localizations "
-                                     "show: seconds"),))
+                PreflightChoice("Fit without learning",
+                                settings=replace(settings, model=replace(m, sample=replace(m.sample, learn="nothing"))),
+                                help="the calibration's PSFs drawn at the focus -- the lowest localizations' "
+                                     "edge, or typed: seconds"),))
 
     def _insitu(self, ctx: Context, settings, source, camera, finder):
         """*in situ* resolved before the fit, as Spline 3D's: the two-channel model learnt from this movie
@@ -3342,24 +3368,31 @@ class DualSplineFit(_TwoChannelFit):
         if found is not None:
             ctx.report(f"in situ: {found.focus_nm:.0f} nm above the coverslip, as learnt before")
         elif not getattr(self, "_may_learn", False):
-            ctx.report("in situ: learnt at Run; this Preview fits with the focus on auto")
-            auto = replace(settings, model=replace(m, sample=replace(m.sample, focus="auto")))
-            return self.with_focus(ctx, auto, source, camera, finder)
+            ctx.report("in situ: learnt at Run; this Preview fits without learning")
+            plain = replace(settings, model=replace(m, sample=replace(m.sample, learn="nothing")))
+            return self.with_focus(ctx, plain, source, camera, finder)
         else:
-            # in situ starts where auto puts it: seconds, where its own estimate takes minutes
-            start = None
-            try:
-                auto = replace(settings, model=replace(m, sample=replace(m.sample, focus="auto")))
-                start = self.with_focus(ctx, auto, source, camera, finder).model.sample.focus_nm
-            except ValueError:
-                pass
-            found = depth.insitu_dual(dual, [settings.source.path], camera, m.sample.n_med(), start, learn=m.learn,
-                                      registration=m.learn_registration, share_per_molecule=not m.link_photons,
-                                      progress=ctx.report, cancel=ctx.stop)
+            # in situ starts where the edge puts it: seconds, where its own estimate takes minutes; a typed
+            # focus is held where it was typed
+            hold = holds_focus(m.sample.focus)
+            start = m.sample.focus_nm if hold else None
+            if not hold:
+                try:
+                    plain = replace(settings, model=replace(m, sample=replace(m.sample, learn="nothing")))
+                    start = self.with_focus(ctx, plain, source, camera, finder).model.sample.focus_nm
+                except ValueError:
+                    pass
+            found = depth.insitu_dual(dual, [settings.source.path], camera, m.sample.n_med(), start,
+                                      learn=m.sample.learn, registration=m.learn_registration,
+                                      share_per_molecule=not m.link_photons, progress=ctx.report, cancel=ctx.stop,
+                                      hold_focus=hold)
+            if start is not None and not hold:
+                found.edge_nm = start
             if depth.keep(key, found) is None:
                 raise ValueError("the model learnt in situ could not be kept for the fit: see the configuration "
                                  "directory's sample_depth folder")
-            learnt = "" if m.learn == "focus" or found.fallback else f", the {m.learn} learnt"
+            learnt = ("" if m.sample.learn == "blur" or found.fallback
+                      else f", the {LEARN_WORDS[m.sample.learn]} learnt")
             ctx.report(f"in situ: {found.focus_nm:.0f} nm above the coverslip, blur {found.blur_nm:.0f} nm"
                        f"{learnt}, from {found.n} molecules in both channels")
         for note in found.notes:
@@ -3383,9 +3416,9 @@ class DualSplineFit(_TwoChannelFit):
         without a model, or no torch, fits as calibrated, said."""
         from ..calibrate import depth
         m = settings.model
-        if m.sample.focus == "insitu":
+        if m.sample.mode == "insitu":
             return self._insitu(ctx, settings, source, camera, finder)
-        if m.sample.focus != "auto":
+        if m.sample.mode != "auto":
             return settings
         as_calibrated = replace(settings, model=replace(m, sample=replace(m.sample, focus="calibrated")))
         # the calibration as this run read it (`registration`, read once), the beads' splines on *auto*
@@ -3425,15 +3458,15 @@ class DualSplineFit(_TwoChannelFit):
 
     def focus_plots(self, settings, camera) -> dict:
         from ..calibrate import depth
-        focus = settings.model.sample.focus
-        if focus not in ("auto", "insitu"):
+        mode = settings.model.sample.mode
+        if mode not in ("auto", "insitu"):
             return {}
-        found = depth.found(self._focus_key(settings) if focus == "auto" else self._insitu_key(settings))
+        found = depth.found(self._focus_key(settings) if mode == "auto" else self._insitu_key(settings))
         return {} if found is None or found.heights is None else {"focus": focus_plot(found, settings)}
 
     def _sample_form(self, settings, state) -> None:
         """*in the sample* only for a dual calibration that carries its pupil (Zernike) model
-        (`calibrate.depth.sample_state`): auto, typed or as calibrated."""
+        (`calibrate.depth.sample_state`): the coverslip's edge, typed or the beads' focus, and what is learnt."""
         from ..calibrate.depth import sample_state
         try:
             path = self.with_calibration(settings).model.calibration
@@ -3451,20 +3484,18 @@ class DualSplineFit(_TwoChannelFit):
                 self._sample_key, self._sample_main = key, main
             main = self._sample_main
         from ..calibrate.depth import found
-        focus = settings.model.sample.focus
-        known = (found(self._focus_key(settings)) if focus == "auto" else
-                 found(self._insitu_key(settings)) if focus == "insitu" else None)
+        mode = settings.model.sample.mode
+        known = (found(self._focus_key(settings)) if mode == "auto" else
+                 found(self._insitu_key(settings)) if mode == "insitu" else None)
         shown, active, hints = sample_state(main, settings.model.sample, prefix="model.sample.", found=known)
         shown["model.sample"] = shown.pop("model.sample.focus")
-        if known is not None:
+        if known is not None and "model.sample.focus_nm" in hints:
             hints["model.sample.focus_nm"] += ", found before"
         state.shown.update(shown)
         state.active.update(active)
         state.hints.update(hints)
-        state.choices["model.sample.focus"] = [("auto", "auto"), ("insitu", "in situ"), ("typed", "typed"),
-                                               ("calibrated", "as calibrated")]
-        insitu = bool(shown.get("model.sample")) and settings.model.sample.focus == "insitu"
-        state.shown["model.learn"] = insitu
+        state.choices["model.sample.focus"] = list(SAMPLE_FOCUS_CHOICES)
+        insitu = bool(shown.get("model.sample")) and mode == "insitu"
         state.shown["model.learn_registration"] = insitu
         sample = settings.model.sample
         if state.notice is None and shown.get("model.sample.medium"):
@@ -3477,7 +3508,7 @@ class DualSplineFit(_TwoChannelFit):
         # the focus too: the PSFs read are drawn for it (`DualModelSettings.load`), and *auto* is resolved to a
         # typed focus after the registration was first read, which must not be kept for the fit
         sample = settings.model.sample
-        drawn = f"|{sample.focus_nm}|{sample.n_med()}" if sample.focus == "typed" else ""
+        drawn = f"|{sample.focus_nm}|{sample.n_med()}" if sample.mode == "typed" else ""
         return f"{settings.model.calibration}|{registration_file(settings.model.registration)}{drawn}"
 
     def read_registration(self, settings):

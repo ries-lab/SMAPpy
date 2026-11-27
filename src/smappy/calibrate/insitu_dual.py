@@ -256,7 +256,7 @@ def dual_movie_rois(paths, transform, settings: InSituSettings | None = None, ca
 
 #: what in situ holds of the start model's two pupils for each *learn* (`depth.LEARN_CHOICES`): every aberration
 #: of both, γ and the phase above the order, or nothing
-DUAL_HOLDS = {"focus": "all", "aberrations": "start", "everything": "nothing"}
+DUAL_HOLDS = {"blur": "all", "phase": "start", "apodisation": "nothing"}
 
 
 def _optics(model, c: int, n_med: float):
@@ -268,18 +268,19 @@ def _optics(model, c: int, n_med: float):
     return replace(o, NA=float(getattr(psf.pupil, "na", o.NA)), n_med=float(n_med))
 
 
-def run_insitu_dual(start, paths, camera, learn: str = "focus", n_med=None, focus_nm=None,
+def run_insitu_dual(start, paths, camera, learn: str = "blur", n_med=None, focus_nm=None,
                     detection: InSituSettings | None = None, rounds: int = 2, registration: bool = False,
                     share_per_molecule: bool = False, rois: DualInSituROIs | None = None, transform=None,
-                    progress=None, cancel=None, device=None):
+                    progress=None, cancel=None, device=None, hold_focus: bool = False):
     """Two-channel in situ: the split movies at ``paths`` learnt from, starting from ``start`` (the two-channel
     `LearnedPSF` a dual pupil calibration carries, `depth.model_of(main, channels=2)`), as `insitu_run.run_insitu`
     learns one channel (`InSituRunResult`).
 
-    ``learn`` says what of the start's two pupils is held (`DUAL_HOLDS`): with ``focus`` both whole -- only the
+    ``learn`` says what of the start's two pupils is held (`DUAL_HOLDS`): with ``blur`` both whole -- only the
     focus, each channel's blur and the molecules are learnt, and the channels' offset in z (``ch1.dz``) stays
-    the beads'; with ``aberrations`` each channel's γ and phase above the model's order, the offset learnt;
-    with ``everything`` nothing, the focus then pinned by the coverslip as in one channel.  ``registration``
+    the beads'; with ``phase`` each channel's γ and phase above the model's order, the offset learnt;
+    with ``apodisation`` nothing, the focus then pinned by the coverslip as in one channel.  ``hold_focus``
+    holds the focus at ``focus_nm``, typed, whatever is learnt.  ``registration``
     learns the map between the channels (``ch1.transform``) too, else it is the start's.  ``share_per_molecule``
     gives each molecule its own share of the light in the secondary channel (two dyes, the fit's photons not
     linked), else one share is learnt for all.  The molecules are paired by ``transform`` (default the start
@@ -298,9 +299,12 @@ def run_insitu_dual(start, paths, camera, learn: str = "focus", n_med=None, focu
         focus_from_data,
     )
 
-    from .depth import resolved_medium
+    from .depth import learn_key, resolved_medium
     from .insitu_run import InSituRunResult
     from .pupil import BeadSettings
+    learn = learn_key(learn)
+    if hold_focus and focus_nm is None:
+        raise ValueError("a focus held needs the focus: type it")
     if learn not in DUAL_HOLDS:
         raise ValueError(f"learn: one of {', '.join(DUAL_HOLDS)}, not {learn!r}")
     if start.model.n_channels != 2:
@@ -337,7 +341,7 @@ def run_insitu_dual(start, paths, camera, learn: str = "focus", n_med=None, focu
         spec = replace(spec, magnitude=held[0].kind)
     else:
         spec = replace(spec, magnitude="minimal")
-    focus_fit = "learnt" if hold != "nothing" else "coverslip"
+    focus_fit = "typed" if hold_focus else "learnt" if hold != "nothing" else "coverslip"
     roi = int(rois.units.regions.shape[-1])
     H = np.asarray(rois.transform.transformation, float)
     H = H / H[2, 2]
@@ -361,7 +365,8 @@ def run_insitu_dual(start, paths, camera, learn: str = "focus", n_med=None, focu
         model = make(result_focus)
     first = dict(first, **{"geometry.focus": torch.tensor(model.geometry.focus_nm)})
     learned = calibrate_insitu(model, rois, first, noise,
-                               RoundSettings(max_rounds=rounds, coverslip=True, twin_test=hold != "all"),
+                               RoundSettings(max_rounds=rounds, coverslip=focus_fit != "typed",
+                                             twin_test=hold != "all"),
                                selection=detection, progress=progress, cancel=cancel)
     result = InSituRunResult(rois, learned, learned.model or model, start, result_focus)
     # what its model file keeps, as a dual bead model's (`molecule_stack_run`): the split it was learnt on and the

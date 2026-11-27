@@ -365,10 +365,11 @@ method, and is [Spline 3D](plugin:Localize/Spline 3D)'s *focus*: the
 calibration is drawn for a molecule at each height above the coverslip, with
 the objective's focus *focus depth* into the sample, and the network learns
 that PSF rather than the beads' on the coverslip.  Its z is then the height
-above the coverslip.  *auto* finds the focus from the movie's lowest
-molecules, as Spline 3D does, before the prefit; *in situ* learns it, in
-minutes; *typed* takes it as typed; *as calibrated* uses the beads' spline
-as it is.  Its *sample index* is Spline 3D's: what the sample is in -- on
+above the coverslip.  *coverslip edge* finds the focus from the movie's
+lowest molecules, as Spline 3D does, before the prefit; *typed* takes it as
+typed; *beads' focus* uses the beads' spline as it is.  Its *learn* is Spline
+3D's: anything but *nothing* learns the PSF again from the movie, in minutes,
+starting at the edge's focus or held at the typed one.  Its *sample index* is Spline 3D's: what the sample is in -- on
 *auto* the calibration's own, *blinking buffer* (1.345) for fixed cells in a
 dSTORM buffer when the beads were in water.  The drawing never includes the bead's size, nor the beads'
 damping of the light beyond the critical angle: those belonged to the

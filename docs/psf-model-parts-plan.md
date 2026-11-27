@@ -86,8 +86,11 @@ One field, the same with or without learning; learning only refines it.
 
 Nothing falls back silently.  The form's hint says what the focus resolved to ("edge 692 nm,
 learnt 705 nm"), the fitted file records both (`sample_depth`), and **the depth guard** refuses a
-learnt focus that moved from the edge by more than its uncertainty allows (the August failure:
-692 → 1718 nm, kept): the edge's value is kept with a warning.  With no edge found (sparse near the
+pupil learnt that moved the focus more than 500 nm from the focus learnt alone
+(`depth.DEPTH_GUARD_NM`, `judged`; the August failure: 692 → 1718 nm, kept; the right pupils on M2
+moved it by 143--289 nm): the focus alone is kept, with a warning.  Measured against the focus
+alone, not the edge, because that is what the M2 runs measured; a check of the edge after learning
+is still open.  With no edge found (sparse near the
 coverslip, a sample away from it) the run says so and asks for a typed focus; a fourth choice,
 *from the PSF alone* (today's `coverslip=False`, the twin decided only by an index mismatch), is
 under *more* if a measurement shows it is ever right.
@@ -157,6 +160,14 @@ whether both do.  Either way a chain and a batch run the settings, not the windo
 | two colours with a wrong map | DECODE-Plex Fig. 2a (Zenodo 21348704, next-day beads); a simulation with a 30 px shift | the map from this movie within 0.1 px of the beads' after learning |
 | a showcase | uiPSF Zenodo `2ch_smlm_nup96_WGA` | Nup96 rings' diameter and z as with beads |
 | 4Pi (stage 4) | the 2017 4Pi tubulin | the phase and z of the bead model's fit |
+
+## Progress
+
+* **2026-11-27, stage 1, first slice**: the focus and *learn* in one vocabulary in Spline 3D,
+  Spline 3D 2C (its *learn* moved into the sample part), the DECODE training's and Simulate's
+  sample part -- *focus* = coverslip edge / typed / beads' focus, *learn* = nothing / focus and blur
+  / phase / phase and apodisation; a typed focus held while learning; the depth guard; settings
+  saved in the old words read back to what they did (`depth.settled_focus`, `tests/test_focus_learn.py`).
 
 ## Open
 

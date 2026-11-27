@@ -1,5 +1,5 @@
 ---
-version: "11"
+version: "12"
 covers: [smappy.psf.SplinePSF, smappy.pipeline.one_per_molecule, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.io.calibration.matched_to_em, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.io.embedded.image, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.heldout_deviance, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of, smappy.calibrate.depth.in_beads_orientation]
 ---
 
@@ -200,31 +200,36 @@ the beads' aberrations, with molecules at every height above the coverslip
 and the objective's focus moved *focus depth* into the sample.  z is then the
 **height above the coverslip**, not the objective's movement.
 
-*focus* says how the position is known:
+*focus* says how the position is known, and *learn* how much of the PSF the
+molecules of this movie teach before the fit:
 
-* *auto* (the default) finds it before the fit from the lowest
+* *coverslip edge* (the default) finds the focus from the lowest
   localizations.  In most samples some molecules are on the coverslip, so the
   heights have a lower edge, and the focus is moved until that edge is at 0.
   It takes a second or two.
-* *in situ* learns it from the molecules, as the
-  [PSF calibration](plugin:Panels/PSF calibration)'s in situ method does,
-  starting from the calibration's pupil model.  *learn* says how much of the
-  PSF the molecules teach.  On *focus and blur* every aberration is held from
-  the beads, and only the focus and the blur are learnt, the coverslip's edge
-  guiding the focus.  On *aberrations* the sample's own aberrations are
-  learnt too -- a refractive-index mismatch, a coverslip of another
-  thickness, the beads' day against today's -- and on *everything* the pupil's
-  brightness profile as well.  It takes minutes, and is for when the depth or
-  the PSF has to be right.
-* *typed* takes it as given.
-* *as calibrated* fits with the beads' spline as it is.
+* *typed* takes it as given: the focus drive's reading, for a sample that does
+  not touch the coverslip.
+* *beads' focus* fits with the beads' spline as it is, not drawn in the sample.
 
-*auto* and *in situ* are found once for a file and its settings: *Preview*
-finds them and draws the heights they came from, with the coverslip at 0 and
-the plane in focus marked, and the Run after it uses what Preview found.  An
-*in situ* result is also kept on disk, so it is not learnt again in the next
-session.  A bead-average calibration has no model: there the setting is not
-shown, and *auto* fits as calibrated.
+*learn* (shown with the first two) runs the
+[PSF calibration](plugin:Panels/PSF calibration)'s in situ method on this
+movie, starting from the calibration's pupil model.  On *nothing* the model is
+drawn as it is.  On *focus and blur* every aberration is held from the beads,
+and the focus and the blur are learnt.  On *phase* the sample's own aberrations
+are learnt too -- a refractive-index mismatch, a coverslip of another
+thickness, the beads' day against today's -- and on *phase and apodisation*
+the pupil's brightness profile as well.  Learning refines the focus, never
+replaces how it is known: from the coverslip's edge, it starts at the edge and
+is learnt; typed, it is held where it was typed and the rest is learnt around
+it.  It takes minutes, and is for when the depth or the PSF has to be right.
+
+The focus is found once for a file and its settings: *Preview* finds it and
+draws the heights it came from, with the coverslip at 0 and the plane in focus
+marked, and the Run after it uses what Preview found; *focus depth* shows in
+grey what was found -- the edge, and what learning made of it ("edge 692 nm,
+learnt 705 nm").  A learnt result is also kept on disk, so it is not learnt
+again in the next session.  A bead-average calibration has no model: there the
+setting is not shown, and the edge fits as calibrated.
 
 **Without a bead calibration: the microscope's pupil.**  *PSF calibration*'s
 *Add to microscope...* keeps the objective's pupil with the microscope, for
@@ -236,7 +241,7 @@ folder, which the fit and its history name.  It has a model, so *focus* draws
 it in the sample as it draws a pupil calibration.  It is the PSF of beads of
 another day: the blur, a re-aligned 3D lens and the coverslip of the data are
 not in it, so a bead calibration of the data's own day is better where there
-is one.  *auto* never takes it.
+is one.  *calibration* on *auto* never takes it.
 
 **After the fit.**  Once the last frame is fitted, the steps of the folded
 section [*after the fit*](plugin:Analysis/After fit/After the fit) run over
@@ -338,7 +343,7 @@ mirrored, so a model from beads on the other port (the conventional
 amplifier's, say, as the DECODE example beads were taken) is mirrored against
 the data.  The turn is the one above, exact, done when the model is made; the
 [DECODE](plugin:Localize/DECODE) fitter flips its frames instead, for the
-same reason, and so does *focus* on *auto*: it fits the beads' spline and
+same reason, and so does *focus* on *coverslip edge*: it fits the beads' spline and
 its drawings, all in the beads' orientation, so the spots it reads are
 mirrored into it.  The fit says so in a warning, which stays in the plugin's
 output and its status, and goes into the run's text, so the history and the
@@ -367,7 +372,7 @@ with a focus slightly wrong the lowest molecules are fitted there instead of
 being parked on the spline's edge.  Fits below 0 are filtered afterwards, like
 any other.
 
-*auto* reads 10 blocks of 50 frames spread over the fitted range and cuts the
+*coverslip edge* reads 10 blocks of 50 frames spread over the fitted range and cuts the
 fit boxes as the fit does.  It keeps the 4000 with the most photons above the
 fit box's edge (not the brightest peak, which would favour molecules in
 focus), and fits them with 30 iterations.  It takes the lower edge of their
@@ -385,23 +390,24 @@ above it, and the position comes out short by their distance: on simulated
 heights starting 250 nm above the coverslip, by about 200 nm.  The run says so
 in its log.  So little depends on the depth there that it rarely matters.
 
-*in situ* runs the in situ calibration (`insitu_run.run_insitu`).  On *learn*
-*focus and blur*, *hold* is set to every aberration.  The bead model's whole pupil, phase and magnitude,
+*learn* runs the in situ calibration (`insitu_run.run_insitu`).  On *focus
+and blur*, *hold* is set to every aberration.  The bead model's whole pupil, phase and magnitude,
 is held -- a *minimal* model's γ, a Zernike model's magnitude modes -- and a
 phase mode up to its order that it lacks is held at 0.  The beads' SAF
 damping is not: it is the beads', and a molecule's light beyond the critical
 angle follows its own depth.  Learnt are
 the focus, the blur and each molecule; with nothing of the pupil to learn
-there is no twin test.  It starts at the position *auto* finds, from 1000
-molecules, in at most 2 rounds.  The spline is the learnt model drawn as
+there is no twin test.  It starts at the position the edge gives, from 1000
+molecules, in at most 2 rounds; with *focus* *typed* the focus is held there
+(*focus fit* typed) and only the blur and the molecules are learnt.  The spline is the learnt model drawn as
 above, at the learnt focus.  It is kept in the configuration directory's
 `sample_depth` folder (not beside the data, where *calibration* on *auto*
-would take it for a bead calibration), and the run fits with it as
-*as calibrated*, so the history names the file.
+would take it for a bead calibration), and the run fits with it at the
+*beads' focus*, so the history names the file.
 
-**Learning the aberrations, and checking them.**  On *learn* *aberrations*
-(*hold* the start's: γ, the pupil's brightness profile, and the phase above
-the model's order are the beads') or *everything* (*hold* nothing), the focus
+**Learning the aberrations, and checking them.**  On *learn* *phase* (*hold*
+the start's: γ, the pupil's brightness profile, and the phase above the
+model's order are the beads') or *phase and apodisation* (*hold* nothing), the focus
 is learnt first, as above, but from the molecules a calibration in situ
 chooses (2000 of them, spread over heights).  The pupil is then learnt from
 the same molecules, starting at that focus, in at most 4 rounds with the twin
@@ -412,7 +418,16 @@ of 250 nm, and the deviance of its region -- twice the log-likelihood it loses
 it explains the molecules held out better; the log says by how many nats per
 molecule.  If it does not, the fit uses the focus learnt alone, with the beads'
 aberrations, and warns: more freedom that the held-out molecules do not
-support is fitting the noise or a few odd molecules.  Before the first such
+support is fitting the noise or a few odd molecules.
+
+**The depth guard.**  A pupil learnt is refused, however well it explains the
+molecules held out, when it moved the focus more than 500 nm from the focus
+learnt alone (`depth.DEPTH_GUARD_NM`); the fit then uses the focus alone and
+warns.  Where no molecule marks the coverslip, the brightness profile and the
+focus trade against each other, and a better fit can be bought with the
+depth: on one M2 data set (sun1 on the nuclear envelope) *everything* moved the
+focus from 692 to 1718 nm and every localization with it, while the pupils that
+were right moved it by 143 to 289 nm on the others.  Before the first such
 run for a file and its settings the fitter asks, since it takes minutes,
 offering the focus alone instead.
 
@@ -514,29 +529,34 @@ pixel's noise.  Without a map for the readout mode, or with frames outside the
 map, the fit is refused and the form says why.
 
 ### model.focus
-*auto* is right for most data, and costs a second or two before the fit.
-*in situ* for a measurement where the depth matters more than a few minutes:
-deep in the sample, or TIRF and other work on the coverslip where the SAF
-counts.  *as calibrated* for molecules near the coverslip with the focus
-there too, or to compare with an older fit.  Drawing needs torch (`pip install
-smappy-smlm[uipsf]`): without it, *auto* fits as calibrated and warns, and the
-others stop and say so.  A live fit
-cannot use *auto* or *in situ*: the frames they need are not there yet.
+*coverslip edge* is right for most data, and costs a second or two before the
+fit.  *typed* where the sample does not touch the coverslip (a nucleus, a
+tissue section), or where the focus drive's reading is trusted.  *beads' focus*
+for molecules near the coverslip with the focus there too, or to compare with
+an older fit.  Drawing needs torch (`pip install smappy-smlm[uipsf]`): without
+it, the edge fits as calibrated and warns, and the others stop and say so.  A
+live fit can use only *typed* with nothing learnt: the frames the edge and
+learning need are not there yet.  Settings saved before November 2026 with
+*auto* read as the edge with nothing learnt, and *in situ* as the edge with
+*learn* as it was.
 
 ### model.learn
-*focus and blur* is right when the beads were imaged in the same medium and on
-the same kind of coverslip as the sample.  *aberrations* when they were not
+*nothing* for most data.  *focus and blur* when the depth matters more than a
+few minutes, or the beads were imaged in the same medium and on the same kind
+of coverslip as the sample.  *phase* when they were not
 -- beads in water, cells in a mounting medium; an old calibration -- or when
 fits deep in the sample show z compressed or skewed; it needs a few hundred
 molecules held out to judge, so a few thousand blinks in the movie.
-*everything* rarely: the brightness profile is the objective's, and learnt from
-molecules it trades with the focus, which is then pinned to the coverslip.
+*phase and apodisation* rarely: the brightness profile is the objective's, and
+learnt from molecules it trades with the focus, which is then held at the edge
+or where it was typed.
 
 ### model.focus_nm
 How far the objective was moved up from the coverslip, as its focus drive
 reads, not the true distance in the sample.  An error of a few hundred
-nanometres changes little.  On *auto* and *in situ* it shows what was found
-for this file, once a Preview or a Run has found it.
+nanometres changes little.  On *coverslip edge* it shows what was found for
+this file -- the edge, and the focus learnt -- once a Preview or a Run has
+found it.
 
 ### model.medium
 What the *sample* is in, which can differ from what the calibration's
@@ -616,7 +636,7 @@ z instead of the PSF width:
 | --- | --- |
 | `x_nm`, `y_nm` | the position on the camera chip (the camera ROI's corner added) |
 | `camera_channel` | on *two channels*: which channel saw it, 0 the main one |
-| `z_nm` | height relative to the calibration's focal plane, in objective nanometres; drawn for a focus in the sample (*focus* not *as calibrated*), the height above the coverslip |
+| `z_nm` | height relative to the calibration's focal plane, in objective nanometres; drawn for a focus in the sample (*focus* not *beads' focus*), the height above the coverslip |
 | `z_err_nm` | its precision (CRLB) |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm` | the lateral precision (CRLB) |
 | `photons`, `background`, `photons_err`, `background_err` | $N$, $b$ and their CRLB |
