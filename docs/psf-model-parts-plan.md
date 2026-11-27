@@ -214,7 +214,31 @@ robust sd; blink-pair z (1 = honest errors); the share more than 50 nm below the
   reference -- the held pupil is wrong -- so (1) the phase should start from the edge's focus and fall back to the
   edge, not to a focus learnt with a wrong pupil; (2) the guard should also check the edge: a model that puts more
   than a share of the localizations below the coverslip (Sep 22--32 % against 3--7 % for every model kept) is
-  refused.  Not built yet.
+  refused.
+
+**Built and measured again (the same day)**: with a theory start the first stage holds the focus at the edge's
+and the phase starts there (`depth.insitu_focus`); and `judged` refuses a model whose final learning puts more
+than 15 % of its molecules more than 50 nm under the coverslip (`depth.learnt_below`, `BELOW_SHARE`) -- the
+learning's own heights (``emitter.xyz``): the rounds' heights are localised before the last learning, with the
+model before, and read 19 % for Sep's good bead model, which a first try refused.  Rows appended to the jsonl:
+
+| data | run | focus (edge) nm | guard's share under | bias, sd vs beads nm | blink z | below (fit) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Sep | beads/phase | 568 (640), kept | 1.5 % | -- | 1.31 | 3.7 % |
+| | theory/phase | 590 (590), phase refused: 27 % under | -- | +68, 29 | 1.42 | 2.1 % |
+| | nominal/phase | 568 (568), phase refused: 32 % under | -- | +54, 32 | 1.42 | 2.5 % |
+| Jan | beads/phase | 431 (478), kept | 2.4 % | -- | 1.15 | 4.7 % |
+| | theory/phase | 455 (498), kept | 0.2 % | +22, 8 | 1.25 | 2.7 % |
+| | nominal/phase | 458 (508), kept | 0.6 % | +26, 9 | 1.25 | 2.9 % |
+| Aug | beads/phase | 654 (587), refused by the depth guard (+2925 nm) | -- | -- | 0.55 | 5.2 % |
+| | theory/phase | 604 (604), phase refused (held out, -0.2 nats) | -- | -41, 22 | 0.80 | 12 % |
+
+* No run fails badly any more: Sep from theory is +68 nm instead of -245, at the edge with the blur learnt.
+* **But the phase is learnt from theory only on Jan** (+22 nm, just over the 20 nm asked).  On Sep the phase learnt
+  from the theory puts a quarter of the molecules under the coverslip, where the beads' pupil learns it right; on
+  Aug the held-out molecules refuse it.  Why the theory's phase learning fails on Sep (590 nm, Cy3B, γ 0.20 from
+  the far-red pupil, astigmatism +62 nm) is open: the twin and the even modes' sign (`TWIN_DECISIVE_NATS`), and the
+  γ of another colour, are the first suspects.
 
 ## Open
 
