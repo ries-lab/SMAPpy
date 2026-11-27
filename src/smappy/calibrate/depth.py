@@ -405,6 +405,8 @@ class AutoDepth:
     fallback: Optional[str] = None
     # in situ started from the coverslip's edge: the edge's focus, shown beside the one learnt (`focus_hint`)
     edge_nm: Optional[float] = None
+    # in situ: the share of the molecules' heights more than `BELOW_NM` under the coverslip, as the model put them
+    below: Optional[float] = None
 
 
 def _next_focus(passes, paraxial: float) -> float:
@@ -494,6 +496,11 @@ LEGACY_LEARN = {"focus": "blur", "aberrations": "phase", "everything": "apodisat
 #: this from the focus learnt alone.  On M2 (docs/insitu-fitting-plan.md, Open) the pupils that were right moved it
 #: by 143--289 nm; August's *everything*, which put every localization a micrometre too high, by 1026 nm
 DEPTH_GUARD_NM = 500.0
+#: the edge guard (`judged`): a learnt model that puts more than this share of the molecules' heights more than
+#: `BELOW_NM` under the coverslip is refused -- on M2 every model kept put 3--7 % there, the theory start's that
+#: ran away on Sep 22--32 % (docs/psf-model-parts-plan.md, "Measured")
+BELOW_SHARE = 0.15
+BELOW_NM = 50.0
 
 
 def learn_word(learn: str) -> str:
@@ -563,15 +570,27 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
         raise ValueError(f"learn: one of {', '.join(LEARN_HOLDS)}, not {learn!r}")
     if hold_focus and focus_nm is None:
         raise ValueError("a focus held needs the focus: type it")
+    # a start drawn in theory (`microscope_psf.theory_pupil`) lacks the objective's own aberrations: a focus
+    # learnt with it held makes up for them (Sep on M2: from the edge's 590 to 163 nm), so the stage that holds
+    # it never moves the focus from where it starts -- the edge or the typed one -- and the phase starts there
+    from .microscope_psf import is_theory
+    theory = is_theory(cal) and focus_nm is not None
+    held_first = hold_focus or theory
     if learn == "blur":
-        return _insitu(cal, paths, camera, n_med, focus_nm, "blur", InSituSettings(molecules=molecules), rounds,
-                       progress, cancel, hold_focus=hold_focus)
+        out = _insitu(cal, paths, camera, n_med, focus_nm, "blur", InSituSettings(molecules=molecules), rounds,
+                      progress, cancel, hold_focus=held_first)
+        if theory and not hold_focus:
+            out.notes.append("the start is the microscope's optics in theory: the focus is held at the edge's, "
+                             "since with the theory's aberrations held it would make up for the objective's own; "
+                             "learn the phase for it to be learnt")
+        return out
     from .insitu_run import InSituModelSettings
     detection = InSituSettings()
     first = _insitu(cal, paths, camera, n_med, focus_nm, "blur", detection, rounds, progress, cancel,
-                    hold_focus=hold_focus)
-    second = _insitu(cal, paths, camera, n_med, first.focus_nm, learn, detection, InSituModelSettings().max_rounds,
-                     progress, cancel, rois=first.result.rois, hold_focus=hold_focus)
+                    hold_focus=held_first)
+    second = _insitu(cal, paths, camera, n_med, focus_nm if theory else first.focus_nm, learn, detection,
+                     InSituModelSettings().max_rounds, progress, cancel, rois=first.result.rois,
+                     hold_focus=hold_focus)
     return judged(first, second, learn, progress)
 
 
@@ -633,7 +652,8 @@ def _insitu(cal, paths, camera, n_med, focus_nm, learn: str, detection, rounds: 
     edge = last.edge
     out = AutoDepth(focus, np.nan if edge is None else edge.sd_nm, 0.0 if edge is None else edge.spike,
                     len(last.used), heights=h - (0.0 if edge is None else edge.shift_nm), errors=err,
-                    method="in situ", spline=spline, blur_nm=blur)
+                    method="in situ", spline=spline, blur_nm=blur,
+                    below=learnt_below(result.cal))
     out.notes += list(result.messages)
     out.cal, out.drawn, out.result = result.cal, drawn, result
     return out
@@ -676,11 +696,24 @@ def insitu_dual(dual, paths, camera, n_med: Optional[float] = None, focus_nm: Op
     return judged(first, second, learn, progress)
 
 
+def learnt_below(cal) -> Optional[float]:
+    """The share of the molecules ``cal`` (a uipsf `Calibration`) learnt from that its final model puts more than
+    `BELOW_NM` under the coverslip: their heights as the last learning left them (``emitter.xyz``), not the
+    round's heights, which were localised before it with the model before (`insitu_rounds.Round.heights`) --
+    on M2 Sep those said 19 % for a model whose fit put 3.6 % there.  None where the model does not say."""
+    try:
+        h = cal.result.params.physical()["emitter.xyz"][:, 2].detach().cpu().double().numpy()
+    except Exception:
+        return None
+    h = h[np.isfinite(h)]
+    return float(np.mean(h < -BELOW_NM)) if len(h) else None
+
+
 def judged(first: AutoDepth, second: AutoDepth, learn: str, progress=None) -> AutoDepth:
     """The focus-only run ``first`` or the run that learnt ``learn`` too, ``second``: ``second`` only if it explains
     the molecules held out of both better (`insitu_run.heldout_deviance`) and its focus stays within
-    `DEPTH_GUARD_NM` of ``first``'s -- else ``first`` with a warning and ``fallback`` set
-    (docs/insitu-fitting-plan.md §2).  The guard is the depth's own check: where no molecule marks the coverslip
+    `DEPTH_GUARD_NM` of ``first``'s and leaves no more than `BELOW_SHARE` of the heights under the coverslip --
+    else ``first`` with a warning and ``fallback`` set (docs/insitu-fitting-plan.md §2).  The guard is the depth's own check: where no molecule marks the coverslip
     the apodisation and the focus trade, and a better fit of the held-out molecules was bought on M2 with the
     focus a micrometre off; a gain in nats cannot see that."""
     from .insitu_run import heldout_deviance
@@ -695,6 +728,13 @@ def judged(first: AutoDepth, second: AutoDepth, learn: str, progress=None) -> Au
                               f"alone ({first.focus_nm:.0f} nm), more than the {DEPTH_GUARD_NM:.0f} nm a "
                               f"right pupil moves it: fitted with the start's aberrations and the focus learnt; "
                               f"type the focus if it is known")
+        first.fallback = learn
+        return first
+    if second.below is not None and second.below > BELOW_SHARE:
+        first.messages.append(f"the {word} learnt put {100 * second.below:.0f} % of the molecules more than "
+                              f"{BELOW_NM:.0f} nm under the coverslip (the focus alone: "
+                              f"{100 * (first.below or 0):.0f} %): fitted with the start's aberrations and the "
+                              f"focus learnt; type the focus if it is known")
         first.fallback = learn
         return first
     if held["blur"] is None or held[learn] is None:
@@ -757,7 +797,8 @@ def _insitu_dual(dual, start, paths, camera, n_med, focus_nm, learn: str, detect
     edge = last.edge
     out = AutoDepth(focus, np.nan if edge is None else edge.sd_nm, 0.0 if edge is None else edge.spike,
                     len(last.used), heights=h - (0.0 if edge is None else edge.shift_nm), errors=err,
-                    method="in situ", spline=spline, blur_nm=blur)
+                    method="in situ", spline=spline, blur_nm=blur,
+                    below=learnt_below(result.cal))
     out.notes += list(result.messages)
     out.cal, out.drawn, out.result = result.cal, drawn, result
     return out
@@ -803,7 +844,7 @@ def keep(key, result: AutoDepth) -> Optional[Path]:
                                                        errors=result.errors.tolist(), notes=result.notes,
                                                        messages=result.messages, n=result.n,
                                                        heldout=result.heldout, fallback=result.fallback,
-                                                       edge_nm=result.edge_nm)
+                                                       edge_nm=result.edge_nm, below=result.below)
         save(path, result.cal, result.spline, overwrite=True)
         return path
     except Exception:
@@ -830,7 +871,8 @@ def kept(key, dual: bool = False) -> Optional[AutoDepth]:
                         heights=np.asarray(record.get("heights", []), float),
                         errors=np.asarray(record.get("errors", []), float), method="in situ", spline=spline,
                         blur_nm=record.get("blur_nm"), heldout=record.get("heldout"),
-                        fallback=record.get("fallback"), edge_nm=record.get("edge_nm"))
+                        fallback=record.get("fallback"), edge_nm=record.get("edge_nm"),
+                        below=record.get("below"))
         out.notes = list(record.get("notes", [])) + [f"kept from an earlier run: {path}"]
         out.messages = list(record.get("messages", []))
         return out

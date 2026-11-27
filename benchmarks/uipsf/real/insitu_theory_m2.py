@@ -168,6 +168,7 @@ def main():
                        edge_nm=None if found is None or found.edge_nm is None else round(found.edge_nm, 1),
                        blur_nm=None if found is None or found.blur_nm is None else round(found.blur_nm, 1),
                        fallback=None if found is None else found.fallback,
+                       learnt_below=None if found is None or found.below is None else round(found.below, 4),
                        blink_pairs=pairs(locs, error_columns(locs.columns)),
                        below_coverslip=round(float(np.mean(z < -50)), 4),
                        z_percentiles=[round(float(v)) for v in np.nanpercentile(z, [5, 25, 50, 75, 95])],

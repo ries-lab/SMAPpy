@@ -686,3 +686,52 @@ def test_spline_3d_asks_before_learning_more_than_the_focus_and_hands_learn_on(m
     assert "aberrations" not in plugin._focus_key(focus) and "aberrations" in plugin._focus_key(more)
     monkeypatch.setattr(depth, "found", lambda key: object() if "aberrations" in key else None)
     assert plugin.preflight(Context(), more) is None                       # learnt before: no question
+
+
+def test_a_pupil_that_puts_the_molecules_under_the_coverslip_is_refused(monkeypatch):
+    # M2 Sep from theory: a fifth of the localizations under the coverslip, a focus far from the edge, and
+    # still within the depth guard of the focus alone
+    from types import SimpleNamespace
+
+    from smappy.calibrate import depth, insitu_run
+
+    def one(cal, paths, camera, n_med, focus_nm, learn, detection, rounds, progress, cancel, rois=None,
+            hold_focus=False):
+        rois = rois or SimpleNamespace(ids=lambda state: np.arange(7))
+        out = depth.AutoDepth(500.0 if learn == "blur" else 300.0, 10.0, 0.1, 50, method="in situ",
+                              below=0.04 if learn == "blur" else 0.22)
+        out.result = SimpleNamespace(learn=learn, rois=rois)
+        return out
+    monkeypatch.setattr(depth, "_insitu", one)
+    monkeypatch.setattr(insitu_run, "heldout_deviance", lambda result: 10.0 if result.learn == "blur" else 1.0)
+    found = depth.insitu_focus(None, ["movie.tif"], CAMERA, learn="phase")
+    assert found.focus_nm == 500.0 and found.fallback == "phase"
+    assert any("22 %" in m and "under the coverslip" in m for m in found.messages)
+
+
+def test_a_theory_start_holds_the_focus_at_the_edge_until_the_phase_is_learnt(monkeypatch):
+    from types import SimpleNamespace
+
+    from smappy.calibrate import depth, insitu_run, microscope_psf
+    runs = []
+
+    def one(cal, paths, camera, n_med, focus_nm, learn, detection, rounds, progress, cancel, rois=None,
+            hold_focus=False):
+        runs.append((learn, focus_nm, hold_focus))
+        out = depth.AutoDepth(focus_nm if hold_focus else 163.0, 10.0, 0.1, 50, method="in situ", below=0.03)
+        out.result = SimpleNamespace(learn=learn, rois=rois or SimpleNamespace(ids=lambda state: np.arange(7)))
+        return out
+    monkeypatch.setattr(depth, "_insitu", one)
+    monkeypatch.setattr(insitu_run, "heldout_deviance", lambda result: 10.0 if result.learn == "blur" else 1.0)
+    monkeypatch.setattr(microscope_psf, "is_theory", lambda cal: True)
+    depth.insitu_focus("theory", ["movie.tif"], CAMERA, focus_nm=590.0, learn="phase")
+    # the first stage holds the edge's focus; the phase starts there and learns the focus
+    assert runs == [("blur", 590.0, True), ("phase", 590.0, False)]
+    runs.clear()
+    found = depth.insitu_focus("theory", ["movie.tif"], CAMERA, focus_nm=590.0, learn="blur")
+    assert runs == [("blur", 590.0, True)] and any("held at the edge" in n for n in found.notes)
+    # a bead start learns the focus in the first stage, as before
+    monkeypatch.setattr(microscope_psf, "is_theory", lambda cal: False)
+    runs.clear()
+    depth.insitu_focus("beads", ["movie.tif"], CAMERA, focus_nm=590.0, learn="phase")
+    assert runs == [("blur", 590.0, False), ("phase", 163.0, False)]
