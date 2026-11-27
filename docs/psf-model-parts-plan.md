@@ -180,6 +180,42 @@ whether both do.  Either way a chain and a batch run the settings, not the windo
   *move* still on top.  Built as Gaussian's rather than with the start's PSFs per channel: the move, measured with
   the spline, takes the Gaussian's few-nm offset out; *learn map* (in situ) refines it further.
 
+## Measured: the theory start on M2 (2026-11-27)
+
+`benchmarks/uipsf/real/insitu_theory_m2.py`, rows in `benchmarks/uipsf/results/insitu_theory_m2.jsonl`; 10000 frames
+each on gpuvm.  *learn* = *phase* from the bead calibration of the day against the same from M2's optics in theory
+(no pupil kept: NA 1.43, the entry's astigmatism for the camera, γ 0.20 from the far-red pupil it keeps) and from
+the theory with a nominal γ; z of the localizations matched to the bead start's, its median difference (bias) and
+robust sd; blink-pair z (1 = honest errors); the share more than 50 nm below the coverslip.
+
+| data | run | focus (edge) nm | bias, sd vs beads nm | blink z | below |
+| --- | --- | --- | --- | --- | --- |
+| Jan, CLTA AF647, Evolve | beads/phase | 431 (478) | -- | 1.17 | 5.1 % |
+| | theory/phase | 453 (517) | +21, 8 | 1.25 | 2.9 % |
+| | nominal/phase | 457 (508) | +25, 9 | 1.26 | 3.0 % |
+| | theory, nothing learnt | 498 (edge) | +54, 8 | 1.37 | 2.1 % |
+| Sep, CLC Cy3B 590 nm | beads/phase | 568 (640) | -- | 1.34 | 3.6 % |
+| | theory/phase | **163** (590), phase refused (-16 nats) | **-245**, 14 | 1.36 | **21.5 %** |
+| | nominal/phase | **86** (568) | **-303**, 22 | 1.33 | **32 %** |
+| | theory, nothing learnt | 590 (edge) | +64, 32 | 1.64 | 2.7 % |
+| Aug, sun1 A647 | beads/phase | 654 (587), **the guard refused** a +2925 nm move | -- | 0.59 | 7.2 % |
+| | theory/phase | 521 (604), phase refused (-0.7 nats) | -100, 20 | 0.76 | 7.9 % |
+| | theory, nothing learnt | 604 (edge) | -43, 23 | 0.87 | 10 % |
+
+* **Jan passes, just**: 21 nm against the 20 nm asked, the blink pairs 7 % worse than the bead start's.
+* **Sep fails, and the guard does not see it**: the first stage, the focus and the blur learnt with the theory's
+  pupil held, moved the focus from the edge's 590 to 163 nm (a theory pupil lacks the objective's spherical
+  aberration, which the focus then makes up for), the phase learnt from there was refused, and the fit kept the bad
+  focus.  The guard compares against that first stage, so it passed; a fifth of the localizations below the
+  coverslip shows it at once.
+* **Aug** has no reference: the bead start itself was refused by the guard (the phase moved the focus by 2.9 µm),
+  as the plan's *everything* was in November.  The theory start lands 100 nm from the bead start's focus alone.
+* **What it says for the design**: with a theory start the first stage (every aberration held) is not a safe
+  reference -- the held pupil is wrong -- so (1) the phase should start from the edge's focus and fall back to the
+  edge, not to a focus learnt with a wrong pupil; (2) the guard should also check the edge: a model that puts more
+  than a share of the localizations below the coverslip (Sep 22--32 % against 3--7 % for every model kept) is
+  refused.  Not built yet.
+
 ## Open
 
 * The depth guard's threshold: the edge's uncertainty from the molecules' count, or a fixed
