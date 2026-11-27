@@ -531,8 +531,13 @@ pins to its tabs is a list, `src/smappy/data/default.gui.yaml` -- a GUI file
 like any other (*View > Workspace > Save* writes the same format), so a new
 plugin that belongs in the shipped GUI gets a line there.  The tabs of one
 technique (MINFLUX, DNA-PAINT, Tracking, 4Pi) are GUI files of their own in
-`src/smappy/data/workspaces/`, added beside a workspace's tabs by *File >
-Workspace > Add tabs* (`workspace.tab_sets`, `Workspace.add_tabs`); their
+`src/smappy/data/workspaces/`, added beside a workspace's tabs by *View >
+Workspace > Tabs* or a tab's right click (`MainWindow.fill_tabs_menu`,
+`workspace.tab_sets`, `Workspace.add_tabs`), where unticking a tab hides it
+(`Tab.hidden`, kept with its plugins) and *Detach* floats it
+(`Tab.detached`, `app.TabWindow`); a tab's page is `MainWindow.tab_page`
+and `show_tab` brings it forward wherever it is, never
+`tabs.setCurrentIndex`; their
 plugins and preset settings are checked by `tests/test_workspace.py`.  Likewise the
 per-region steps a new ROI project starts with are a list,
 `roi_manager.pipeline.DEFAULT_REGION_STEPS`.

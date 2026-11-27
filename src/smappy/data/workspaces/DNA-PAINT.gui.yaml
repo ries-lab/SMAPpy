@@ -1,4 +1,4 @@
-# A tab set: View > Workspace > Add tabs > DNA-PAINT (`workspace.Workspace.add_tabs`).
+# A tab set: View > Workspace > Tabs > DNA-PAINT (`workspace.Workspace.add_tabs`).
 version: 1
 tabs:
 - name: DNA-PAINT

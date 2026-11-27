@@ -1,4 +1,4 @@
-# A tab set: View > Workspace > Add tabs > 4Pi (`workspace.Workspace.add_tabs`).
+# A tab set: View > Workspace > Tabs > 4Pi (`workspace.Workspace.add_tabs`).
 # Both fitters finish with 4Pi z (on by default) and COMET on the phase z.
 version: 1
 tabs:

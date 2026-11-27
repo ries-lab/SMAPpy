@@ -4,8 +4,8 @@
 # tabs in the program, save the GUI, and put the tabs here.  A plugin named
 # here that is not installed is left out when it is read.  `line_above: true`
 # draws a line above a section (right-click it: *Line above*).  The tabs of
-# one technique are not here but in data/workspaces, added by File >
-# Workspace > Add tabs.
+# one technique are not here but in data/workspaces, added by View >
+# Workspace > Tabs, or a tab's right click.
 version: 1
 tabs:
 - name: File

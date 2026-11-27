@@ -197,8 +197,7 @@ class LiveSession:
         The tab is where a user would look for it; a workspace that has
         unpinned it still gets the fit, in the window the Plugins menu opens.
         """
-        for index in range(self.control.tabs.count()):
-            tab = self.control.tabs.widget(index)
+        for index, tab in enumerate(self.control._tab_widgets()):
             slots = getattr(tab, "slots", None)
             if not slots:
                 continue
@@ -207,7 +206,7 @@ class LiveSession:
                     continue
                 panel = slots[instance.id].ensure()
                 if panel is not None:
-                    self.control.tabs.setCurrentIndex(index)
+                    self.control.show_tab(index)
                     tab.open_section(instance.id)
                     return panel
         from .plugin_panel import PluginWindow

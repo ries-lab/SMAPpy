@@ -1,4 +1,4 @@
-# A tab set: View > Workspace > Add tabs > MINFLUX adds this tab to the
+# A tab set: View > Workspace > Tabs > MINFLUX adds this tab to the
 # workspace that is open, beside its own tabs (`workspace.Workspace.add_tabs`).
 # Same format as default.gui.yaml; `values` preset a plugin by dotted name.
 version: 1

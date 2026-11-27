@@ -1,4 +1,4 @@
-# A tab set: View > Workspace > Add tabs > Tracking (`workspace.Workspace.add_tabs`).
+# A tab set: View > Workspace > Tabs > Tracking (`workspace.Workspace.add_tabs`).
 version: 1
 tabs:
 - name: Tracking

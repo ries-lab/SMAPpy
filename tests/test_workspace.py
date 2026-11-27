@@ -434,7 +434,7 @@ def test_the_workspace_is_a_submenu_of_view_and_reset_gives_the_default(window, 
     assert "Workspace" in entries and not any("GUI" in e for e in entries)
     actions = {a.text(): a for a in window.workspace_menu.actions() if a.text()}
     assert list(actions) == ["Save", "Save as...", "Open...", "Recent", "Reset",
-                             "Add tabs", "From data file..."]
+                             "Tabs", "From data file..."]
     set_profile_value(window, 31)
     window.save_gui_to(tmp_path / "mine.gui.yaml")
     actions["Reset"].trigger()
@@ -716,7 +716,8 @@ def test_a_tab_is_renamed_moved_removed_and_added_from_its_right_click(window):
     assert names() == [t.name for t in window.workspace.tabs]
     menu = [a.text() for a in window.tab_menu(1).actions() if a.text()]
     assert menu[:3] == ["Rename...", "Move left", "Move right"]
-    assert menu[3].startswith("Remove ") and "New tab..." in menu and "Add tabs" in menu
+    assert menu[3] == "Detach" and menu[4].startswith("Remove ")
+    assert "New tab..." in menu and "Tabs" in menu
     # the first tab cannot move left, the last not right
     assert not window.tab_menu(0).actions()[1].isEnabled()
     last = len(names()) - 1
@@ -741,3 +742,64 @@ def test_a_tab_is_renamed_moved_removed_and_added_from_its_right_click(window):
     assert pinned >= 0                               # its pins went with it
     # what is left is what a saved GUI writes
     assert [t.name for t in window.collect_workspace().tabs] == names()
+
+
+def _tabs_menu(window):
+    menu = next(a.menu() for a in window.tab_menu(0).actions() if a.text() == "Tabs")
+    return {a.text(): a for a in menu.actions() if a.text()}
+
+
+def test_unticking_a_tab_under_tabs_hides_it_and_ticking_brings_it_back_as_left(window):
+    names = [t.name for t in window.workspace.tabs]
+    ticks = _tabs_menu(window)
+    # every tab ticked, then the tab sets not added, unticked
+    assert [n for n, a in ticks.items() if a.isChecked()] == names
+    assert "Tracking" in ticks and not ticks["Tracking"].isChecked()
+
+    ticks["Tracking"].setChecked(True)               # ticking a set adds it
+    assert window.workspace.tabs[-1].name == "Tracking"
+    index = len(window.workspace.tabs) - 1
+    window.tab_page(index).tab.instances.pop()        # the user changes it
+    left = [i.plugin for i in window.workspace.tabs[-1].instances]
+
+    _tabs_menu(window)["Tracking"].setChecked(False)
+    assert window.workspace.tabs[index].hidden
+    assert not window.tabs.isTabVisible(index)
+    assert window.collect_workspace().to_dict()["tabs"][index]["hidden"] is True
+    # a hidden tab is passed over by a move and by the menu's neighbours
+    assert window._neighbour(index - 1, 1) is None
+
+    _tabs_menu(window)["Tracking"].setChecked(True)
+    assert window.tabs.isTabVisible(index)
+    assert [i.plugin for i in window.workspace.tabs[index].instances] == left
+    assert window.tabs.currentIndex() == index
+
+    # Analysis, a shipped tab, hides as any other; the last shown cannot
+    assert window.show_tab_named("Analysis", False)
+    for name in [t.name for t in window.workspace.tabs][1:]:
+        window.show_tab_named(name, False)
+    assert window._in_strip() == [0]
+    assert not _tabs_menu(window)[window.workspace.tabs[0].name].isEnabled()
+    assert not window.show_tab_named(window.workspace.tabs[0].name, False)
+
+
+def test_a_detached_tab_is_in_a_window_of_its_own_and_closing_it_puts_it_back(window):
+    from smappy.gui.app import TabWindow
+    index = [t.name for t in window.workspace.tabs].index("Analysis")
+    page = window.tab_page(index)
+    assert window.detach_tab(index)
+    tab_window = window._tab_windows["Analysis"]
+    assert isinstance(tab_window, TabWindow) and tab_window.isVisible()
+    page = window.tab_page(index)
+    assert page.window() is tab_window
+    assert not window.tabs.isTabVisible(index)
+    assert window.collect_workspace().to_dict()["tabs"][index]["detached"] is True
+    assert "tab:Analysis" in window.window_geometries()
+    # brought forward where it is: its window, not the strip
+    assert window.show_tab(index) is page and window._tab_windows["Analysis"] is tab_window
+
+    tab_window.close()
+    window.attach_tab("Analysis")                    # what the queued close does
+    assert window.tabs.isTabVisible(index) and window.tabs.currentIndex() == index
+    assert window.tab_page(index).window() is window
+    assert not window.workspace.tabs[index].detached

@@ -86,6 +86,17 @@ def _tab_index(window, name: str) -> int:
     return names.index(name)
 
 
+def _show_tab(window, name: str, shown: bool = True):
+    """*Tabs*: a tab of the workspace shown or hidden, a tab set added."""
+    if any(tab.name == name for tab in window.workspace.tabs):
+        return window.show_tab_named(name, bool(shown))
+    if shown and name in tab_sets():
+        return window.add_tab_set(name)
+    raise ValueError(f"no tab {name!r}: the tabs are "
+                     + ", ".join(t.name for t in window.workspace.tabs)
+                     + "; the tab sets " + ", ".join(tab_sets()))
+
+
 def menu_items(window) -> List[str]:
     """Every item of the window's menus, by path ("View/Workspace/Open"):
     what the test checks the actions and `LEFT_OUT` against."""
@@ -122,9 +133,9 @@ def _paths(path) -> List[str]:
 
 def _render_tab(window):
     from .render_tab import RenderTab
-    for i in range(window.tabs.count()):
-        if isinstance(window.tabs.widget(i), RenderTab):
-            return i, window.tabs.widget(i)
+    for i, page in enumerate(window._tab_widgets()):
+        if isinstance(page, RenderTab):
+            return i, page
     raise ToolError("the workspace has no Render tab")
 
 
@@ -176,17 +187,17 @@ def actions_of(window) -> Dict[str, Action]:
                                else float(frame_time_ms))
 
     def show_tab(name):
-        names = [window.tabs.tabText(i) for i in range(window.tabs.count())]
+        names = [tab.name for tab in window.workspace.tabs]
         found = [i for i, n in enumerate(names) if n.lower() == str(name).strip().lower()]
         if not found:
             raise ToolError(f"no tab {name!r}; there are {', '.join(names)}")
-        window.tabs.setCurrentIndex(found[0])
+        window.show_tab(found[0])
         window.show()
         window.raise_()
 
     def render_tab():
         index, tab = _render_tab(window)
-        window.tabs.setCurrentIndex(index)
+        window.show_tab(index)
         return tab
 
     def select_layer(layer):
@@ -280,11 +291,19 @@ def actions_of(window) -> Dict[str, Action]:
                    _paths(path)[0]), {"path": PATH}, ("path",)),
         Action("View/Workspace/Reset", "The shipped workspace, now and at the "
                "next start.", window.load_default_gui),
-        Action("View/Workspace/Add tabs", "A shipped tab set -- the plugins of "
-               "one technique -- added beside the tabs there are.",
-               lambda name: window.add_tab_set(name),
-               {"name": {"type": "string",
-                         "enum": list(tab_sets())}}, ("name",)),
+        Action("View/Workspace/Tabs", "A tab shown or hidden (a hidden tab "
+               "keeps its plugins and values), or a shipped tab set -- the "
+               "plugins of one technique -- added beside the tabs there are.",
+               lambda name, shown=True: _show_tab(window, name, shown),
+               {"name": {"type": "string", "description": "a tab's name, or one of "
+                         "the tab sets: " + ", ".join(tab_sets())},
+                "shown": {"type": "boolean", "description": "default true"}},
+               ("name",)),
+        Action("View/Workspace/Detach tab", "A tab in a window of its own; "
+               "attached again when that window is closed, or by attach.",
+               lambda tab, attach=False: (window.attach_tab(tab) if attach else
+                                          window.detach_tab(_tab_index(window, tab))),
+               {"tab": {"type": "string"}, "attach": {"type": "boolean"}}, ("tab",)),
         # a tab's right click (`MainWindow.tab_menu`): no menu bar item
         Action("View/Workspace/Rename tab", "A tab given another name.",
                lambda tab, name: window.rename_tab(_tab_index(window, tab), name),
@@ -293,7 +312,7 @@ def actions_of(window) -> Dict[str, Action]:
                lambda tab, by: window.move_tab(_tab_index(window, tab), int(by)),
                {"tab": {"type": "string"}, "by": {"type": "integer"}}, ("tab", "by")),
         Action("View/Workspace/Remove tab", "A tab removed with what is pinned in "
-               "it; Add tabs brings a technique's back.",
+               "it; Tabs hides one and keeps them, and brings a technique's back.",
                lambda tab: window.remove_tab(_tab_index(window, tab), ask=False),
                {"tab": {"type": "string"}}, ("tab",)),
         Action("View/Workspace/New tab", "An empty tab, after the tab named or "

@@ -46,7 +46,7 @@ RECENT_MAX = 8
 DEFAULT_GUI = Path(__file__).resolve().parent / "data" / "default.gui.yaml"
 
 #: Tabs for one technique -- MINFLUX, DNA-PAINT, tracking, 4Pi -- that
-#: *View > Workspace > Add tabs* puts beside the tabs one has, rather than in
+#: *View > Workspace > Tabs* (and a tab's right click) puts beside the tabs one has, rather than in
 #: place of them: the default stays general, and a lab that also renders and
 #: clusters keeps what it built.  GUI files like any other, one or more tabs
 #: each, some plugins preset for the technique (`values`).
@@ -96,6 +96,13 @@ class Tab:
     kind: str = "plugins"          # "plugins", or a widget: "render", "roi"
     header: str = ""               # a header widget above a plugin list
     instances: List[Instance] = field(default_factory=list)
+    # unticked in the *Tabs* menu: kept, with its plugins and values, but not
+    # shown -- so ticking it again brings back the tab as it was left, not
+    # the shipped one
+    hidden: bool = False
+    # floated into a window of its own (*Detach*); closing that window puts
+    # it back in the strip
+    detached: bool = False
 
     def index_of(self, instance_id: str) -> int:
         return next(i for i, x in enumerate(self.instances) if x.id == instance_id)
@@ -153,6 +160,9 @@ class Workspace:
                     instance.pop("chain", None)
                 if not instance.get("line_above"):
                     instance.pop("line_above", None)
+            for flag in ("hidden", "detached"):     # said only when set
+                if not tab.get(flag):
+                    tab.pop(flag, None)
         data = {"version": self.version, "tabs": tabs, "layout": dict(self.layout)}
         if self.filters is not None:
             data["filters"] = {f: [None if v is None else float(v) for v in b]
@@ -190,7 +200,9 @@ class Workspace:
                     chain=chain if isinstance(chain, dict) else None,
                     line_above=bool(item.get("line_above", False))))
             tabs.append(Tab(name=str(raw["name"]), kind=str(raw.get("kind") or "plugins"),
-                            header=str(raw.get("header") or ""), instances=instances))
+                            header=str(raw.get("header") or ""), instances=instances,
+                            hidden=bool(raw.get("hidden", False)),
+                            detached=bool(raw.get("detached", False))))
         layout = data.get("layout")
         windows = data.get("windows")
         windows = ({str(k): v for k, v in windows.items() if isinstance(v, str) and v}
@@ -202,15 +214,17 @@ class Workspace:
     def add_tabs(self, other: "Workspace") -> List[str]:
         """``other``'s tabs appended to these, as copies with their own
         identities; a tab whose name is here already is left out (adding a
-        set twice gives one tab, not two of a name).  The names added."""
-        have = {tab.name for tab in self.tabs}
+        set twice gives one tab, not two of a name) but shown if it was
+        hidden -- as the user left it, not as shipped.  The names added."""
+        have = {tab.name: tab for tab in self.tabs}
         added = []
         for tab in other.tabs:
             if tab.name in have:
+                have[tab.name].hidden = False
                 continue
             self.tabs.append(Tab(name=tab.name, kind=tab.kind, header=tab.header,
                                  instances=[i.copy() for i in tab.instances]))
-            have.add(tab.name)
+            have[tab.name] = self.tabs[-1]
             added.append(tab.name)
         return added
 

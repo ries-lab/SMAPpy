@@ -235,9 +235,12 @@ class ControlWindow(QMainWindow):
                 "QMenuBar { border-bottom: 1px solid palette(mid); }")
             self.tabs.setStyleSheet(TAB_STYLE)
         self.plugin_tabs: List[PluginTab] = []
+        self._tab_pages: List[QWidget] = []        # every tab's page (`tab_page`)
+        self._tab_windows: Dict[str, "TabWindow"] = {}   # detached tabs' windows
         self.roi_tab: Optional[ROIHeader] = None
-        # a tab's right click: rename, move, remove, add (`tab_menu`), the
-        # one place the tabs are edited -- Preferences had a page of them
+        # a tab's right click: rename, move, detach, remove, add, show and
+        # hide (`tab_menu`), the place the tabs are edited -- Preferences
+        # had a page of them
         bar = self.tabs.tabBar()
         bar.setContextMenuPolicy(Qt.CustomContextMenu)
         bar.customContextMenuRequested.connect(self._tab_menu)
@@ -345,19 +348,21 @@ class ControlWindow(QMainWindow):
                 ("Recent", None, None),
                 ("Reset", self.load_default_gui,
                  "the shipped workspace, now and at the next start"),
-                ("Add tabs", None, None),
+                ("Tabs", None, None),
                 (None, None, None),
                 # a lambda: `triggered`'s checked would arrive as the path
                 ("From data file...", lambda: self.restore_state_from_file(),
                  "the workspace a localization file was saved with")):
             if text is None:
                 self.workspace_menu.addSeparator()
-            elif slot is None and text == "Add tabs":
-                # the shipped tab sets (`workspace.tab_sets`), beside the tabs
-                # one has: a technique's plugins without losing one's own
-                self.tab_sets_menu = _add_menu(self.workspace_menu, text, self)
-                self.tab_sets_menu.setToolTipsVisible(True)
-                self.tab_sets_menu.aboutToShow.connect(self._fill_tab_sets)
+            elif slot is None and text == "Tabs":
+                # a tick per tab, and the shipped tab sets (`workspace.tab_sets`)
+                # beside the tabs one has: a technique's plugins without
+                # losing one's own -- the same as a tab's right click
+                self.tabs_menu = _add_menu(self.workspace_menu, text, self)
+                self.tabs_menu.setToolTipsVisible(True)
+                self.tabs_menu.aboutToShow.connect(
+                    lambda: self.fill_tabs_menu(self.tabs_menu))
             elif slot is None:
                 # filled as it opens: a file saved in another window, or
                 # deleted since, is right without anything to keep in step
@@ -666,7 +671,7 @@ class ControlWindow(QMainWindow):
         if pinned is None:
             return None
         index, tab, instance = pinned
-        self.tabs.setCurrentIndex(index)
+        self.show_tab(index)
         tab.open_section(instance.id)
         slot = tab.slots.get(instance.id)
         return slot.ensure() if slot is not None else None
@@ -852,13 +857,22 @@ class ControlWindow(QMainWindow):
         return None
 
     def build_tabs(self) -> None:
-        """(Re)build the tab strip from the workspace."""
+        """(Re)build the tab strip from the workspace.
+
+        Every tab of the workspace has its place in the strip, hidden or
+        detached ones too (`setTabVisible`), so a place in the strip is a
+        place in `workspace.tabs`; a detached tab's place holds an empty
+        stand-in and its page is in a `TabWindow` -- `tab_page` is the page
+        wherever it is, `show_tab` brings it forward wherever it is.
+        """
         current = self.tabs.tabText(self.tabs.currentIndex()) if self.tabs.count() else ""
         for tab in self.plugin_tabs:                # keep the values before the
             tab.save_values()                       # widgets go
+        self._close_tab_windows(keep_places=True)
         while self.tabs.count():
             self.tabs.removeTab(0)
         self.plugin_tabs = []
+        self._tab_pages = []
         for tab in self.workspace.tabs:
             if tab.kind == "render":
                 widget = RenderTab(self.session, self.render_window.view)
@@ -867,14 +881,20 @@ class ControlWindow(QMainWindow):
                 header = tab.header or ("analysis" if tab.name == "Analysis" else "")
                 widget = PluginTab(tab, self.session, header=self.header_for(header))
                 self.plugin_tabs.append(widget)
-            self.tabs.addTab(widget, tab.name)
+            self._tab_pages.append(widget)
+            if tab.detached and not tab.hidden:
+                index = self.tabs.addTab(QWidget(), tab.name)
+                self._float_tab(tab.name, widget)
+            else:
+                index = self.tabs.addTab(widget, tab.name)
+            self.tabs.setTabVisible(index, not (tab.hidden or tab.detached))
         # a rebuild keeps the tab one is on; a start is on File, whatever
-        # tab the GUI was saved from
+        # tab the GUI was saved from -- or the first shown, if that one is not
         wanted = current or "File"
-        for i in range(self.tabs.count()):
-            if self.tabs.tabText(i) == wanted:
-                self.tabs.setCurrentIndex(i)
-                break
+        shown = [i for i in range(self.tabs.count()) if self.tabs.isTabVisible(i)]
+        found = [i for i in shown if self.tabs.tabText(i) == wanted]
+        if found or shown:
+            self.tabs.setCurrentIndex((found or shown)[0])
         saved = self.workspace.layout.get("open", {})
         for tab, widget in zip(self.workspace.tabs, self._tab_widgets()):
             if not isinstance(widget, PluginTab):
@@ -889,31 +909,163 @@ class ControlWindow(QMainWindow):
 
     # ------------------------------------------------- a tab's right click
     def tab_menu(self, index: int) -> QMenu:
-        """What a right click on tab ``index`` offers: rename, move, remove,
-        a new tab after it and the tab sets.  Each changes the workspace
-        and rebuilds the strip."""
+        """What a right click on tab ``index`` offers: rename, move, detach,
+        remove, a new tab after it and *Tabs*, which shows and hides them.
+        Each changes the workspace and rebuilds the strip."""
         menu = QMenu(self)
-        count = len(self.workspace.tabs)
         name = self.workspace.tabs[index].name
         menu.addAction("Rename...", lambda: self.rename_tab(index))
-        menu.addAction("Move left", lambda: self.move_tab(index, -1)).setEnabled(index > 0)
+        menu.addAction("Move left", lambda: self.move_tab(index, -1)).setEnabled(
+            self._neighbour(index, -1) is not None)
         menu.addAction("Move right", lambda: self.move_tab(index, 1)).setEnabled(
-            index < count - 1)
+            self._neighbour(index, 1) is not None)
+        menu.addAction("Detach", lambda: self.detach_tab(index)).setEnabled(
+            len(self._in_strip()) > 1)
         menu.addAction(f"Remove {name}...", lambda: self.remove_tab(index)).setEnabled(
-            count > 1)
+            len(self._in_strip()) > 1)
         menu.addSeparator()
         menu.addAction("New tab...", lambda: self.new_tab(index + 1))
-        sets = menu.addMenu("Add tabs")
-        have = {tab.name for tab in self.workspace.tabs}
-        for set_name in workspace_module.tab_sets():
-            action = sets.addAction(set_name, lambda n=set_name: self.add_tab_set(n))
-            action.setCheckable(True)
-            action.setChecked(set_name in have)
+        tabs = menu.addMenu("Tabs")
+        tabs.setToolTipsVisible(True)
+        self.fill_tabs_menu(tabs)
         return menu
+
+    def fill_tabs_menu(self, menu: QMenu) -> None:
+        """A tick per tab, which shows or hides it, then the shipped tab sets
+        not added yet (`workspace.tab_sets`), unticked: ticking one adds it.
+        A hidden tab keeps its plugins and values; the last tab in the strip
+        cannot be hidden."""
+        menu.clear()
+        strip = self._in_strip()
+        for i, tab in enumerate(self.workspace.tabs):
+            action = menu.addAction(tab.name)
+            action.setCheckable(True)
+            action.setChecked(not tab.hidden)
+            if tab.detached and not tab.hidden:
+                action.setToolTip("in a window of its own")
+            action.setEnabled(tab.hidden or strip != [i])
+            action.toggled.connect(lambda on, n=tab.name: self.show_tab_named(n, on))
+        have = {tab.name for tab in self.workspace.tabs}
+        sets = [n for n in workspace_module.tab_sets() if n not in have]
+        if sets:
+            menu.addSeparator()
+        for name in sets:
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setToolTip(f"a tab of the {name} plugins beside these tabs")
+            action.toggled.connect(lambda on, n=name: on and self.add_tab_set(n))
+
+    def _in_strip(self) -> List[int]:
+        """The places of the tabs shown in the strip: not hidden, not detached."""
+        return [i for i, t in enumerate(self.workspace.tabs)
+                if not (t.hidden or t.detached)]
+
+    def _neighbour(self, index: int, by: int) -> Optional[int]:
+        """The place of the next tab in the strip to the left (-1) or right
+        (1) of ``index``, or None: a hidden tab is passed over."""
+        strip = [i for i in self._in_strip() if (i - index) * by > 0]
+        return (max(strip) if by < 0 else min(strip)) if strip else None
+
+    def tab_page(self, index: int) -> QWidget:
+        """Tab ``index``'s page, in the strip or in a window of its own."""
+        return self._tab_pages[index]
+
+    def show_tab(self, index: int) -> QWidget:
+        """Tab ``index`` in front, wherever it is: shown if it was hidden,
+        its window raised if it is detached.  Its page."""
+        tab = self.workspace.tabs[index]
+        if tab.hidden:
+            self.show_tab_named(tab.name, True)
+        window = self._tab_windows.get(tab.name)
+        if window is not None:
+            window.show()
+            window.raise_()
+            window.activateWindow()
+        else:
+            self.tabs.setCurrentIndex(index)
+        return self._tab_pages[index]
+
+    def show_tab_named(self, name: str, shown: bool = True) -> bool:
+        """The tab ``name`` shown or hidden; whether anything changed.  A
+        hidden tab keeps its plugins and values, and comes back as it was;
+        the last tab in the strip is not hidden."""
+        index = _tab_place(self.workspace, name)
+        tab = self.workspace.tabs[index]
+        if tab.hidden == (not shown):
+            return False
+        if not shown and self._in_strip() == [index]:
+            return False
+        self.collect_workspace()
+        tab.hidden = not shown
+        self.build_tabs()
+        if shown and not tab.detached:
+            self.tabs.setCurrentIndex(index)
+        return True
+
+    def detach_tab(self, index: int) -> bool:
+        """Tab ``index`` in a window of its own; closing the window puts it
+        back.  Not the last tab in the strip."""
+        tab = self.workspace.tabs[index]
+        if tab.detached or tab.hidden or len(self._in_strip()) <= 1:
+            return False
+        self.collect_workspace()
+        tab.detached = True
+        self.build_tabs()
+        return True
+
+    def attach_tab(self, name: str) -> bool:
+        """A detached tab back in the strip, and in front."""
+        index = _tab_place(self.workspace, name)
+        tab = self.workspace.tabs[index]
+        window = self._tab_windows.get(name)
+        if window is not None:               # its place, for the next detach
+            self.workspace.windows[f"tab:{name}"] = bytes(
+                window.saveGeometry().toBase64()).decode()
+        if not tab.detached:
+            return False
+        self.collect_workspace()
+        tab.detached = False
+        self.build_tabs()
+        self.tabs.setCurrentIndex(index)
+        return True
+
+    def _close_tab_windows(self, keep_places: bool = False) -> None:
+        """The detached tabs' windows closed quietly, the tabs still detached;
+        ``keep_places``: where each was, for the tab's next window."""
+        for name, window in list(self._tab_windows.items()):
+            if keep_places:
+                self.workspace.windows[f"tab:{name}"] = bytes(
+                    window.saveGeometry().toBase64()).decode()
+            window.quiet = True
+            window.close()
+            window.deleteLater()
+        self._tab_windows = {}
+
+    def _float_tab(self, name: str, page: QWidget) -> None:
+        """``page`` in a window of its own, where it was last, else beside
+        this window at its size."""
+        window = TabWindow(name, page, self)
+        window.closed.connect(lambda n=name: QTimer.singleShot(0, lambda: self._attach_later(n)))
+        self._tab_windows[name] = window
+        if self.workspace.windows.get(f"tab:{name}"):
+            self._place(f"tab:{name}", window)
+        else:
+            window.resize(self.tabs.width() or CONTROL_WIDTH, self.height())
+            place_beside(window, self)
+        window.show()
+
+    def _attach_later(self, name: str) -> None:
+        # out of the window's closeEvent, which `build_tabs` would delete it
+        # in; a singleShot callable must not raise (CLAUDE.md)
+        try:
+            if any(t.name == name for t in self.workspace.tabs):
+                self.attach_tab(name)
+        except Exception:
+            traceback.print_exc()
 
     def _tab_menu(self, at) -> None:
         index = self.tabs.tabBar().tabAt(at)
-        if 0 <= index < len(self.workspace.tabs):
+        if 0 <= index < len(self.workspace.tabs) and self.tabs.isTabVisible(index):
             self.tab_menu(index).exec(self.tabs.tabBar().mapToGlobal(at))
 
     def _changed_tabs(self) -> None:
@@ -949,13 +1101,14 @@ class ControlWindow(QMainWindow):
         return True
 
     def move_tab(self, index: int, by: int) -> bool:
-        """Tab ``index`` moved ``by`` places, -1 left and 1 right."""
+        """Tab ``index`` moved past the next tab in the strip, -1 left and 1
+        right: hidden and detached tabs, not in the strip, are passed over."""
         tabs = self.workspace.tabs
-        j = index + by
-        if not 0 <= j < len(tabs):
+        j = self._neighbour(index, by)
+        if j is None:
             return False
         self.collect_workspace()
-        tabs[index], tabs[j] = tabs[j], tabs[index]
+        tabs.insert(j, tabs.pop(index))
         self.build_tabs()
         return True
 
@@ -963,13 +1116,14 @@ class ControlWindow(QMainWindow):
         """Tab ``index`` gone, with what is pinned in it, after a question when
         there is something pinned.  The last tab stays."""
         tabs = self.workspace.tabs
-        if len(tabs) <= 1:
+        if self._in_strip() == [index]:
             return False
         tab = tabs[index]
         if ask and tab.instances:
             question = (f"Remove the {tab.name} tab?\n\n{len(tab.instances)} pinned "
-                        "plugin(s) go with it.  File > Workspace > Add tabs brings a "
-                        "technique's tab back; Plugins has every plugin.")
+                        "plugin(s) go with it.  To put it away and keep them, "
+                        "untick it under Tabs instead.  Tabs brings a technique's "
+                        "tab back as shipped; Plugins has every plugin.")
             if QMessageBox.question(self, "Remove tab", question) != QMessageBox.Yes:
                 return False
         self.collect_workspace()
@@ -1003,7 +1157,9 @@ class ControlWindow(QMainWindow):
         return True
 
     def _tab_widgets(self) -> List[QWidget]:
-        return [self.tabs.widget(i) for i in range(self.tabs.count())]
+        """Every tab's page, in the order of the workspace's tabs, wherever
+        it is (`tab_page`)."""
+        return list(self._tab_pages)
 
     def save_bug_report(self) -> None:
         """The log, the crash stacks and what is open, zipped for an issue."""
@@ -1103,6 +1259,7 @@ class ControlWindow(QMainWindow):
     def apply_workspace_state(self, state: dict, label: str) -> list:
         """The tabs and values of a file's `gui` group in place of these;
         the plugins it names that are not installed here."""
+        self._close_tab_windows()        # the old workspace's
         self.workspace = Workspace.from_dict(state)
         missing = self.workspace.prune(list(plugins.refs()))
         self.build_tabs()
@@ -1241,6 +1398,10 @@ class ControlWindow(QMainWindow):
         from .plugin_panel import PluginPanel
         active = front if front is not None else QApplication.activeWindow()
         tabs = list(zip(self.workspace.tabs, self._tab_widgets()))
+        index = self.tabs.currentIndex()
+        if isinstance(active, TabWindow) and active.page in self._tab_pages:
+            # a detached tab: what is in front of it, as of the strip's
+            index, active = self._tab_pages.index(active.page), None
         if active is not None and active is not self:
             if active is self.render_window or active is self.view3d_window:
                 return ("layers",)
@@ -1258,7 +1419,6 @@ class ControlWindow(QMainWindow):
                         return ("plugin", instance.plugin, slot.panel, instance,
                                 f"the {tab.name} tab")
             return None
-        index = self.tabs.currentIndex()
         if not 0 <= index < len(tabs):
             return None
         tab, widget = tabs[index]
@@ -1617,6 +1777,7 @@ class ControlWindow(QMainWindow):
         handoff.apply_state(self.session, locs, state, grouped)
         gui = state.get("gui_state")
         if gui:
+            self._close_tab_windows()        # the old workspace's
             self.workspace = Workspace.from_dict(gui)
             self.workspace.prune(list(plugins.refs()))
             # for files to come: the layers came over as they were
@@ -1720,6 +1881,7 @@ class ControlWindow(QMainWindow):
         A file that does not read gives the shipped default, and is not
         remembered, so the next start is not a broken one.
         """
+        self._close_tab_windows()        # the old workspace's
         self.workspace = workspace_module.load(path)
         missing = self.workspace.prune(list(plugins.refs()))
         self.tabs.clear()               # start on File, not on the tab one was on
@@ -1774,35 +1936,22 @@ class ControlWindow(QMainWindow):
         if not paths:
             menu.addAction("(none saved yet)").setEnabled(False)
 
-    def _fill_tab_sets(self) -> None:
-        """One entry per shipped tab set; a set already added is ticked."""
-        menu = self.tab_sets_menu
-        menu.clear()
-        have = {tab.name for tab in self.workspace.tabs}
-        for name, path in workspace_module.tab_sets().items():
-            action = menu.addAction(name)
-            action.setCheckable(True)
-            action.setChecked(name in have)
-            action.setToolTip(f"a tab of the {name} plugins beside these tabs")
-            action.triggered.connect(lambda _=False, n=name: self.add_tab_set(n))
-
     def add_tab_set(self, name: str) -> List[str]:
         """The tab set ``name`` (`workspace.tab_sets`) beside the tabs there
-        are, and shown; a tab of that name already here is shown instead of
-        added twice.  The tabs added."""
+        are, and shown; a tab of that name already here is shown -- as it was
+        left -- instead of added twice.  The tabs added."""
         sets = workspace_module.tab_sets()
         if name not in sets:
             raise ValueError(f"no tab set {name!r}: there are {', '.join(sets)}")
         extra = workspace_module.load(sets[name])
         extra.prune(list(plugins.refs()))
-        added = self.workspace.add_tabs(extra)
-        if added:
-            self.build_tabs()
+        self.collect_workspace()
+        added = self.workspace.add_tabs(extra)       # shows one that was hidden
+        self.build_tabs()
         wanted = added[0] if added else (extra.tabs[0].name if extra.tabs else "")
-        for i in range(self.tabs.count()):
-            if self.tabs.tabText(i) == wanted:
-                self.tabs.setCurrentIndex(i)
-                break
+        names = [t.name for t in self.workspace.tabs]
+        if wanted in names:
+            self.show_tab(names.index(wanted))
         return added
 
     def load_default_gui(self) -> None:
@@ -1814,6 +1963,7 @@ class ControlWindow(QMainWindow):
         windows = {"control": self, "render": self.render_window}
         if self.view3d_window is not None:
             windows["3d"] = self.view3d_window
+        windows.update({f"tab:{name}": w for name, w in self._tab_windows.items()})
         return windows
 
     def window_geometries(self) -> Dict[str, str]:
@@ -2105,7 +2255,7 @@ class ControlWindow(QMainWindow):
         """The Render tab in front, its player open on ``path``."""
         for index, widget in enumerate(self._tab_widgets()):
             if isinstance(widget, RenderTab):
-                self.tabs.setCurrentIndex(index)
+                self.show_tab(index)
                 widget.show_view_path(path)
                 self.show()
                 self.raise_()
@@ -2116,7 +2266,7 @@ class ControlWindow(QMainWindow):
         ``settings`` (`ScanPlayer.take_stack`)."""
         for index, widget in enumerate(self._tab_widgets()):
             if isinstance(widget, RenderTab):
-                self.tabs.setCurrentIndex(index)
+                self.show_tab(index)
                 widget.show_stack(settings)
                 self.show()
                 self.raise_()
@@ -2210,7 +2360,7 @@ class ControlWindow(QMainWindow):
     def use_decode_model(self, path: str) -> None:
         """Put a trained model into the DECODE fitter, as `use_calibration` puts a calibration into Spline 3D."""
         for index in range(self.tabs.count()):
-            tab = self.tabs.widget(index)
+            tab = self.tab_page(index)
             slots = getattr(tab, "slots", None)
             if not slots:
                 continue
@@ -2220,7 +2370,7 @@ class ControlWindow(QMainWindow):
                 panel = slots[instance.id].ensure()
                 if panel is None:
                     break
-                self.tabs.setCurrentIndex(index)
+                self.show_tab(index)
                 tab.open_section(instance.id)
                 panel.form.set_values({"model.path": str(path)})
                 self.statusBar().showMessage(f"the DECODE fitter now uses {Path(path).name}", 8000)
@@ -2258,7 +2408,7 @@ class ControlWindow(QMainWindow):
             values = {"model.calibration": str(path)}
             name = f"{wanted.split('/')[-1]} fitter"
         for index in range(self.tabs.count()):
-            tab = self.tabs.widget(index)
+            tab = self.tab_page(index)
             slots = getattr(tab, "slots", None)
             if not slots:
                 continue
@@ -2268,7 +2418,7 @@ class ControlWindow(QMainWindow):
                 panel = slots[instance.id].ensure()
                 if panel is None:
                     break
-                self.tabs.setCurrentIndex(index)
+                self.show_tab(index)
                 tab.open_section(instance.id)
                 panel.form.set_values(values)
                 self.statusBar().showMessage(f"the {name} now uses {Path(path).name}", 8000)
@@ -2782,7 +2932,7 @@ class ControlWindow(QMainWindow):
                 f"{path.name} is an image stack, but no fitter is pinned to a "
                 "tab - add one to the Localize tab with +", 12000)
             return False
-        self.tabs.setCurrentIndex(index)
+        self.show_tab(index)
         tab.open_section(instance.id)
         field = panel.form.fields["source"].fields["path"]
         field.set(str(path))
@@ -3066,3 +3216,33 @@ def main(argv: Optional[List[str]] = None, files: Sequence[str] = (),
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def _tab_place(workspace, name: str) -> int:
+    """The place of the tab called ``name``; a ValueError naming the tabs there are."""
+    names = [tab.name for tab in workspace.tabs]
+    if name not in names:
+        raise ValueError(f"no tab {name!r}: the tabs are {', '.join(names)}")
+    return names.index(name)
+
+
+class TabWindow(QWidget):
+    """A detached tab's page in a window of its own (*Detach* on a tab's
+    right click); closing it puts the tab back in the strip, unless the
+    strip is being rebuilt (``quiet``), which makes the window again."""
+
+    closed = Signal()
+
+    def __init__(self, name: str, page: QWidget, parent: QWidget):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle(name)
+        self.page = page
+        self.quiet = False
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(page)
+
+    def closeEvent(self, event) -> None:
+        super().closeEvent(event)
+        if not self.quiet:
+            self.closed.emit()

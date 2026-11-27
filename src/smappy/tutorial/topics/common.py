@@ -10,17 +10,16 @@ from contextlib import contextmanager
 
 
 def tab(d, name: str):
-    tabs = d.control.tabs
-    for i in range(tabs.count()):
-        if tabs.tabText(i) == name:
-            return i, tabs.widget(i)
-    raise LookupError(f"no {name!r} tab; there are "
-                      + ", ".join(tabs.tabText(i) for i in range(tabs.count())))
+    names = [t.name for t in d.control.workspace.tabs]
+    if name in names:
+        i = names.index(name)
+        return i, d.control.tab_page(i)
+    raise LookupError(f"no {name!r} tab; there are " + ", ".join(names))
 
 
 def show_tab(d, name: str):
     i, widget = tab(d, name)
-    d.control.tabs.setCurrentIndex(i)
+    d.control.show_tab(i)
     return widget
 
 
