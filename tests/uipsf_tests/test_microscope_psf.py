@@ -208,3 +208,44 @@ def test_spline_3d_offers_the_theory_says_it_is_one_and_asks_to_learn(config, mo
     used = plugin.with_calibration(settings, ctx)
     assert used.model.calibration.endswith("_3dcal.h5") and "theory" in used.model.calibration
     assert any("in theory" in w and "γ 0.25" in w for w in ctx.warnings)
+
+
+def _in_orange(scope):
+    """``scope`` as a file taken in another colour, for which no pupil is kept, on a microscope whose entry
+    gives no astigmatism (M2's does: a microscope added by a user need not)."""
+    values = {k: v for k, v in (scope.get("values") or {}).items() if k != "astigmatism_nm"}
+    return dict(scope, channels=[dict(c, wavelength_nm=580.0) for c in scope.get("channels") or [{}]],
+                values=dict(values, wavelength_nm=580.0))
+
+
+def test_the_theory_takes_the_astigmatism_of_a_pupil_kept_in_another_colour(tmp_path, config):
+    _, scope = _keep(tmp_path)
+    kept = microscope_db.pupil_of(scope)
+    orange = _in_orange(scope)
+    assert microscope_db.pupil_of(orange) is None                        # never another colour's pupil
+    rec = mpsf.record(orange)
+    assert rec["theory"] and rec["pupil"]["phase_nm"] == {"6": round(kept["phase_nm"]["6"], 3)}
+    assert any("the pupil M2 keeps for 3DA: on" in line for line in rec["theory"])
+    # another state of the 3D lens is not this one's: its astigmatism is the lens's
+    off = dict(orange, states={k: "off" for k in orange.get("states") or {}})
+    assert off["states"] != orange["states"]
+    assert "6" not in mpsf.record(off)["pupil"]["phase_nm"]
+
+
+def test_the_theory_takes_the_astigmatism_of_the_newest_pupil_calibration_listed(tmp_path, config):
+    from smappy import calibration_list
+    from smappy.io.calibration import save_spline_calibration
+    _, scope = _keep(tmp_path)
+    microscope_db.database(reload=True)
+    entry = microscope_db.database().get("M2")
+    entry.pupils.clear()                                                 # nothing kept: only the list
+    cal = mpsf.calibration(mpsf.record(scope))
+    for day, rad in (("2026-05-01", 0.9), ("2026-08-01", -0.3)):
+        cal.parameters = dict(cal.parameters, zernikes=[{"phase": [[5, 0.1, 0.0], [6, rad, 0.0]]}],
+                              microscope=dict(scope))
+        cal.parameters.pop("pupil", None)
+        path = tmp_path / f"beads_{day}_3dcal.h5"
+        save_spline_calibration(path, cal, overwrite=True)
+        calibration_list.add(path, microscope=scope, made=day, method="pupil model")
+    nm, where = mpsf.earlier_astigmatism(_in_orange(scope), 580.0)
+    assert nm == pytest.approx(-0.3 * 700.0 / (2 * np.pi), rel=1e-6) and "2026-08-01" in where

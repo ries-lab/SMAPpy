@@ -187,8 +187,9 @@ def movie_rois(paths, settings: InSituSettings | None = None, camera=None, progr
 # ------------------------------------------------------------------ the model and its start
 
 def start_astigmatism(insitu: InSituModelSettings, camera=None) -> tuple[Optional[float], str]:
-    """(the start's vertical astigmatism in nm, where it comes from): typed, else the microscope entry's for
-    the state its 3D lens was in (``astigmatism_nm``, from bead models of it), else (None, why).  It is what
+    """(the start's vertical astigmatism in nm, where it comes from): typed, else the kept pupil's, else the
+    microscope entry's for the state its 3D lens was in (``astigmatism_nm``, from bead models of it), else any
+    earlier model of it in that state (`microscope_psf.earlier_astigmatism`), else (None, why).  It is what
     sets the sign of z: the twin, every even aberration of the other sign, sees the same molecules mirrored."""
     if insitu.astigmatism_nm is not None:
         return float(insitu.astigmatism_nm), "typed"
@@ -197,11 +198,17 @@ def start_astigmatism(insitu: InSituModelSettings, camera=None) -> tuple[Optiona
     kept = (pupil_of(scope) or {}).get("phase_nm") or {}
     if "6" in kept:
         return float(kept["6"]), f"{scope.get('name')}'s objective pupil, for its 3D lens"
-    value = (scope.get("values") or {}).get("astigmatism_nm")
-    if value is not None:
-        return float(value), f"{scope.get('name')}'s, for its 3D lens"
-    return None, (f"{scope.get('name')}'s entry gives none" if scope.get("name")
-                  else "no microscope recognised")
+    if not scope.get("name"):
+        return None, "no microscope recognised"
+    # the entry's, else any earlier model of the same microscope, 3D lens state and camera
+    # (`microscope_psf.earlier_astigmatism`)
+    from ..microscope_db import emission_of
+    from .microscope_psf import earlier_astigmatism
+    value, where = earlier_astigmatism(scope, emission_of(scope))
+    if value is None:
+        return None, f"{scope.get('name')}: {where}"
+    return float(value), (f"{scope.get('name')}'s, for its 3D lens" if where.startswith("the entry")
+                          else where)
 
 
 def start_shared(model, run_start_from: str, astigmatism_nm: float, wavelength_nm: float, pupil=None):

@@ -21,7 +21,8 @@ calibration list's *auto*.
 
 **Without a kept pupil: the theory of the optics.**  A microscope that keeps no pupil is drawn from what its
 entry says (`theory_pupil`): a minimal pupil -- cos θ^γ, the aperture, no aberration but the 3D lens's
-astigmatism (``astigmatism_nm``, Noll 6) -- at the entry's NA, γ from the entry or the pupils kept under
+astigmatism (Noll 6: the entry's ``astigmatism_nm``, else any earlier model of the same microscope, camera and
+3D lens state, `earlier_astigmatism`) -- at the entry's NA, γ from the entry or the pupils kept under
 other states (`microscope_db.gamma_of`), else a nominal one, and a 20 nm blur, the bead model's start.
 It is a start, not a calibration: the fit says so (`Notice`, a warning at Run), and *learn* learns the
 data's own aberrations from it (docs/psf-model-parts-plan.md: *PSF model* = *microscope*, "its kept pupil,
@@ -55,6 +56,92 @@ NOMINAL_GAMMA = 0.36
 THEORY_BLUR_NM = 20.0
 
 
+def _lens_state(entry, states: Dict[str, Any]) -> Optional[str]:
+    """The state of the entry's 3D lens in ``states``, or None (no lens, or not said)."""
+    device = entry.lens_device() if entry is not None else None
+    return None if device is None else (states or {}).get(device)
+
+
+_ZERNIKES: dict = {}
+
+
+def _calibration_noll6(path: str) -> Optional[tuple]:
+    """(Noll 6 in rad, the emission it was learnt at or None) a pupil calibration records in its parameters
+    (`pupil._record`'s ``zernikes``), kept per file and date: the whole spline is read for it, and the form
+    asks with every change."""
+    p = Path(path)
+    try:
+        key = (str(p), p.stat().st_mtime)
+    except OSError:
+        return None
+    if key not in _ZERNIKES:
+        found = None
+        try:
+            from ..io.calibration import load_spline_calibration
+            from ..microscope_db import emission_of
+            params = load_spline_calibration(p).parameters or {}
+            phase = ((params.get("zernikes") or [{}])[0] or {}).get("phase") or []
+            value = next((float(v) for j, v, *_ in phase if int(j) == 6), None)
+            if value is not None:
+                found = (value, emission_of(params.get("microscope")))
+        except Exception:
+            found = None
+        _ZERNIKES[key] = found
+    return _ZERNIKES[key]
+
+
+def earlier_astigmatism(summary: Dict[str, Any], wavelength_nm: Optional[float]) -> tuple:
+    """(the vertical astigmatism in nm of wavefront, where it comes from), or (None, why): what a theory pupil
+    starts from where the entry gives no ``astigmatism_nm``.  The 3D lens puts the same astigmatism into
+    every model taken with it, whatever the colour or day, so any earlier model is a good start: a pupil kept
+    with the microscope for the same state of its 3D lens and camera, the nearest in colour; else the newest
+    pupil (Zernike) calibration listed for that microscope, state and camera (`calibration_list`).  Only Noll
+    6 (cos 2θ) is taken: the EM register's mirror in x leaves it as it is, but a camera mounted turned flips
+    its sign, so the camera must be the same (M2's Evolve against its iXon, `Microscope.pupil_for`)."""
+    from ..microscope_db import database, same_camera
+    name = str(summary.get("name") or "")
+    value = (summary.get("values") or {}).get("astigmatism_nm")
+    if value is not None:
+        return float(value), "the entry's for its 3D lens"
+    entry = database().get(name)
+    states = summary.get("states") or {}
+    state = _lens_state(entry, states)
+    camera = str(summary.get("camera") or (entry.camera if entry is not None else "") or "")
+    if entry is not None:
+        prefix = entry.pupil_key(states)
+        kept = [(k, p) for k, p in entry.pupils.items()
+                if k.split(" \u00b7 ")[0] == prefix and "6" in (p.get("phase_nm") or {})
+                and (not camera or not p.get("camera") or same_camera(camera, str(p["camera"])))]
+        if kept:
+            if wavelength_nm is not None:
+                kept.sort(key=lambda kp: abs(float(kp[1].get("wavelength_nm") or wavelength_nm) - wavelength_nm))
+            key, pupil = kept[0]
+            return float(pupil["phase_nm"]["6"]), f"the pupil {name} keeps for {key}"
+    from .. import calibration_list
+    listed = []
+    for item in calibration_list.entries():
+        scope = item.microscope or {}
+        if item.dual or str(scope.get("name") or "") != name:
+            continue
+        if _lens_state(entry, scope.get("states") or {}) != state:
+            continue
+        if camera and scope.get("camera") and not same_camera(camera, str(scope["camera"])):
+            continue
+        listed.append(item)
+    listed.sort(key=lambda e: e.made, reverse=True)
+    for item in listed:
+        found = _calibration_noll6(item.path)
+        if found is None:
+            continue
+        rad, emission = found
+        at = emission or wavelength_nm
+        if at is None:
+            continue
+        return rad * float(at) / (2 * np.pi), f"{item.name} ({item.made[:10] or 'undated'})"
+    return None, (f"none in {name}'s entry, its kept pupils or the calibrations listed for "
+                  f"{'this state of its 3D lens' if state is not None else 'it'}")
+
+
 def theory_pupil(summary: Dict[str, Any], wavelength_nm: Optional[float]) -> Dict[str, Any]:
     """A pupil description (`uipsf.VectorPSF.describe`'s form) of what ``summary``'s entry says of its
     optics, for a microscope that keeps no pupil: a minimal pupil at the entry's NA, its 3D lens's
@@ -72,13 +159,13 @@ def theory_pupil(summary: Dict[str, Any], wavelength_nm: Optional[float]) -> Dic
     if gamma is None:
         gamma, where = NOMINAL_GAMMA, "nominal (M5's beads)"
     made.append(f"γ {gamma:g}, {where}")
-    astigmatism = values.get("astigmatism_nm")
+    astigmatism, from_where = earlier_astigmatism(summary, wavelength_nm)
     phase = {}
     if astigmatism is not None:
-        phase["6"] = float(astigmatism)
-        made.append(f"astigmatism {float(astigmatism):g} nm, the entry's for its 3D lens")
+        phase["6"] = round(float(astigmatism), 3)
+        made.append(f"astigmatism {float(astigmatism):.0f} nm, from {from_where}")
     else:
-        made.append("no astigmatism: the entry gives none for this state, so z's sign is not known")
+        made.append(f"no astigmatism ({from_where}), so z's sign is not known")
     out = {"kind": "minimal", "phase_nm": phase, "gamma": float(gamma), "sigma_nm": [THEORY_BLUR_NM] * 2,
            "pixel_blur": True, "wavelength_nm": float(wavelength_nm) if wavelength_nm else None,
            "NA": float(values["NA"]), "n_immersion": float(values.get("n_immersion") or 1.518),

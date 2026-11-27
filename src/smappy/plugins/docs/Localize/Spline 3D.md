@@ -247,7 +247,9 @@ is one.  *calibration* on *auto* never takes it.
 that keeps no pupil is offered in the same menu, as its *optics in theory*,
 where its entry gives the objective's NA (`microscope_psf.theory_pupil`).  The
 pupil is then the minimal model with no aberration but the 3D lens's
-astigmatism (the entry's *astigmatism*), γ the entry's or one kept under
+astigmatism -- the entry's for the state of its 3D lens, else that of any
+earlier model of the same microscope, camera and lens state: a pupil it keeps
+in another colour, else the newest pupil calibration listed for it -- γ the entry's or one kept under
 another state of the 3D lens, else 0.36, and a 20 nm blur.  It is a start, not
 a calibration: the real objective's aberrations are not in it, and z can be off
 by tens of nanometres.  The form says so while nothing is learnt, and a Run
