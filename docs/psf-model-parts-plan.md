@@ -1,6 +1,6 @@
 # The PSF model in the window and in the fitters: one set of parts
 
-Discussed with Jonas on 2026-11-27; a plan, nothing built.  It continues `insitu-fitting-plan.md`
+Agreed with Jonas on 2026-11-27; a plan, nothing built.  It continues `insitu-fitting-plan.md`
 (the calibration inside the fitted file, in situ in Spline 3D), whose phases 0–3 are done, and
 answers its question of how in situ learning can depend less on a start model, or need none.
 
@@ -117,8 +117,9 @@ Instead of the parts in the fitter's form, the fitter's model part could show it
 a button *Open in PSF window...* (`Plugin.part_windows`) that opens the window with the same
 settings and hands them back (`PluginPanel.take_settings` with a `reply`, as the bead window does),
 or hands back a calibration file.  It would remove a second interface to uiPSF.  The parts are what
-makes this possible, so they come first; the button is a spike in stage 2: does the round trip feel
-right, and does it survive a chain and a batch (the settings, not the window, are what runs).
+makes this possible, so they come first.  It is mostly wiring, so stage 2 builds both -- the rows in
+the fitter's form and the button to the window -- and Jonas decides by using them which stays, or
+whether both do.  Either way a chain and a batch run the settings, not the window.
 
 ## Pros and cons of the parts, and how the costs are paid
 
@@ -139,7 +140,7 @@ right, and does it survive a chain and a batch (the settings, not the window, ar
    map* on), batch's *learn from*.  Spline 3D, Spline 3D 2C, the window's in situ (single and,
    new, dual).  Migrations.
 2. **The window's bead and molecule-stack methods** on the same parts (mostly relabelling); the
-   *Open in PSF window* spike.
+   *Open in PSF window* button beside the fitter's rows, both tried.
 3. **The extensions the parts bring**: the move and *over time* for 4Pi, the depth for 4Pi, *from
    this movie* for DECODE's two channels, field dependence in situ for two colours.
 4. **4Pi in situ without a bead model** (the closed-form `fourpi.model_calibration` as a start):
