@@ -39,9 +39,10 @@ the ones that shape this module:
 * **An interface, when it has one.**  A chain's file may name the few settings
   a user is meant to set (``interface:``, a dotted name in the chain's
   settings and a label each).  Its form then shows those at the top
-  (`FormState.keys`) and hides the steps behind one tick, *show the steps*:
-  the steps are how the chain is made, and what it asks is these.  Nothing
-  is lost -- every step's settings are still there, saved and run.
+  (`FormState.keys`), and the chain panel folds the steps into one section,
+  *steps* (`gui.chain_panel`): the steps are how the chain is made, and what
+  it asks is these.  Nothing is lost -- every step's settings are still
+  there, saved and run, and unfolding *steps* shows them.
 
 * **Linear.**  SMAP's workflows were graphs; `NOTES.md` ("No module chain")
   records why the fitting pipeline is not, and the same reasons hold here --
@@ -82,8 +83,6 @@ GROUPING_FIELD = "use_grouping"
 BLOCK_ROIS = "rois"
 # where a chain lands in the tree when its file does not say
 DEFAULT_GROUP = "Analysis/Chains"
-# the field a chain with an interface gains: whether its steps are shown
-STEPS_FIELD = "show_steps"
 
 
 class ChainError(ValueError):
@@ -289,7 +288,7 @@ def identifier(text: str) -> str:
     name = re.sub(r"[^0-9a-zA-Z]+", "_", text).strip("_").lower() or "step"
     if name[0].isdigit():
         name = "s_" + name
-    if keyword.iskeyword(name) or name in ("grouping", STEPS_FIELD):
+    if keyword.iskeyword(name) or name == "grouping":
         name += "_"
     return name
 
@@ -736,8 +735,6 @@ class ChainPlugin(Plugin):
         interface = self.interface()
         if interface:
             state.keys = interface
-            show = bool(getattr(settings, STEPS_FIELD, True))
-            state.shown.update({key: show for key, _, _ in self.steps})
         return state
 
     @classmethod
@@ -833,11 +830,6 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
         columns.append(column)
         extras.update(_flat_infos(cls.specs(), f"{key}."))
         steps.append((key, step, cls))
-    if spec.interface:
-        # last, below the settings the chain asks (shown at the top) and the steps it folds
-        columns.append((STEPS_FIELD, bool, param(
-            False, label="show the steps",
-            help="every step's settings, not only the ones this chain asks")))
     settings_cls = make_dataclass("ChainSettings", columns,
                                   namespace={"__module__": __name__})
     name = spec.name

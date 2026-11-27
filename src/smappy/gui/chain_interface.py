@@ -3,7 +3,7 @@
 A chain is made of steps with all their settings, and most of them are how the
 chain is made rather than what a user of it decides.  Ticked here, a setting is
 shown at the top of the chain's form under the label typed beside it, and the
-steps fold away behind *show the steps* (`chain.ChainPlugin.describe`).  What is
+*steps* section starts folded (`chain_panel.ChainPanel._fold_steps`).  What is
 chosen is the chain's ``interface:`` (`ChainSpec.interface`), saved with it.
 """
 from __future__ import annotations

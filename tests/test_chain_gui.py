@@ -327,7 +327,7 @@ def test_the_batch_windows_folders_show_what_the_chain_reads_and_follow_a_change
 
 def test_a_chain_with_an_interface_shows_what_it_asks_and_folds_its_steps(app):
     """*interface...* ticks a step's setting: it is shown at the top under its label, the steps
-    fold away behind *show the steps*, and an edit there is the step's own value, saved."""
+    fold away into the folded *steps* section, and an edit there is the step's own value, saved."""
     from smappy.gui.chain_interface import InterfaceDialog
     tab, instance, panel = new_chain_tab(app, Session(blinks()))
     spec = panel.current_spec()
@@ -341,14 +341,30 @@ def test_a_chain_with_an_interface_shows_what_it_asks_and_folds_its_steps(app):
     panel.panel.refresh_derived()
     form = panel.form
     assert list(form.key_fields) == ["localization_statistics.bins"]
+    # rebuilt with the interface: *steps* folded, the steps inside it
+    form = panel.form
+    assert panel.steps_section is not None and not panel.steps_section.button.isChecked()
     assert not form.sections["localization_statistics"].isVisibleTo(panel)
     form.key_fields["localization_statistics.bins"].set(21)
     form._key_edited("localization_statistics.bins", form.key_fields["localization_statistics.bins"])
     assert panel.current_spec().steps[0].values["bins"] == 21
-    # the steps come back on a tick, everything in them still there
-    form.set_values({chain.STEPS_FIELD: True})
-    panel.panel.refresh_derived()
-    assert form.sections["localization_statistics"].isVisibleTo(panel)
+    # unfolded, the steps are there with their ticks, everything in them kept
+    panel.steps_section.set_expanded(True)
+    section = form.sections["localization_statistics"]
+    assert section.isVisibleTo(panel) and section.tick.isChecked()
+    assert section.parent() is not form    # inside *steps*, not beside it
+    # and *steps* stays open across a rebuild
+    panel._apply(panel.current_spec())
+    assert panel.steps_section.button.isChecked()
+
+
+def test_a_chain_without_an_interface_opens_with_its_steps_unfolded(app):
+    _tab, _instance, panel = new_chain_tab(app, Session(blinks()))
+    spec = panel.current_spec()
+    spec.steps.append(Step(plugin="Analysis/Measure/Localization Statistics"))
+    panel._apply(spec)
+    assert panel.steps_section.button.isChecked()
+    assert panel.form.sections["localization_statistics"].isVisibleTo(panel)
 
 
 def test_switching_a_step_off_leaves_every_section_open_or_folded_as_it_was(app):

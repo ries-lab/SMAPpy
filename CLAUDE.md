@@ -318,7 +318,8 @@ A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.  A chain may name the few
 settings it asks (`interface:` in its file, `ChainSpec.interface`, chosen with
 *interface...* under the chain panel's *build*): its form then shows those as
-key parameters and folds its steps behind *show the steps*.  In the chain
+key parameters and its *steps* section, which holds every chain's steps,
+starts folded (`ChainPanel._fold_steps`).  In the chain
 panel (`gui/chain_panel.py`) the steps are the list: each a section of the
 form with a tick in its title (a step switched off keeps its section and
 values, `ChainPlugin.off`), rename / move / remove on its title's right

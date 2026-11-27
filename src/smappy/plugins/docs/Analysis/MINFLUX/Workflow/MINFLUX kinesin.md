@@ -13,7 +13,8 @@ and their steps.
 
 It is a [chain](plugin:Panels/Glossary) (also called a pipeline or
 workflow): the plugins it runs, one after the other, each with its own
-settings in a section of this panel, folded behind *show the steps*.  Six
+settings in a section of this panel, inside the folded *steps* section,
+with a tick each to switch it on or off.  Six
 settings are shown at the top:
 
 * *offset from* -- where [MINFLUX dual colour](plugin:Analysis/MINFLUX/MINFLUX dual colour)

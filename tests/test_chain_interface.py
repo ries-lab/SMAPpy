@@ -22,18 +22,16 @@ def test_the_interface_is_written_with_the_chain_and_read_back(tmp_path):
     assert chain_class(listed).interface() == {"rcc.n_timepoints": "time windows"}
 
 
-def test_the_form_asks_only_the_interface_until_the_steps_are_shown():
+def test_the_form_asks_the_interface_at_the_top_and_hides_no_step():
+    # the steps are folded by the chain panel's *steps* section, not hidden
     cls = chain_class(stats_chain({"rcc.n_timepoints": "drift windows"}))
     state = cls().describe(None, cls.Settings())
     assert state.keys == {"rcc.n_timepoints": "drift windows"}
-    assert state.shown == {"rcc": False, "localization_statistics": False}
-    shown = cls().describe(None, replace(cls.Settings(), show_steps=True)).shown
-    assert shown == {"rcc": True, "localization_statistics": True}
+    assert "rcc" not in state.shown and "localization_statistics" not in state.shown
 
 
 def test_a_chain_without_an_interface_is_as_it_was():
     cls = chain_class(stats_chain())
-    assert not hasattr(cls.Settings(), chain.STEPS_FIELD)
     state = cls().describe(None, cls.Settings())
     assert not state.keys and "rcc" not in state.shown
 

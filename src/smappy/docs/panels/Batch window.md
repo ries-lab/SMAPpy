@@ -250,8 +250,8 @@ will take, and which attributes its steps change without writing them back.
 ### interface...
 Chooses the settings the chain asks: tick a step's setting and type the label
 it goes by in the chain.  The chain's form then shows those at the top and
-folds its steps away behind *show the steps*, a tick that only such a chain
-has: every step's settings are still saved and run, and the tick shows them.
+its *steps* section starts folded: every step's settings are still saved and
+run, and unfolding *steps* shows them, each with its tick.
 The batch window shows the chain the same way.  Saved with the chain (`interface:` in its file); see
 `docs/batch.md`, "A chain's interface".
 

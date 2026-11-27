@@ -92,6 +92,10 @@ class ChainPanel(QWidget):
         self.cls = cls
         self.panel: Optional[PluginPanel] = None
         self._current: Tuple[int, ...] = ()
+        # *steps*, the section the steps' sections are folded into
+        # (`_fold_steps`), and whether it was open, kept across rebuilds
+        self.steps_section: Optional[CollapsibleSection] = None
+        self._steps_open: Optional[bool] = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(3)
@@ -245,6 +249,7 @@ class ChainPanel(QWidget):
         self.cls = cls
         self.panel = PluginPanel(cls, self.session)
         self.holder.addWidget(self.panel)
+        self._fold_steps()
         self._show_run_controls()
         self._decorate()
         origin = cls.spec.origin
@@ -253,6 +258,47 @@ class ChainPanel(QWidget):
                         + (f"  {origin.name}" if origin else ""))
         self.check_button.setEnabled(bool(self.root) or any(
             isinstance(step, Block) for step in cls.spec.steps))
+
+    def _fold_steps(self) -> None:
+        """Put the steps' sections into one section, *steps*, where they were.
+
+        A chain's form is its steps, each a section of its own, and a chain
+        with an interface (`ChainPlugin.interface`) asks its few settings at
+        the top: there *steps* starts folded, the whole chain with its ticks
+        one click away.  Without an interface the steps are all the form has,
+        so it starts open.  Folded here, in the panel, not as a part of the
+        settings: a step's values stay named ``<step>.<field>``, as chains,
+        batches and GUI files have saved them.  Not on a block's own steps
+        (``root``, the per-region steps), which are that panel's list.
+        """
+        self.steps_section = None
+        if self.root:
+            return
+        form = self.panel.form
+        layout = form.layout()
+        keys = [key for key, _, _ in list(self.cls.steps) + list(self.cls.off)]
+        sections = [form.sections[k] for k in self.cls.spec.keys()
+                    if k in keys and k in form.sections]
+        if not sections:
+            return
+        at = layout.indexOf(sections[0])
+        box = QWidget()
+        column = QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        for section in sections:
+            layout.removeWidget(section)
+            column.addWidget(section)
+        expanded = (self._steps_open if self._steps_open is not None
+                    else not self.cls.interface())
+        self.steps_section = CollapsibleSection("steps", box, expanded=expanded)
+        self.steps_section.setToolTip("every step of the chain with its settings; "
+                                      "the tick in a step's title switches it on or off")
+        self.steps_section.toggled.connect(self._steps_toggled)
+        layout.insertWidget(at, self.steps_section)
+
+    def _steps_toggled(self, on: bool) -> None:
+        self._steps_open = bool(on)
 
     def step_sections(self) -> List[tuple]:
         """``(path, key, step, section)`` for every step the form shows, in
@@ -321,6 +367,8 @@ class ChainPanel(QWidget):
         self._current = tuple(path)
         for p, _, _, section in self.step_sections():
             if p == tuple(path):
+                if self.steps_section is not None:
+                    self.steps_section.set_expanded(True)
                 section.set_expanded(True)
 
     def current_spec(self) -> ChainSpec:

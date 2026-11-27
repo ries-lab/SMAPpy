@@ -220,8 +220,9 @@ interface:
 ```
 
 Its form then shows those at the top (`FormState.keys`, the same key
-parameters *Simulate*'s presets use), and its steps fold away behind one
-tick, *show the steps* (`chain.STEPS_FIELD`, a field only such a chain has).
+parameters *Simulate*'s presets use), and its steps start folded in one
+section, *steps* (`gui/chain_panel.py`'s `_fold_steps`; open on a chain
+without an interface, where the steps are all there is).
 Nothing else changes: every step's settings are still there, saved and run,
 and the batch window shows the chain the same way.  **interface...** in the
 step editor ticks the settings and types their labels

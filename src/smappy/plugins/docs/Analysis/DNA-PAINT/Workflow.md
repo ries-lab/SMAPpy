@@ -14,7 +14,8 @@ new file.  It is the analysis of [Picasso](https://doi.org/10.1038/nprot.2017.02
 
 It is a [chain](plugin:Panels/Glossary) (also called a pipeline or
 workflow): the plugins it runs, one after the other, each with its own
-settings in a section of this panel, folded behind *show the steps*.  Four
+settings in a section of this panel, inside the folded *steps* section,
+with a tick each to switch it on or off.  Four
 settings are shown at the top:
 
 * *site radius* -- [Find clusters](plugin:Analysis/Regions/Find clusters)'
