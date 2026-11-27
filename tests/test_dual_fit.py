@@ -611,20 +611,24 @@ def test_a_split_preview_reports_each_channels_own_cutoff(tmp_path):
     assert f"(cutoff {first:.3g})" in result.text and f"(cutoff {second:.3g})" in result.text
 
 
-def test_spline_2c_has_no_registration_from_the_movie_and_refuses_a_map_with_its_halves_swapped():
-    """A Gaussian's map is not the spline's: Spline 3D 2C takes the calibration's or a file's, and a
-    splitter moved since the beads is its channel move's."""
-    from dataclasses import fields
+def test_spline_2c_takes_the_calibrations_map_by_default_and_refuses_a_map_with_its_halves_swapped():
+    """The calibration's map by default -- the beads measured it with the PSFs -- the movie's only when asked
+    (docs/psf-model-parts-plan.md), with the spline's move still on top of it; a map that puts the main
+    channel on the other half is refused, whichever it comes from."""
+    from dataclasses import fields, replace
 
     from smappy.calibrate.dual import ChannelTransform, with_registration
-    from smappy.plugins.fit import DualSplineFit, from_movie
+    from smappy.plugins.fit import DualSplineFit, from_movie, move_of
     settings = DualSplineFit().Settings()
     names = [f.name for f in fields(settings.model.registration)]
-    assert names[:2] == ["map", "path"] and not any(n.startswith("calibrate") for n in names)
+    assert names[:2] == ["map", "path"]
     assert [v for v, _ in fields(settings.model.registration)[0].metadata["smappy"].choices] == \
-        ["calibration", "file"]
+        ["calibration", "movie", "file"]
     assert not from_movie(settings)
     assert DualSplineFit().measured(None, settings) is None
+    movie = replace(settings, model=replace(settings.model, registration=replace(settings.model.registration,
+                                                                                 map="movie")))
+    assert from_movie(movie) and move_of(movie.model.registration).move == "measured"
     beads, moved = dual_calibration(ratio=0.3), dual_calibration(dx=1.4, dy=0.8, ratio=0.3)
     flipped = ChannelTransform(moved.transformation, dict(moved.geometry, main_channel="lower"), {})
     with pytest.raises(ValueError, match="wrong channels"):

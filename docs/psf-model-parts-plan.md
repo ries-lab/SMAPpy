@@ -173,6 +173,12 @@ whether both do.  Either way a chain and a batch run the settings, not the windo
 * **2026-11-27, third slice**: Spline 3D's *calibration* = *microscope* draws the microscope's optics in
   theory where it keeps no pupil (`microscope_psf.theory_pupil`: the entry's NA, its 3D lens's astigmatism,
   γ from the entry, a kept pupil or nominal), said in the menu, the form and the Run; *learn* starts from it.
+* **2026-11-27, fourth slice**: the theory's astigmatism, where the entry gives none, from any earlier model of
+  the microscope, camera and 3D lens state (`microscope_psf.earlier_astigmatism`), the PSF window's start too.
+* **2026-11-27, fifth slice**: Spline 3D 2C's *map* = *from this movie*: Gaussian 2D 2C's measurement (each half
+  fitted, the pairs registered over the chip, any shift), the calibration's halves and PSFs kept, the spline's
+  *move* still on top.  Built as Gaussian's rather than with the start's PSFs per channel: the move, measured with
+  the spline, takes the Gaussian's few-nm offset out; *learn map* (in situ) refines it further.
 
 ## Open
 

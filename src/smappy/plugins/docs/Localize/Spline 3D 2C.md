@@ -53,10 +53,11 @@ What it needs:
   empty, *calibration* is *auto*, as in [Spline 3D](plugin:Localize/Spline 3D).
   When the splitter has moved since the beads, the PSFs and the map still
   hold: the *channel registration*'s *move* measures how far the second
-  channel moved, with this fit, and fits with the map moved by it.  There is no map measured from
-  the movie with a plain Gaussian, as Gaussian 2D 2C has: a Gaussian's
-  centre is not the spline's, so such a map is off by a few nanometres in
-  ways that change with z.
+  channel moved, with this fit, and fits with the map moved by it.  When it
+  moved further than the move can find -- more than about 10 pixels, a
+  splitter realigned or a camera remounted -- *map* *from this movie*
+  measures the map anew, as [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C)
+  does, with the calibration's PSFs and halves kept.
   A calibration made with the pupil (Zernike) method can also be **learnt
   again from the movie itself**: both channels' focus and blur, and on
   request their aberrations and the map between them, from the movie's own
@@ -529,16 +530,27 @@ drawn for another index than the calibration's.
 In grey, the index the choice stands for; typing over it makes it *typed*.
 
 ### model.registration.map
-*the calibration's*: the map the beads measured with the PSFs.  *file*: a
-transformation file in its place.
+*the calibration's*: the map the beads measured with the PSFs.  *from this
+movie*: frames spread over the movie fitted with a plain Gaussian, each half
+on its own, and the pairs registered over the whole chip, whatever the shift
+(`calibrate.transform.register_channels`) -- Gaussian 2D 2C's measurement,
+the chip split as the calibration's PSFs were learnt.  A Gaussian's centre is
+not the spline's, a few nanometres apart in ways that change with z, so the
+*move*, measured with the spline model, still runs on top of it: leave it on
+*measured*.  The map is measured once for a movie and its settings, at the
+first Preview or Run, and saved beside the output as `_2ct.h5` (*save it*,
+under *more*).  *file*: a transformation file in its place.  Use the
+calibration's map where the splitter has not moved more than a few pixels:
+the beads measured it better than a movie can.
 
 ### model.registration.path
 Read only when *map* is *file*.  A `_2ct.h5` from [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) or a
 registration, used in place of the calibration's own; the PSFs are still the
 calibration's.  It must put the main channel on the same half as the
 calibration does, or the fit refuses: each PSF was made from its own half.
-For a splitter that moved since the beads, keep the calibration's map and
-let *move* measure how far.
+For a splitter that moved a few pixels since the beads, keep the
+calibration's map and let *move* measure how far; for one that moved
+further, *from this movie*.
 
 ### model.registration.move
 How far the splitter's second channel moved on the chip since the beads, on

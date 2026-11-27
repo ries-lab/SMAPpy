@@ -28,11 +28,11 @@ def _moved(cal, columns, rows):
     return moved_calibration(cal, (columns, rows))
 
 
-def _movie(tmp_path, cal, truth, n=30, per_frame=4, seed=1):
+def _movie(tmp_path, cal, truth, n=30, per_frame=4, seed=1, xs=(10, 46)):
     rng = np.random.default_rng(seed)
     frames = []
     for _ in range(n):
-        xy = np.c_[rng.uniform(10, 46, per_frame), rng.uniform(11, 20, per_frame)]
+        xy = np.c_[rng.uniform(*xs, per_frame), rng.uniform(11, 20, per_frame)]
         frames.append(split_frame(list(map(tuple, xy)), float(rng.uniform(14, 30)), 9000.0, 0.4, 20.0, rng, truth))
     path = tmp_path / "moved.tif"
     tifffile.imwrite(path, (np.stack(frames) + 100).astype(np.uint16))
@@ -216,3 +216,33 @@ def test_one_channel_registration_part_shows_what_its_map_and_move_read():
     shown = registration_shown(spline)
     assert not shown["model.registration.path"] and shown["model.registration.columns"]
     assert registration_title(spline) == "channel registration: the calibration's, move typed"
+
+
+def test_spline_2c_measures_its_map_from_the_movie_when_the_beads_map_is_far_off(tmp_path):
+    """Moved 20 columns since the beads, beyond the move's vote (±10 px): the move alone cannot pair the
+    channels; *map* = *from this movie* registers them over the whole chip and the fit splits the photons
+    as drawn -- the calibration's PSFs, its halves, the movie's map."""
+    from smappy.plugins.fit import DualSplineFit, _MEASURED
+    cal = dual_calibration()
+    truth = np.array([20.0, 1.0])
+    assert truth[0] > cm.VOTE_REACH_PX
+    movie, calibration = _movie(tmp_path, cal, _moved(cal, *truth), n=80, per_frame=4, xs=(9, 28))
+    _MEASURED.clear()
+    DualSplineFit._moves.clear()
+    movie_map = dict(map="movie", calibrate_skip=0, calibrate_frames=80, calibrate_locs=500, calibrate_blocks=1,
+                     save_calibration=False, move="measured")
+    settings = _settings(movie, calibration, **movie_map)
+    result = DualSplineFit().run(Context(), settings)
+    assert np.median(result.locs["ratio"]) == pytest.approx(0.4, abs=0.05)
+    assert "channel registration" in result.plots
+    # the map kept: the calibration's PSFs and halves with the movie's registration, which now puts the
+    # secondary about 20 columns further than the beads' did
+    plugin = DualSplineFit()
+    read = plugin.read_registration(settings)
+    beads = cal.layout()
+    here = read.layout()
+    point = np.array([[20.0, 15.0]])
+    np.testing.assert_allclose(here.to_channel(1, point) - beads.to_channel(1, point), [truth], atol=0.5)
+    # the move alone, from the beads' map, does not get there
+    alone = DualSplineFit().run(Context(), _settings(movie, calibration, move="measured")).locs
+    assert abs(np.median(alone["ratio"]) - 0.4) > 0.1 or len(alone) < 0.7 * len(result.locs)

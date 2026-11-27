@@ -15,7 +15,7 @@ expandable section.
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import MISSING, asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -1968,17 +1968,39 @@ class ChannelTransformSettings:
         return load_transform(self.path)
 
 
+def _like(cls, name: str):
+    """A field as ``cls`` declares it -- default and presentation -- for a part that asks the same."""
+    f = cls.__dataclass_fields__[name]
+    if f.default_factory is not MISSING:
+        return field(default_factory=f.default_factory, metadata=f.metadata)
+    return field(default=f.default, metadata=f.metadata)
+
+
 @dataclass
 class SplineTransformSettings:
-    """Spline 3D 2C's *channel registration*: the calibration's map or a file's, and the move on top;
-    the PSFs are always the calibration's.  No map from the movie: a Gaussian's centres are not the
-    spline's, so a map measured with one put the channels a few nm apart in z-dependent ways; a
-    splitter moved since the beads is the move's, measured with the spline model itself."""
-    map: str = param("calibration", label="map", choices=(("calibration", "the calibration's"), ("file", "file")),
-                     help="the calibration's: the beads' own; file: a _2ct.h5 in its place, with the "
-                          "calibration's PSFs")
+    """Spline 3D 2C's *channel registration*: the calibration's map, a file's, or one measured from this
+    movie, and the move on top; the PSFs are always the calibration's.
+
+    *From this movie* (docs/psf-model-parts-plan.md, "two colours from a wrong map"): a bead calibration's
+    map is often wrong for today's sample -- a splitter realigned, the camera moved -- by more than the
+    move's vote reaches (±10 px).  The movie is measured as Gaussian 2D 2C measures it, each half fitted on
+    its own and the pairs registered over the whole chip, whatever the shift (`calibrate.transform.
+    register_channels`).  A Gaussian's centre is not the spline's, a few nm apart in z-dependent ways, so
+    the *move*, measured with the spline model itself, still runs on top of it (not so over Gaussian 2D 2C's,
+    where it would be the same Gaussians again)."""
+    map: str = param("calibration", label="map",
+                     choices=(("calibration", "the calibration's"), ("movie", "from this movie"), ("file", "file")),
+                     help="the calibration's: the beads' own; from this movie: each half fitted, the pairs "
+                          "registered, any shift; file: a _2ct.h5 in its place -- the calibration's PSFs in "
+                          "every case")
     path: str = param("", label="transformation", kind="open_file", file_filter=TRANSFORM_FILTER,
                       help="a _2ct.h5 to use in place of the calibration's map")
+    calibrate_frames: int = _like(ChannelTransformSettings, "calibrate_frames")
+    calibrate_locs: int = _like(ChannelTransformSettings, "calibrate_locs")
+    calibrate_blocks: int = _like(ChannelTransformSettings, "calibrate_blocks")
+    measure: RegisterSettings = _like(ChannelTransformSettings, "measure")
+    calibrate_skip: int = _like(ChannelTransformSettings, "calibrate_skip")
+    save_calibration: bool = _like(ChannelTransformSettings, "save_calibration")
     move: str = _move()
     rows: float = _rows()
     columns: float = _columns()
@@ -2005,9 +2027,10 @@ def registration_file(registration) -> str:
 
 
 def move_of(registration) -> ChannelMoveSettings:
-    """The move a *channel registration* asks for, as `smappy.channel_move` takes it.  Over a map
-    from the movie: none, or measured as a shift when *over time* asks for the drift."""
-    if getattr(registration, "map", "") == "movie":
+    """The move a *channel registration* asks for, as `smappy.channel_move` takes it.  Over Gaussian 2D 2C's
+    map from the movie: none, or measured as a shift when *over time* asks for the drift; over Spline 3D
+    2C's, as asked (the spline's centres are not the Gaussians' that measured the map)."""
+    if getattr(registration, "map", "") == "movie" and not isinstance(registration, SplineTransformSettings):
         return ChannelMoveSettings(**{**{f: getattr(registration, f) for f in MOVE_FIELDS},
                                       "move": "measured" if registration.over_time else "none",
                                       "learn": "shift"})
@@ -2025,7 +2048,7 @@ def calibration_map(move: ChannelMoveSettings) -> SplineTransformSettings:
 def move_shown(prefix: str, s) -> Dict[str, bool]:
     """Which of a part's move rows the form shows: the move typed or how it is measured; over a map
     from the movie only *over time* (and how it is measured, while it is on)."""
-    movie = getattr(s, "map", "") == "movie"
+    movie = getattr(s, "map", "") == "movie" and not isinstance(s, SplineTransformSettings)
     measured = s.over_time if movie else s.move == "measured"
     return {f"{prefix}.move": not movie,
             f"{prefix}.rows": not movie and s.move == "typed", f"{prefix}.columns": not movie and s.move == "typed",
@@ -2042,7 +2065,8 @@ def registration_title(s) -> str:
     else:
         where = Path(s.path).name if s.path else "no file chosen"
     m = move_of(s)
-    moved = ("" if m.move == "none" else ", drift over time" if s.map == "movie"
+    gaussian_movie = s.map == "movie" and not isinstance(s, SplineTransformSettings)
+    moved = ("" if m.move == "none" else ", drift over time" if gaussian_movie
              else f", move {m.move}" + (" over time" if m.move == "measured" and m.over_time else ""))
     return f"channel registration: {where}{moved}"
 
@@ -3347,7 +3371,9 @@ class DualSplineFit(_TwoChannelFit):
                 return (str(path), None)
         return ("2C in situ", stamp(settings.source.path), stamp(m.calibration),
                 # *learn* in the words before 2026-11-27, so that what was kept stays found
-                stamp(registration_file(m.registration)), m.sample.n_med(), learn_word(m.sample.learn),
+                stamp(registration_file(m.registration)) if m.registration.map != "movie"
+                else ("movie", _measuring_key(settings, self._start_sigma(settings))),
+                m.sample.n_med(), learn_word(m.sample.learn),
                 bool(m.learn_registration), bool(m.link_photons), repr(settings.camera),
                 repr(getattr(settings, "channels", None))) + (
             (("typed", m.sample.focus_nm),) if holds_focus(m.sample.focus) else ())
@@ -3540,15 +3566,48 @@ class DualSplineFit(_TwoChannelFit):
         # typed focus after the registration was first read, which must not be kept for the fit
         sample = settings.model.sample
         drawn = f"|{sample.focus_nm}|{sample.n_med()}" if sample.mode == "typed" else ""
-        return f"{settings.model.calibration}|{registration_file(settings.model.registration)}{drawn}"
+        # a map from the movie: what it was measured from, so that a move measured over it is its own
+        movie = ""
+        if from_movie(settings):
+            import hashlib
+            movie = "|movie:" + hashlib.sha1(str(_measuring_key(settings, self._start_sigma(settings))).encode()
+                                             ).hexdigest()[:12]
+        return f"{settings.model.calibration}|{registration_file(settings.model.registration)}{drawn}{movie}"
 
     def read_registration(self, settings):
-        """The dual-colour calibration: both PSFs, and its registration or the file's in place of it."""
+        """The dual-colour calibration: both PSFs, and its registration, the file's in place of it, or the one
+        measured from this movie (kept by `_calibrate`; before it is measured, the calibration's -- what the
+        form reads the halves from)."""
         from ..calibrate.dual import with_registration
         calibration = settings.model.load()
         if registration_file(settings.model.registration):
             return with_registration(calibration, settings.model.registration.load())
+        if from_movie(settings):
+            key = _measuring_key(settings, self._start_sigma(settings))
+            found = _MEASURED.get(key) if key is not None else None
+            if found is not None:
+                return with_registration(calibration, found.transform)
         return calibration
+
+    def _reading_once(self, settings, call, measured=None):
+        # a map measured from the movie is a `ChannelTransform`: the calibration's PSFs with it
+        if measured is not None and not hasattr(measured, "main"):
+            from ..calibrate.dual import with_registration
+            measured = with_registration(settings.model.load(), measured)
+        return super()._reading_once(settings, call, measured)
+
+    def _measure_registration(self, ctx: Context, settings):
+        """Gaussian 2D 2C's measurement, the chip split as the calibration's PSFs were learnt -- its layout and
+        main channel, which the map must keep (`calibrate.dual.with_registration`) -- whatever the *channels*
+        part says."""
+        try:
+            geometry = settings.model.load().geometry
+        except Exception:
+            geometry = {}
+        told = {k: geometry[k] for k in ("layout", "main_channel") if geometry.get(k)}
+        if told:
+            settings = replace(settings, channels=replace(settings.channels, **told))
+        return super()._measure_registration(ctx, settings)
 
     geometry_source = "calibration"
 
