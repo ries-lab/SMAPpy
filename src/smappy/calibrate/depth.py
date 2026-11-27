@@ -478,8 +478,8 @@ def auto_focus(cal, images: np.ndarray, n_med: Optional[float] = None, iteration
 #: (docs/psf-model-parts-plan.md): what the movie's molecules teach of the model, the rest held from the start --
 #: nothing (the model as it is, no learning run); the focus and the blur, every aberration held; the pupil's phase
 #: up to the model's order too, γ (the apodisation) and the phase above the order held; or the apodisation too, the
-#: focus then held at the coverslip's edge or typed (`insitu_run.InSituModelSettings.hold` is the same seen as
-#: what is held)
+#: focus then held at the coverslip's edge or typed (the PSF window's in situ *learn*,
+#: `insitu_run.InSituModelSettings.learn`, is the same less *nothing*)
 LEARN_CHOICES = (("nothing", "nothing"), ("blur", "focus and blur"), ("phase", "phase"),
                  ("apodisation", "phase and apodisation"))
 LEARN_HOLDS = {"blur": "all", "phase": "start", "apodisation": "nothing"}
@@ -612,7 +612,7 @@ def _insitu(cal, paths, camera, n_med, focus_nm, learn: str, detection, rounds: 
         progress(f"{word}: " + "; ".join(filter(None, [last[0], text]))
                  + ("" if left is None else f", about {duration(left)} left"))
     result = run_insitu(paths, optics, model,
-                        InSituModelSettings(focus_nm=focus_nm, hold=LEARN_HOLDS[learn], max_rounds=rounds,
+                        InSituModelSettings(focus_nm=focus_nm, learn=learn, max_rounds=rounds,
                                             spline_z="height", focus_fit="typed" if hold_focus else "learnt"),
                         detection,
                         run=RunSettings(start_from=str(path) if path is not None else "", save_model=False),

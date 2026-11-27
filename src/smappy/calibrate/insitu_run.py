@@ -35,7 +35,11 @@ from ..plugins import param
 from .insitu import InSituROIs, InSituSettings, choose, concatenate, insitu_units, select
 
 SPLINE_Z = (("focus", "above the plane in focus"), ("height", "above the coverslip"))
+#: *hold* before 2026-11-27, what of the start was held; now *learn*, what is learnt (`depth.LEARN_CHOICES`, the
+#: fitters' words, less *nothing*: a calibration in situ learns), read through `InSituModelSettings.__post_init__`
 HOLDS = (("start", "the start's"), ("all", "every aberration"), ("nothing", "nothing"))
+HOLD_LEARNS = {"start": "phase", "all": "blur", "nothing": "apodisation"}
+LEARNS = (("blur", "focus and blur"), ("phase", "phase"), ("apodisation", "phase and apodisation"))
 FOCUS_FITS = (("learnt", "learnt"), ("coverslip", "from the coverslip"), ("typed", "typed"))
 #: the spline's z step on auto, nm: a molecule's PSF changes over ~100 nm
 SPLINE_DZ_NM = 20.0
@@ -55,12 +59,13 @@ class InSituModelSettings:
                                             help="the start's vertical astigmatism (Noll 6), with the "
                                                  "microscope's sign; auto: the microscope's, for its 3D lens; "
                                                  "not used with start from")
-    hold: str = param("start", label="hold", choices=HOLDS,
-                      help="the start's: γ (a Zernike model's symmetric magnitude) and the phase above the "
-                           "order held from start from or the microscope's pupil, else the microscope's γ; every "
-                           "aberration: the start "
-                           "model's whole pupil, only the focus and the blur learnt; nothing: γ learnt, the "
-                           "focus then pinned")
+    learn: str = param("phase", label="learn", choices=LEARNS,
+                       help="the focus and the blur alone, the start's whole pupil held; the phase up to the order "
+                            "too, γ (the apodisation) and the phase above it held from start from or the "
+                            "microscope's pupil, else the microscope's γ; or the apodisation too, the focus then "
+                            "pinned")
+    # before 2026-11-27: what was held (`HOLDS`), folded into *learn* when read
+    hold: str = param("", label="hold", hidden=True, help="before 2026-11-27: what was held; now learn")
     focus_fit: str = param("learnt", label="focus fit", choices=FOCUS_FITS,
                            help="learnt with the pupil; from the coverslip: set by the lowest molecules' edge "
                                 "each round, not fitted; typed: held at focus")
@@ -71,6 +76,19 @@ class InSituModelSettings:
     spline_z: str = param("focus", label="spline z", choices=SPLINE_Z,
                           help="what the spline's z is: the height above the plane in focus, or above the "
                                "coverslip")
+
+    def __post_init__(self):
+        from .depth import learn_key
+        if self.hold:
+            self.learn = HOLD_LEARNS.get(self.hold, self.learn)
+            self.hold = ""
+        self.learn = learn_key(self.learn)
+
+    @property
+    def held(self) -> str:
+        """What of the start is held, the old *hold*'s words: "all", "start" or "nothing"."""
+        from .depth import LEARN_HOLDS
+        return LEARN_HOLDS[self.learn]
 
 
 # ------------------------------------------------------------------ reading the movies
@@ -377,7 +395,7 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     from ..microscope_db import pupil_of
     from .pupil import load_start
     kept = pupil if pupil is not None else pupil_of(getattr(rois.camera, "microscope", None))
-    every = insitu.hold == "all"
+    every = insitu.held == "all"
     astigmatism, why = start_astigmatism(insitu, rois.camera)
     if every and not (run.start_from or kept):
         raise ValueError("holding every aberration needs a pupil to hold: a bead model to start from, or one "
@@ -390,7 +408,7 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     from uipsf.model.build import Held
     spec = model.psf
     held = Held()
-    if insitu.hold in ("start", "all"):
+    if insitu.held in ("start", "all"):
         held = held_pupil(load_start(run.start_from) if run.start_from else None, kept, spec.order,
                           o.wavelength_nm, every=every)
         if every:

@@ -75,3 +75,14 @@ def test_the_hint_shows_the_edge_beside_the_focus_learnt():
     assert focus_hint("insitu", learnt) == "edge 692 nm, learnt 705 nm"
     learnt.fallback = "phase"
     assert focus_hint("insitu", learnt) == "edge 692 nm, learnt 705 nm (the focus alone)"
+
+
+def test_the_psf_windows_hold_reads_back_as_learn():
+    from smappy.calibrate.insitu_run import InSituModelSettings
+    assert InSituModelSettings().learn == "phase" and InSituModelSettings().held == "start"
+    for hold, learn in (("start", "phase"), ("all", "blur"), ("nothing", "apodisation")):
+        part = InSituModelSettings(hold=hold)
+        assert (part.learn, part.held, part.hold) == (learn, hold, "")
+    from smappy.plugins import settings_from
+    assert settings_from(InSituModelSettings, {"hold": "all"}).learn == "blur"
+    assert settings_from(InSituModelSettings, {"learn": "aberrations"}).learn == "phase"

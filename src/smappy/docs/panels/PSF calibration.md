@@ -769,7 +769,7 @@ eight bead calibrations of different days, cameras and colours, and it is what
 keeps a bead's z straight through focus.  Learnt from molecules, it trades
 with the focus, so that two starts end a hundred nanometres apart.  And the
 finest aberrations, above the *Zernike order*, gain little over a bead
-model's.  So with *hold* on *the start's*, in situ takes the magnitude and the
+model's.  So with *learn* on *phase*, in situ takes the magnitude and the
 phase above the order from *start from*, or else from the objective's pupil
 kept with the microscope (*Add to microscope...*), and learns the rest: the
 phase up to the order, the blur, the focus.  From a *minimal* bead model the
@@ -788,7 +788,7 @@ the microscope has none is a nominal γ (0.36, from M5's beads) held, and the
 window warns: it matters.  On M2's January clathrin movie the beads' γ, 0.08,
 gave in situ the beads' astigmatism, and 0.36 gave a quarter of a radian more
 (and fitted the molecules a little better); on another M2 movie 0.36 cost 2
-nats per molecule.  With *hold* on *nothing*, γ is learnt from the molecules,
+nats per molecule.  With *learn* on *phase and apodisation*, γ is learnt from the molecules,
 and the focus is then pinned (*focus fit*), since the two cannot both be
 learnt.
 
@@ -988,7 +988,7 @@ aberrations and cost more time and more beads.
 ### pupil magnitude
 *minimal* (cos θ^γ, the ring beyond the critical angle and the aperture),
 *Zernike*, *symmetric Zernike* or *fixed* (the apodisation only); *In detail*
-says what each is.  Not shown for *in situ*, which decides it by its *hold*.
+says what each is.  Not shown for *in situ*, which decides it by its *learn*.
 With two channels each learns its own γ: two colours pass the objective's
 edge differently.  Should the two come out alike on real pairs, one shared γ
 would be fewer numbers to learn; that is to be revisited.
@@ -1310,17 +1310,21 @@ from the coverslip's focus.  A rough value is enough: the rounds learn it.
 *auto*: estimated from the molecules on the coverslip before learning.  With
 *focus fit* on *typed* it is the focus, held.
 
-### hold
-*the start's*: the symmetric magnitude and the phase above the *Zernike
-order* held from *start from*, or else from the microscope's kept pupil (the
-default; see *What is held*), and without either the microscope's γ.  *every aberration*: the whole pupil of
-*start from* (or the kept one) held, every mode of phase and magnitude, and
-only the focus and the blur learnt, with no twin test -- the beads' pupil
-taken as the objective's, for a sample whose depth is the question (Spline
-3D's *learn* *focus and blur* runs this).  *nothing*: the symmetric magnitude learnt from
-the molecules, for a microscope with no pupil kept and no model to start
-from; the focus is then pinned to the coverslip unless *focus fit* says
-*typed*.
+### learn
+What the molecules teach, in the words of Spline 3D's *learn*.  *phase* (the
+default): the phase up to the *Zernike order*, the blur and the focus, with
+the symmetric magnitude and the phase above the order held from *start from*,
+or else from the microscope's kept pupil (see *What is held*), and without
+either the microscope's γ.  *focus and blur*: the whole pupil of *start from*
+(or the kept one) held, every mode of phase and magnitude, and only the focus
+and the blur learnt, with no twin test -- the beads' pupil taken as the
+objective's, for a sample whose depth is the question (Spline 3D's *learn*
+*focus and blur* runs this).  *phase and apodisation*: the symmetric magnitude
+learnt from the molecules too, for a microscope with no pupil kept and no
+model to start from; the focus is then pinned to the coverslip unless *focus
+fit* says *typed*.  A run saved before November 2026 with *hold* reads back
+as the same choice: *the start's* is *phase*, *every aberration* *focus and
+blur*, *nothing* *phase and apodisation*.
 
 ### focus fit
 *learnt*: with the pupil, the lowest molecules' edge as its guide (the

@@ -168,6 +168,8 @@ whether both do.  Either way a chain and a batch run the settings, not the windo
   sample part -- *focus* = coverslip edge / typed / beads' focus, *learn* = nothing / focus and blur
   / phase / phase and apodisation; a typed focus held while learning; the depth guard; settings
   saved in the old words read back to what they did (`depth.settled_focus`, `tests/test_focus_learn.py`).
+* **2026-11-27, second slice**: the PSF window's in situ *hold* is *learn* in the same words (focus and
+  blur / phase / phase and apodisation), a saved *hold* read back as its *learn*.
 
 ## Open
 

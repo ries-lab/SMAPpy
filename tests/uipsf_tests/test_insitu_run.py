@@ -374,9 +374,8 @@ def test_a_start_model_s_pupil_is_held_whole_its_own_held_modes_included():
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("hold", ["start", "nothing"])
-def test_in_situ_holds_the_start_or_learns_gamma_with_the_focus_pinned(movie_file, monkeypatch,
-                                                                                         hold):
+@pytest.mark.parametrize("learn", ["phase", "apodisation"])
+def test_in_situ_holds_the_start_or_learns_gamma_with_the_focus_pinned(movie_file, monkeypatch, learn):
     # the microscope's kept pupil (`microscope_db.pupil_of`), one round on the small model, nothing saved
     import smappy.microscope_db as db
     from smappy.calibrate.insitu_run import run_insitu
@@ -391,10 +390,11 @@ def test_in_situ_holds_the_start_or_learns_gamma_with_the_focus_pinned(movie_fil
     path, _ = movie_file
     result = run_insitu([path], OPTICS_SETTINGS, small(),
                         InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1,
-                                            hold=hold), SELECTION, camera=CAMERA, run=RunSettings(save_model=False))
+                                            learn=learn), SELECTION, camera=CAMERA,
+                        run=RunSettings(save_model=False))
     pupil = result.model.psf.pupil
     assert pupil.magnitude_modes == []                                  # m != 0 never learnt in situ
-    if hold == "start":
+    if learn == "phase":
         assert pupil.held_magnitude == {4: -0.1, 11: -0.07, 22: -0.05} and 22 in pupil.held_phase
         assert result.model.geometry.fit_focus and "held from" in result.messages[0]
     else:
@@ -486,7 +486,7 @@ def test_in_situ_holding_every_aberration_learns_only_the_focus_and_finds_it(mov
     monkeypatch.setattr(db, "pupil_of", lambda scope: kept)
     path, _ = movie_file
     result = run_insitu([path], OPTICS_SETTINGS, small(),
-                        InSituModelSettings(focus_nm=450.0, max_rounds=3, hold="all"), SELECTION, camera=CAMERA,
+                        InSituModelSettings(focus_nm=450.0, max_rounds=3, learn="blur"), SELECTION, camera=CAMERA,
                         run=RunSettings(save_model=False))
     pupil = result.model.psf.pupil
     assert pupil.phase_modes == [] and pupil.magnitude_modes == []
