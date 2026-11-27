@@ -1,6 +1,6 @@
 ---
-version: "18"
-covers: [smappy.psf.GlobalSplinePSF, smappy.psf.signal_integral, smappy.psf.light_at_focus, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.pipeline.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus, smappy.calibrate.depth.insitu_dual, smappy.calibrate.depth.judged, smappy.calibrate.insitu_dual.dual_movie_rois, smappy.calibrate.insitu_dual.dual_units, smappy.calibrate.insitu_dual.run_insitu_dual, smappy.plugins.fit.DualSplineFit.preflight]
+version: "19"
+covers: [smappy.psf.GlobalSplinePSF, smappy.psf.signal_integral, smappy.psf.light_at_focus, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.pipeline.one_per_molecule, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus, smappy.calibrate.depth.insitu_dual, smappy.calibrate.depth.judged, smappy.calibrate.insitu_dual.dual_movie_rois, smappy.calibrate.insitu_dual.dual_units, smappy.calibrate.insitu_dual.run_insitu_dual, smappy.plugins.fit.DualSplineFit.preflight, smappy.plugins.fit._ChannelSplines]
 ---
 
 ## What it does
@@ -531,13 +531,15 @@ In grey, the index the choice stands for; typing over it makes it *typed*.
 
 ### model.registration.map
 *the calibration's*: the map the beads measured with the PSFs.  *from this
-movie*: frames spread over the movie fitted with a plain Gaussian, each half
-on its own, and the pairs registered over the whole chip, whatever the shift
-(`calibrate.transform.register_channels`) -- Gaussian 2D 2C's measurement,
-the chip split as the calibration's PSFs were learnt.  A Gaussian's centre is
-not the spline's, a few nanometres apart in ways that change with z, so the
-*move*, measured with the spline model, still runs on top of it: leave it on
-*measured*.  The map is measured once for a movie and its settings, at the
+movie*: frames spread over the movie fitted each half on its own with that
+half's spline from the calibration -- turned as the half's pixels are, along
+a mirror -- and the pairs registered over the whole chip, whatever the shift
+(`calibrate.transform.register_channels`): Gaussian 2D 2C's measurement with
+the calibration's PSFs in place of the Gaussian, the chip split as they were
+learnt.  The map is then measured between the positions the fit itself finds:
+a Gaussian's centre sits off a lopsided PSF's, by a different amount in each
+channel, and that difference would land in the map.  The *move* can still run
+on top of it, for a drift over time.  The map is measured once for a movie and its settings, at the
 first Preview or Run, and saved beside the output as `_2ct.h5` (*save it*,
 under *more*).  *file*: a transformation file in its place.  Use the
 calibration's map where the splitter has not moved more than a few pixels:
@@ -574,9 +576,9 @@ against the frame with the move, and what is left after the move against
 z -- a slope there means the registration and the PSF models disagree,
 which a move cannot mend.  The measurement is kept beside the movie
 (`<movie>.channel_move.json`), so later previews and runs read it; the
-line under *move* says what was found.  Unlike *registration* > *from this
-movie*, which measures a new map with a plain Gaussian, this keeps the
-beads' map and measures with the model that made it.
+line under *move* says what was found.  Unlike *map* > *from this movie*,
+which measures a new map over the whole chip, this keeps the beads' map and
+measures how far it moved.
 *measured* is the default.  Where too few pairs are found to measure it,
 the fit goes on with the registration as it is and says so.  A constant
 move whose blocks differ by more than a quarter pixel is said to change:

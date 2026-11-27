@@ -2932,7 +2932,7 @@ class _TwoChannelFit(_FitPlugin):
         Measured once per movie and the settings it depends on (`_measuring_key`), and kept: it
         fits up to thousands of frames, so a preview that measured it is not to be followed by a
         run -- or a second preview at another frame -- that measures it again."""
-        key = _measuring_key(settings, self._start_sigma(settings))
+        key = self._map_key(settings)
         found = _MEASURED.get(key) if key is not None else None
         if found is None:
             found = self._measure_registration(ctx, settings)
@@ -2994,6 +2994,8 @@ class _TwoChannelFit(_FitPlugin):
         quiet = Context(progress=lambda _: None)
         want = int(settings.model.registration.calibrate_locs)
 
+        fitter = self._pass_fitter(settings)
+
         def fit_range(start, stop):
             # the two channels each detected and fitted on its own, with its own threshold --
             # what lets a dim channel be detected at all -- as a 1C fit on *two channels* does
@@ -3003,7 +3005,7 @@ class _TwoChannelFit(_FitPlugin):
                 model=GaussianModelSettings(sigma=self._start_sigma(settings)),
                 fit=settings.fit,
                 output=OutputSettings(save=False, raw_frames=0))
-            return GaussianFit().run(quiet, plain).locs
+            return fitter.run(quiet, plain).locs
 
         # One small block first, only to find out how dense this sample is.
         # Stopping early once the count is reached would be the obvious thing
@@ -3054,6 +3056,15 @@ class _TwoChannelFit(_FitPlugin):
     def _start_sigma(self, settings) -> float:
         """The Gaussian width the calibration pass's plain fit starts from, px."""
         return 1.3
+
+    def _pass_fitter(self, settings) -> "_FitPlugin":
+        """What fits the calibration pass's frames, each channel on its own: a free-width Gaussian, for a
+        fitter that has no PSF of its channels."""
+        return GaussianFit()
+
+    def _map_key(self, settings) -> Optional[str]:
+        """What a map measured from this movie is kept under (`_measuring_key`)."""
+        return _measuring_key(settings, self._start_sigma(settings))
 
     # ----------------------------------------------------------- the channel layer
     def channel_layout(self, settings, base, camera: Optional[CameraMetadata] = None):
@@ -3319,7 +3330,8 @@ class DualSplineFit(_TwoChannelFit):
     #     the main channel's lowest localizations, z the height above the coverslip (`calibrate.depth`)
     # 16: a SMAP two-channel calibration's photons as photons: each half's own light at focus its share
     #     (`psf.signal_integral`), a linked N the total over both halves (Jonas, 2026-11-22)
-    version = "18"
+    # 19: *map* from this movie measured with each half's spline, not a Gaussian (`_ChannelSplines`)
+    version = "19"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -3372,7 +3384,7 @@ class DualSplineFit(_TwoChannelFit):
         return ("2C in situ", stamp(settings.source.path), stamp(m.calibration),
                 # *learn* in the words before 2026-11-27, so that what was kept stays found
                 stamp(registration_file(m.registration)) if m.registration.map != "movie"
-                else ("movie", _measuring_key(settings, self._start_sigma(settings))),
+                else ("movie", self._map_key(settings)),
                 m.sample.n_med(), learn_word(m.sample.learn),
                 bool(m.learn_registration), bool(m.link_photons), repr(settings.camera),
                 repr(getattr(settings, "channels", None))) + (
@@ -3570,8 +3582,7 @@ class DualSplineFit(_TwoChannelFit):
         movie = ""
         if from_movie(settings):
             import hashlib
-            movie = "|movie:" + hashlib.sha1(str(_measuring_key(settings, self._start_sigma(settings))).encode()
-                                             ).hexdigest()[:12]
+            movie = "|movie:" + hashlib.sha1(str(self._map_key(settings)).encode()).hexdigest()[:12]
         return f"{settings.model.calibration}|{registration_file(settings.model.registration)}{drawn}{movie}"
 
     def read_registration(self, settings):
@@ -3583,7 +3594,7 @@ class DualSplineFit(_TwoChannelFit):
         if registration_file(settings.model.registration):
             return with_registration(calibration, settings.model.registration.load())
         if from_movie(settings):
-            key = _measuring_key(settings, self._start_sigma(settings))
+            key = self._map_key(settings)
             found = _MEASURED.get(key) if key is not None else None
             if found is not None:
                 return with_registration(calibration, found.transform)
@@ -3595,6 +3606,25 @@ class DualSplineFit(_TwoChannelFit):
             from ..calibrate.dual import with_registration
             measured = with_registration(settings.model.load(), measured)
         return super()._reading_once(settings, call, measured)
+
+    def _pass_fitter(self, settings) -> "_FitPlugin":
+        """Each channel fitted with its own spline: the map is then measured between the positions the fit
+        itself will find, where a Gaussian's centre sits a few nm off an asymmetric PSF's -- an offset that
+        differs between the channels, so it lands in the map."""
+        return _ChannelSplines(settings.model.load())
+
+    def _map_key(self, settings) -> Optional[str]:
+        # the splines the pass fits with: the calibration (and its version) and the focus they are drawn for
+        key = super()._map_key(settings)
+        if key is None:
+            return None
+        path, sample = settings.model.calibration, settings.model.sample
+        try:
+            version = Path(path).stat().st_mtime_ns
+        except (OSError, TypeError, ValueError):
+            version = None
+        drawn = (sample.focus_nm, sample.n_med()) if sample.mode == "typed" else None
+        return repr((key, str(path), version, drawn))
 
     def _measure_registration(self, ctx: Context, settings):
         """Gaussian 2D 2C's measurement, the chip split as the calibration's PSFs were learnt -- its layout and
@@ -3619,6 +3649,38 @@ class DualSplineFit(_TwoChannelFit):
 
     def model(self, settings, camera):
         return settings.model.model(self.registration(settings), camera)
+
+
+class _ChannelSplines(GaussianFit):
+    """The calibration pass of Spline 3D 2C's map from this movie: a fit on *two channels*
+    (`multichannel.SplitEngine`) with each channel's own spline of a dual-colour calibration in place of
+    the Gaussian.  Each spline is turned as its channel's pixels are cut (the layout's flips): the
+    calibration keeps them as the camera saw them (`calibrate.dual.build_dual_calibration`), and the
+    flip is the split engine's own, so it cannot disagree with the pixels it is fitted to.  Not a plugin
+    of the menu: no ``@register``, used by `DualSplineFit._pass_fitter` only."""
+
+    def __init__(self, calibration):
+        super().__init__()
+        self.calibration = calibration
+
+    def model(self, settings, camera):
+        from ..calibrate.depth import in_focus
+        from ..io.calibration import warn_on_em_mismatch
+        if camera is not None:
+            warn_on_em_mismatch(self.calibration.main, camera.em_on)
+        # the fits start at the plane in focus, as the 2C fit's do (`DualModelSettings.model`)
+        return SplinePSF(self.calibration.main, z_start_nm=in_focus(self.calibration.main))
+
+    def engine(self, settings, camera, finder, model, source=None):
+        from ..calibrate.depth import in_focus
+        from ..calibrate.dual import mirrored_spline
+        split = super().engine(settings, camera, finder, model, source)
+        for c, spline in enumerate((self.calibration.main, self.calibration.secondary)):
+            for axis, flipped in zip((2, 1), split.layout.flips[c]):      # (x, y) flips; spline axes z, y, x
+                if flipped:
+                    spline = mirrored_spline(spline, axis=axis)
+            split.engines[c].model = SplinePSF(spline, z_start_nm=in_focus(self.calibration.main))
+        return split
 
 
 # The split each registration or calibration file records, by path and modification time: the form

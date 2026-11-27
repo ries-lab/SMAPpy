@@ -246,3 +246,59 @@ def test_spline_2c_measures_its_map_from_the_movie_when_the_beads_map_is_far_off
     # the move alone, from the beads' map, does not get there
     alone = DualSplineFit().run(Context(), _settings(movie, calibration, move="measured")).locs
     assert abs(np.median(alone["ratio"]) - 0.4) > 0.1 or len(alone) < 0.7 * len(result.locs)
+
+
+def _lopsided(side, axis, astigmatism):
+    """A spline whose PSF has a weaker second lobe ``side`` px along ``axis`` (1 y, 2 x of z, y, x): its
+    Gaussian centre lies off the spline's origin, by a share of ``side``."""
+    from test_dual_fit import psf_volume
+
+    from smappy.calibrate.core import spline_coefficients
+    from smappy.io.calibration import SplineCalibration
+    volume = psf_volume(astigmatism=astigmatism)
+    volume = (volume + 0.4 * np.roll(volume, side, axis=axis)) / 1.4
+    return SplineCalibration(spline_coefficients(volume), 10., 20., x0=8.0, psf=volume, parameters={})
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_spline_2c_measures_the_movie_map_with_each_channels_spline_not_a_gaussian(tmp_path, mirrored, monkeypatch):
+    """Each channel's PSF lopsided the other way, so a Gaussian's centre sits off each spline's origin in
+    opposite directions: a map measured from Gaussian fits carries that difference; measured from the
+    channels' own splines (`_ChannelSplines`, the secondary turned as its channel's pixels are -- along y,
+    for a mirrored splitter) it is the drawn map."""
+    from test_dual_fit import SHAPE, SPLIT
+
+    from smappy.calibrate.dual import DualColorCalibration, split_geometry
+    from smappy.plugins.fit import DualSplineFit, GaussianFit, _MEASURED
+    axis = 1 if mirrored else 2                       # the lobes along the mirror: what a wrong turn shows
+    main = _lopsided(2, axis, 0.6)
+    secondary = _lopsided(-2, axis, -0.6)
+    if mirrored:
+        from smappy.calibrate.dual import mirrored_spline
+        secondary = mirrored_spline(secondary, axis=1)        # stored as the camera sees it
+        transformation = np.array([[1., 0., -0.37], [0., -1., 2 * SPLIT - 1 - 0.21], [0., 0., 1.]])
+        geometry = split_geometry("up-down mirrored", "upper", SHAPE, split_position=SPLIT)
+    else:
+        transformation = np.array([[1., 0., -0.37], [0., 1., -SPLIT + 0.21], [0., 0., 1.]])
+        geometry = split_geometry("up-down", "upper", SHAPE, split_position=SPLIT)
+    cal = DualColorCalibration(main, secondary, transformation, geometry, {"secondary_main_brightness_ratio": 1.0})
+    movie, calibration = _movie(tmp_path, cal, cal, n=80, per_frame=4, xs=(9, 50))
+    movie_map = dict(map="movie", calibrate_skip=0, calibrate_frames=80, calibrate_locs=500, calibrate_blocks=1,
+                     save_calibration=False)
+    settings = _settings(movie, calibration, **movie_map)
+    points = np.array([[15.0, 12.0], [40.0, 18.0], [28.0, 15.0]])
+
+    def error(plugin):
+        _MEASURED.clear()
+        found = plugin._measure_registration(Context(), settings)
+        from smappy.calibrate.dual import with_registration
+        here = with_registration(cal, found.transform).layout()
+        return np.abs(here.to_channel(1, points) - cal.layout().to_channel(1, points)).max()
+
+    splines = error(DualSplineFit())
+    monkeypatch.setattr(DualSplineFit, "_pass_fitter", lambda self, s: GaussianFit())
+    gaussian = error(DualSplineFit())
+    # 0.03 and 0.05 px from the splines, 1.05 and 1.07 px from Gaussians; 1.09 px with the secondary not turned
+    assert splines < 0.1
+    assert gaussian > 0.5

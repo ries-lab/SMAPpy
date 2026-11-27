@@ -177,8 +177,12 @@ whether both do.  Either way a chain and a batch run the settings, not the windo
   the microscope, camera and 3D lens state (`microscope_psf.earlier_astigmatism`), the PSF window's start too.
 * **2026-11-27, fifth slice**: Spline 3D 2C's *map* = *from this movie*: Gaussian 2D 2C's measurement (each half
   fitted, the pairs registered over the chip, any shift), the calibration's halves and PSFs kept, the spline's
-  *move* still on top.  Built as Gaussian's rather than with the start's PSFs per channel: the move, measured with
-  the spline, takes the Gaussian's few-nm offset out; *learn map* (in situ) refines it further.
+  *move* still on top.
+* **2026-11-27, sixth slice**: that map measured with each half's own spline (`fit._ChannelSplines`: the split
+  engine's halves, each with its spline turned as its pixels are), as this plan asked, not a Gaussian -- the first
+  build took Gaussian 2D 2C's pass and left the offset to the move.  On PSFs lopsided the other way in each
+  channel the Gaussian map was 1.05 px off, the splines' 0.03 px (0.05 mirrored)
+  (`test_channel_move.py::test_spline_2c_measures_the_movie_map_with_each_channels_spline_not_a_gaussian`).
 
 ## Measured: the theory start on M2 (2026-11-27)
 
