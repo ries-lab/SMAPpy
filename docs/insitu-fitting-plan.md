@@ -191,8 +191,8 @@ with a warning; the cache is used on a second run.  Slow tier.
      the share to 0.458, the focus to 667 nm (700), 17 nats per held-out molecule better than the focus alone;
      the fit's z scatter about the truth (MAD) 26 nm against 33 nm with the start at the focus on auto.  Two
      dyes (0.2, 0.8): the shares per molecule 0.24 / 0.75.
-   * **Real data** (Zenodo `2ch_smlm_nup96_WGA`, 2026-11-26, see Open): the focus and the aberrations ran;
-     the aberrations fell back (−4 nats per held-out molecule); *learn registration* failed.
+   * **Real data**: not tested yet.  The Zenodo movie `2ch_smlm_nup96_WGA` has no beads of its own (see
+     Open); its runs of 2026-11-26 paired nothing and are void.
    * **Not done**: M2's two colours; a field-dependent calibration
      is learnt and drawn without its field; the PSF calibration window has no in situ dual sample (the
      fitter was the goal; `insitu_dual.run_insitu_dual` is the entry a window would call).
@@ -210,7 +210,6 @@ with a warning; the cache is used on a second run.  Slow tier.
   | M2 Sep, CLC Cy3B | 279 nm, 13.4 % below | +3.5 nats, 568 nm, 3.6 % | +4.3 nats, 495 nm, 4.7 % |
   | M2 Jan, CLTA AF647 | 574 nm, 1.8 % | +5.8 nats, 431 nm, 5.1 % | +7.1 nats, 407 nm, 3.4 % |
   | M2 Aug, sun1 A647 | 692 nm, 6.9 % | −13.7 nats: fell back | +11.1 nats, **1718 nm**, 0 % |
-  | Zenodo 2C, Nup96 / WGA | 393 nm, 9.9 % (auto: 3.1 %) | −4.1 nats: fell back | -- |
 
   Every gain that kept a pupil was several nats per molecule, so **a threshold in nats would have changed
   nothing**, and it would not have caught the one result that is wrong: August's *everything* moved the
@@ -220,12 +219,18 @@ with a warning; the cache is used on a second run.  Slow tier.
   differences over their errors) told none of the models apart.  What is needed instead is a check of the
   depth: the learnt focus against the focus alone (August: 692 → 1718 nm), or the lowest localizations'
   edge, which a kept model should leave at the coverslip; not decided yet.
-* Spline 3D 2C *learn registration* on real data (Zenodo) rejected every molecule ("no bead left to learn
-  from"): every molecule's offset from its region's centre about 6 px after the first stage, against the
-  3 px limit -- already in the focus stage, with the map still the calibration's: the molecules' positions
-  spread ±2 µm, z up to 2.9 µm.  On 2000 frames the same run went through and was kept with the focus at
-  2981 nm (12 % better on the held-out molecules): not trusted.  The focus-only run of the same movie, which
-  fitted, needs comparing stage by stage; not done.
+* Spline 3D 2C in situ on real data is untested.  The Zenodo movie `2ch_smlm_nup96_WGA` (2019-09-10, EM
+  port, gain 200) has no beads of its own: the record's `2ch_40nm_bead` are of 2022-01-24, on the normal port.
+  Their map (correct for the beads: 0.6--0.9 px) is about 25 rows and 1° off for the movie even mirrored for
+  the EM register, so the molecules paired with it hardly ever met their partner (0.6 % within 2 px; an affine
+  from the movie's own peaks pairs 93 %), and the runs of 2026-11-26 -- focus 393 nm, aberrations −4.1 nats,
+  *learn registration* rejecting every molecule -- were learnt from mispaired regions: void.  uiPSF v1 fitted
+  this movie without beads (halves mirrored, T learnt in situ from identity).  The channel move's vote
+  (±10 px) found a chance peak there, (−9, −7.5) px, and cached it beside the movie.  A test on two colours
+  wants a movie with beads of its own day: DECODE-Plex's Fig. 2a (Zenodo 21348704, beads the next day).
+* EM gain in two colours: a dual pupil calibration did not record its beads' EM state (fixed: it does), and
+  Spline 3D 2C and in situ only warn on a mismatch where Spline 3D mirrors its spline (`matched_to_em`):
+  mirroring the pair needs both splines, both pupils' Zernikes and the map about the chip.  Not done.
 * Found on the way: a spline drawn for a deep focus (its planes about the plane in focus, the coverslip below
   them) was refused by the writer (z0 outside the grid), so August's *everything* could not be kept and the
   fit stopped; and the residual atlas's background ramp raised on a region masked whole (a split chip's
