@@ -27,6 +27,7 @@ from ..picture import (FrameSource, ViewFrame, bar_label, colour_bar_labels, col
 from ..regions import Region, readable
 from ..render import FieldOfView, axis_unit
 from ..session import Session
+from ..tracking.columns import NoTracks
 from . import folders
 from .widgets import CompactSpinBox
 
@@ -160,8 +161,10 @@ class RenderWorker(QObject):
             # Always answer.  Returning in silence left the view waiting for
             # this render forever, so it never asked for another: one failure
             # -- a layer that cannot be drawn -- and the image stayed black
-            # for good.
-            traceback.print_exc()
+            # for good.  A table without tracks in the tracks mode is the
+            # data's state, said over the picture: no traceback for it.
+            if not isinstance(e, NoTracks):
+                traceback.print_exc()
             self.failed.emit(f"{type(e).__name__}: {e}", generation)
             return
         self.done.emit(result, generation)

@@ -22,6 +22,13 @@ TRACK_COLUMNS = ("track_id", "tid", "track_id_true")
 AUTO = ""
 
 
+class NoTracks(ValueError):
+    """The table has no column to take the tracks from.  A state of the data,
+    not a bug: the render thread shows it over the picture without a traceback
+    (`gui.render_view.RenderWorker.render`), where a layer left in the *tracks*
+    mode on a table without tracks otherwise printed one on every redraw."""
+
+
 def integer_columns(locs) -> List[str]:
     """The table's one-dimensional integer columns: what can name tracks."""
     return [n for n in locs.keys() if np.asarray(locs[n]).ndim == 1
@@ -36,7 +43,7 @@ def auto_track_column(locs) -> str:
 def track_column(locs, chosen: str = AUTO) -> str:
     """The column that names the tracks: ``chosen``, or on *auto* the first of
     `TRACK_COLUMNS` the table has.  Raises ValueError, naming the integer
-    columns there are, when there is none."""
+    columns there are, when there is none (`NoTracks`)."""
     column = (chosen or "").strip() or auto_track_column(locs)
     if column and column in locs:
         return column
@@ -46,7 +53,7 @@ def track_column(locs, chosen: str = AUTO) -> str:
     else:
         start = ("no tracks: the table has none of "
                  + ", ".join(TRACK_COLUMNS))
-    raise ValueError(start + ".  Link them (Analysis/Tracking/Link tracks), or "
+    raise NoTracks(start + ".  Link them (Analysis/Tracking/Link tracks), or "
                      "choose the track id among "
                      + (", ".join(have) if have else "(no integer attribute)"))
 

@@ -158,6 +158,41 @@ def test_the_view_says_why_a_picture_could_not_be_drawn():
     assert view.error_hint.isHidden()
 
 
+def test_a_tracks_layer_without_tracks_is_reported_without_a_traceback(capsys):
+    # the data's state, not a bug: said over the picture, not printed on
+    # every redraw; any other failure still prints its traceback
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.render_view import RenderWorker
+
+    class Job:
+        def __init__(self, error):
+            self.error = error
+
+        def run(self, worker):
+            bare = Localizations({"x_nm": np.zeros(2, np.float32),
+                                  "y_nm": np.zeros(2, np.float32),
+                                  "frame": np.arange(2)}, {})
+            if self.error:
+                raise self.error
+            return render_locs(bare, FieldOfView(0, 0, 1.0, 4, 4), TRACKS)
+
+    # the worker's own signals are queued from its thread: a stand-in for it
+    failed = []
+
+    class Worker:
+        failed = done = type("Emit", (), {"emit": staticmethod(
+            lambda message, generation: failed.append(message))})()
+
+    RenderWorker.render(Worker(), Job(None), 0)
+    assert "none of track_id, tid, track_id_true" in failed[-1]
+    assert "Traceback" not in capsys.readouterr().err
+    RenderWorker.render(Worker(), Job(RuntimeError("a bug")), 1)
+    assert failed[-1] == "RuntimeError: a bug"
+    assert "Traceback" in capsys.readouterr().err
+
+
 def test_merged_blinks_keep_their_track_so_no_line_crosses_the_field():
     # merging used to average track_id_true: one blink of two particles
     # passing close took a third track's id, and was joined to it
