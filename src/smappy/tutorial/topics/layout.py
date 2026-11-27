@@ -1,5 +1,5 @@
 """Finding your way around: the two windows, the tabs, filters, layers,
-grouping, the selection, plugins and undo.
+grouping, the selection, plugins, the workspace, the AI assistant and undo.
 
 The second of the series and the first one made, because everything after it
 assumes it.  Aimed at a biologist who knows what SMLM is: each idea gets one
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 TITLE = "Finding your way around SMAPpy"
 DESCRIPTION = ("The two windows, the tabs, filters, layers, merging blinks, what a "
-               "plugin works on, and undo.")
+               "plugin works on, your workspace, the AI assistant, and undo.")
 
 # ---------------------------------------------------------------- figures
 # Drawn for the cards; `currentColor` and the player's CSS variables, so they
@@ -96,6 +96,7 @@ _SELECTION = """
 
 from .common import menu as _menu, menu_item as _menu_item, open_section as _open
 from .common import show_tab as _show_tab, tab_button as _tab_button, toolbar as _toolbar
+from .common import submenu as _submenu, tab_menu as _tab_menu
 
 
 # ---------------------------------------------------------------- the story
@@ -108,7 +109,7 @@ def make(d) -> None:
     d.card(TITLE,
            "<p>The two windows, the tabs, and the four ideas the rest of SMAPpy "
            "is built on: <b>filters</b>, <b>layers</b>, <b>merging blinks</b> and "
-           "<b>the selection</b>.</p>"
+           "<b>the selection</b>. Then your workspace, and the AI assistant.</p>"
            "<p>Everything here uses simulated data, so you can follow along: "
            "<i>File &rarr; Simulate</i>.</p>",
            say="Welcome. This tutorial is a tour of SMAPpy: where things are, "
@@ -350,6 +351,70 @@ def make(d) -> None:
            spot=[d.rect(menu)], zoom=d.around(menu, 700))
     menu.close()
 
+    d.chapter("Your workspace")
+    d.shot("The tabs, the plugins pinned to them and their settings are your "
+           "workspace. SMAPpy keeps it from one start to the next.",
+           spot=[d.rect(control.tabs.tabBar())],
+           zoom=d.around(control.tabs.tabBar(), 640))
+    menu = _tab_menu(d, "Analysis")
+    d.shot("Right-click a tab to rename it, move it, add an empty tab, or "
+           "detach it into a window of its own.",
+           spot=[d.rect(menu)], point=_tab_button(d, "Analysis"),
+           zoom=d.around(menu, 700))
+    tabs_menu = _submenu(d, menu, "Tabs")
+    d.shot("Under Tabs, a tick shows or hides each tab. Below the line are "
+           "ready-made tabs for one technique, such as MINFLUX or DNA-PAINT.",
+           spot=[d.rect(tabs_menu)], point=_menu_item(d, tabs_menu, "DNA-PAINT"),
+           click=True, zoom=d.around(tabs_menu, 760))
+    tabs_menu.close()
+    menu.close()
+    control.add_tab_set("DNA-PAINT")
+    d.settle()
+    d.shot("Ticked, the tab is added beside yours, with its plugins set up for "
+           "the technique. Untick it to hide it again: what you changed in it "
+           "is kept.",
+           spot=[_tab_button(d, "DNA-PAINT")], point=_tab_button(d, "DNA-PAINT"),
+           zoom=d.around(control.tabs.tabBar(), 700))
+    control.show_tab_named("DNA-PAINT", False)
+    _show_tab(d, "Analysis")
+    menu = _menu(d, "View")
+    workspace_menu = _submenu(d, menu, "Workspace")
+    d.shot("View, Workspace saves it to a file: the tabs, their settings and "
+           "where the windows are. One per project, or per microscope.",
+           spot=[_menu_item(d, workspace_menu, "Save"),
+                 _menu_item(d, workspace_menu, "Save as...")],
+           zoom=d.around(workspace_menu, 760))
+    d.shot("Recent opens one again. Reset brings back the tabs SMAPpy came "
+           "with.",
+           spot=[_menu_item(d, workspace_menu, "Recent"),
+                 _menu_item(d, workspace_menu, "Reset")],
+           zoom=d.around(workspace_menu, 760))
+    workspace_menu.close()
+    menu.close()
+    d.settle()
+
+    d.chapter("An AI assistant")
+    d.card("An AI assistant",
+           "<p>An AI assistant such as Claude or Codex can work with SMAPpy, "
+           "with your own account. Ask it in plain words.</p>"
+           "<ul><li><b>It explains</b> which plugin and which settings, and "
+           "what the numbers mean.</li>"
+           "<li><b>It suggests</b> a plugin with its settings; you press Run.</li>"
+           "<li><b>It does it</b> for you, when you let it.</li></ul>",
+           say="An AI assistant can work with SMAPpy. Ask it in plain words: it "
+               "explains, it suggests, or it does it for you.")
+    menu = _menu(d, "Assistant")
+    item = _menu_item(d, menu, "Start assistant")
+    d.shot("Assistant, Start assistant, or Ctrl+Shift+A, starts it beside the "
+           "picture. Its own tutorial shows how to work with it.",
+           spot=[item], point=item, zoom=d.around(menu, 700))
+    menu.close()
+    d.settle()
+    button = control.assistant_button
+    d.shot("This button in the picture's toolbar says whether one is "
+           "connected, and keeps what it proposes for you to check.",
+           spot=[button], point=button, zoom=d.around(button, 760))
+
     d.chapter("Undo, copy and saving")
     menu = _menu(d, "Edit")
     d.shot("What changes the table, like a drift correction, can be undone. "
@@ -378,7 +443,9 @@ def make(d) -> None:
            "<li><b>Merge blinks</b> turns one blink seen in several frames into one "
            "localization.</li>"
            "<li><b>The selection</b> &ndash; filter and ROI &ndash; is what a plugin "
-           "measures.</li></ul>"
+           "measures.</li>"
+           "<li><b>Your workspace</b> &ndash; the tabs and their settings &ndash; is "
+           "kept, and saved under View, Workspace.</li></ul>"
            "<p>Next: fitting raw data, rendering in 2D and 3D, and the ROI "
            "manager.</p>",
            say="That is the tour. Next: fitting raw data, rendering, and the "

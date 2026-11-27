@@ -123,6 +123,30 @@ def menu(d, title: str):
     return menu
 
 
+def submenu(d, menu, text: str):
+    """The submenu ``text`` of an open menu, opened beside it as a person
+    opens it, its item highlighted."""
+    from PySide6.QtCore import QPoint
+    action = next(a for a in menu.actions() if a.text().replace("&", "") == text)
+    r = menu.actionGeometry(action)
+    sub = action.menu()
+    menu.setActiveAction(action)
+    sub.popup(menu.mapToGlobal(QPoint(r.right(), r.top())))
+    d.settle()
+    return sub
+
+
+def tab_menu(d, name: str):
+    """A tab's right-click menu (`ControlWindow.tab_menu`), open on its tab."""
+    from PySide6.QtCore import QPoint
+    i, _ = tab(d, name)
+    bar = d.control.tabs.tabBar()
+    menu = d.control.tab_menu(i)
+    menu.popup(bar.mapToGlobal(bar.tabRect(i).center() + QPoint(0, 6)))
+    d.settle()
+    return menu
+
+
 def menu_item(d, menu, text: str):
     """An item of an open menu, as a rectangle on the desktop."""
     action = next(a for a in menu.actions() if a.text().replace("&", "").startswith(text))
