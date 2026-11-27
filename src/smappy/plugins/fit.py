@@ -28,7 +28,8 @@ from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
 from ..calibrate.dual import (RegisterSettings, layout_param, main_channel_param,
                               split_position_param)
 from ..calibrate.depth import (FOCUS_HELP, LEARN_CHOICES, LEARN_HELP, LEARN_WORDS, SAMPLE_FOCUS_CHOICES,
-                               SampleSettings, focus_mode, holds_focus, learn_word, settled_focus)
+                               SampleSettings, focus_mode, holds_focus, learn_order_field, learn_word, learns_pupil,
+                               settled_focus)
 from ..calibrate.medium import (cleared, differs, for_drawing, index_field, medium_field, mismatch_text, resolve,
                                settle)
 from ..pipeline import FitSettings, fit_stack, provenance
@@ -467,6 +468,7 @@ class SplineModelSettings:
     # how much of the PSF the data's own molecules teach before the fit, the rest held from the calibration's
     # pupil model, the start (`calibrate.depth.insitu_focus`); learning refines the focus, never replaces it
     learn: str = param("nothing", label="learn", choices=LEARN_CHOICES, help=LEARN_HELP)
+    learn_order: Optional[int] = learn_order_field()
     focus_nm: float = param(0.0, label="focus depth", unit="nm", min=0.0,
                             help="how far into the sample the objective was moved from the "
                                  "coverslip; typed here, else found at Preview or Run")
@@ -2343,6 +2345,7 @@ class SplineFit(_FitPlugin):
         drawn = shown and m.focus != "calibrated"
         state.shown["model.focus"] = shown
         state.shown["model.learn"] = drawn
+        state.shown["model.learn_order"] = drawn and learns_pupil(m.learn)
         state.shown["model.focus_nm"] = drawn
         state.shown["model.medium"] = drawn
         state.shown["model.sample_index"] = drawn
@@ -2402,6 +2405,8 @@ class SplineFit(_FitPlugin):
         key = [mode, stamp(src.path), stamp(m.calibration), m.n_med()]
         if mode == "insitu" and m.learn != "blur":
             key.append({"phase": "aberrations", "apodisation": "everything"}[m.learn])
+            if m.learn_order is not None:
+                key.append(("order", int(m.learn_order)))
         if mode == "insitu" and holds_focus(m.focus):
             key.append(("typed", m.focus_nm))
         if mode == "auto":
@@ -2488,7 +2493,8 @@ class SplineFit(_FitPlugin):
                 except ValueError:
                     pass
             found = depth.insitu_focus(cal, [settings.source.path], camera, m.n_med(), start,
-                                       progress=ctx.report, cancel=ctx.stop, learn=m.learn, hold_focus=hold)
+                                       progress=ctx.report, cancel=ctx.stop, learn=m.learn, hold_focus=hold,
+                                       order=m.learn_order)
             if start is not None and not hold:
                 found.edge_nm = start
             if depth.keep(key, found) is None:
@@ -3388,7 +3394,9 @@ class DualSplineFit(_TwoChannelFit):
                 m.sample.n_med(), learn_word(m.sample.learn),
                 bool(m.learn_registration), bool(m.link_photons), repr(settings.camera),
                 repr(getattr(settings, "channels", None))) + (
-            (("typed", m.sample.focus_nm),) if holds_focus(m.sample.focus) else ())
+            (("typed", m.sample.focus_nm),) if holds_focus(m.sample.focus) else ()) + (
+            (("order", int(m.sample.learn_order)),)
+            if m.sample.learn_order is not None and learns_pupil(m.sample.learn) else ())
 
     def kept_insitu(self, settings):
         """What this session or an earlier Run learnt in situ for these settings (`calibrate.depth.kept`), or None."""
@@ -3454,7 +3462,7 @@ class DualSplineFit(_TwoChannelFit):
             found = depth.insitu_dual(dual, [settings.source.path], camera, m.sample.n_med(), start,
                                       learn=m.sample.learn, registration=m.learn_registration,
                                       share_per_molecule=not m.link_photons, progress=ctx.report, cancel=ctx.stop,
-                                      hold_focus=hold)
+                                      hold_focus=hold, order=m.sample.learn_order)
             if start is not None and not hold:
                 found.edge_nm = start
             if depth.keep(key, found) is None:

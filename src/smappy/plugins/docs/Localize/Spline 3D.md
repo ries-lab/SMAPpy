@@ -565,6 +565,18 @@ molecules held out to judge, so a few thousand blinks in the movie.
 learnt from molecules it trades with the focus, which is then held at the edge
 or where it was typed.
 
+### model.learn_order
+Read with *learn* on *phase* or *phase and apodisation*: the phase is learnt
+up to this radial order and held above it.  *auto* is 6, what a calibration
+learns up to, and right for most data: it includes the spherical aberration
+(order 4) that a sample deeper than the beads' plane, or in another medium,
+adds.  Lower it to 4 for few molecules, where the high orders only fit noise;
+raise it to 8 for a movie with many bright molecules and a PSF far from the
+beads'.  The order is always this one, never the calibration's own: a start
+drawn from the microscope's optics in theory carries astigmatism alone, which
+at its own order 2 left a sample's spherical aberration to the focus, a few
+hundred nanometres off on M2.
+
 ### model.focus_nm
 How far the objective was moved up from the coverslip, as its focus drive
 reads, not the true distance in the sample.  An error of a few hundred

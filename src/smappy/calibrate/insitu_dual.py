@@ -271,7 +271,8 @@ def _optics(model, c: int, n_med: float):
 def run_insitu_dual(start, paths, camera, learn: str = "blur", n_med=None, focus_nm=None,
                     detection: InSituSettings | None = None, rounds: int = 2, registration: bool = False,
                     share_per_molecule: bool = False, rois: DualInSituROIs | None = None, transform=None,
-                    progress=None, cancel=None, device=None, hold_focus: bool = False):
+                    progress=None, cancel=None, device=None, hold_focus: bool = False,
+                    order: int | None = None):
     """Two-channel in situ: the split movies at ``paths`` learnt from, starting from ``start`` (the two-channel
     `LearnedPSF` a dual pupil calibration carries, `depth.model_of(main, channels=2)`), as `insitu_run.run_insitu`
     learns one channel (`InSituRunResult`).
@@ -320,7 +321,8 @@ def run_insitu_dual(start, paths, camera, learn: str = "blur", n_med=None, focus
     detection = detection.resolved(rois.pixel_size_nm)
     n = resolved_medium(start, n_med)
     shared = start.shared() if callable(getattr(start, "shared", None)) else start.shared
-    spec = BeadSettings.from_options(start.options).psf
+    # the phase up to the order asked (*Zernike order*, None `pupil.AUTO_ORDER`), never the start model's own
+    spec = replace(BeadSettings.from_options(start.options).psf, zernike_order=order)
     hold = DUAL_HOLDS[learn]
     held = [Held(), Held()]
     messages = []

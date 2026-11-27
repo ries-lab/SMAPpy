@@ -86,3 +86,14 @@ def test_the_psf_windows_hold_reads_back_as_learn():
     from smappy.plugins import settings_from
     assert settings_from(InSituModelSettings, {"hold": "all"}).learn == "blur"
     assert settings_from(InSituModelSettings, {"learn": "aberrations"}).learn == "phase"
+
+
+def test_the_zernike_order_is_asked_beside_learn_and_keys_what_is_kept():
+    # shown only where the phase is learnt, and a model learnt to another order is another model
+    from smappy.plugins.fit import SplineFit, SplineFitSettings, SplineModelSettings
+    plugin = SplineFit()
+    auto = SplineFitSettings(model=SplineModelSettings(learn="phase"))
+    four = SplineFitSettings(model=SplineModelSettings(learn="phase", learn_order=4))
+    assert plugin._focus_key(auto) != plugin._focus_key(four)
+    blur = SplineFitSettings(model=SplineModelSettings(learn="blur", learn_order=4))
+    assert plugin._focus_key(blur) == plugin._focus_key(SplineFitSettings(model=SplineModelSettings(learn="blur")))

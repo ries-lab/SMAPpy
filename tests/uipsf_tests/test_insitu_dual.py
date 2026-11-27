@@ -155,7 +155,7 @@ def test_two_channel_in_situ_keeps_what_it_learnt_only_where_the_molecules_held_
     runs = []
 
     def one(dual, start, paths, camera, n_med, focus_nm, learn, detection, rounds, registration,
-            share_per_molecule, progress, cancel, rois=None, hold_focus=False):
+            share_per_molecule, progress, cancel, rois=None, hold_focus=False, order=None):
         rois = rois or SimpleNamespace(ids=lambda state: np.arange(7))
         out = depth.AutoDepth(650.0 if learn == "blur" else 700.0, 10.0, 0.1, 50, method="in situ")
         out.result = SimpleNamespace(learn=learn, rois=rois)
@@ -223,7 +223,7 @@ def test_spline_3d_2c_learns_in_situ_at_run_never_at_preview_and_asks_first(monk
     learnt = []
 
     def insitu_dual(dual, paths, camera, n_med, focus_nm, learn, registration, share_per_molecule, progress,
-                    cancel, hold_focus=False):
+                    cancel, hold_focus=False, order=None):
         learnt.append((focus_nm, learn, registration, share_per_molecule))
         out = depth.AutoDepth(710.0, 10.0, 0.1, 50, method="in situ", blur_nm=40.0)
         out.messages.append("a warning")

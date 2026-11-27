@@ -273,6 +273,7 @@ class Simulate(Plugin):
         state.hints.update(hints)
         state.choices["optics.sample.focus"] = [("typed", "typed"), ("calibrated", "beads' focus")]
         state.shown["optics.sample.learn"] = False      # frames are drawn, nothing learnt from them
+        state.shown["optics.sample.learn_order"] = False
 
     def describe(self, ctx: Optional[Context], settings: SimulateSettings) -> FormState:
         """The preset's key parameters at the top; each component's fields

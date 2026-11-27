@@ -59,7 +59,9 @@ def test_the_sample_part_is_shown_only_for_a_calibration_that_carries_a_model(fi
     assert not any(shown.values())
     shown, active, hints = depth.sample_state(pupil, SampleSettings())
     assert shown == {"sample.focus": True, "sample.focus_nm": True, "sample.medium": True,
-                     "sample.sample_index": True, "sample.learn": True}
+                     "sample.sample_index": True, "sample.learn": True, "sample.learn_order": False}
+    # the order only where the phase is learnt
+    assert depth.sample_state(pupil, SampleSettings(learn="phase"))[0]["sample.learn_order"]
     assert not active["sample.focus_nm"] and hints["sample.focus_nm"].startswith("edge")
     # the number in grey: the index the calibration was learnt with -- read from its parameters, without the
     # model -- or the preset's

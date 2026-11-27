@@ -563,7 +563,7 @@ def test_in_situ_keeps_what_it_learnt_only_where_the_molecules_held_out_agree(mo
     runs = []
 
     def one(cal, paths, camera, n_med, focus_nm, learn, detection, rounds, progress, cancel, rois=None,
-            hold_focus=False):
+            hold_focus=False, order=None):
         rois = rois or SimpleNamespace(ids=lambda state: np.arange(7))
         out = depth.AutoDepth(650.0 if learn == "blur" else 700.0, 10.0, 0.1, 50, method="in situ")
         out.result = SimpleNamespace(learn=learn, rois=rois)
@@ -596,7 +596,7 @@ def test_a_pupil_that_moves_the_focus_beyond_the_guard_is_refused_however_well_i
     from smappy.calibrate import depth, insitu_run
 
     def one(cal, paths, camera, n_med, focus_nm, learn, detection, rounds, progress, cancel, rois=None,
-            hold_focus=False):
+            hold_focus=False, order=None):
         rois = rois or SimpleNamespace(ids=lambda state: np.arange(7))
         out = depth.AutoDepth(692.0 if learn == "blur" else 1718.0, 10.0, 0.1, 50, method="in situ")
         out.result = SimpleNamespace(learn=learn, rois=rois)
@@ -615,7 +615,7 @@ def test_a_typed_focus_is_held_while_the_rest_is_learnt(monkeypatch):
     runs = []
 
     def one(cal, paths, camera, n_med, focus_nm, learn, detection, rounds, progress, cancel, rois=None,
-            hold_focus=False):
+            hold_focus=False, order=None):
         runs.append((learn, focus_nm, hold_focus))
         out = depth.AutoDepth(focus_nm, 10.0, 0.1, 50, method="in situ")
         out.result = SimpleNamespace(learn=learn, rois=rois or SimpleNamespace(ids=lambda state: np.arange(7)))
@@ -696,7 +696,7 @@ def test_a_pupil_that_puts_the_molecules_under_the_coverslip_is_refused(monkeypa
     from smappy.calibrate import depth, insitu_run
 
     def one(cal, paths, camera, n_med, focus_nm, learn, detection, rounds, progress, cancel, rois=None,
-            hold_focus=False):
+            hold_focus=False, order=None):
         rois = rois or SimpleNamespace(ids=lambda state: np.arange(7))
         out = depth.AutoDepth(500.0 if learn == "blur" else 300.0, 10.0, 0.1, 50, method="in situ",
                               below=0.04 if learn == "blur" else 0.22)
@@ -716,7 +716,7 @@ def test_a_theory_start_holds_the_focus_at_the_edge_until_the_phase_is_learnt(mo
     runs = []
 
     def one(cal, paths, camera, n_med, focus_nm, learn, detection, rounds, progress, cancel, rois=None,
-            hold_focus=False):
+            hold_focus=False, order=None):
         runs.append((learn, focus_nm, hold_focus))
         out = depth.AutoDepth(focus_nm if hold_focus else 163.0, 10.0, 0.1, 50, method="in situ", below=0.03)
         out.result = SimpleNamespace(learn=learn, rois=rois or SimpleNamespace(ids=lambda state: np.arange(7)))
@@ -735,3 +735,35 @@ def test_a_theory_start_holds_the_focus_at_the_edge_until_the_phase_is_learnt(mo
     runs.clear()
     depth.insitu_focus("beads", ["movie.tif"], CAMERA, focus_nm=590.0, learn="phase")
     assert runs == [("blur", 590.0, False), ("phase", 163.0, False)]
+
+
+@pytest.mark.parametrize("asked", [None, 4])
+def test_in_situ_learns_the_phase_up_to_the_order_asked_never_the_start_models(monkeypatch, asked):
+    # M2 Sep: the theory's astigmatism alone made its model order 2, so *phase* had no spherical aberration to
+    # learn and the focus made up for it.  The order is the form's *Zernike order* -- auto the one a calibration
+    # learns up to -- whatever the start model's
+    from types import SimpleNamespace
+
+    from smappy.calibrate import depth, insitu_run
+    from smappy.calibrate.insitu import InSituSettings
+    from smappy.calibrate.pupil import AUTO_ORDER
+    optics = SimpleNamespace(NA=1.5, wavelength_nm=590.0, n_imm=1.518, n_cov=1.52, d_cov_nm=0.0,
+                             pixel_size_nm=(110.0, 110.0))
+    channel = SimpleNamespace(psf=SimpleNamespace(grid=SimpleNamespace(optics=optics), pupil=SimpleNamespace(na=1.43)))
+    learned = SimpleNamespace(model=SimpleNamespace(channels=[channel]),
+                              options={"psf": {"magnitude": "minimal", "zernike_order": 2}})
+    monkeypatch.setattr(depth, "model_file", lambda cal: None)
+    monkeypatch.setattr(depth, "model_of", lambda cal: learned)
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def run(paths, optics, model, *args, **kwargs):
+        seen["order"] = model.order
+        raise Stop
+    monkeypatch.setattr(insitu_run, "run_insitu", run)
+    cal = SimpleNamespace(parameters={"pupil": {"pupil": {}}})
+    with pytest.raises(Stop):
+        depth._insitu(cal, ["movie.tif"], CAMERA, 1.33, 590.0, "phase", InSituSettings(), 4, None, None, order=asked)
+    assert seen["order"] == (AUTO_ORDER if asked is None else asked)
