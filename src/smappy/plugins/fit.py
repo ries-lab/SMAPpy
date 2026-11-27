@@ -698,10 +698,18 @@ class _FitPlugin(Plugin):
         if chosen == MICROSCOPE and self.calibration_kind == "single":
             # the pupil kept with the microscope, drawn into a spline once and kept as a file, so that
             # the history and the fitted file name what was fitted with (`calibrate.microscope_psf`)
-            from ..calibrate.microscope_psf import calibration_path
+            from ..calibrate.microscope_psf import calibration_path, record
             scope, em_on = self._scope(settings)
+            rec = record(scope)
             path = calibration_path(scope, em_on)
-            tell(f"calibration: {scope.get('name')}'s pupil, {path.name}")
+            if rec.get("theory"):
+                # a start, not a calibration: said where it cannot be missed, with what it was made of
+                (ctx.warn if ctx is not None else tell)(
+                    f"calibration: {scope.get('name')}'s optics in theory, no beads ({'; '.join(rec['theory'])}): "
+                    f"z may be off by tens of nanometres; learn the phase from the movie (model, learn), or "
+                    f"calibrate with beads")
+            else:
+                tell(f"calibration: {scope.get('name')}'s pupil, {path.name}")
             return replace(settings, model=replace(settings.model, calibration=str(path)))
         if chosen:
             if embedded.carried_format(chosen) is not None:
@@ -764,8 +772,9 @@ class _FitPlugin(Plugin):
 
     def _microscope_choice(self, settings):
         """``(MICROSCOPE, label)`` for the calibration's menu where the file's microscope keeps a pupil for
-        its state and colour, else None.  Asked with every change of the form: no drawing here."""
-        from ..calibrate.microscope_psf import MICROSCOPE
+        its state and colour -- or, keeping none, gives its optics, drawn in theory
+        (`microscope_psf.theory_pupil`) -- else None.  Asked with every change of the form: no drawing here."""
+        from ..calibrate.microscope_psf import MICROSCOPE, record
         from ..microscope_db import database, emission_of, pupil_of
         try:
             scope, _ = self._scope(settings)
@@ -773,7 +782,12 @@ class _FitPlugin(Plugin):
             return None
         pupil = pupil_of(scope)
         if not pupil:
-            return None
+            try:
+                rec = record(scope)
+            except Exception:
+                return None
+            return (MICROSCOPE, f"{scope.get('name')}'s optics in theory ({rec['key'] or 'no pupil kept'}), "
+                                f"a start for learning")
         entry = database().get(str(scope.get("name")))
         key = entry.pupil_key(scope.get("states") or {}, emission_of(scope)) if entry else ""
         return (MICROSCOPE, f"{scope.get('name')}'s pupil, {key} (from {pupil.get('source') or 'beads'}, "
@@ -2253,7 +2267,24 @@ class SplineFit(_FitPlugin):
             self._focus_form(settings, state)
         except Exception:
             pass
+        try:
+            self._theory_notice(settings, state)
+        except Exception:
+            pass
         return state
+
+    def _theory_notice(self, settings, state) -> None:
+        """A line under the form while the calibration is the microscope's optics in theory and nothing is
+        learnt: a start fitted as if it were the microscope's PSF."""
+        from ..calibrate.microscope_psf import MICROSCOPE
+        m = settings.model
+        if state.notice is not None or m.calibration != MICROSCOPE or m.mode == "insitu":
+            return
+        choice = self._microscope_choice(settings)
+        if choice and "in theory" in choice[1]:
+            state.notice = Notice("The microscope keeps no pupil: its optics are drawn in theory, without its "
+                                  "aberrations.  Learn at least the phase (learn) for z to be right, or "
+                                  "calibrate with beads.", kind="info")
 
     def preflight(self, ctx: Context, settings):
         """The camera's question first; then, for in situ learning more than the focus that has not been learnt

@@ -143,3 +143,68 @@ def test_simulate_offers_every_kept_pupil_and_draws_it_at_its_pixel(tmp_path, co
     record = load_spline_calibration(path).parameters["pupil"]
     assert record["optics"]["pixel_size_nm"] == [110.0, 110.0]
     assert json.loads(json.dumps(record["pupil"]))["gamma"] == pytest.approx(0.3)
+
+
+THEORY_SCOPE = {"name": "No-beads scope", "states": {},
+                "values": {"NA": 1.43, "astigmatism_nm": 80.0, "gamma": 0.25, "pixel_nm": [127.0, 116.0],
+                           "wavelength_nm": 680.0, "n_immersion": 1.518}}
+
+
+def test_a_microscope_without_a_pupil_is_drawn_from_the_theory_of_its_optics(config):
+    rec = mpsf.record(THEORY_SCOPE)
+    pupil = rec["pupil"]
+    assert pupil["kind"] == "minimal" and pupil["phase_nm"] == {"6": 80.0} and pupil["gamma"] == 0.25
+    assert rec["theory"] and any("γ 0.25" in line for line in rec["theory"])
+    cal = mpsf.calibration(rec)
+    assert mpsf.is_theory(cal) and "optics in theory" in cal.parameters["source"]
+    # the astigmatism the entry gives: a spot wider in x on one side of focus and in y on the other
+    psf = mpsf.learned(rec)
+    images = psf.psf(np.array([[0.0, 0.0, -400.0], [0.0, 0.0, 400.0]]), mpsf.ROI_PX).numpy()
+    axis = np.arange(mpsf.ROI_PX) - mpsf.ROI_PX // 2
+
+    def widths(image):
+        return [float(np.sqrt((image.sum(a) * axis ** 2).sum() / image.sum())) for a in (0, 1)]
+    (x0, y0), (x1, y1) = widths(images[0]), widths(images[1])
+    assert (x0 - y0) * (x1 - y1) < 0
+    # depth draws it at depth as it draws a kept pupil: it is a model
+    assert depth.has_model(cal)
+
+
+def test_the_theory_says_what_it_lacks_and_refuses_without_an_na(config):
+    bare = {**THEORY_SCOPE, "values": {k: v for k, v in THEORY_SCOPE["values"].items()
+                                       if k not in ("gamma", "astigmatism_nm")}}
+    rec = mpsf.record(bare)
+    assert rec["pupil"]["gamma"] == mpsf.NOMINAL_GAMMA and rec["pupil"]["phase_nm"] == {}
+    assert any("nominal" in line for line in rec["theory"]) and any("z's sign" in line for line in rec["theory"])
+    with pytest.raises(ValueError, match="no NA"):
+        mpsf.record({**THEORY_SCOPE, "values": {"pixel_nm": 100.0, "wavelength_nm": 680.0}})
+
+
+def test_the_forms_nominal_gamma_is_uipsfs():
+    from uipsf.model.build import NOMINAL_GAMMA
+    assert mpsf.NOMINAL_GAMMA == NOMINAL_GAMMA
+
+
+def test_spline_3d_offers_the_theory_says_it_is_one_and_asks_to_learn(config, monkeypatch, tmp_path):
+    from smappy.plugins import Context, FormState
+    from smappy.plugins.fit import SourceSettings, SplineFit, SplineFitSettings, SplineModelSettings
+    monkeypatch.setattr(SplineFit, "_scope", lambda self, settings: (THEORY_SCOPE, False))
+    plugin = SplineFit()
+    movie = tmp_path / "movie.tif"
+    movie.write_bytes(b"")
+    settings = SplineFitSettings(source=SourceSettings(path=str(movie)),
+                                 model=SplineModelSettings(calibration=mpsf.MICROSCOPE))
+    value, label = plugin._microscope_choice(settings)
+    assert value == mpsf.MICROSCOPE and "in theory" in label
+    state = FormState()
+    plugin._theory_notice(settings, state)
+    assert state.notice is not None and "learn" in state.notice.text
+    learning = SplineFitSettings(source=settings.source, model=SplineModelSettings(calibration=mpsf.MICROSCOPE,
+                                                                                learn="phase"))
+    quiet = FormState()
+    plugin._theory_notice(learning, quiet)
+    assert quiet.notice is None                                      # learning: nothing to say
+    ctx = Context()
+    used = plugin.with_calibration(settings, ctx)
+    assert used.model.calibration.endswith("_3dcal.h5") and "theory" in used.model.calibration
+    assert any("in theory" in w and "γ 0.25" in w for w in ctx.warnings)

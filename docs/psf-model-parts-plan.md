@@ -170,6 +170,9 @@ whether both do.  Either way a chain and a batch run the settings, not the windo
   saved in the old words read back to what they did (`depth.settled_focus`, `tests/test_focus_learn.py`).
 * **2026-11-27, second slice**: the PSF window's in situ *hold* is *learn* in the same words (focus and
   blur / phase / phase and apodisation), a saved *hold* read back as its *learn*.
+* **2026-11-27, third slice**: Spline 3D's *calibration* = *microscope* draws the microscope's optics in
+  theory where it keeps no pupil (`microscope_psf.theory_pupil`: the entry's NA, its 3D lens's astigmatism,
+  γ from the entry, a kept pupil or nominal), said in the menu, the form and the Run; *learn* starts from it.
 
 ## Open
 

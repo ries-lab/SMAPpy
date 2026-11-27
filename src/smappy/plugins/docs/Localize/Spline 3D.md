@@ -243,6 +243,18 @@ another day: the blur, a re-aligned 3D lens and the coverslip of the data are
 not in it, so a bead calibration of the data's own day is better where there
 is one.  *calibration* on *auto* never takes it.
 
+**Without beads or a kept pupil: the theory of the optics.**  A microscope
+that keeps no pupil is offered in the same menu, as its *optics in theory*,
+where its entry gives the objective's NA (`microscope_psf.theory_pupil`).  The
+pupil is then the minimal model with no aberration but the 3D lens's
+astigmatism (the entry's *astigmatism*), γ the entry's or one kept under
+another state of the 3D lens, else 0.36, and a 20 nm blur.  It is a start, not
+a calibration: the real objective's aberrations are not in it, and z can be off
+by tens of nanometres.  The form says so while nothing is learnt, and a Run
+warns with what the theory was made of.  With *learn* on *phase* the movie's
+own molecules teach the aberrations, starting from it -- the in situ
+calibration without beads.
+
 **After the fit.**  Once the last frame is fitted, the steps of the folded
 section [*after the fit*](plugin:Analysis/After fit/After the fit) run over
 the whole table before it is saved: a drift correction (none by default),

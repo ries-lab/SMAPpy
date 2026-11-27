@@ -19,6 +19,14 @@ objective's as it was when the beads were taken, the blur theirs; the coverslip,
 re-aligned 3D lens are not in it.  So it is chosen by hand (*calibration*'s menu, `MICROSCOPE`), never by the
 calibration list's *auto*.
 
+**Without a kept pupil: the theory of the optics.**  A microscope that keeps no pupil is drawn from what its
+entry says (`theory_pupil`): a minimal pupil -- cos θ^γ, the aperture, no aberration but the 3D lens's
+astigmatism (``astigmatism_nm``, Noll 6) -- at the entry's NA, γ from the entry or the pupils kept under
+other states (`microscope_db.gamma_of`), else a nominal one, and a 20 nm blur, the bead model's start.
+It is a start, not a calibration: the fit says so (`Notice`, a warning at Run), and *learn* learns the
+data's own aberrations from it (docs/psf-model-parts-plan.md: *PSF model* = *microscope*, "its kept pupil,
+else the theory of its optics").
+
 *Simulate* draws its frames with it too (`choices`, `simulation_path`): there is no file there to name a
 microscope, so every kept pupil is offered, drawn at its own emission and the simulation's pixel.
 """
@@ -40,6 +48,50 @@ MICROSCOPE_FOLDER = "microscope_psfs"
 DZ_NM = 20.0
 Z_RANGE_NM = 800.0
 ROI_PX = 27
+#: γ where neither the entry nor a kept pupil gives one: uipsf's `model.build.NOMINAL_GAMMA` (M5's beads),
+#: copied so that the form, which asks with every change, never loads torch (a test keeps the two equal)
+NOMINAL_GAMMA = 0.36
+#: the theory's blur, nm: the bead model's start (`pupil.BeadSettings`' *blur σ*)
+THEORY_BLUR_NM = 20.0
+
+
+def theory_pupil(summary: Dict[str, Any], wavelength_nm: Optional[float]) -> Dict[str, Any]:
+    """A pupil description (`uipsf.VectorPSF.describe`'s form) of what ``summary``'s entry says of its
+    optics, for a microscope that keeps no pupil: a minimal pupil at the entry's NA, its 3D lens's
+    astigmatism the only aberration, γ the microscope's (`microscope_db.gamma_of`) or `NOMINAL_GAMMA`.  It
+    records what it was made of in ``theory``, every value's source, which the fit says.  A ValueError
+    where the entry gives no NA."""
+    from ..microscope_db import gamma_of
+    name = str(summary.get("name"))
+    values = summary.get("values") or {}
+    if values.get("NA") is None:
+        raise ValueError(f"{name} keeps no pupil and its entry gives no NA: add the objective's NA to the "
+                         f"microscope, or choose a bead calibration")
+    gamma, na, where = gamma_of(summary, wavelength_nm)
+    made = []
+    if gamma is None:
+        gamma, where = NOMINAL_GAMMA, "nominal (M5's beads)"
+    made.append(f"γ {gamma:g}, {where}")
+    astigmatism = values.get("astigmatism_nm")
+    phase = {}
+    if astigmatism is not None:
+        phase["6"] = float(astigmatism)
+        made.append(f"astigmatism {float(astigmatism):g} nm, the entry's for its 3D lens")
+    else:
+        made.append("no astigmatism: the entry gives none for this state, so z's sign is not known")
+    out = {"kind": "minimal", "phase_nm": phase, "gamma": float(gamma), "sigma_nm": [THEORY_BLUR_NM] * 2,
+           "pixel_blur": True, "wavelength_nm": float(wavelength_nm) if wavelength_nm else None,
+           "NA": float(values["NA"]), "n_immersion": float(values.get("n_immersion") or 1.518),
+           "n_medium": 1.33, "source": "theory", "theory": made}
+    if na is not None:
+        out["na"] = float(na)                  # learnt with that γ: the two trade, so one goes with the other
+    return out
+
+
+def is_theory(cal) -> bool:
+    """Whether a calibration (loaded) is a microscope's optics drawn in theory, not beads."""
+    rec = (getattr(cal, "parameters", None) or {}).get("pupil") or {}
+    return bool(rec.get("theory"))
 
 
 def record(summary: Optional[Dict[str, Any]], wavelength_nm: Optional[float] = None) -> Dict[str, Any]:
@@ -56,10 +108,10 @@ def record(summary: Optional[Dict[str, Any]], wavelength_nm: Optional[float] = N
     states = summary.get("states") or {}
     entry = database().get(name)
     key = entry.pupil_key(states, wavelength_nm or emission_of(summary)) if entry is not None else ""
-    if pupil is None:
-        raise ValueError(f"{name} keeps no pupil for {key or 'this state'}: PSF calibration's Add to "
-                         f"microscope... keeps one from a bead model, or choose a bead calibration")
     values = summary.get("values") or {}
+    theory = pupil is None
+    if theory:
+        pupil = theory_pupil(summary, wavelength_nm or emission_of(summary))
     pixel = values.get("pixel_nm")
     if pixel is None:
         raise ValueError(f"{name} gives no pixel for this file's state: the camera's pixel is missing")
@@ -74,8 +126,11 @@ def record(summary: Optional[Dict[str, Any]], wavelength_nm: Optional[float] = N
               # sample's (`depth.with_medium`)
               "n_med": float(pupil.get("n_medium") or 1.33),
               "pixel_size_nm": pixel}
-    return {"pupil": dict(pupil), "optics": optics, "microscope": name, "key": key,
-            "version": summary.get("version")}
+    out = {"pupil": dict(pupil), "optics": optics, "microscope": name, "key": key,
+           "version": summary.get("version")}
+    if theory:
+        out["theory"] = list(pupil["theory"])
+    return out
 
 
 _LEARNED: dict = {}
@@ -110,7 +165,8 @@ def calibration(rec: Dict[str, Any], em_on: Optional[bool] = None):
     camera = SimpleNamespace(is_em=bool(em_on), pixelsize_um=[o["pixel_size_nm"][0] / 1000,
                                                          o["pixel_size_nm"][1] / 1000])
     cal = spline_calibration(learned(rec), DZ_NM, Z_RANGE_NM, ROI_PX, camera=camera)
-    cal.parameters.update(pupil=rec, source=f"{rec['microscope']}'s pupil, {rec['key']}")
+    what = "optics in theory" if rec.get("theory") else "pupil"
+    cal.parameters.update(pupil=rec, source=f"{rec['microscope']}'s {what}, {rec['key']}")
     cal.parameters.pop("model_file", None)
     return cal
 
@@ -121,7 +177,7 @@ def path_for(rec: Dict[str, Any], em_on: Optional[bool] = None) -> Path:
     from ..config import config_dir
     digest = hashlib.sha1(json.dumps([rec, em_on, DZ_NM, Z_RANGE_NM, ROI_PX], sort_keys=True,
                                      default=str).encode()).hexdigest()[:10]
-    stem = f"{rec['microscope']} {rec['key']}".replace("/", "-").replace(":", "").replace("·", "-")
+    stem = f"{rec['microscope']} {rec['key']}{' theory' if rec.get('theory') else ''}".replace("/", "-").replace(":", "").replace("·", "-")
     return config_dir() / MICROSCOPE_FOLDER / f"{'_'.join(stem.split())}_{digest}_3dcal.h5"
 
 
