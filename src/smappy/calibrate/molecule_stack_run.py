@@ -178,7 +178,8 @@ def calibration_of(result: MoleculeStackResult, spline=None):
         roi = int(result.rois.units.regions.shape[-1])
         if result.rois.n_channels == 2:
             from ..io.calibration import keep_microscope
-            result.calibration = dual_calibration(result.cal, dz, span, roi, depth_nm=result.height_nm())
+            result.calibration = dual_calibration(result.cal, dz, span, roi, depth_nm=result.height_nm(),
+                                                  camera=result.rois.camera)
             for channel in (result.calibration.main, result.calibration.secondary):
                 keep_microscope(channel, result.rois.camera)
                 channel.parameters.update(stack_record(result))

@@ -641,12 +641,13 @@ def _transform(learned) -> np.ndarray:
 
 
 def dual_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27,
-                     upsample: int | None = UPSAMPLE, depth_nm: float | None = None):
+                     upsample: int | None = UPSAMPLE, depth_nm: float | None = None, camera=None):
     """smappy's `DualColorCalibration` of a two-channel uipsf model: both channels sampled on one z grid
     (a biplane offset is in the PSFs), normalised jointly by `positive_pair_models`, so each channel's
     `photon_normalization` is its learnt photon share; the model's transform and the split it was
     learnt on.  Spline 3D 2C reads it as one of its own (tests/uipsf_tests/test_smappy_dual.py).  ``depth_nm``
-    as `sample`'s."""
+    as `sample`'s.  ``camera`` records its EM state, as `spline_calibration`'s and the dual bead average's do:
+    without it a movie taken with the other EM gain was not even warned about (Zenodo 2ch, 2026-11-27)."""
     from .core import positive_pair_models
     from .dual import DualColorCalibration
     if learned.model.n_channels != 2:
@@ -662,6 +663,8 @@ def dual_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 2
         # each channel's node splines, normalised by the pair's joint factor as its centre is
         _with_field(model, field_splines(learned, dz_nm, z_range_nm, roi_size, upsample,
                                          float(model.parameters["common_normalization"]), depth_nm, c))
+        if camera is not None:
+            model.em_on = bool(camera.is_em)
     return DualColorCalibration(main, secondary, _transform(learned), dict(learned.geometry), dict(record))
 
 
@@ -1083,7 +1086,7 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
         dz = spline.dz_nm or float(rois.batch.z_step_nm)
         z_range = spline.z_range_nm or _auto_z_range(cal, rois.batch)
         roi = int(rois.batch.data.shape[-1])
-        result.calibration = (dual_calibration(cal, dz, z_range, roi) if dual
+        result.calibration = (dual_calibration(cal, dz, z_range, roi, camera=rois.camera) if dual
                               else spline_calibration(cal, dz, z_range, roi, camera=rois.camera))
         if dual:
             from ..io.calibration import keep_microscope

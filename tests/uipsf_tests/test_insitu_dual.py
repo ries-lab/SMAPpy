@@ -372,3 +372,20 @@ def small_model(optics, spec, roi_shape, focus_nm, z_max_nm=2000.0, device=None,
         channels.append(Channel(psf, transform=(transforms or [None, None])[c], **options[c]))
     return uipsf.ForwardModel(channels, geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
                               intensity=Bleaching(order=0))
+
+
+def test_a_dual_pupil_calibration_keeps_the_beads_em_gain_on_disk(tmp_path):
+    """Without it a movie taken with the other EM gain -- mirrored in x by the EM register -- went unwarned:
+    the Zenodo two-colour beads (normal port) against their movie (EM port)."""
+    import smappy.calibrate.pupil as pupil_module
+    from smappy.calibrate.dual import load_dual_color_calibration, save_dual_color_calibration
+
+    from uipsf.export import LearnedPSF, describe
+    model, shared = truth()
+    learned = LearnedPSF(model, shared, {}, describe(model), geometry=dict(GEOMETRY),
+                         options={"psf": {"zernike_order": 4, "blur_nm": 30.0, "pixel_blur": False}})
+    for camera, em in ((CameraMetadata(em_on=True), True), (CameraMetadata(em_on=False), False), (None, None)):
+        path = tmp_path / f"pair_{em}_3dcal.h5"
+        save_dual_color_calibration(path, pupil_module.dual_calibration(learned, 20.0, 700.0, 17, camera=camera))
+        read = load_dual_color_calibration(path)
+        assert read.main.em_on is em and read.secondary.em_on is em
