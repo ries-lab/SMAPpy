@@ -183,6 +183,8 @@ whether both do.  Either way a chain and a batch run the settings, not the windo
   build took Gaussian 2D 2C's pass and left the offset to the move.  On PSFs lopsided the other way in each
   channel the Gaussian map was 1.05 px off, the splines' 0.03 px (0.05 mirrored)
   (`test_channel_move.py::test_spline_2c_measures_the_movie_map_with_each_channels_spline_not_a_gaussian`).
+* **2026-11-27, seventh slice**: *Zernike order* beside *learn* (Spline 3D, the sample part), auto 6: in situ learns
+  the phase up to the order asked, never the start model's -- a theory start had learnt only to order 2 (below).
 
 ## Measured: the theory start on M2 (2026-11-27)
 
@@ -240,9 +242,39 @@ model before, and read 19 % for Sep's good bead model, which a first try refused
 * No run fails badly any more: Sep from theory is +68 nm instead of -245, at the edge with the blur learnt.
 * **But the phase is learnt from theory only on Jan** (+22 nm, just over the 20 nm asked).  On Sep the phase learnt
   from the theory puts a quarter of the molecules under the coverslip, where the beads' pupil learns it right; on
-  Aug the held-out molecules refuse it.  Why the theory's phase learning fails on Sep (590 nm, Cy3B, γ 0.20 from
-  the far-red pupil, astigmatism +62 nm) is open: the twin and the even modes' sign (`TWIN_DECISIVE_NATS`), and the
-  γ of another colour, are the first suspects.
+  Aug the held-out molecules refuse it.
+
+**Why Sep failed: the order.**  The theory's description lists astigmatism alone, and uipsf reads a description's
+order off the terms it lists (`export.from_description`: order 2); in situ learnt the phase up to the start's
+order.  So the theory learnt only the two astigmatism terms, where the bead start learnt 24 -- among them Sep's
+spherical aberration, Noll 11 = 0.32 rad -- and the focus made up for the missing spherical: 130 nm, the bead
+start's 440 nm, both from the edge.  The astigmatism learnt agreed with the beads' (0.64 and 0.67 against 0.70 rad),
+so neither the sign nor γ was the cause.  Fixed (Jonas: the order is the form's, with a sensible default): *Zernike
+order* beside *learn*, auto 6, never the start model's (`depth._insitu`, `insitu_dual.run_insitu_dual`).
+
+After the order fix (all kept results cleared; the bead and nominal rows as before where the phase was refused):
+
+| data | run | focus (edge) nm | bias, sd vs beads nm | below (fit) |
+| --- | --- | --- | --- | --- |
+| Sep | beads/phase | 568 (640), kept | -- | 3.7 % |
+| | theory/phase | 454 (590), **kept** | -72, 4 | 5.1 % |
+| | nominal/phase | 568 (568), phase refused: 23 % under | +54, 32 | 2.5 % |
+| Jan | beads/phase | 431 (478), kept | -- | 4.7 % |
+| | theory/phase | 433 (498), kept | **+3, 3** | 4.8 % |
+| | nominal/phase | 435 (508), kept | +44, 6 | 2.5 % |
+| Aug | beads/phase | 654 (587), refused by the depth guard (+2925 nm) | -- | 5.2 % |
+| | theory/phase | 604 (604), refused by the depth guard (+508 nm) | -41, 22 | 12 % |
+| | nominal/phase | 611 (611), refused by the depth guard (+826 nm) | -37, 26 | 7.1 % |
+
+* **Jan from theory is the beads' within 3 nm** (sd 3): the theory start, with γ from the microscope's kept pupil,
+  stands in for a bead calibration there.
+* **Sep from theory now learns the phase**, its z following the beads' closely (sd 4 nm) but 72 nm lower: the focus
+  learnt is 454 nm, the bead start's 568.  Focus and spherical aberration still trade, with nothing in a cell
+  movie to tell them apart but the coverslip's edge; the bead start moved its focus from its edge too (640 to 568).
+  Open: whether holding the focus at the edge while the phase is learnt, or a guard on that trade, does better.
+* **γ matters once the phase is learnt**: the nominal 0.36 is 44 nm off on Jan and refused on Sep.  The microscope's
+  kept γ (here M2's far-red pupil's, 0.20, used at 590 nm too) is the start to use.
+* Aug learns no phase from any start, beads included: the depth guard refuses every one.
 
 ## Open
 
