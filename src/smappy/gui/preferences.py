@@ -1,4 +1,4 @@
-"""Preferences: the folders scanned for plugins, the tabs, light or dark,
+"""Preferences: the folders scanned for plugins, light or dark,
 whether quitting asks about unsaved changes and whether startup looks for
 updates, the workstations DECODE trains on, and the usage log and where it
 is sent.
@@ -6,27 +6,24 @@ is sent.
 Both are things the user names on purpose.  One plugin folder is scanned
 without being named, the user's own (`config.user_plugin_dir`), and no tab
 appears because a stray directory exists -- but a plugin that no tab shows is
-still one click from being pinned, so nothing is unreachable.
+still one click from being pinned, so nothing is unreachable.  The tabs are
+edited where they are, by a right click on one (`app.MainWindow.tab_menu`).
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
-                               QInputDialog, QLabel, QListWidget, QListWidgetItem,
-                               QLineEdit, QMessageBox, QPushButton, QTabWidget, QVBoxLayout,
-                               QWidget)
+                               QLabel, QListWidget, QLineEdit, QMessageBox, QPushButton,
+                               QTabWidget, QVBoxLayout, QWidget)
 
 from .. import config, plugins, updates
-from ..workspace import Tab, Workspace
+from ..workspace import Workspace
 from . import theme
 from .widgets import note_style
-
-BESPOKE = {"render": "the render view"}
-
 
 _GUIDE = None                     # the open *How to connect a workstation* window (`HostsPage.show_guide`)
 
@@ -137,101 +134,6 @@ class GeneralPage(QWidget):
         self.check_updates.toggled.connect(updates.set_automatic)
         layout.addWidget(self.check_updates)
         layout.addStretch(1)
-
-
-class TabsPage(QWidget):
-    """The tab strip: add, rename, reorder, remove.  A new tab starts empty."""
-
-    def __init__(self, workspace: Workspace, parent=None):
-        super().__init__(parent)
-        self.workspace = workspace
-        layout = QVBoxLayout(self)
-        about = QLabel("Tabs are lists of plugins you pin, not branches of the "
-                       "tree — any plugin can go in any tab. A tab you add "
-                       "starts empty; use + in the tab to pin something.")
-        about.setWordWrap(True)
-        about.setStyleSheet("color: gray")
-        layout.addWidget(about)
-        self.list = QListWidget()
-        self.list.setSelectionMode(QAbstractItemView.SingleSelection)
-        layout.addWidget(self.list, 1)
-        layout.addLayout(_buttons(("Add", self.add), ("Rename...", self.rename),
-                                  ("Up", lambda: self.move(-1)),
-                                  ("Down", lambda: self.move(1)),
-                                  ("Remove", self.remove)))
-        self.reset_button = QPushButton("Reset tabs to defaults")
-        self.reset_button.clicked.connect(self.reset)
-        layout.addWidget(self.reset_button)
-        self.refresh()
-
-    def refresh(self, select: int = 0) -> None:
-        self.list.clear()
-        for tab in self.workspace.tabs:
-            if tab.kind in BESPOKE:
-                text = f"{tab.name}  ({BESPOKE[tab.kind]})"
-            else:
-                text = f"{tab.name}  ({len(tab.instances)} plugins)"
-            item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, tab.name)
-            self.list.addItem(item)
-        if self.list.count():
-            self.list.setCurrentRow(max(0, min(select, self.list.count() - 1)))
-
-    def current(self) -> Optional[int]:
-        row = self.list.currentRow()
-        return row if 0 <= row < len(self.workspace.tabs) else None
-
-    def add(self) -> None:
-        name, ok = QInputDialog.getText(self, "New tab", "Name:")
-        name = name.strip()
-        if not ok or not name:
-            return
-        if any(t.name == name for t in self.workspace.tabs):
-            QMessageBox.warning(self, "New tab", f"There is already a tab called {name}.")
-            return
-        self.workspace.tabs.append(Tab(name=name))
-        self.refresh(len(self.workspace.tabs) - 1)
-
-    def rename(self) -> None:
-        row = self.current()
-        if row is None:
-            return
-        tab = self.workspace.tabs[row]
-        name, ok = QInputDialog.getText(self, "Rename tab", "Name:", text=tab.name)
-        if ok and name.strip():
-            tab.name = name.strip()
-            self.refresh(row)
-
-    def move(self, by: int) -> None:
-        row = self.current()
-        if row is None or not 0 <= row + by < len(self.workspace.tabs):
-            return
-        tabs = self.workspace.tabs
-        tabs[row], tabs[row + by] = tabs[row + by], tabs[row]
-        self.refresh(row + by)
-
-    def remove(self) -> None:
-        row = self.current()
-        if row is None:
-            return
-        tab = self.workspace.tabs[row]
-        pinned = len(tab.instances)
-        question = f"Remove the {tab.name} tab?"
-        if pinned:
-            question += f"\n\n{pinned} pinned plugin(s) go with it."
-        if QMessageBox.question(self, "Remove tab", question) != QMessageBox.Yes:
-            return
-        self.workspace.tabs.pop(row)
-        self.refresh(row)
-
-    def reset(self) -> None:
-        if QMessageBox.question(self, "Reset tabs",
-                                "Replace every tab with the shipped defaults?\n\n"
-                                "Anything you pinned is lost.") != QMessageBox.Yes:
-            return
-        self.workspace.tabs = Workspace.default().tabs
-        self.refresh()
-
 
 
 class HostsPage(QWidget):
@@ -482,7 +384,10 @@ class UsageLogPage(QWidget):
 
 
 class PreferencesDialog(QDialog):
-    """Plugin folders, tabs, general settings, training hosts and the usage log.  Accepting means the window rebuilds its tabs."""
+    """Plugin folders, general settings, training hosts and the usage log.
+
+    The tabs are not here: a tab's right click renames, moves, removes and
+    adds them where they are (`app.MainWindow.tab_menu`)."""
 
     def __init__(self, workspace: Workspace, parent=None):
         super().__init__(parent)
@@ -491,12 +396,10 @@ class PreferencesDialog(QDialog):
         layout = QVBoxLayout(self)
         self.pages = QTabWidget()
         self.roots = RootsPage()
-        self.tabs = TabsPage(workspace)
         self.general = GeneralPage()
         self.training_hosts = HostsPage()
         self.usage_log = UsageLogPage()
         self.pages.addTab(self.roots, "Plugin folders")
-        self.pages.addTab(self.tabs, "Tabs")
         self.pages.addTab(self.general, "General")
         self.pages.addTab(self.training_hosts, "Training hosts")
         self.pages.addTab(self.usage_log, "Usage log")

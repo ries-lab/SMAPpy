@@ -709,3 +709,35 @@ def test_add_tabs_in_the_window_adds_the_tab_and_shows_it(window):
     assert window.tabs.tabText(window.tabs.currentIndex()) == "Tracking"
     assert window.add_tab_set("Tracking") == []
     assert [t.name for t in window.workspace.tabs].count("Tracking") == 1
+
+
+def test_a_tab_is_renamed_moved_removed_and_added_from_its_right_click(window):
+    names = lambda: [window.tabs.tabText(i) for i in range(window.tabs.count())]
+    assert names() == [t.name for t in window.workspace.tabs]
+    menu = [a.text() for a in window.tab_menu(1).actions() if a.text()]
+    assert menu[:3] == ["Rename...", "Move left", "Move right"]
+    assert menu[3].startswith("Remove ") and "New tab..." in menu and "Add tabs" in menu
+    # the first tab cannot move left, the last not right
+    assert not window.tab_menu(0).actions()[1].isEnabled()
+    last = len(names()) - 1
+    assert not window.tab_menu(last).actions()[2].isEnabled()
+
+    first, second = names()[:2]
+    assert window.move_tab(0, 1)
+    assert names()[:2] == [second, first]
+    assert [t.name for t in window.workspace.tabs][:2] == [second, first]
+
+    assert window.rename_tab(1, "Mine")
+    assert names()[1] == "Mine" and window.workspace.tabs[1].name == "Mine"
+    assert not window.rename_tab(1, second)          # another tab's name: refused
+
+    assert window.new_tab(2, "Empty")
+    assert names()[2] == "Empty" and not window.workspace.tabs[2].instances
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "Empty"
+
+    pinned = len(window.workspace.tabs[1].instances)
+    assert window.remove_tab(1, ask=False)
+    assert "Mine" not in names() and len(names()) == last + 1
+    assert pinned >= 0                               # its pins went with it
+    # what is left is what a saved GUI writes
+    assert [t.name for t in window.collect_workspace().tabs] == names()

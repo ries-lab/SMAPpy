@@ -78,6 +78,14 @@ def menu_name(text: str) -> str:
     return text.replace("&", "").removesuffix("...").strip()
 
 
+def _tab_index(window, name: str) -> int:
+    """The place of the tab called ``name``; a ValueError naming the tabs there are."""
+    names = [tab.name for tab in window.workspace.tabs]
+    if name not in names:
+        raise ValueError(f"no tab {name!r}: the tabs are {', '.join(names)}")
+    return names.index(name)
+
+
 def menu_items(window) -> List[str]:
     """Every item of the window's menus, by path ("View/Workspace/Open"):
     what the test checks the actions and `LEFT_OUT` against."""
@@ -277,6 +285,23 @@ def actions_of(window) -> Dict[str, Action]:
                lambda name: window.add_tab_set(name),
                {"name": {"type": "string",
                          "enum": list(tab_sets())}}, ("name",)),
+        # a tab's right click (`MainWindow.tab_menu`): no menu bar item
+        Action("View/Workspace/Rename tab", "A tab given another name.",
+               lambda tab, name: window.rename_tab(_tab_index(window, tab), name),
+               {"tab": {"type": "string"}, "name": {"type": "string"}}, ("tab", "name")),
+        Action("View/Workspace/Move tab", "A tab moved left (-1) or right (1).",
+               lambda tab, by: window.move_tab(_tab_index(window, tab), int(by)),
+               {"tab": {"type": "string"}, "by": {"type": "integer"}}, ("tab", "by")),
+        Action("View/Workspace/Remove tab", "A tab removed with what is pinned in "
+               "it; Add tabs brings a technique's back.",
+               lambda tab: window.remove_tab(_tab_index(window, tab), ask=False),
+               {"tab": {"type": "string"}}, ("tab",)),
+        Action("View/Workspace/New tab", "An empty tab, after the tab named or "
+               "at the end; its + pins plugins.",
+               lambda name, after=None: window.new_tab(
+                   _tab_index(window, after) + 1 if after else len(window.workspace.tabs),
+                   name),
+               {"name": {"type": "string"}, "after": {"type": "string"}}, ("name",)),
         Action("View/Workspace/From data file", "The workspace a localization "
                "file was saved with.", workspace_from, {"path": PATH}, ("path",)),
         Action("Plugins/Microscope manager", "The microscope entries' window.",

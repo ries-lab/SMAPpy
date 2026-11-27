@@ -236,6 +236,11 @@ class ControlWindow(QMainWindow):
             self.tabs.setStyleSheet(TAB_STYLE)
         self.plugin_tabs: List[PluginTab] = []
         self.roi_tab: Optional[ROIHeader] = None
+        # a tab's right click: rename, move, remove, add (`tab_menu`), the
+        # one place the tabs are edited -- Preferences had a page of them
+        bar = self.tabs.tabBar()
+        bar.setContextMenuPolicy(Qt.CustomContextMenu)
+        bar.customContextMenuRequested.connect(self._tab_menu)
         self.build_tabs()
         self._update_title()
         # under the tabs, shown only after a file failed to open: what went
@@ -882,6 +887,121 @@ class ControlWindow(QMainWindow):
             if opened:
                 widget.open_section(opened)
 
+    # ------------------------------------------------- a tab's right click
+    def tab_menu(self, index: int) -> QMenu:
+        """What a right click on tab ``index`` offers: rename, move, remove,
+        a new tab after it and the tab sets.  Each changes the workspace
+        and rebuilds the strip."""
+        menu = QMenu(self)
+        count = len(self.workspace.tabs)
+        name = self.workspace.tabs[index].name
+        menu.addAction("Rename...", lambda: self.rename_tab(index))
+        menu.addAction("Move left", lambda: self.move_tab(index, -1)).setEnabled(index > 0)
+        menu.addAction("Move right", lambda: self.move_tab(index, 1)).setEnabled(
+            index < count - 1)
+        menu.addAction(f"Remove {name}...", lambda: self.remove_tab(index)).setEnabled(
+            count > 1)
+        menu.addSeparator()
+        menu.addAction("New tab...", lambda: self.new_tab(index + 1))
+        sets = menu.addMenu("Add tabs")
+        have = {tab.name for tab in self.workspace.tabs}
+        for set_name in workspace_module.tab_sets():
+            action = sets.addAction(set_name, lambda n=set_name: self.add_tab_set(n))
+            action.setCheckable(True)
+            action.setChecked(set_name in have)
+        return menu
+
+    def _tab_menu(self, at) -> None:
+        index = self.tabs.tabBar().tabAt(at)
+        if 0 <= index < len(self.workspace.tabs):
+            self.tab_menu(index).exec(self.tabs.tabBar().mapToGlobal(at))
+
+    def _changed_tabs(self) -> None:
+        """Rebuild the strip after an edit of the workspace's tabs, values,
+        open sections and all kept (`collect_workspace` first)."""
+        self.collect_workspace()
+        self.build_tabs()
+
+    def rename_tab(self, index: int, name: Optional[str] = None) -> bool:
+        """Tab ``index`` called ``name``; None asks.  Refused for a name another tab has."""
+        from PySide6.QtWidgets import QInputDialog
+        tab = self.workspace.tabs[index]
+        asked = name is None
+        if name is None:
+            name, ok = QInputDialog.getText(self, "Rename tab", "Name:", text=tab.name)
+            if not ok:
+                return False
+        name = name.strip()
+        if not name or name == tab.name:
+            return False
+        if any(t.name == name for t in self.workspace.tabs):
+            if asked:                        # said to whoever typed it
+                QMessageBox.warning(self, "Rename tab", f"There is already a tab called {name}.")
+            return False
+        self.collect_workspace()
+        opened = self.workspace.layout.get("open", {})
+        if tab.name in opened:               # its open section goes with it
+            opened[name] = opened.pop(tab.name)
+        # the strip is on this tab, and stays on it under its new name
+        self.tabs.setTabText(index, name)
+        tab.name = name
+        self.build_tabs()
+        return True
+
+    def move_tab(self, index: int, by: int) -> bool:
+        """Tab ``index`` moved ``by`` places, -1 left and 1 right."""
+        tabs = self.workspace.tabs
+        j = index + by
+        if not 0 <= j < len(tabs):
+            return False
+        self.collect_workspace()
+        tabs[index], tabs[j] = tabs[j], tabs[index]
+        self.build_tabs()
+        return True
+
+    def remove_tab(self, index: int, ask: bool = True) -> bool:
+        """Tab ``index`` gone, with what is pinned in it, after a question when
+        there is something pinned.  The last tab stays."""
+        tabs = self.workspace.tabs
+        if len(tabs) <= 1:
+            return False
+        tab = tabs[index]
+        if ask and tab.instances:
+            question = (f"Remove the {tab.name} tab?\n\n{len(tab.instances)} pinned "
+                        "plugin(s) go with it.  File > Workspace > Add tabs brings a "
+                        "technique's tab back; Plugins has every plugin.")
+            if QMessageBox.question(self, "Remove tab", question) != QMessageBox.Yes:
+                return False
+        self.collect_workspace()
+        tabs.pop(index)
+        self.build_tabs()
+        return True
+
+    def new_tab(self, at: int, name: Optional[str] = None) -> bool:
+        """An empty tab at place ``at``, called ``name`` (None asks), and shown:
+        its + pins plugins."""
+        from PySide6.QtWidgets import QInputDialog
+        from ..workspace import Tab
+        asked = name is None
+        if name is None:
+            name, ok = QInputDialog.getText(self, "New tab", "Name:")
+            if not ok:
+                return False
+        name = name.strip()
+        if not name:
+            return False
+        if any(t.name == name for t in self.workspace.tabs):
+            if asked:                        # said to whoever typed it
+                QMessageBox.warning(self, "New tab", f"There is already a tab called {name}.")
+            return False
+        self.collect_workspace()
+        self.workspace.tabs.insert(max(0, min(at, len(self.workspace.tabs))), Tab(name=name))
+        self.build_tabs()
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == name:
+                self.tabs.setCurrentIndex(i)
+        return True
+
     def _tab_widgets(self) -> List[QWidget]:
         return [self.tabs.widget(i) for i in range(self.tabs.count())]
 
@@ -934,13 +1054,10 @@ class ControlWindow(QMainWindow):
 
     def open_preferences(self, page: Optional[str] = None) -> None:
         """Preferences, opened on ``page`` (a tab's title) when given."""
-        before = [(t.name, t.kind) for t in self.workspace.tabs]
         dialog = PreferencesDialog(self.workspace, self)
         if isinstance(page, str):          # the menu's action passes its checked state
             dialog.show_page(page)
         dialog.exec()
-        if [(t.name, t.kind) for t in self.workspace.tabs] != before:
-            self.build_tabs()
 
     # ---------------------------------------------------------- workspace
     def plugin_state(self) -> dict:
