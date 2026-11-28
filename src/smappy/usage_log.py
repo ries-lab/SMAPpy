@@ -20,8 +20,10 @@ the computer unless they also give a link to send it to.  When on:
   of the tools it missed (`assistant.knowledge`, with the copied scripts),
   and the assistant client's own transcripts of the conversations held in
   its folder -- Claude Code's under ``~/.claude/projects``, Codex's under
-  ``~/.codex/sessions`` -- which hold what was asked and what was tried, and
-  which SMAPpy cannot see any other way.
+  ``~/.codex/sessions`` -- and Claude Code's conversations in any other
+  folder that called SMAPpy's tools (`claude_smappy_transcripts`), which hold
+  what was asked and what was tried, and which SMAPpy cannot see any other
+  way.
 
 **Sent as a zip to a cloud folder's upload-only link** -- a Nextcloud "file
 drop", which the University of Vienna's u:cloud is -- by one WebDAV ``PUT``
@@ -241,6 +243,48 @@ def claude_transcripts(work: Path) -> List[Path]:
     return []
 
 
+SMAPPY_CALL = re.compile(r'"name"\s*:\s*"mcp__smappy')
+
+
+def calls_smappy(path: Path) -> bool:
+    """Whether a Claude Code conversation called one of SMAPpy's tools
+    (``mcp__smappy...``) -- a tool call of the assistant's, not a line that
+    merely names one: a developer's session on SMAPpy's own code talks about
+    those tools all day and is none of the log's business."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if not SMAPPY_CALL.search(line):       # cheap: most lines are not
+                    continue
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    continue
+                if record.get("type") != "assistant":
+                    continue
+                content = (record.get("message") or {}).get("content")
+                for block in content if isinstance(content, list) else []:
+                    if isinstance(block, dict) and block.get("type") == "tool_use" \
+                            and str(block.get("name", "")).startswith("mcp__smappy"):
+                        return True
+    except OSError:
+        pass
+    return False
+
+
+def claude_smappy_transcripts(since: Optional[datetime] = None) -> List[Path]:
+    """Claude Code's conversations held anywhere else that called SMAPpy's
+    tools: an assistant started in a data folder rather than through *Start
+    assistant* left its tool calls in the events and its notes, but no
+    conversation (the first logs, 2026-11).  Only those that called SMAPpy:
+    the rest of what someone does with Claude Code is not SMAPpy's."""
+    projects = _claude_home() / "projects"
+    if not projects.is_dir():
+        return []
+    return [path for path in sorted(projects.glob("*/*.jsonl"))
+            if _newer(path, since) and calls_smappy(path)]
+
+
 def _records_cwd(path: Path, wanted: str, lines: int = 20) -> bool:
     try:
         with path.open(encoding="utf-8", errors="replace") as handle:
@@ -350,11 +394,12 @@ def bundle(path: Path, since: Optional[datetime] = None) -> Dict[str, Any]:
                 z.write(script, f"assistant/own-code/{script.name}")
                 parts["scripts"] = parts.get("scripts", 0) + 1
         work = assistant_folder()
-        for transcript in claude_transcripts(work):
-            if _newer(transcript, since):
-                z.writestr(f"transcripts/claude/{transcript.name}",
-                           scrub_transcript(transcript))
-                parts["transcripts"] = parts.get("transcripts", 0) + 1
+        claude = [t for t in claude_transcripts(work) if _newer(t, since)]
+        claude += [t for t in claude_smappy_transcripts(since) if t not in claude]
+        for transcript in claude:
+            z.writestr(f"transcripts/claude/{transcript.name}",
+                       scrub_transcript(transcript))
+            parts["transcripts"] = parts.get("transcripts", 0) + 1
         for transcript in codex_transcripts(work, since):
             z.writestr(f"transcripts/codex/{transcript.name}", scrub_transcript(transcript))
             parts["transcripts"] = parts.get("transcripts", 0) + 1

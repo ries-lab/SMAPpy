@@ -38,7 +38,9 @@ last send:
   its scripts, and the tools it said it was missing;
 - the assistant's conversations, as its program keeps them: Claude Code's
   and Codex's, from the folder the assistant works in
-  (*Assistant > Settings...*).  These hold what you asked and what the
+  (*Assistant > Settings...*), and Claude Code's conversations in any
+  other folder that called SMAPpy's tools -- only those, none of the rest
+  you do with Claude Code.  These hold what you asked and what the
   assistant tried.
 
 Pictures are taken out, and any single text longer than 8000 characters

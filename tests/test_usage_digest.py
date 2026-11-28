@@ -1,7 +1,9 @@
 """The usage-log skill's digest: bundles in, an overview and timelines out."""
+import base64
 import importlib.util
 import json
 import re
+import urllib.error
 from datetime import datetime
 from pathlib import Path
 
@@ -112,3 +114,105 @@ def test_a_conversation_sent_twice_is_kept_once_and_only_new_bundles_are_named(h
                             "new: smappy-usage-Ada-20261124-100000.zip"]
     assert len(list((out / "sessions" / "Ada").glob("*.md"))) == 1
     assert (out / "overview.md").read_text().count("How bright are my blinks") == 1
+
+
+def test_a_bundle_sent_to_try_the_link_is_not_read(home, digest, capsys):
+    a_conversation(home)
+    bundles = home / "drop"
+    bundles.mkdir()
+    usage_log.bundle(bundles / "smappy-usage-test.zip")
+    usage_log.bundle(bundles / "smappy-usage-Ada-test.zip")
+    digest.main([str(bundles), str(home / "digest")])
+    assert capsys.readouterr().out.startswith("0 bundles (0 new) from 0 senders")
+
+
+LISTING = b"""<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+ <d:response><d:href>/remote.php/dav/files/ada/SMAPpy%20usage/</d:href></d:response>
+ <d:response><d:href>/remote.php/dav/files/ada/SMAPpy%20usage/smappy-usage-Bo-20261120-100000.zip</d:href></d:response>
+ <d:response><d:href>/remote.php/dav/files/ada/SMAPpy%20usage/smappy-usage-Cy-20261121-100000.zip</d:href></d:response>
+ <d:response><d:href>/remote.php/dav/files/ada/SMAPpy%20usage/smappy-usage-test.zip</d:href></d:response>
+ <d:response><d:href>/remote.php/dav/files/ada/SMAPpy%20usage/notes.txt</d:href></d:response>
+</d:multistatus>"""
+FOLDER = "https://cloud.example.org/remote.php/dav/files/ada/SMAPpy%20usage/"
+
+
+class Reply:
+    def __init__(self, body, status=200):
+        self.body, self.status = body, status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self.body
+
+
+def server(asked, refuse=None):
+    def opener(request, timeout):
+        asked.append(request)
+        if refuse:
+            raise urllib.error.HTTPError(request.full_url, refuse, "Unauthorized", {}, None)
+        if request.get_method() == "PROPFIND":
+            return Reply(LISTING, 207)
+        return Reply(b"zip of " + request.full_url.rsplit("/", 1)[-1].encode())
+    return opener
+
+
+def test_the_listing_is_read_for_the_bundles_and_only_new_ones_are_fetched(digest, tmp_path):
+    target = tmp_path / "bundles"
+    target.mkdir()
+    (target / "smappy-usage-Bo-20261120-100000.zip").write_bytes(b"had it")
+    asked = []
+    got = digest.fetch(FOLDER, "ada", target, password="pw", opener=server(asked))
+    assert got == ["smappy-usage-Cy-20261121-100000.zip"]
+    propfind, get = asked
+    assert propfind.get_method() == "PROPFIND" and propfind.get_header("Depth") == "1"
+    assert propfind.get_header("Authorization") == "Basic " + base64.b64encode(b"ada:pw").decode()
+    assert get.get_method() == "GET" and get.full_url == FOLDER + "smappy-usage-Cy-20261121-100000.zip"
+    assert (target / got[0]).read_bytes() == b"zip of smappy-usage-Cy-20261121-100000.zip"
+    assert (target / "smappy-usage-Bo-20261120-100000.zip").read_bytes() == b"had it"
+    assert not list(target.glob("*.part"))
+
+
+def test_a_refused_login_is_reported_plainly(digest, tmp_path, monkeypatch, capsys):
+    with pytest.raises(digest.FetchError, match="refused the login for 'ada'.*Keychain"):
+        digest.fetch(FOLDER, "ada", tmp_path, password="wrong", opener=server([], refuse=401))
+    # from the command line: a line on stderr and a code, no traceback
+    monkeypatch.setattr(digest, "keychain_password", lambda user="": "wrong")
+    monkeypatch.setattr(digest.urllib.request, "urlopen", server([], refuse=401))
+    out = tmp_path / "out"
+    assert digest.main(["--fetch", str(out), "--url", FOLDER, "--user", "ada"]) == 2
+    assert "refused the login" in capsys.readouterr().err
+    assert json.loads((out / "fetch.json").read_text()) == {"url": FOLDER, "user": "ada"}
+
+
+def test_a_fetch_remembers_the_folder_and_digests_what_it_fetched(digest, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(digest, "keychain_password", lambda user="": "pw")
+    monkeypatch.setattr(digest.urllib.request, "urlopen", server([]))
+    monkeypatch.setattr(digest, "read_bundle", lambda path, senders: None)
+    out = tmp_path / "out"
+    assert digest.main(["--fetch", str(out), "--url", FOLDER, "--user", "ada"]) == 0
+    assert digest.main(["--fetch", str(out)]) == 0                 # fetch.json kept them
+    printed = capsys.readouterr().out
+    assert "fetched 2 new bundles" in printed and "fetched 0 new bundles" in printed
+    assert "password" not in (out / "fetch.json").read_text()
+
+
+def test_the_password_is_found_by_the_service_when_stored_under_another_account(digest, monkeypatch):
+    class Done:
+        def __init__(self, code, out):
+            self.returncode, self.stdout = code, out
+
+    asked = []
+
+    def run(command, **kw):
+        asked.append(command)
+        return Done(0, "pw\n") if "-a" not in command else Done(44, "")
+
+    monkeypatch.setattr(digest.subprocess, "run", run)
+    assert digest.keychain_password("ada@example.org") == "pw"
+    assert asked[0][3:5] == ["-a", "ada@example.org"] and "-a" not in asked[1]

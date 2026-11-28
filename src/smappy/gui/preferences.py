@@ -291,7 +291,9 @@ class UsageLogPage(QWidget):
         layout = QVBoxLayout(self)
         about = QLabel("A log for SMAPpy's developers of what the AI assistant tried, which "
                        "plugins ran and which help pages were read: it shows what is hard to "
-                       "find or missing.  Pictures and localizations are never in it; file "
+                       "find or missing.  The assistant's conversations go with it: those in "
+                       "its folder, and Claude Code's elsewhere that called SMAPpy's tools "
+                       "(only those).  Pictures and localizations are never in it; file "
                        "names are.  Nothing is sent without a link.")
         about.setWordWrap(True)
         about.setStyleSheet(note_style())

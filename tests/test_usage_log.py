@@ -119,6 +119,24 @@ def test_a_bundle_gathers_the_events_logs_notes_and_the_clients_transcripts(home
     assert about["parts"]["transcripts"] == 2 and made["count"] == sum(about["parts"].values())
 
 
+def test_claude_conversations_elsewhere_go_only_if_they_called_smappys_tools(home):
+    usage_log.save_settings(enabled=True)
+    projects = home / "claude" / "projects"
+    call = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "mcp__smappy__find_plugins", "input": {"query": "drift"}}]}}
+    write_log(projects / "-data-cells" / "used.jsonl",
+              [json.dumps({"type": "user", "message": {"content": "drift?"}}), json.dumps(call)])
+    # a conversation that only talks about the tools, as a developer's does
+    talk = {"type": "user", "message": {"content": 'it calls "name": "mcp__smappy__run_plugin"'}}
+    write_log(projects / "-code-SMAPpy" / "talk.jsonl", [json.dumps(talk)])
+    write_log(projects / "-other" / "other.jsonl", [json.dumps(
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}})])
+    usage_log.bundle(home / "b.zip", datetime.now() - timedelta(hours=1))
+    names = set(usage_log.iter_parts(home / "b.zip"))
+    assert "transcripts/claude/used.jsonl" in names
+    assert not {"transcripts/claude/talk.jsonl", "transcripts/claude/other.jsonl"} & names
+
+
 class Answer:
     status = 201
 

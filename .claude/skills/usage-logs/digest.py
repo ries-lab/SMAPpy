@@ -1,6 +1,17 @@
 """Turn SMAPpy usage-log bundles into digests a model can read.
 
     python .claude/skills/usage-logs/digest.py BUNDLES OUT [--all]
+    python .claude/skills/usage-logs/digest.py --fetch OUT [--url URL --user USER]
+
+With ``--fetch`` the bundles are first fetched from the drop folder itself,
+over WebDAV with the collector's own u:cloud login (the share link they were
+sent to can add files but read none): every ``smappy-usage-*.zip`` not yet in
+``OUT/bundles`` is downloaded there, and ``OUT/bundles`` is digested.  The
+folder's WebDAV address and the user come from the arguments, kept in
+``OUT/fetch.json`` for the next time; the password only from the macOS
+Keychain (``security find-generic-password -s smappy-usage-logs -w``, an app
+password), never from an argument or a file.  Nothing on the server is
+deleted or moved.
 
 ``BUNDLES`` is the folder the bundles land in (`smappy/usage_log.py` sends
 ``smappy-usage-<who>-<date>.zip``; searched recursively); ``OUT`` gets
@@ -24,10 +35,16 @@ again in the next bundle, so each conversation is kept once, its longest copy.
 from __future__ import annotations
 
 import argparse
+import base64
 import collections
 import json
 import re
+import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ElementTree
 import zipfile
 from pathlib import Path
 
@@ -393,16 +410,165 @@ def overview(senders: dict, out: Path) -> str:
     return "\n".join(md) + "\n"
 
 
+def is_test(path: Path) -> bool:
+    """A bundle someone sent to try the link (``smappy-usage-test.zip``,
+    ``...-test.zip``): not usage, and it showed up as a sender of its own."""
+    return path.stem == "smappy-usage-test" or path.stem.endswith("-test")
+
+
+# ---------------------------------------------------------------- fetching
+KEYCHAIN_SERVICE = "smappy-usage-logs"
+FETCH_TIMEOUT = 120            # seconds for one request
+PROPFIND_BODY = (b'<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>'
+                 b'<d:getcontentlength/></d:prop></d:propfind>')
+
+
+class FetchError(Exception):
+    """A fetch that cannot go on, said plainly for the person running it."""
+
+
+def keychain_password(user: str = "") -> str:
+    """The app password from the macOS Keychain; never asked for or stored
+    elsewhere, so it is in no shell history, file or argument list."""
+    command = ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"]
+    # by the user first, then by the service alone: the entry's account is
+    # whatever was typed when it was stored (a login name, not the address)
+    tries = ([command[:3] + ["-a", user] + command[3:]] if user else []) + [command]
+    for attempt in tries:
+        try:
+            done = subprocess.run(attempt, capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise FetchError(f"could not read the Keychain: {error}") from error
+        if done.returncode == 0 and done.stdout.strip():
+            break
+    if done.returncode != 0 or not done.stdout.strip():
+        raise FetchError(
+            f"no password for {KEYCHAIN_SERVICE!r} in the Keychain; store the u:cloud app "
+            f"password with: security add-generic-password -a {user or '<user>'} "
+            f"-s {KEYCHAIN_SERVICE} -w")
+    return done.stdout.rstrip("\n")
+
+
+def _refused(error: urllib.error.HTTPError, user: str) -> FetchError:
+    if error.code in (401, 403):
+        return FetchError(
+            f"u:cloud refused the login for {user!r} (HTTP {error.code}): check the user and "
+            f"the app password stored as {KEYCHAIN_SERVICE!r} in the Keychain")
+    if 300 <= error.code < 400:
+        return FetchError(
+            f"u:cloud answered with a redirect (HTTP {error.code}, to "
+            f"{error.headers.get('Location', '?') if error.headers else '?'}), probably to "
+            f"its login page: it takes no app password over WebDAV for this folder")
+    return FetchError(f"u:cloud answered HTTP {error.code} {error.reason}")
+
+
+def list_bundles(url: str, user: str, password: str, opener=None) -> list:
+    """``(name, absolute URL)`` of each usage bundle in the WebDAV folder
+    ``url``, by one PROPFIND of depth 1."""
+    opener = opener or urllib.request.urlopen
+    folder = url if url.endswith("/") else url + "/"
+    request = urllib.request.Request(folder, data=PROPFIND_BODY, method="PROPFIND", headers={
+        "Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode(),
+        "Depth": "1", "Content-Type": "application/xml", "User-Agent": "smappy-usage-digest"})
+    try:
+        with opener(request, timeout=FETCH_TIMEOUT) as response:
+            status = getattr(response, "status", 207)
+            body = response.read()
+    except urllib.error.HTTPError as error:
+        raise _refused(error, user) from error
+    except (urllib.error.URLError, OSError) as error:
+        raise FetchError(f"could not reach {folder}: {getattr(error, 'reason', error)}") from error
+    if status != 207:
+        raise FetchError(f"u:cloud answered HTTP {status} to the listing, not 207: "
+                         f"is {folder} a WebDAV folder?")
+    try:
+        root = ElementTree.fromstring(body)
+    except ElementTree.ParseError as error:
+        raise FetchError("the listing is not WebDAV's XML (a login page?)") from error
+    out = []
+    for href in root.iter("{DAV:}href"):
+        path = (href.text or "").strip()
+        name = urllib.parse.unquote(path.rstrip("/").rsplit("/", 1)[-1])
+        if re.fullmatch(r"smappy-usage-.+\.zip", name) and not is_test(Path(name)):
+            out.append((name, urllib.parse.urljoin(folder, path)))
+    return out
+
+
+def fetch(url: str, user: str, target: Path, password: str = None, opener=None) -> list:
+    """Download into ``target`` each bundle of the folder it lacks; returns
+    their names.  A download goes to a ``.part`` file first, so a broken one
+    is never taken for a bundle."""
+    password = keychain_password(user) if password is None else password
+    opener = opener or urllib.request.urlopen
+    target.mkdir(parents=True, exist_ok=True)
+    have = {p.name for p in target.glob("*.zip")}
+    got = []
+    for name, address in list_bundles(url, user, password, opener):
+        if name in have:
+            continue
+        request = urllib.request.Request(address, headers={
+            "Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode(),
+            "User-Agent": "smappy-usage-digest"})
+        part = target / (name + ".part")
+        try:
+            with opener(request, timeout=FETCH_TIMEOUT) as response:
+                part.write_bytes(response.read())
+        except urllib.error.HTTPError as error:
+            part.unlink(missing_ok=True)
+            raise _refused(error, user) from error
+        except (urllib.error.URLError, OSError) as error:
+            part.unlink(missing_ok=True)
+            raise FetchError(f"could not fetch {name}: {getattr(error, 'reason', error)}") from error
+        part.replace(target / name)
+        got.append(name)
+    return got
+
+
+def fetch_settings(out: Path, url: str = "", user: str = "") -> tuple:
+    """The folder's address and the user: the arguments, kept in
+    ``out/fetch.json`` (no password), else what that file kept."""
+    path = out / "fetch.json"
+    saved = json.loads(path.read_text()) if path.exists() else {}
+    url, user = url or saved.get("url", ""), user or saved.get("user", "")
+    if not (url and user):
+        raise FetchError(f"--fetch needs --url and --user the first time (kept in {path})")
+    if (url, user) != (saved.get("url"), saved.get("user")):
+        path.write_text(json.dumps({"url": url, "user": user}, indent=1))
+    return url, user
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("bundles", type=Path)
-    parser.add_argument("out", type=Path)
+    parser.add_argument("paths", type=Path, nargs="+", metavar="BUNDLES OUT",
+                        help="the bundles' folder and the output; with --fetch, the output alone")
     parser.add_argument("--all", action="store_true", help="read every bundle, not only new ones")
+    parser.add_argument("--fetch", action="store_true",
+                        help="first fetch new bundles from the drop folder into OUT/bundles")
+    parser.add_argument("--url", default="", help="the drop folder's WebDAV address (--fetch)")
+    parser.add_argument("--user", default="", help="the u:cloud user (--fetch)")
     args = parser.parse_args(argv)
+    if args.fetch:
+        if len(args.paths) != 1:
+            parser.error("--fetch takes the output folder alone")
+        args.out = args.paths[0].expanduser()
+        args.bundles = args.out / "bundles"
+    elif len(args.paths) == 2:
+        args.bundles, args.out = args.paths[0], args.paths[1].expanduser()
+    else:
+        parser.error("give the bundles' folder and the output folder")
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.fetch:
+        try:
+            url, user = fetch_settings(args.out, args.url, args.user)
+            got = fetch(url, user, args.bundles)
+        except FetchError as error:
+            print(f"fetch: {error}", file=sys.stderr)
+            return 2
+        print(f"fetched {len(got)} new bundles into {args.bundles}")
     seen_file = args.out / "digested.json"
     seen = set() if args.all or not seen_file.exists() else set(json.loads(seen_file.read_text()))
-    bundles = sorted(args.bundles.expanduser().rglob("smappy-usage-*.zip"))
+    bundles = [b for b in sorted(args.bundles.expanduser().rglob("smappy-usage-*.zip"))
+               if not is_test(b)]
     new = [b for b in bundles if b.name not in seen]
     senders: dict = {}
     for bundle in bundles:              # the overview is of everything seen

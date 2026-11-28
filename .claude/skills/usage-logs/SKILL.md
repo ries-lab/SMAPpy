@@ -22,9 +22,25 @@ user asks for that item, and then only the finding, in your own words.
 
 ## 1. Digest the bundles
 
-Ask where the bundles land if you do not know (the user's synced u:cloud
-folder; remember it in memory once told).  The output goes to
-`~/Documents/SMAPpy usage analysis` unless the user names another folder.
+The bundles are fetched from the u:cloud drop folder itself, over WebDAV
+with the collector's own login (the share link they were sent to can add
+files but read none), into `<output folder>/bundles`, and digested there:
+
+    python .claude/skills/usage-logs/digest.py --fetch "<output folder>"
+
+The output folder is `~/Documents/SMAPpy usage analysis` unless the user
+names another.  The folder's WebDAV address and the user are kept in its
+`fetch.json` (look in memory if it is missing, and pass `--url` and `--user`
+once); the password is a u:cloud app password read from the macOS Keychain
+(service `smappy-usage-logs`) and nowhere else -- never ask for it, type it
+or store it.  A refused login is said plainly: then the user makes a new app
+password (u:cloud > Settings > Security) and stores it with
+`security add-generic-password -a <user> -s smappy-usage-logs -w`.
+Nothing on the server is deleted or moved.  Bundles named `...-test.zip`
+(someone trying the link) are skipped.
+
+Bundles that are already on disk (a synced folder) are digested without
+fetching:
 
     python .claude/skills/usage-logs/digest.py "<bundles folder>" "<output folder>"
 
