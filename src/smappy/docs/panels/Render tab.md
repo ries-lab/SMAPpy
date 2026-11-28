@@ -976,7 +976,7 @@ copied.  A right-click on the attribute renames or removes it, as on the
 filter's drop-down.
 
 *region value* colours by what was measured per region, chosen beside it by
-its source, evaluation and value -- `per cluster_id › Id statistics ›
+its source, evaluation and value -- `per cluster_id › Region statistics ›
 n_locs`, `ROIs › NPC Corners › n_corners` -- as the region filter names them;
 only values that are numbers are offered.  The Regions tab's *Results
 table...* sets it from a column's header.  How the values reach the

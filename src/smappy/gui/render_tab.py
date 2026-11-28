@@ -1692,7 +1692,7 @@ class RenderTab(QWidget):
         for field in numeric:
             found = parse(field)
             # a region value by its value first: the list is narrow, and
-            # `per cluster_id › Id statistics › …` hid the part that differs
+            # `per cluster_id › Region statistics › …` hid the part that differs
             text = field if found is None else f"{found[2]}  ({found[1]}, " \
                 f"{'ROIs' if found[0] == ROIS else 'per ' + found[0]})"
             self.color_field.addItem(text, field)

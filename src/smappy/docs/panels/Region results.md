@@ -60,7 +60,7 @@ offered.
 ### Copy
 The table as it is sorted, tab-separated, to the clipboard: pasted into a
 spreadsheet it keeps its columns.  The header is the value and its
-evaluation, `n_locs / Id statistics`.
+evaluation, `n_locs / Region statistics`.
 
 ### Save...
 The same table as a CSV file.

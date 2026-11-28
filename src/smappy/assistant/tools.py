@@ -1465,7 +1465,7 @@ class Assistant:
           render={"type": "object", "description": "a localization layer's render "
                   "settings, dotted names.  color_field may be a value measured per "
                   "region, drawn without writing it onto the localizations: "
-                  "'per cluster_id › Id statistics › n_locs' (an id column's regions) "
+                  "'per cluster_id › Region statistics › n_locs' (an id column's regions) "
                   "or 'ROIs › <evaluation> › <value>' (overlapping ROIs: their mean); "
                   "hide_missing true leaves out the localizations without a value "
                   "(outside every region) instead of drawing them grey"},

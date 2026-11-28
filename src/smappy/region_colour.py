@@ -4,7 +4,7 @@ The Render tab colours a layer by an attribute; this makes a region's value
 one of them -- a cluster's circularity, a pore's number of corners --
 without writing it onto the localizations.  A layer's ``color_field`` names
 the value as the region filter does, ``ROIs › NPC Corners › n_corners`` or
-``per cluster_id › Id statistics › circularity`` (`name`, `parse`), and the
+``per cluster_id › Region statistics › circularity`` (`name`, `parse`), and the
 column is made when the layer is drawn: `ViewState.snapshot` asks the
 session (`Tables.column_source`, `Session.region_column`), and the render
 threads, the 3D view, the colour bars and *Save image* see an ordinary column

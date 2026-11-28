@@ -11,7 +11,7 @@ from smappy.render import FieldOfView
 
 from test_region_filter import clusters, overlapping_rois
 
-N_LOCS = "per cluster_id › Id statistics › n_locs"
+N_LOCS = "per cluster_id › Region statistics › n_locs"
 
 
 @pytest.fixture(scope="module")
@@ -28,8 +28,8 @@ def colour_by(session, field, layer=0, **more):
 
 
 def test_a_name_reads_back_and_no_column_is_taken_for_one():
-    assert name("cluster_id", "Id statistics", "n_locs") == N_LOCS
-    assert parse(N_LOCS) == ("cluster_id", "Id statistics", "n_locs")
+    assert name("cluster_id", "Region statistics", "n_locs") == N_LOCS
+    assert parse(N_LOCS) == ("cluster_id", "Region statistics", "n_locs")
     assert parse(name("rois", "NPC Corners", "n_corners")) == ("rois", "NPC Corners",
                                                                 "n_corners")
     assert parse("photons") is None and parse(None) is None
@@ -37,7 +37,7 @@ def test_a_name_reads_back_and_no_column_is_taken_for_one():
 
 def test_each_localization_takes_its_clusters_value_and_noise_has_none():
     session, truth = clusters()
-    values = region_values_onto(session, "cluster_id", "Id statistics", "n_locs")
+    values = region_values_onto(session, "cluster_id", "Region statistics", "n_locs")
     for k, n in ((1, 60), (2, 40), (3, 25)):
         assert np.all(values[truth == k] == n)
     assert np.isnan(values[truth == -1]).all()
@@ -161,7 +161,7 @@ def test_the_results_window_lists_every_region_sorts_copies_and_colours(qapp, tm
     actions["Colour localizations by this"].trigger()
     assert coloured == [N_LOCS]
     actions["Filter regions on this..."].trigger()
-    assert filtered == [("cluster_id", "Id statistics", "n_locs")]
+    assert filtered == [("cluster_id", "Region statistics", "n_locs")]
     window._on_row(window.proxy.index(0, 0))               # cluster 3, centred on it
     assert np.allclose(centred[0], 9000, atol=30)
     window.close()
@@ -188,7 +188,7 @@ def test_the_regions_tab_opens_the_table_and_its_filter_on_a_value(qapp):
     header = ROIHeader(session, colour_by=coloured.append)
     window = header.open_results("cluster_id")
     assert window.source.currentData() == "cluster_id"
-    header.filter_on("cluster_id", "Id statistics", "n_locs")
-    assert header.region_filter.chosen == ("cluster_id", "Id statistics", "n_locs")
+    header.filter_on("cluster_id", "Region statistics", "n_locs")
+    assert header.region_filter.chosen == ("cluster_id", "Region statistics", "n_locs")
     assert window.colour_by is not None
     window.close()
