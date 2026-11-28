@@ -1387,9 +1387,19 @@ class RenderTab(QWidget):
         self.color = QComboBox()
         self.color.addItem("intensity", None)
         self.color.addItem("attribute", "field")
+        # what was measured per region, drawn without writing it onto the
+        # localizations (`region_colour`)
+        self.color.addItem("region value", "region")
+        self.color.setToolTip("intensity: the density.  attribute: a column of "
+                              "the localizations.  region value: what was measured "
+                              "in each localization's ROI or cluster")
         self.color_field = QComboBox()
         self.color_field.setToolTip("the attribute the colour encodes; "
                                     "right-click to rename or remove it")
+        # a region value's name is long (`ROIs › NPC Corners › n_corners`):
+        # the list is as wide as the column, not as its longest entry
+        self.color_field.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.color_field.setMinimumContentsLength(8)
         self.color_field.setContextMenuPolicy(Qt.CustomContextMenu)
         self.color_field.customContextMenuRequested.connect(
             lambda at: self._attribute_menu(self.color_field, at))
@@ -1401,9 +1411,14 @@ class RenderTab(QWidget):
         self.color_auto = QPushButton("auto")
         self.color_auto.setToolTip("the field's 0.5-99.5% range over what the "
                                    "picture shows: filtered, in the ROI, in view")
+        self.hide_missing = QCheckBox("hide no value")
+        self.hide_missing.setToolTip("leave out the localizations the colour has no "
+                                     "value for -- outside every region, for a region "
+                                     "value -- instead of drawing them grey")
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
-        for w in (self.color_lo, QLabel("to"), self.color_hi, self.color_auto):
+        for w in (self.color_lo, QLabel("to"), self.color_hi, self.color_auto,
+                  self.hide_missing):
             range_row.addWidget(w)
         range_row.addStretch(1)
         self.color_range_row = QWidget()
@@ -1546,6 +1561,7 @@ class RenderTab(QWidget):
         self.factor.valueChanged.connect(self._on_render_settings)
         self.color.currentIndexChanged.connect(self._on_color)
         self.color_field.currentIndexChanged.connect(self._on_color)
+        self.hide_missing.toggled.connect(self._on_hide_missing)
         self.lut.currentTextChanged.connect(self._on_display)
         # every pick, the same one again too: choosing the ids table anew
         # draws new colours (`_on_lut_chosen`)
@@ -1630,6 +1646,10 @@ class RenderTab(QWidget):
             self._bind_layer(self.strip.current)
         elif what in ("roi", "roi-edited"):
             self.filter._update_count()
+        elif what == "rois" and not self.layer.is_image:
+            # results measured, an ROI added or switched off: the region
+            # values on offer may have changed
+            self._fill_color_fields(self.layer)
         elif what == "layer" and self.filter.current_field() == "filenumber":
             # the files a layer shows changed from elsewhere -- the ROI
             # manager puts the layers on a selected ROI's file -- and the
@@ -1651,20 +1671,64 @@ class RenderTab(QWidget):
         made survives every block after that.
         """
         locs = layer.locs
-        numeric = [n for n in locs if np.asarray(locs[n]).dtype.kind in "iuf"
-                   and np.asarray(locs[n]).ndim == 1]
-        if numeric == [self.color_field.itemText(i)
+        settings = layer.state.settings
+        if self.color.currentData() == "region":
+            numeric = self._region_fields()
+            chosen = settings.color_field if settings.color_field in numeric else (
+                numeric[0] if numeric else "")
+        else:
+            numeric = [n for n in locs if np.asarray(locs[n]).dtype.kind in "iuf"
+                       and np.asarray(locs[n]).ndim == 1]
+            chosen = settings.color_field or ("z_nm" if "z_nm" in locs
+                                              else (numeric[0] if numeric else ""))
+        if numeric == [self.color_field.itemData(i)
                        for i in range(self.color_field.count())]:
             return
-        settings = layer.state.settings
-        chosen = settings.color_field or ("z_nm" if "z_nm" in locs
-                                          else (numeric[0] if numeric else ""))
+        from ..chain import BLOCK_ROIS as ROIS
+        from ..region_colour import parse
         blocked = self.color_field.signalsBlocked()
         self.color_field.blockSignals(True)
         self.color_field.clear()
-        self.color_field.addItems(numeric)
-        self.color_field.setCurrentText(chosen)
+        for field in numeric:
+            found = parse(field)
+            # a region value by its value first: the list is narrow, and
+            # `per cluster_id › Id statistics › …` hid the part that differs
+            text = field if found is None else f"{found[2]}  ({found[1]}, " \
+                f"{'ROIs' if found[0] == ROIS else 'per ' + found[0]})"
+            self.color_field.addItem(text, field)
+            if found is not None:
+                self.color_field.setItemData(self.color_field.count() - 1, field,
+                                             Qt.ToolTipRole)
+        self.color_field.setCurrentIndex(max(0, self.color_field.findData(chosen)))
         self.color_field.blockSignals(blocked)
+
+    def _region_fields(self) -> list:
+        """Every region value a layer can be coloured by, by its name."""
+        from ..region_colour import name, numeric_values
+        try:
+            found = numeric_values(self.session)
+        except Exception as e:           # a list must not break the panel
+            print(f"region values: {e}")
+            return []
+        return [name(source, label, value) for source, labels in found.items()
+                for label, values in labels.items() for value in values]
+
+    def colour_by_region(self, field: str) -> None:
+        """Colour the current layer by a region value (`region_colour.name`):
+        what the results window's *Colour localizations by this* does."""
+        if self.layer.is_image:
+            return
+        state = self.layer.state
+        state.settings = dataclasses.replace(state.settings, color_field=None,
+                                             color_range=None)
+        self.color.blockSignals(True)
+        self.color.setCurrentIndex(self.color.findData("region"))
+        self.color.blockSignals(False)
+        self._fill_color_fields(self.layer)
+        self.color_field.blockSignals(True)
+        self.color_field.setCurrentIndex(max(0, self.color_field.findData(field)))
+        self.color_field.blockSignals(False)
+        self._on_color()
 
     def _bind_layer(self, index: int) -> None:
         """Point every control at one layer, without firing their signals."""
@@ -1672,6 +1736,7 @@ class RenderTab(QWidget):
         self.filter.layer_index = index
         widgets = (self.mode, self.track_column, self.line_width, self.lines_add,
                    self.sigma, self.sigma_y, self.factor, self.color, self.color_field,
+                   self.hide_missing,
                    self.lut, self.invert, self.white,
                    self.contrast, self.scale, self.maximum, self.gamma,
                    self.grouped,
@@ -1720,11 +1785,14 @@ class RenderTab(QWidget):
             return
         self.filter.bind(layer)
         locs = layer.locs
-        self._fill_color_fields(layer)
         settings, display = layer.state.settings, layer.state.display
-        self.color.setCurrentIndex(1 if settings.color_field else 0)
+        from ..region_colour import parse
+        self.color.setCurrentIndex(0 if not settings.color_field
+                                   else 2 if parse(settings.color_field) else 1)
+        self._fill_color_fields(layer)
         self.color_field.setEnabled(settings.color_field is not None)
         self.color_range_row.setEnabled(settings.color_field is not None)
+        self.hide_missing.setChecked(settings.hide_missing)
         lo, hi = settings.color_range or (None, None)
         self.color_lo.set(lo)
         self.color_hi.set(hi)
@@ -1757,8 +1825,10 @@ class RenderTab(QWidget):
 
     def _attribute_menu(self, combo: QComboBox, at) -> None:
         from .attribute_menu import show_menu
-        if combo.isEnabled() and combo.currentText():
-            show_menu(self.session, combo.currentText(), combo, at)
+        from ..region_colour import parse
+        name = combo.currentData() if combo is self.color_field else combo.currentText()
+        if combo.isEnabled() and name and parse(name) is None:   # not a region's value
+            show_menu(self.session, name, combo, at)
 
     def set_mode(self, key: str) -> None:
         """Choose a render mode by its stored key ("precision", "gauss", ...)."""
@@ -1896,10 +1966,15 @@ class RenderTab(QWidget):
 
     def _on_color(self) -> None:
         state = self.layer.state
-        by_field = self.color.currentData() == "field"
-        field = self.color_field.currentText() if by_field else None
-        self.color_field.setEnabled(by_field)
+        kind = self.color.currentData()
+        by_field = kind in ("field", "region")
+        from ..region_colour import parse
         was = state.settings.color_field
+        if by_field and (parse(was) is not None) != (kind == "region"):
+            # switched between columns and region values: the other list
+            self._fill_color_fields(self.layer)
+        field = (self.color_field.currentData() or None) if by_field else None
+        self.color_field.setEnabled(by_field)
         # a new field starts on its 99% range: one scale for the 2D and 3D views
         color_range = (self._field_range(field) if field and field != was
                        else state.settings.color_range)
@@ -1931,10 +2006,10 @@ class RenderTab(QWidget):
         field is first chosen, so the first colours are the whole table's;
         with ``shown``, over what the picture shows -- filtered, in the ROI
         and in view -- for *auto*, which rescales to what one is looking at."""
-        locs = self.layer.locs
-        if field not in locs:
+        found = self.layer.state.column(field) if field else None
+        if found is None:
             return None
-        values = np.asarray(locs[field], np.float64)
+        values = np.asarray(found, np.float64)
         if shown and self.session is not None:
             mask = self._shown_mask()
             if mask is not None and mask.any():
@@ -1944,6 +2019,11 @@ class RenderTab(QWidget):
             return None
         lo, hi = (float(np.quantile(finite, q)) for q in (0.005, 0.995))
         return round_in_span(lo, hi - lo), round_in_span(hi, hi - lo)
+
+    def _on_hide_missing(self, on: bool) -> None:
+        state = self.layer.state
+        state.settings = dataclasses.replace(state.settings, hide_missing=bool(on))
+        self.session.changed("layer")
 
     def _on_color_range(self) -> None:
         state = self.layer.state

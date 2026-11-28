@@ -6,6 +6,7 @@ it the same way without subscribing to anything.
 from __future__ import annotations
 
 import dataclasses
+import weakref
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
@@ -473,14 +474,33 @@ class Session:
                     **kwargs) -> Tables:
         """`Tables` over ``locs``, deferring its linking as the session does
         (`defer_merge_from`)."""
-        return Tables(locs, settings, defer_from=self.defer_merge_from, **kwargs)
+        return self._give_columns(
+            Tables(locs, settings, defer_from=self.defer_merge_from, **kwargs))
+
+    def _give_columns(self, tables: Tables) -> Tables:
+        """Let the layers over ``tables`` draw the regions' values
+        (`region_column`); weakly, as a bound method would be a cycle."""
+        tables.column_source = weakref.WeakMethod(self.region_column)
+        return tables
+
+    def region_column(self, table: Localizations, field: str) -> Optional[np.ndarray]:
+        """A region's value as a column of ``table`` (the session's table or
+        its grouped form), for a layer coloured by it (`region_colour`); None
+        when ``field`` is no region value."""
+        from .region_colour import onto_table
+        cache = self.__dict__.setdefault("_region_columns", {})
+        try:
+            return onto_table(self, table, field, cache)
+        except Exception as e:          # a drawing must not fail on it
+            print(f"region colour {field!r}: {e}")
+            return None
 
     def _take_tables(self, tables: Tables) -> None:
         """Make ``tables`` the session's and every layer's.  Its grouped table
         is linked when a layer showing blinks reads it (`ViewState.current`;
         render threads are handed snapshots taken on the GUI thread, so none
         meets one being linked)."""
-        self.tables = tables
+        self.tables = self._give_columns(tables)
         for layer in self.layers:
             layer.rebind(tables)
 
@@ -1366,7 +1386,7 @@ class Session:
             tables = Tables(locs, self._group_settings,
                             grouped=grouped.locs if take else None)
         copy._group_settings = self._group_settings
-        copy.tables = tables
+        copy.tables = copy._give_columns(tables)
         copy.path = self.path
         copy.files = list(self.files)
         copy.images = list(self.images)

@@ -767,6 +767,13 @@ def _id_places(values, lut, offset):
     return luts.as_ramp(values, lut, 0.0, 1.0, False, offset)[0]
 
 
+def _column_id(locs: Localizations, name: Optional[str]) -> Optional[int]:
+    """The colour column's array, in the key: a column made again under the
+    same name -- a region's value measured again (`region_colour`), a live
+    recipe -- is another upload, not the old colours."""
+    return id(locs[name]) if name and name in locs else None
+
+
 def _table_key(locs: Localizations, *extra):
     """A key that dies with the table: an object stored on it, not a bare id."""
     return (id(table_token(locs)), len(locs)) + extra
@@ -813,6 +820,7 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
         # out only when the table is uploaded, not on every frame of a drag
         cvalues = partial(_id_places, cvalues, display.lut, display.ids_offset)
     key = _table_key(locs, prec_name, settings.weight_field, color_field,
+                     _column_id(locs, color_field),
                      *(("ids", display.ids_offset) if ids else ()))
     engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
                  locs[settings.weight_field] if settings.weight_field else None, cvalues)
@@ -876,6 +884,7 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
         # out only when the table is uploaded, not on every frame of a drag
         cvalues = partial(_id_places, cvalues, display.lut, display.ids_offset)
     key = _table_key(locs, prec_name, settings.weight_field, color_field,
+                     _column_id(locs, color_field),
                      *(("ids", display.ids_offset) if ids else ()))
     engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
                  locs[settings.weight_field] if settings.weight_field else None, cvalues)

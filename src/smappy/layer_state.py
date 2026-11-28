@@ -260,6 +260,11 @@ class Tables:
         worker thread, off the GUI's."""
         self.ungrouped = LocSet(locs, extent=extent, growable=live)
         self.settings = settings if settings is not None else GroupSettings()
+        # columns a layer may draw that the tables do not hold: ``(table,
+        # name) -> values or None``, the session's region values
+        # (`region_colour`).  A weak method, as the session sets it: a bound
+        # one would be a cycle, and automatic collection is off
+        self.column_source: Optional[Callable] = None
         self._link_with = link
         self._ready = ready
         self.defer_from = defer_from
@@ -877,13 +882,35 @@ class ViewState:
         current = self.current        # once: the table and its selection agree
         f = self.filter_for(current)
         index = self.cull_index
+        locs, mask, known = current.locs.snapshot(), f.mask, f.cached_indices
+        field = self.settings.color_field
+        if field is not None:
+            values = self.column(field, current.locs)
+            if values is not None and field not in locs:
+                # a region's value (`region_colour`): a column of this
+                # snapshot alone, never of the table
+                locs.columns[field] = values
+            if (self.settings.hide_missing and values is not None
+                    and len(values) == len(mask)):
+                mask, known = mask & np.isfinite(values), None
         return LayerSnapshot(
-            name=name, visible=visible, locs=current.locs.snapshot(), mask=f.mask,
-            known_indices=f.cached_indices,
+            name=name, visible=visible, locs=locs, mask=mask,
+            known_indices=known,
             index=None if index is None else index.snapshot(),
             median_precision=current.median_precision,
             settings=copy.deepcopy(self.settings), display=copy.deepcopy(self.display),
             n_threads=self.n_threads)
+
+    def column(self, name: str, locs: Optional[Localizations] = None
+               ) -> Optional[np.ndarray]:
+        """A column of the shown table (or of ``locs``), or one the tables'
+        `column_source` makes for it -- a region's value -- or None."""
+        locs = self.locs if locs is None else locs
+        if name in locs:
+            return locs[name]
+        source = self.tables.column_source
+        source = source() if source is not None else None
+        return None if source is None else source(locs, name)
 
     def keep_indices(self, snapshot: "LayerSnapshot") -> None:
         """Keep the rows a render thread compacted from a snapshot of this

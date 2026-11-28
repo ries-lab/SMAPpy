@@ -1463,7 +1463,12 @@ class Assistant:
           name={"type": "string", "description": "the layer's name"},
           display={"type": "object", "description": "other display settings, by name"},
           render={"type": "object", "description": "a localization layer's render "
-                                                   "settings, dotted names"},
+                  "settings, dotted names.  color_field may be a value measured per "
+                  "region, drawn without writing it onto the localizations: "
+                  "'per cluster_id › Id statistics › n_locs' (an id column's regions) "
+                  "or 'ROIs › <evaluation> › <value>' (overlapping ROIs: their mean); "
+                  "hide_missing true leaves out the localizations without a value "
+                  "(outside every region) instead of drawing them grey"},
           reason={"type": "string", "description": "why, for the user (a proposal)"})
     def set_layer(self, layer: int = 0, image=None, lut: Optional[str] = None,
                   contrast: Optional[float] = None, visible: Optional[bool] = None,

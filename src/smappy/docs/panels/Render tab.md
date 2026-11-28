@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.lut.id_index, smappy.lut.offers_ids, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z, smappy.handoff.view_settings, smappy.handoff.apply_view_settings, smappy.gui.attribute_menu.add_actions, smappy.scan.scan_steps]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.lut.id_index, smappy.lut.offers_ids, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z, smappy.handoff.view_settings, smappy.handoff.apply_view_settings, smappy.gui.attribute_menu.add_actions, smappy.scan.scan_steps, smappy.region_colour.region_values_onto, smappy.region_colour.onto_table, smappy.layer_state.ViewState.column]
 ---
 
 ## What it does
@@ -553,6 +553,23 @@ therefore keeps its hue instead of bleaching to white.  Choosing an attribute
 starts its range at its 0.5th to 99.5th percentile and switches the LUT to
 rainbow; going back to intensity switches it to red hot.  Because the colour is part
 of the rendering here, changing the LUT of a coloured layer renders it again.
+A localization without a value -- NaN, as MINFLUX's `cfr` where it was not
+measured -- is drawn grey whatever the LUT, or left out with *hide no value*.
+
+**Colour by a region value.**  What a per-region step measured -- a
+cluster's circularity, a pore's number of corners -- is kept in the region's
+row of its region table, not on the localizations.  *Region value* colours
+each localization by its region's value all the same: when the layer is
+drawn, each localization is given its region's value -- for an id attribute
+by its id, for the ROIs through the rows each ROI holds -- as a column of
+that drawing alone, so the stored table stays as it was and nothing extra is
+saved or exported.  A localization in two overlapping ROIs takes the mean of
+their values; one in no region has none (grey, or hidden); an ROI that is
+not used gives none.  On a layer with merged blinks a blink takes the mean
+over its localizations.  The values follow the region table: measured
+again, the colours change at the next drawing, with no click.  To put the
+values onto the localizations for good -- for a filter, a histogram, an
+export -- use *Write results* ([Write results](plugin:Analysis/Regions/Write results)).
 
 **The LUTs.**  The list has three groups, the ones that suit how the layer
 is coloured first.  *One colour* (gray, red, green, ...) runs from black to
@@ -958,6 +975,13 @@ toolbar's *options* menu hides the bar, on screen and in what is saved or
 copied.  A right-click on the attribute renames or removes it, as on the
 filter's drop-down.
 
+*region value* colours by what was measured per region, chosen beside it by
+its source, evaluation and value -- `per cluster_id › Id statistics ›
+n_locs`, `ROIs › NPC Corners › n_corners` -- as the region filter names them;
+only values that are numbers are offered.  The Regions tab's *Results
+table...* sets it from a column's header.  How the values reach the
+localizations is under *Colour by a region value* above.
+
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the
 colours over the part of the range that matters -- for z, the depth of the
@@ -970,6 +994,14 @@ picture shows: the localizations that pass the filter, inside the ROI if one
 is drawn, and in view.  Zoom in on a part and press it to spread the colours
 over that part.  Choosing an attribute in *colour by* starts from the same
 percentiles over all the layer's localizations.
+
+### hide no value
+Leaves out the localizations the colour has no value for, instead of drawing
+them grey: for a region value, those outside every region (DBSCAN's noise,
+the background between ROIs); for an attribute, its NaNs.  The localizations
+stay in the table, the filter and every plugin -- only this layer's picture
+leaves them out.  Off by default, so that the regions are seen against what
+surrounds them.
 
 ### LUT
 Red hot for intensity, rainbow for an attribute.  For several layers, one pure colour

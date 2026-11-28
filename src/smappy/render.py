@@ -636,6 +636,9 @@ class RenderSettings:
     # its crossings with others are no brighter than the line, and the
     # quantile contrast is set by the lines rather than by their knots
     lines_add: bool = False
+    # coloured by an attribute: leave out the localizations without a value
+    # (NaN, which the LUT draws grey) -- a region's value outside every region
+    hide_missing: bool = False
 
 
 @dataclass
