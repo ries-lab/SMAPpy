@@ -489,8 +489,9 @@ see.  The focus found is written into the settings as typed, so the history
 and the file say what was fitted with, and a Preview finds it once for the
 Run after it.  *typed* takes it as typed; *beads' focus* fits the beads'
 splines as they are, z above their focus.  Without torch, the edge fits as
-calibrated and warns.  A live fit can use only *typed* with nothing learnt:
-the frames are not there yet.
+calibrated and warns.  A live fit has no frames before it starts: on the
+*coverslip edge* it fits as calibrated and warns, as the form says once *live*
+is ticked, and *in situ* stops.
 
 ### model.sample.learn
 How much of the two PSFs the movie teaches, both channels at once (*In

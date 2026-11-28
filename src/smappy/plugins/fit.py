@@ -598,6 +598,26 @@ def default_output_path(source_path) -> Path:
 FinishSettings = AfterFitSettings
 
 
+#: a live fit's focus on *auto*: it has no frames to find the edge in before it starts, so it fits as
+#: calibrated and says so -- it used to refuse at Run, 7 times on two installations in the first usage
+#: logs (2026-11), each time followed by the focus typed and the fit started again
+LIVE_AUTO_FOCUS = ("a live fit cannot find the focus from the coverslip edge before it starts: fitted as "
+                   "calibrated, z above the beads' focus.  Type the focus for z above the coverslip.")
+LIVE_INSITU = "in situ needs the movie before the fit: choose another focus for a live fit"
+
+
+def live_focus_notice(live: bool, mode: str) -> Optional[Notice]:
+    """The line under a spline fitter's form while *live* and a focus that needs the frames before the fit
+    are both set, so that it is read before Run, not after."""
+    if not live:
+        return None
+    if mode == "auto":
+        return Notice(LIVE_AUTO_FOCUS, kind="info")
+    if mode == "insitu":
+        return Notice(LIVE_INSITU[0].upper() + LIVE_INSITU[1:] + ".")
+    return None
+
+
 def _camera_choices() -> List:
     """The cameras in the database, for a file that identifies none."""
     from ..camera_db import database
@@ -2297,6 +2317,10 @@ class SplineFit(_FitPlugin):
             self._theory_notice(settings, state)
         except Exception:
             pass
+        # only where the focus is asked at all: a spline without a pupil model fits as calibrated anyway
+        live = live_focus_notice(settings.source.live, settings.model.mode)
+        if live is not None and state.shown.get("model.focus", False):
+            state.notice = live
         return state
 
     def _theory_notice(self, settings, state) -> None:
@@ -2444,8 +2468,10 @@ class SplineFit(_FitPlugin):
             raise ValueError("a focus in situ draws the PSF with uipsf, which needs torch: pip install "
                              "smappy-smlm[uipsf]")
         if settings.source.live:
-            raise ValueError(f"a focus {'from the edge' if mode == 'auto' else 'learnt'} needs the frames "
-                             f"before the fit: type it for a live fit, and learn nothing")
+            if mode == "auto":
+                ctx.warn(LIVE_AUTO_FOCUS)
+                return replace(settings, model=replace(m, focus="calibrated"))
+            raise ValueError(LIVE_INSITU)
         found = self.found_focus(ctx, settings, source, camera, finder, cal)
         if mode == "auto":
             return replace(settings, model=replace(m, focus="typed", focus_nm=round(found.focus_nm, 1)))
@@ -3347,6 +3373,9 @@ class DualSplineFit(_TwoChannelFit):
             self._sample_form(settings, state)
         except Exception:
             pass
+        live = live_focus_notice(settings.source.live, settings.model.sample.mode)
+        if live is not None and state.shown.get("model.sample", False):
+            state.notice = live
         return state
 
     def _focus_key(self, settings) -> tuple:
@@ -3431,7 +3460,7 @@ class DualSplineFit(_TwoChannelFit):
         from ..calibrate import depth
         m = settings.model
         if settings.source.live:
-            raise ValueError("in situ needs the movie before the fit: choose another focus for a live fit")
+            raise ValueError(LIVE_INSITU)
         dual = self.registration(settings)
         if not depth.has_model(dual.main):
             raise ValueError("in situ needs a dual calibration made with the pupil (Zernike) method: its two "
@@ -3509,7 +3538,8 @@ class DualSplineFit(_TwoChannelFit):
                      "fitted as calibrated, z above the beads' focus")
             return as_calibrated
         if settings.source.live:
-            raise ValueError("a focus on auto needs the frames before the fit: type it for a live fit")
+            ctx.warn(LIVE_AUTO_FOCUS)
+            return as_calibrated
         key = self._focus_key(settings)
         found = depth.found(key)
         if found is not None:

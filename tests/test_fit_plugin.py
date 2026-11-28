@@ -319,3 +319,21 @@ def test_the_camera_part_is_folded_and_titled_by_what_it_resolves_to(stack):
     # no microscope recognises a simulated stack: the camera's numbers stand in the line
     assert section.title.startswith("no microscope recognised \u00b7 0.5 e-/ADU \u00b7 108")
     assert GaussianFit.specs()["output"].children["show_tags"].info.advanced
+
+
+def test_a_live_fit_with_the_focus_on_the_edge_is_told_before_run_that_it_fits_as_calibrated(monkeypatch):
+    from smappy.plugins import fit
+    plugin = fit.SplineFit()
+    settings = plugin.Settings()
+    settings.source.live = True
+    # the focus is asked only for a calibration with a pupil model: stand in for one
+    monkeypatch.setattr(fit.SplineFit, "_focus_form",
+                        lambda self, s, state: state.shown.__setitem__("model.focus", True))
+    assert settings.model.mode == "auto"
+    notice = plugin.describe(None, settings).notice
+    assert notice is not None and "fitted as calibrated" in notice.text
+    settings.source.live = False
+    assert plugin.describe(None, settings).notice is None or \
+        "live fit" not in plugin.describe(None, settings).notice.text
+    assert "choose another focus" in fit.live_focus_notice(True, "insitu").text
+    assert fit.live_focus_notice(True, "typed") is None

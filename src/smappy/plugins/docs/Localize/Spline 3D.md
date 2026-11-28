@@ -549,8 +549,10 @@ tissue section), or where the focus drive's reading is trusted.  *beads' focus*
 for molecules near the coverslip with the focus there too, or to compare with
 an older fit.  Drawing needs torch (`pip install smappy-smlm[uipsf]`): without
 it, the edge fits as calibrated and warns, and the others stop and say so.  A
-live fit can use only *typed* with nothing learnt: the frames the edge and
-learning need are not there yet.  Settings saved before November 2026 with
+live fit has no frames before it starts to find the edge in or learn from: on
+the *coverslip edge* it fits as calibrated and warns -- the form says so as
+soon as *live* is ticked -- and learning stops.  Type the focus for z above
+the coverslip.  Settings saved before November 2026 with
 *auto* read as the edge with nothing learnt, and *in situ* as the edge with
 *learn* as it was.
 
