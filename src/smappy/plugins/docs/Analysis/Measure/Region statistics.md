@@ -1,6 +1,6 @@
 ---
-version: "3"
-covers: [smappy.id_statistics.id_statistics, smappy.id_statistics.member_statistics, smappy.id_statistics.region_shapes, smappy.id_statistics.covariance_axes, smappy.id_statistics.hull_measure, smappy.id_statistics.dense_codes, smappy.id_statistics.stat_name, smappy.plugins.region_statistics.RegionStatistics.run, smappy.plugins.region_statistics.regions_source, smappy.plugins.region_statistics.summarised_columns, smappy.plugins.region_statistics.roi_table, smappy.region_runs.column_table]
+version: "4"
+covers: [smappy.id_statistics.id_statistics, smappy.id_statistics.member_statistics, smappy.id_statistics.region_shapes, smappy.id_statistics.covariance_axes, smappy.id_statistics.hull_measure, smappy.id_statistics.dense_codes, smappy.id_statistics.stat_name, smappy.id_statistics.parse_percentiles, smappy.plugins.region_statistics.RegionStatistics.run, smappy.plugins.region_statistics.regions_source, smappy.plugins.region_statistics.summarised_columns, smappy.plugins.region_statistics.roi_table, smappy.region_runs.column_table]
 ---
 
 ## What it does
@@ -9,8 +9,8 @@ Gives a few numbers for every region at once -- every ROI of the
 [ROI manager](plugin:Panels/ROI manager), or every
 [trace](plugin:Panels/Glossary), track or [cluster](plugin:Panels/Glossary): how many localizations it has,
 where its centre is, how far its localizations spread around it, how long
-it lasted, and the mean, median or maximum of any attribute -- a MINFLUX
-trace's `cfr` or `efo`, the photons, the precision.
+it lasted, and the mean, median, maximum or percentiles of any attribute --
+a MINFLUX trace's `cfr` or `efo`, the photons, the precision, z.
 
 A MINFLUX microscope measures a molecule many times in a row, and calls
 those localizations one trace (`tid`).  Whether a trace is good shows in
@@ -89,20 +89,25 @@ overlap, and a localization in two of them counts in both.  Only the
 localizations the layer's filter keeps count, and a region with none kept
 is left out.
 
-**2. Count, centre and spread.**  For each region: its number of
-localizations, the mean of each coordinate, and the standard deviation of
-each coordinate around that mean.  The lateral spread `std_xy_nm` is the
-root mean square of the x and y ones, as `xy_err_nm` is of the two
-precisions.
+**2. Count, centre and size.**  For each region, always: its number of
+localizations, the mean of each coordinate -- its centre, where the region
+is -- and its lateral spread `std_xy_nm`, the root mean square of the
+standard deviations of x and y around the centre, as `xy_err_nm` is of the
+two precisions.
 
-**3. Time.**  With a clock (`time_s`, MINFLUX) the first and last time and
-the duration; with frames, the first and last frame and the span.
+**3. Position.**  For each axis ticked under *attributes*: its own standard
+deviation (`std_z_nm`) and the chosen statistics -- the median, maximum,
+percentiles (`z_median_nm`, `z_p95_nm`); the mean is the centre.
 
-**4. Attributes.**  For each chosen attribute, the chosen statistics of the
-values that were measured -- a localization whose `cfr` is missing counts
-for neither the mean nor the median.
+**4. Time.**  With `time_s` ticked (a clock, MINFLUX) the first and last
+time and the duration; with `frame` ticked, the first and last frame and
+the span.
 
-**5. Shape** (with *shape* ticked).  For each region: the
+**5. Attributes.**  For each other ticked attribute, the chosen statistics
+of the values that were measured -- a localization whose `cfr` is missing
+counts for neither the mean nor the median.
+
+**6. Shape** (with *shape* ticked).  For each region: the
 covariance of its x and y positions -- how they spread together, an
 ellipse -- whose long and short axis give the standard deviations along and across the region
 and the direction it is stretched in; the extents along both axes; the
@@ -171,6 +176,10 @@ the two middle ones.  All regions' values are put in order with one sort,
 of the region's number plus the value scaled into [0, 0.5]; two values of a
 region closer than $2^{-52}$ times the number of regions times the
 attribute's whole range can swap, which moves a median by no more than that.
+A percentile $q$ is read from the same order, linear between the two values
+around position $h = (k - 1)\,q/100$ among a region's $k$ finite values, as
+`numpy.percentile` does by default; it is named `p` and the number, a dot
+written as `_` (`photons_p2_5`), so the name stays one an expression can use.
 Every other statistic needs no sort: the rows are put in region order once
 (not at all for a MINFLUX file, whose traces follow each other), and the
 regions are found by a lookup table on the ids, not by sorting them.  The
@@ -230,25 +239,32 @@ and the ROIs only when the table has none of them: on a MINFLUX file the
 traces are what one measures, whatever ROIs were drawn.  Choose `group_id`
 for blinks, or any other id attribute.
 
-### common
-On a MINFLUX file these are all five; on a camera fit usually `photons` and
-`xy_err_nm`.  Untick it to summarise only what is ticked under *attributes*.
+### attributes
+The list opens from the button, which names what is ticked.  Its names are
+in groups -- *position* (`x_nm`, `y_nm`, `z_nm`), *time* (`time_s`,
+`frame`), *localization* (photons, background, precisions, PSF width,
+likelihood), *MINFLUX* (`cfr`, `efo`, `dcr`) and *other*, the rest of the
+table -- each under a header whose tick ticks or unticks all of them.  Id
+attributes are not offered.
 
-### columns
-The list opens from the button, which names what is ticked.  Positions,
-frame, time and id attributes are not offered: the centre,
-spread and time span are measured anyway.  An attribute ticked in a saved
-setting that this table lacks is refused with the list of those it has.
+Ticked by default: the position, the time, `photons` and `xy_err_nm`.  The
+centre and `std_xy_nm` are measured whatever is ticked; untick an axis to
+leave out its own spread and statistics -- `z_nm` for a 2D measurement
+whose z is only noise (a MINFLUX 2D file has z at ~10^-13 m).  Tick
+*MINFLUX* on a MINFLUX file to judge its traces by `cfr` and `efo`.
 
-### use_z
-Untick it for a 2D measurement whose `z_nm` is only noise (a MINFLUX 2D
-file has z at ~10^-13 m).
+A ticked name this table lacks is passed over with a warning, so one chain
+runs over files of different kinds; a default name is passed over silently,
+since no table has all of them.  The list hides a group member the table
+lacks but keeps it ticked.  Every ticked attribute adds a column per
+statistic, so the table grows wide: the results window's *select* picks
+what to look at or save.
 
 ### shape
 Off by default, since its hulls take about 35 µs per region, seconds for
 10^5 regions.  Tick it for clusters (`cluster_id`); for a MINFLUX trace of a
 still molecule the shape is that of its localization error, round, with an
-angle that means nothing.  The 3D values follow *use z*.
+angle that means nothing.  The 3D values come with `z_nm` ticked.
 
 ### statistics.median
 Leave it on for `cfr` and `efo`, whose distributions within a trace have a
@@ -269,6 +285,12 @@ Mostly for times and frames written as attributes of their own.
 A trace's worst `cfr`: one bad iteration in a trace shows here and not in
 its mean.
 
+### statistics.percentiles
+Numbers from 0 to 100, separated by spaces or commas.  `5 95` gives the
+range that holds a region's middle 90 %, less sensitive to one outlier than
+the minimum and maximum; with a few localizations per region the extreme
+percentiles are the minimum and maximum themselves.
+
 ## Output
 
 The text gives the number of regions and localizations, the median count
@@ -278,10 +300,11 @@ count, the spread, the duration (or the span in frames), and of the median
 (else the mean) of each chosen attribute.
 
 The table has, per region: `n_locs`; `centre_x_nm`, `centre_y_nm`
-(`centre_z_nm`); `std_x_nm`, `std_y_nm` (`std_z_nm`) and `std_xy_nm`;
-`start_s`, `end_s` and `duration_s`, or `first_frame`, `last_frame` and
+(`centre_z_nm`) and `std_xy_nm`; for each ticked axis `std_x_nm` and its
+statistics, `x_median_nm`, `x_max_nm`, ...; with the time ticked `start_s`,
+`end_s` and `duration_s`, with the frame `first_frame`, `last_frame` and
 `frames`; and for each attribute its statistics, `cfr_mean`, `cfr_median`,
-`cfr_max`, ...; with *shape* also `area_nm2`, `density_per_um2`, `rg_nm`,
+`cfr_max`, `cfr_p95`, ...; with *shape* also `area_nm2`, `density_per_um2`, `rg_nm`,
 `std_long_nm`, `std_short_nm`, `angle_deg`, `elongation`, `extent_long_nm`,
 `extent_short_nm`, and in 3D `z_extent_nm` and `volume_nm3`, which the text
 summarises by their medians and the figure by the distribution of the

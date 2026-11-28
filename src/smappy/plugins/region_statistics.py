@@ -12,6 +12,16 @@ same pass (`member_statistics`).  *shape* adds *Cluster shape*'s numbers
 (`id_statistics.region_shapes`, which *Cluster shape* calls for its one
 region) for every region at once.
 
+What is summarised is one list, *attributes*, in groups -- position, time,
+localization, MINFLUX, other -- whose headers tick their members (version
+4, 2026-11; before, *common attributes* and *use z* were ticks beside a list
+of extras, and the position and time were left out of it, which hid them).
+A region's centre is measured whether or not its axis is ticked, because it
+is where the region is; ticking an axis adds its spread and the statistics.
+A ticked name the table lacks is passed over with a warning, not refused,
+so one chain runs over MINFLUX and camera files alike -- silently for the
+default names, which no file has all of.
+
 It was *Id statistics* until 2026-11, when the ROIs were added beside the id
 columns: what decides between it and the per-region steps is the task --
 cheap numbers over many regions here, a measurement that needs each
@@ -34,7 +44,7 @@ localizations, and a merged blink of a trace would be the trace itself.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -43,9 +53,23 @@ from . import Context, FormState, Plot, Plugin, Result, param, register, setting
 #: what *auto* takes the regions from, in order: MINFLUX's traces, linked
 #: tracks, clusters, a simulation's tracks
 AUTO_IDS = ("tid", "track_id", "cluster_id", "track_id_true")
-#: what *auto* summarises, where the table has it: MINFLUX's quality and
-#: colour, and the camera fit's
-AUTO_COLUMNS = ("cfr", "efo", "dcr", "photons", "xy_err_nm")
+#: the groups *attributes* shows its names in, a header each that ticks them
+GROUPS = (
+    ("position", ("x_nm", "y_nm", "z_nm")),
+    ("time", ("time_s", "frame")),
+    ("localization", ("photons", "background", "xy_err_nm", "z_err_nm", "sigma_nm",
+                      "logl_rel")),
+    ("MINFLUX", ("cfr", "efo", "dcr")),
+)
+#: what is ticked unless chosen otherwise: where the region is and when, and
+#: the camera fit's brightness and precision -- not MINFLUX's quality, which
+#: is asked for where it is wanted.  Passed over silently where a table
+#: lacks one
+DEFAULT_ATTRIBUTES = ("x_nm", "y_nm", "z_nm", "time_s", "frame", "photons", "xy_err_nm")
+#: the names that are no attribute of their own: the position and the time
+#: are measured their own way (`id_statistics`)
+POSITIONS = {"x_nm": "x", "y_nm": "y", "z_nm": "z"}
+TIMES = ("time_s", "frame")
 #: the evaluation's name, what *results from* shows after "per <column>: "
 LABEL = "Region statistics"
 #: the *regions* value that names the ROI manager's ROIs (a block's own word)
@@ -83,16 +107,20 @@ def regions_source(ctx, chosen: str = "") -> str:
 
 def moved_settings(values):
     """*Id statistics*' saved settings as this plugin's: *id attribute* is
-    *regions*, and *attributes*, typed, the ticked list -- empty was the
-    common attributes, so *common attributes* is on exactly then."""
+    *regions*; its typed *attributes*, empty for the common ones (MINFLUX's
+    and the camera fit's), the default list with those or with the typed
+    names; its *use z* off, z left out."""
     out = dict(values)
     if "id_column" in out:
         out["regions"] = out.pop("id_column")
-    typed = out.get("columns")
+    typed = out.pop("columns", None)
+    names = list(DEFAULT_ATTRIBUTES)
     if isinstance(typed, str):
-        names = [n for n in typed.replace(",", " ").split() if n]
-        out["columns"] = names
-        out["common"] = not names
+        extra = [n for n in typed.replace(",", " ").split() if n]
+        names += [n for n in (extra or ["cfr", "efo", "dcr"]) if n not in names]
+    if out.pop("use_z", True) is False:
+        names.remove("z_nm")
+    out["attributes"] = names
     return out
 
 
@@ -111,33 +139,31 @@ def id_column(locs, chosen: str = "") -> str:
                      + (", ".join(have) if have else "(no integer attribute)"))
 
 
-def summarised_columns(locs, chosen=(), common: bool = True) -> List[str]:
-    """The columns summarised: with ``common``, those of `AUTO_COLUMNS` the
-    table has, then the ``chosen`` ones (a list, or a comma- or
-    space-separated text, as *Id statistics* had it), each once.  A chosen
-    name the table lacks is refused, naming what it has."""
+def summarised_columns(locs, chosen=()) -> Tuple[List[str], List[str]]:
+    """``(names, missing)``: the ticked names (a list, or a comma- or
+    space-separated text) the table has, each once, and those it lacks that
+    are worth a warning -- not the default ones, which no table has all of."""
     if isinstance(chosen, str):
         chosen = chosen.replace(",", " ").split()
-    names = [str(n).strip() for n in chosen if str(n).strip()]
-    missing = [n for n in names if n not in locs]
-    if missing:
-        raise ValueError(f"no attribute {', '.join(missing)}: the table has "
-                         + ", ".join(sorted(locs.keys())))
-    out = [c for c in AUTO_COLUMNS if c in locs] if common else []
-    return out + [n for n in names if n not in out]
+    names: List[str] = []
+    for n in (str(n).strip() for n in chosen):
+        if n and n not in names:
+            names.append(n)
+    missing = [n for n in names if n not in locs and n not in DEFAULT_ATTRIBUTES]
+    return [n for n in names if n in locs], missing
 
 
-#: what *attributes* does not offer: what every region measures anyway, and ids
-_NOT_OFFERED = ("x_nm", "y_nm", "z_nm", "frame", "time_s", "filenumber",
-                "channel", "group_id", "n_in_group")
+#: what *attributes* does not offer: what says where a row came from
+_NOT_OFFERED = ("filenumber", "channel", "group_id", "n_in_group")
 
 
 def offered_columns(locs) -> List[str]:
-    """The numeric attributes *attributes* offers to tick, ids left out."""
+    """The numeric attributes *attributes* offers to tick: ids left out
+    but the frame, which is a time."""
     from ..tracking.columns import integer_columns
-    ids = set(integer_columns(locs))
+    ids = set(integer_columns(locs)) - set(TIMES)
     return [c for c in locs.keys() if c not in _NOT_OFFERED and c not in ids
-            and np.asarray(locs[c]).dtype.kind in "iuf"]
+            and np.asarray(locs[c]).ndim == 1 and np.asarray(locs[c]).dtype.kind in "iuf"]
 
 
 @dataclass
@@ -148,6 +174,8 @@ class StatisticsSettings:
     std: bool = param(False, label="standard deviation", help="ddof 1; NaN for one value")
     min: bool = param(False, label="minimum", help="the smallest finite value")
     max: bool = param(True, label="maximum", help="the largest finite value")
+    percentiles: str = param("", label="percentiles",
+                             help="typed, e.g. 5 95: photons_p5, photons_p95")
 
     def chosen(self) -> List[str]:
         from ..id_statistics import STATISTICS
@@ -159,13 +187,11 @@ class RegionStatisticsSettings:
     regions: str = param("", label="regions", choices=_region_choices,
                          help="the ROIs of the ROI manager, or an id attribute; "
                               "auto: tid, else track_id, else cluster_id, else the ROIs")
-    common: bool = param(True, label="common attributes",
-                         help="summarise cfr, efo, dcr, photons and xy_err_nm "
-                              "where the table has them")
-    columns: list = param(default_factory=list, label="attributes", kind="columns",
-                          empty_is_all=False, popup=True,
-                          help="more attributes to summarise")
-    use_z: bool = param(True, label="use z", help="z_nm's centre and spread too")
+    attributes: list = param(default_factory=lambda: list(DEFAULT_ATTRIBUTES),
+                             label="attributes", kind="columns", empty_is_all=False,
+                             popup=True, groups=GROUPS,
+                             help="what is summarised; the centre is measured "
+                                  "whatever is ticked")
     shape: bool = param(False, label="shape",
                         help="Cluster shape's numbers too: hull area, axes, angle, "
                              "extents; the hull a loop")
@@ -183,7 +209,7 @@ class RegionStatistics(Plugin):
     changes_locs = False
     # a trace's localizations, whatever the layer shows
     grouping = "ungrouped"
-    version = "3"
+    version = "4"
 
     def describe(self, ctx: Optional[Context], settings: RegionStatisticsSettings
                  ) -> FormState:
@@ -201,11 +227,7 @@ class RegionStatistics(Plugin):
             [("", f"auto ({auto_text})" if auto_text else "auto")]
             + ([(ROIS, "ROIs")] if _has_rois(ctx) else [])
             + [(c, c) for c in integer_columns(locs)])
-        state.active["use_z"] = "z_nm" in locs
-        common = [c for c in AUTO_COLUMNS if c in locs]
-        state.hints["common"] = ", ".join(common) or "none in this table"
-        state.choices["columns"] = [c for c in offered_columns(locs)
-                                    if not (settings.common and c in common)]
+        state.choices["attributes"] = offered_columns(locs)
         return state
 
     def run(self, ctx: Context, settings: RegionStatisticsSettings) -> Result:
@@ -216,20 +238,24 @@ class RegionStatistics(Plugin):
             if c not in locs:
                 raise ValueError(f"no attribute {c}: the table has "
                                  + ", ".join(sorted(locs.keys())))
-        names = summarised_columns(locs, settings.columns, settings.common)
+        from ..id_statistics import parse_percentiles
+        ticked, missing = summarised_columns(locs, settings.attributes)
+        if missing:
+            ctx.warn("not in this table, passed over: " + ", ".join(missing))
+        names = [n for n in ticked if n not in POSITIONS and n not in TIMES]
         stats = settings.statistics.chosen()
-        if names and not stats:
+        percentiles = parse_percentiles(settings.statistics.percentiles)
+        if names and not stats and not percentiles:
             raise ValueError("tick at least one statistic of the attributes")
         keep = self._kept(ctx)
-        positions = {"x": locs["x_nm"], "y": locs["y_nm"]}
-        if settings.use_z and "z_nm" in locs:
-            positions["z"] = locs["z_nm"]
+        positions = {a: locs[c] for c, a in POSITIONS.items() if c in locs}
         where = "ROIs" if source == ROIS else source
         ctx.report(f"region statistics: {where}")
         options = dict(
-            keep=keep, time_s=locs["time_s"] if "time_s" in locs else None,
-            frame=locs["frame"] if "time_s" not in locs and "frame" in locs else None,
-            columns={n: locs[n] for n in names}, stats=stats, shape=settings.shape)
+            keep=keep, time_s=locs["time_s"] if "time_s" in ticked else None,
+            frame=locs["frame"] if "frame" in ticked else None,
+            columns={n: locs[n] for n in names}, stats=stats, percentiles=percentiles,
+            axes=[POSITIONS[c] for c in ticked if c in POSITIONS], shape=settings.shape)
         step = {"label": LABEL, "plugin": self.path, "version": self.version,
                 "parameters": settings_values(settings)}
         if source == ROIS:

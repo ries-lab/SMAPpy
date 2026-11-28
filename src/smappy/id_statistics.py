@@ -13,19 +13,23 @@ the same numbers; the plugin hands them back as a region table
 What is measured, per region (an id, 0 or above, among the rows kept):
 
 * ``n_locs``, its localizations;
-* ``centre_x_nm`` ... and ``std_x_nm`` ...: the mean and the sample standard
-  deviation (ddof 1, NaN for one localization) of each coordinate, and
-  ``std_xy_nm``, the RMS of the x and y ones -- how `xy_err_nm` pools the
-  two.  The spread is the region's own and the localization precision
+* ``centre_x_nm`` ...: the mean of each coordinate, always -- where the
+  region is, which *Centre ROIs*, *Write results* and the results window
+  read -- and ``std_xy_nm``, the RMS of the x and y sample standard
+  deviations (ddof 1, NaN for one localization) -- how `xy_err_nm` pools
+  the two, the region's size;
+* for each axis asked for (``axes``), its own ``std_x_nm`` ... and the
+  chosen statistics but the mean, which is the centre (``x_median_nm``,
+  ``z_p95_nm``).  The spread is the region's own and the localization precision
   together: nothing is subtracted, as in *Cluster shape*.  For a MINFLUX
   trace of one emitter it is the measured precision; a trace twice as wide
   as its neighbours is two emitters or a jump between sites.  For a moving
   track it measures the motion and is no quality measure;
-* its time: ``start_s``, ``end_s`` and ``duration_s`` from ``time_s`` where
-  the table has a clock (MINFLUX), else ``first_frame``, ``last_frame`` and
-  ``frames`` (the span, last - first + 1);
+* its time: ``start_s``, ``end_s`` and ``duration_s`` from ``time_s``,
+  and ``first_frame``, ``last_frame`` and ``frames`` (the span, last - first
+  + 1) from ``frame``, each where it is given;
 * for each chosen column, the chosen statistics (mean, median, std, min,
-  max) of its finite values -- a localization whose `cfr` was not measured
+  max, and percentiles, ``photons_p5``) of its finite values -- a localization whose `cfr` was not measured
   (NaN) counts for neither -- named ``<quantity>_<stat>[_<unit>]``
   (``cfr_mean``, ``xy_err_median_nm``) and listed as a group, so a reader
   can show ``cfr › mean`` as a level of its own (`RegionTable.groups`);
@@ -42,7 +46,7 @@ The regions are found without a sort where the ids allow (`dense_codes`):
 ids are small integers, so a lookup table maps each to its region; the rows
 are put in region order once (not at all for a MINFLUX file, whose traces
 follow each other), and every statistic but the median is a `reduceat` over
-each region's run.  A median sorts once per column.  2 x 10^7
+each region's run.  A median or a percentile sorts once per column.  2 x 10^7
 localizations in 10^6 traces, with three coordinates, the time and three
 columns: see `tests/test_id_statistics.py`.
 
@@ -65,6 +69,32 @@ import numpy as np
 
 #: what can be asked of a chosen column, in the order they are written
 STATISTICS = ("mean", "median", "std", "min", "max")
+
+def percentile_key(q: float) -> str:
+    """The statistic's name of a percentile: 5 -> ``p5``, 2.5 -> ``p2_5``
+    -- no dot, so the column stays a name an expression can use."""
+    text = f"{float(q):g}"
+    return "p" + text.replace(".", "_")
+
+
+def parse_percentiles(text) -> Tuple[float, ...]:
+    """Typed percentiles, ``"5 95"`` or ``"2.5, 97.5"`` (or a list), each
+    once, in order.  ValueError for one that is not a number in [0, 100]."""
+    if isinstance(text, str):
+        text = text.replace(",", " ").split()
+    out = []
+    for item in text or ():
+        try:
+            q = float(item)
+        except (TypeError, ValueError):
+            raise ValueError(f"percentile {item!r} is not a number: type them "
+                             "as 5 95") from None
+        if not 0.0 <= q <= 100.0:
+            raise ValueError(f"percentile {q:g} is outside 0 to 100")
+        if q not in out:
+            out.append(q)
+    return tuple(out)
+
 
 # the unit suffixes a statistic goes in front of: `xy_err_nm` -> `xy_err_mean_nm`
 UNITS = ("nm", "nm2", "s", "ms", "pix", "um2_per_s", "per_um2")
@@ -141,12 +171,16 @@ class _Regions:
         # every region has a member row, so no run is empty
         self.begin = np.concatenate([[0], np.cumsum(self.counts)[:-1]]).astype(np.int64)
 
-    def statistics(self, values, stats: Sequence[str]) -> Dict[str, np.ndarray]:
-        """The statistics of ``values`` per region, over their finite entries;
-        NaN where a region has none (and for a std of one)."""
+    def statistics(self, values, stats: Sequence[str],
+                   percentiles: Sequence[float] = ()) -> Dict[str, np.ndarray]:
+        """The statistics of ``values`` per region, over their finite entries,
+        then each percentile under `percentile_key`; NaN where a region has
+        none (and for a std of one)."""
         out: Dict[str, np.ndarray] = {}
+        keys = [s for s in STATISTICS if s in stats] + [percentile_key(q)
+                                                        for q in percentiles]
         if not self.n:
-            return {s: np.zeros(0) for s in STATISTICS if s in stats}
+            return {k: np.zeros(0) for k in keys}
         v = np.asarray(values, dtype=np.float64)[self.order]
         finite = np.isfinite(v)
         count = np.add.reduceat(finite.astype(np.int64), self.begin).astype(np.float64)
@@ -163,29 +197,46 @@ class _Regions:
                 out["min"] = np.fmin.reduceat(v, self.begin)     # fmin skips NaN
             if "max" in stats:
                 out["max"] = np.fmax.reduceat(v, self.begin)
-        if "median" in stats:
-            out["median"] = self._median(v, finite, count)
-        return {s: out[s] for s in STATISTICS if s in stats}
+        if "median" in stats or len(percentiles):
+            ordered = self._ordered(v, finite)
+            k = count.astype(np.int64)
+            has = k > 0
+            if "median" in stats:
+                med = np.full(self.n, np.nan)
+                a = self.begin[has] + (k[has] - 1) // 2
+                b = self.begin[has] + k[has] // 2
+                med[has] = 0.5 * (ordered[a] + ordered[b])
+                out["median"] = med
+            for q in percentiles:
+                out[percentile_key(q)] = self._percentile(ordered, k, has, q)
+        return {key: out[key] for key in keys}
 
-    def _median(self, v, finite, count) -> np.ndarray:
-        """Each region's values in order, by one sort of the key region +
-        value scaled into [0, 0.5] (NaN at 0.75, after every value).  Two
-        values of a region closer than 2^-52 x regions x their range may
-        swap, which moves a median by no more than that; sorting by value
-        and then stably by region is exact and was three times slower."""
+    def _ordered(self, v, finite) -> np.ndarray:
+        """Each region's values in order, its finite ones first, by one sort
+        of the key region + value scaled into [0, 0.5] (NaN at 0.75, after
+        every value).  Two values of a region closer than 2^-52 x regions x
+        their range may swap, which moves a median by no more than that;
+        sorting by value and then stably by region is exact and was three
+        times slower."""
         lo, hi = (float(v[finite].min()), float(v[finite].max())) if finite.any() \
             else (0.0, 1.0)
         span = hi - lo if hi > lo else 1.0
         key = np.where(finite, 0.5 * (v - lo) / span, 0.75)
         key += np.repeat(np.arange(self.n, dtype=np.float64), self.counts)
-        ordered = v[np.argsort(key)]
-        med = np.full(self.n, np.nan)
-        k = count.astype(np.int64)
-        has = k > 0
-        a = self.begin[has] + (k[has] - 1) // 2
-        b = self.begin[has] + k[has] // 2
-        med[has] = 0.5 * (ordered[a] + ordered[b])
-        return med
+        return v[np.argsort(key)]
+
+    def _percentile(self, ordered, k, has, q: float) -> np.ndarray:
+        """The ``q``-th percentile of each region's finite values, linear
+        between the two nearest as `np.percentile` is by default, so a
+        script's ``np.nanpercentile`` of one region gives the same."""
+        out = np.full(self.n, np.nan)
+        h = (k[has] - 1) * (q / 100.0)
+        low = np.floor(h).astype(np.int64)
+        high = np.minimum(low + 1, k[has] - 1)
+        b = self.begin[has]
+        a, c = ordered[b + low], ordered[b + high]
+        out[has] = a + (h - low) * (c - a)
+        return out
 
 
 # ------------------------------------------------------------------ shape
@@ -305,18 +356,23 @@ def id_statistics(ids, positions: Dict[str, np.ndarray], *, keep=None,
                   time_s=None, frame=None,
                   columns: Optional[Dict[str, np.ndarray]] = None,
                   stats: Sequence[str] = ("mean", "median", "max"),
+                  percentiles: Sequence[float] = (),
+                  axes: Optional[Sequence[str]] = None,
                   shape: bool = False) -> IdStatistics:
     """The statistics of every region of ``ids`` (see the module docstring).
 
-    ``positions`` maps ``"x"``, ``"y"`` and optionally ``"z"`` to nm; ``keep``
-    is the rows measured (a layer's filter), the rest are in no region and a
-    region with none kept is left out; ``time_s`` or ``frame`` give the time;
-    ``columns`` the other quantities, each summarised by ``stats``;
-    ``shape`` adds `region_shapes`' values (3D ones where ``"z"`` is given)."""
+    ``positions`` maps ``"x"``, ``"y"`` and optionally ``"z"`` to nm, each
+    measured for its centre; ``axes`` those also summarised -- their spread
+    and ``stats`` -- all of them when None; ``keep`` is the rows measured (a
+    layer's filter), the rest are in no region and a region with none kept
+    is left out; ``time_s`` and ``frame`` give the time; ``columns`` the
+    other quantities, each summarised by ``stats`` and ``percentiles``;
+    ``shape`` adds `region_shapes`' values (3D ones where ``"z"`` is among
+    ``axes``)."""
     _check(stats)
     found, codes = dense_codes(ids, keep)
     return _measure(IdStatistics(found), codes, positions, time_s, frame,
-                    columns, stats, shape)
+                    columns, stats, percentiles, axes, shape)
 
 
 def member_statistics(members: Sequence[Tuple[Any, np.ndarray]],
@@ -324,6 +380,8 @@ def member_statistics(members: Sequence[Tuple[Any, np.ndarray]],
                       time_s=None, frame=None,
                       columns: Optional[Dict[str, np.ndarray]] = None,
                       stats: Sequence[str] = ("mean", "median", "max"),
+                      percentiles: Sequence[float] = (),
+                      axes: Optional[Sequence[str]] = None,
                       shape: bool = False) -> IdStatistics:
     """`id_statistics` of regions given as their rows, ``[(id, rows), ...]``:
     the ROIs of the ROI manager, which may overlap, so no id column can name
@@ -351,7 +409,8 @@ def member_statistics(members: Sequence[Tuple[Any, np.ndarray]],
     return _measure(IdStatistics(np.array(ids, dtype=object)), codes,
                     {a: take(v) for a, v in positions.items()},
                     take(time_s), take(frame),
-                    {n: take(v) for n, v in (columns or {}).items()}, stats, shape)
+                    {n: take(v) for n, v in (columns or {}).items()}, stats,
+                    percentiles, axes, shape)
 
 
 def _check(stats: Sequence[str]) -> None:
@@ -361,42 +420,59 @@ def _check(stats: Sequence[str]) -> None:
 
 
 def _measure(out: IdStatistics, codes: np.ndarray, positions, time_s, frame,
-             columns, stats, shape) -> IdStatistics:
+             columns, stats, percentiles=(), axes=None, shape=False) -> IdStatistics:
     """Every value of the regions ``codes`` names (0 .. len(out) - 1 per row,
     -1 for none, each region with a row), into ``out``."""
     n = len(out)
     regions = _Regions(codes, n)
     out.values["n_locs"] = regions.counts.astype(np.int64)
+    axes = [a for a in ("x", "y", "z") if a in positions
+            and (axes is None or a in axes)]
+    extra = [s for s in stats if s not in ("mean", "std")]
     std = {}
     for axis in ("x", "y", "z"):
         if axis not in positions:
             continue
-        s = regions.statistics(positions[axis], ("mean", "std"))
+        # the centre always; x and y's spread for std_xy, the region's size
+        wanted = axis in axes or axis in "xy"
+        s = regions.statistics(positions[axis], ("mean", "std") if wanted else ("mean",))
         out.values[f"centre_{axis}_nm"] = s["mean"]
-        std[axis] = out.values[f"std_{axis}_nm"] = s["std"]
+        if wanted:
+            std[axis] = s["std"]
+        if axis in axes:
+            out.values[f"std_{axis}_nm"] = s["std"]
+            more = regions.statistics(positions[axis], extra, percentiles)
+            if more:
+                out.groups[f"{axis}_nm"] = {}
+            for stat, value in more.items():
+                key = stat_name(f"{axis}_nm", stat)
+                out.values[key] = value
+                out.groups[f"{axis}_nm"][stat] = key
     if "x" in std and "y" in std:
         out.values["std_xy_nm"] = np.sqrt(0.5 * (std["x"] ** 2 + std["y"] ** 2))
-    if std:
-        out.groups["std"] = {a: f"std_{a}_nm" for a in ("x", "y", "z", "xy")
-                             if f"std_{a}_nm" in out.values}
-        out.groups["centre"] = {a: f"centre_{a}_nm" for a in ("x", "y", "z")
-                                if f"centre_{a}_nm" in out.values}
+    out.groups["std"] = {a: f"std_{a}_nm" for a in ("x", "y", "z", "xy")
+                         if f"std_{a}_nm" in out.values}
+    out.groups["centre"] = {a: f"centre_{a}_nm" for a in ("x", "y", "z")
+                            if f"centre_{a}_nm" in out.values}
+    for name in ("std", "centre"):
+        if not out.groups[name]:
+            del out.groups[name]
     if shape:
         found_shape = region_shapes(codes, n, positions["x"], positions["y"],
-                                    positions.get("z"))
-        for name in SHAPE_2D + (SHAPE_3D if "z" in positions else ()):
+                                    positions.get("z") if "z" in axes else None)
+        for name in SHAPE_2D + (SHAPE_3D if "z" in axes else ()):
             out.values[name] = found_shape[name]
     if time_s is not None:
         s = regions.statistics(time_s, ("min", "max"))
         out.values["start_s"], out.values["end_s"] = s["min"], s["max"]
         out.values["duration_s"] = s["max"] - s["min"]
-    elif frame is not None:
+    if frame is not None:
         s = regions.statistics(frame, ("min", "max"))
         first, last = s["min"].astype(np.int64), s["max"].astype(np.int64)
         out.values["first_frame"], out.values["last_frame"] = first, last
         out.values["frames"] = last - first + 1
     for name, column in (columns or {}).items():
-        s = regions.statistics(column, tuple(stats))
+        s = regions.statistics(column, tuple(stats), percentiles)
         out.groups[name] = {}
         for stat, value in s.items():
             key = stat_name(name, stat)

@@ -115,8 +115,11 @@ def test_the_plugin_keeps_a_table_that_reads_as_a_blocks_and_goes_stale_with_the
     assert EV in available(ctx, PLUGIN) and is_current(ctx, EV)
     got = {int(r["roi_id"]): r for r in rows(ctx, EV)}
     assert len(got) == len(n) and got[1]["n_locs"] == n[0]
-    assert "cfr_median" in got[1] and "std_xy_nm" in got[1]
-    assert session.id_regions["tid"]["Region statistics"].groups["cfr"]["median"] == "cfr_median"
+    assert "photons_median" in got[1] and "std_xy_nm" in got[1]
+    # MINFLUX's quality is asked for, not summarised by default
+    assert "cfr_median" not in got[1]
+    groups = session.id_regions["tid"]["Region statistics"].groups
+    assert groups["photons"]["median"] == "photons_median"
     assert "regions of tid" in result.text
     # a bound on a layer changes what the regions hold: the table no longer
     # describes them, as a block's would not
@@ -143,7 +146,7 @@ def test_the_table_survives_a_save_and_is_current_after_loading(tmp_path):
     ctx = again.context()
     assert is_current(ctx, EV)
     assert len(rows(ctx, EV)) == 50
-    assert again.id_regions["tid"]["Region statistics"].groups["cfr"]["mean"] == "cfr_mean"
+    assert again.id_regions["tid"]["Region statistics"].groups["photons"]["mean"] == "photons_mean"
 
 
 def test_a_table_of_a_million_regions_is_small_and_quick_to_write_and_read(tmp_path):
@@ -315,28 +318,82 @@ def test_auto_takes_an_id_column_before_the_rois_and_the_rois_without_one():
 
 
 def test_id_statistics_saved_settings_read_as_region_statistics():
+    from smappy.plugins.region_statistics import DEFAULT_ATTRIBUTES
     path, values = plugins.moved("Analysis/Measure/Id statistics",
                                  {"id_column": "tid", "columns": "cfr, efo", "shape": True})
     assert path == PLUGIN
-    assert values == {"regions": "tid", "columns": ["cfr", "efo"], "common": False,
-                      "shape": True}
-    assert plugins.moved("Analysis/Measure/Id statistics", {"columns": ""})[1] == \
-        {"columns": [], "common": True}
+    assert values == {"regions": "tid", "shape": True,
+                      "attributes": list(DEFAULT_ATTRIBUTES) + ["cfr", "efo"]}
+    # empty was the common attributes, MINFLUX's among them; use z off drops z
+    old = plugins.moved("Analysis/Measure/Id statistics", {"columns": "", "use_z": False})[1]
+    assert old["attributes"] == [n for n in DEFAULT_ATTRIBUTES if n != "z_nm"] + \
+        ["cfr", "efo", "dcr"]
     assert plugins.get("Analysis/Measure/Id statistics").path == PLUGIN
 
 
-def test_the_common_attributes_and_the_ticked_ones_are_summarised_each_once():
+def test_the_ticked_attributes_are_summarised_once_and_a_missing_one_is_named():
     from smappy.plugins.region_statistics import offered_columns, summarised_columns
     locs, _, _ = traces(50)
-    assert summarised_columns(locs, [], True) == ["cfr", "photons"]
-    assert summarised_columns(locs, ["z_nm", "cfr"], True) == ["cfr", "photons", "z_nm"]
-    assert summarised_columns(locs, ["cfr"], False) == ["cfr"]
-    assert summarised_columns(locs, "cfr, photons", False) == ["cfr", "photons"]
-    with pytest.raises(ValueError, match="no attribute efo"):
-        summarised_columns(locs, ["efo"], True)
+    assert summarised_columns(locs, ["cfr", "photons", "cfr"]) == (["cfr", "photons"], [])
+    assert summarised_columns(locs, "cfr, photons") == (["cfr", "photons"], [])
+    # a default name a table lacks passes silently, another is named
+    assert summarised_columns(locs, ["xy_err_nm", "efo"]) == ([], ["efo"])
     offered = offered_columns(locs)
-    assert "cfr" in offered and "photons" in offered
-    assert not {"x_nm", "frame", "time_s", "tid"} & set(offered)
+    assert {"cfr", "photons", "x_nm", "z_nm", "frame", "time_s"} <= set(offered)
+    assert not {"tid", "filenumber"} & set(offered)
+
+
+def test_a_missing_attribute_is_warned_about_and_the_run_goes_on():
+    locs, n, _ = traces(50)
+    session = Session(locs)
+    session.show_grouped(0, False)
+    cls = plugins.get(PLUGIN)
+    warnings = []
+    ctx = session.context()
+    ctx.warn = warnings.append
+    result = cls().run(ctx, cls.Settings(attributes=["x_nm", "efo", "cfr"]))
+    assert any("efo" in w for w in warnings)
+    assert "cfr_median" in result.data["statistics"].values
+
+
+def test_an_unticked_axis_keeps_its_centre_and_a_ticked_one_gets_its_statistics():
+    locs, n, centre = traces(300)
+    cls = plugins.get(PLUGIN)
+    session = Session(locs)
+    session.show_grouped(0, False)
+    settings = cls.Settings(attributes=["z_nm"])
+    settings.statistics.percentiles = "5 95"
+    v = cls().run(session.context(), settings).data["statistics"].values
+    # where the region is, always; its size from x and y, always
+    assert {"centre_x_nm", "centre_y_nm", "centre_z_nm", "std_xy_nm"} <= set(v)
+    assert "std_x_nm" not in v and "x_median_nm" not in v
+    assert {"std_z_nm", "z_median_nm", "z_max_nm", "z_p5_nm", "z_p95_nm"} <= set(v)
+    # neither time is ticked
+    assert "duration_s" not in v and "frames" not in v
+    # both are, and each gives its own
+    v = cls().run(session.context(), cls.Settings(attributes=["time_s", "frame"])
+                  ).data["statistics"].values
+    assert np.array_equal(v["frames"], n) and "duration_s" in v
+
+
+def test_percentiles_per_region_match_numpys():
+    from smappy.id_statistics import parse_percentiles, percentile_key
+    rng = np.random.default_rng(5)
+    ids = rng.integers(-1, 200, 8000)
+    value = rng.normal(size=8000)
+    value[rng.random(8000) < 0.2] = np.nan
+    value[ids == 3] = np.nan
+    qs = parse_percentiles("2.5, 50 97.5 100 0")
+    found = id_statistics(ids, {"x": value * 0, "y": value * 0}, columns={"v": value},
+                          stats=("median",), percentiles=qs)
+    for q in qs:
+        expect = [np.nanpercentile(value[ids == i], q) if np.isfinite(value[ids == i]).any()
+                  else np.nan for i in found.ids]
+        assert np.allclose(found.values[f"v_{percentile_key(q)}"], expect, equal_nan=True)
+    assert np.allclose(found.values["v_p50"], found.values["v_median"], equal_nan=True)
+    assert percentile_key(2.5) == "p2_5" and found.groups["v"]["p97_5"] == "v_p97_5"
+    with pytest.raises(ValueError, match="outside"):
+        parse_percentiles("120")
 
 
 def test_the_attributes_are_behind_a_button_that_names_what_is_ticked(app_qt):
@@ -344,20 +401,46 @@ def test_the_attributes_are_behind_a_button_that_names_what_is_ticked(app_qt):
     from smappy.gui.params import ColumnsField
     from smappy.plugins import param_specs
     from smappy.plugins.region_statistics import RegionStatisticsSettings
-    field = ColumnsField(param_specs(RegionStatisticsSettings)["columns"])
+    field = ColumnsField(param_specs(RegionStatisticsSettings)["attributes"])
     assert field.popup and not field.box.isVisible()
+    field.set([])
     field.set_choices(["cfr", "efo", "photons"])
     assert field.value() == [] and field.button.text().startswith("none")
-    field.list.item(0).setCheckState(Qt.Checked)
+    names = {it.data(Qt.UserRole): it for it in field._items()}
+    names["cfr"].setCheckState(Qt.Checked)
     assert field.value() == ["cfr"] and field.button.text().startswith("cfr")
     field._tick_all(True)
-    assert field.button.text().startswith("cfr, efo, photons")
+    assert field.button.text().startswith("photons, cfr, efo")
     field._tick_all(False)
     field.set_choices([f"column_{i}" for i in range(9)])
     field._tick_all(True)
     assert field.button.text().startswith("9 ticked")
     field._open()
     assert field.box.isVisible()
+
+
+def test_a_groups_header_ticks_its_members_and_shows_whether_some_are(app_qt):
+    from PySide6.QtCore import Qt
+    from smappy.gui.params import ColumnsField
+    from smappy.plugins import param_specs
+    from smappy.plugins.region_statistics import RegionStatisticsSettings
+    field = ColumnsField(param_specs(RegionStatisticsSettings)["attributes"])
+    field.set_choices(["x_nm", "y_nm", "photons", "cfr", "efo", "dcr", "my_value"])
+    headers = {h.text(): h for h in field._items(headers=True)}
+    # groups the table has nothing of are not shown; the rest is *other*
+    assert list(headers) == ["position", "localization", "MINFLUX", "other"]
+    # the defaults the table has: position whole, localization partly
+    assert headers["position"].checkState() == Qt.Checked
+    assert headers["MINFLUX"].checkState() == Qt.Unchecked
+    headers["MINFLUX"].setCheckState(Qt.Checked)
+    assert {"cfr", "efo", "dcr"} <= set(field.value())
+    names = {it.data(Qt.UserRole): it for it in field._items()}
+    names["efo"].setCheckState(Qt.Unchecked)
+    assert headers["MINFLUX"].checkState() == Qt.PartiallyChecked
+    headers["position"].setCheckState(Qt.Unchecked)
+    assert not {"x_nm", "y_nm"} & set(field.value())
+    # a header is no name
+    assert None not in field.value() and "position" not in field.value()
 
 
 @pytest.fixture(scope="module")

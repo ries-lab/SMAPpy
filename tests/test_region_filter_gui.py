@@ -68,7 +68,8 @@ def test_the_search_finds_a_value_inside_its_group(app):
     panel.search.setText("median")         # a member: in every group that has one
     shown = [l for l in leaves(panel.tree.invisibleRootItem()) if not l.isHidden()]
     assert {l.text(0) for l in shown} == {"median"}
-    assert {l.parent().text(0) for l in shown} == {"photons", "xy_err_nm"}
+    # the ticked axes' statistics are groups of their own
+    assert {l.parent().text(0) for l in shown} == {"photons", "xy_err_nm", "x_nm", "y_nm"}
 
 
 def test_an_annotation_is_filtered_by_the_texts_ticked(app):
