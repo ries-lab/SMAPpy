@@ -334,9 +334,10 @@ def test_the_server_answers_initialize_list_and_call_as_mcp_says(tmp_path):
         {"jsonrpc": "2.0", "method": "notifications/initialized"})) is None
     listed = _ask(server, "tools/list")["result"]["tools"]
     # headless there is no view to move, no window and no menu: `show`,
-    # `open_plugin`, `open_window` and the actions are the GUI's
+    # `open_plugin`, `open_window`, the actions and reading the windows are the GUI's
     assert {t["name"] for t in listed} == set(Assistant.specs()) - {
-        "show", "open_plugin", "open_window", "list_actions", "do_action"}
+        "show", "open_plugin", "open_window", "list_actions", "do_action",
+        "read_gui", "set_gui", "focus_gui"}
     called = _ask(server, "tools/call", {"name": "list_plugins",
                                          "arguments": {"prefix": "Analysis/Drift"}})
     assert not called["result"]["isError"]

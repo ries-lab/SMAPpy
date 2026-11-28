@@ -539,13 +539,16 @@ def window_actions(control) -> Dict[str, Action]:
 #: reason (`tests/test_assistant_gui.py`), so a window is never opened and left unreachable
 #: without anyone deciding it.
 WINDOWS_WITHOUT_ACTIONS = {
-    "ROI manager": "its work is the ROIs' tools: set_roi, read_values(roi=), run_plugin per region",
+    "ROI manager": "its work is the ROIs' tools: set_roi, read_values(roi=), run_plugin per "
+                   "region; read_gui reads it, set_gui sets its fields",
     "3D view": "View/3D view shows it; the view is the user's to turn",
     "help": "read_doc reads the same pages",
-    "batch window": "not yet: run_chain on the session; the smappy-batch command over files",
-    "DECODE training": "not yet: the training is `smappy-decode train FOLDER` without the window",
-    "microscope manager": "not yet: its entries are the user's database",
-    "camera editor": "not yet: its entries are the user's database",
+    "batch window": "run_chain on the session, the smappy-batch command over files; read_gui "
+                    "reads the window, set_gui sets its fields",
+    "DECODE training": "the training is `smappy-decode train FOLDER` without the window; "
+                       "read_gui reads its forms, set_gui sets them",
+    "microscope manager": "its entries are the user's database: read_gui reads them",
+    "camera editor": "its entries are the user's database: read_gui reads them",
     "region results": "its numbers are the region tables, which run_plugin's values "
                       "and the summaries (Analysis/Regions/Summarize) read; colour "
                       "by one with set_layer's color_field; written to a file by "

@@ -58,7 +58,11 @@ the reason -- `tests/test_assistant_gui.py` fails until it is.  What is inside
 a window `open_window` opens -- its fields and buttons -- is
 `gui/window_actions.py`'s ("PSF calibration/Detect"), or the
 window is in `WINDOWS_WITHOUT_ACTIONS` with the reason --
-`tests/test_window_actions.py` fails until it is.
+`tests/test_window_actions.py` fails until it is.  What every tab, panel
+and window shows is read and its fields set generically by `gui/gui_read.py`
+(`read_gui`, `set_gui`, `focus_gui`): a control is named by its label, so a
+new window needs no code there, but a control without a label reads as
+"choice" or "number" -- give it one (`tests/test_gui_read.py` reads them all).
 
 ## Before you edit anything: a worktree of your own
 

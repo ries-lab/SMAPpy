@@ -247,6 +247,37 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   nothing marked by hand, through the same code (`calibrate/psf_run.py`),
   their pages the result's figures -- so headless `smappy-mcp`, a chain and
   a batch calibrate too.
+* **what the windows show** -- `read_gui`, `set_gui`, `focus_gui`, the GUI
+  only (`needs="gui"`, `gui/gui_read.py`'s `GuiAccess`).  Before them the
+  assistant could open a form but not read it: asked which calibration the
+  open Spline 3D form used, it searched the disk for one (a usage log,
+  2026-11).  `read_gui` without a name lists the tabs with their pinned
+  plugins, the open windows and what is in front; with a name -- *Localize >
+  Spline 3D*, a plugin's path, *Render*, *ROI manager* -- it reads that one.
+  A plugin's panel is read as its settings: the values the form shows by
+  `run_plugin`'s dotted names, which differ from the defaults, what
+  `Plugin.describe` says of them now (*auto* resolved, fields not read, the
+  notice), the status line, and its last run, kept as a result for
+  `figure`.  Every other tab and window is read generically, by walking its
+  widgets in their layouts' order: a control is named by its label (a form
+  row's, the label before it in its row, its own text, its tooltip) under
+  the sections, groups and pages it is in, with its value, its choices and
+  whether it is greyed; tables by their first rows, read-only text, notes,
+  buttons; a `SettingsForm` met on the way by dotted names, a `PluginPanel`
+  by what differs from its defaults.  Generic on purpose: a window written
+  later is read without a line for it -- the price is that a name is only
+  as good as the window's label.  `set_gui` sets fields by those names as
+  typing does (the edit's own signal, so a plugin's `react` fills a preset's
+  settings), leaving the rest; not buttons, which stay `do_action`'s, curated.
+  A dialog a field opens is closed unanswered and said (`_NoDialogs`): it
+  would hold the queue.  A plugin's form, the Render tab and the windows
+  whose fields are inputs to a later run are set in suggest mode, as
+  `open_plugin` fills a form; the ROI manager and the Regions tab change
+  the ROIs as they are set, so there it is a proposal (`CHANGES_SESSION`).
+  `focus_gui` brings a panel or window forward and, given fields, unfolds
+  their sections, scrolls to them and outlines them for three seconds, taking no
+  keyboard: the step a guided mode is built on -- propose a step, point at
+  where it is set, read it back once the user has set it.
 * **the drawn ROI and what is in it** -- `session_state` reports the ROI
   drawn in the 2D view (`Session.roi`, the one shape every plugin's
   selection is cut to) as `roi`, its shape as `set_roi` takes it and how
@@ -282,8 +313,8 @@ One switch, `mode`:
   plugin's panel filled in for the user to run.  Exports, which write files
   even on a copy, are proposals too.  In the GUI the changes to what is
   shown rather than to the data -- `set_filter`, `set_grouped`,
-  `set_layer`, `show`, an action that only shows --
-  are made at once: the user sees them, and a proposal to look somewhere
+  `set_layer`, `show`, an action that only shows, `set_gui` on a form or
+  the Render tab -- are made at once: the user sees them, and a proposal to look somewhere
   would be a click to make a click.  Headless they stay proposals.
 * **act** -- changes are made.  A file is written under the output folder
   (`--output`, the session's folder by default), or as a new file beside the
@@ -526,7 +557,12 @@ the repository.
    get wrong goes into the pages or a short note of lab knowledge.
 4. **Solutions in the knowledge base**: a problem, how it was solved and
    the chain that solves it, found again by `recall`.
-5. **Typing in SMAPpy's pane**: Claude Code's *channels* can push a message
+5. **Guided steps**: a suggest mode that proposes a list of steps and walks
+   the user through them one at a time -- `focus_gui` on where each is set,
+   `read_gui` to see that it was, the proposal's run as the step done.
+   The reading, setting and pointing are built (`gui/gui_read.py`); the
+   list and its pane are not.
+6. **Typing in SMAPpy's pane**: Claude Code's *channels* can push a message
    from an MCP server into a running session (a research preview); the other
    route is running the user's own agent CLI per message.  Later.
 6. **Read and write the open GUI**: every panel, window and control as it

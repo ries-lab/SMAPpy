@@ -655,6 +655,9 @@ class ControlWindow(QMainWindow):
             # the menus' and buttons' clicks, asked for at each call
             from .assistant_actions import actions_of
             server.assistant.actions = lambda: actions_of(self)
+            # what every tab, panel and window shows, read and set by name
+            from .gui_read import GuiAccess
+            server.assistant.gui = GuiAccess(self)
             controls.find_panel = self._assistant_panel
             controls.saved_bounds = self.saved_terminal
             controls.changed.connect(

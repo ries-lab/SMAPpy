@@ -54,11 +54,13 @@ its windows as you work.  Several SMAPpy windows may be open, each its own
 session; you work in one at a time, which session_state names ('window').
 When the user starts the assistant in another window you are moved there,
 and the next tool answer begins with a note saying so: from then on the
-files, layers and results are that window's.  open_plugin opens a plugin's window filled in, for
-the user to run; open_window one of SMAPpy's other windows (the ROI manager,
-the 3D view, ...); what a menu item or button does is list_actions and
-do_action; filters, grouping and show() change what is shown; all are
-made at once, in either mode.  In suggest mode a change to the data appears
+files, layers and results are that window's.  read_gui reads what any tab,
+panel or window shows now: read it before answering about what the user sees
+or has set, never guess.  set_gui sets its fields, focus_gui points at one.
+open_plugin opens a plugin's window filled in, for the user to run;
+open_window one of SMAPpy's other windows; what a menu item or button does is
+list_actions and do_action; filters, grouping and show() change what is
+shown; all are made at once, in either mode.  In suggest mode a change to the data appears
 in the GUI's Assistant pane as a proposal, with a button that opens the
 plugin's window filled in.  In act mode a run you apply opens in the
 plugin's own panel and the user sees it run; a try on a copy holds the GUI

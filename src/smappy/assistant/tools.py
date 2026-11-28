@@ -438,7 +438,10 @@ class Assistant:
     mapping of name to `Action`, asked at each call so that it follows the
     window; None headless.  ``window`` which SMAPpy window this is,
     ``window()`` -> a dict for session_state: an assistant moves between
-    windows (`attach`); None headless.
+    windows (`attach`); None headless.  ``gui`` reads and sets what the
+    windows show (`gui.gui_read.GuiAccess`: ``overview()``, ``read(name,
+    fields)``, ``write(name, values)``, ``focus(name, field)``, ``find(name)``,
+    ``changes(entry)``, ``plugin_class(name)``); None headless.
     """
 
     def __init__(self, session=None, mode: str = "act", output=None,
@@ -462,6 +465,8 @@ class Assistant:
         self.actions = actions
         self.runner = None
         self.window = None
+        self.gui = None
+        self._gui_results: Dict[int, str] = {}     # a panel's last run, kept once: id -> r<n>
         self.missing_tools = Path(missing_tools or knowledge.missing_tools_file()).expanduser()
         self.own_code = Path(own_code or knowledge.own_code_file()).expanduser()
         self.proposals: List[Proposal] = []
@@ -1738,6 +1743,85 @@ class Assistant:
             roi_id = found.id
         self.windows[chosen](roi_id)
         return {"opened": chosen, **({"roi": roi} if roi is not None else {})}
+
+    @tool("What SMAPpy's windows show now, as the user sees them.  Without "
+          "name: the tabs with the plugins pinned to each, the open windows "
+          "and what is in front.  With a name from that list, or a plugin's "
+          "path: a plugin's panel -- its settings by run_plugin's names, those "
+          "that differ from the defaults, what its auto fields resolve to, the "
+          "fields it does not read now, its notice, status and last run (a "
+          "result for figure) -- or a tab or window: each field by its section "
+          "and label with its value, choices and whether it is greyed, its "
+          "tables, notes and buttons.  Read before answering about what the "
+          "user sees ('are my settings right?', 'why is this greyed?', 'which "
+          "calibration does the fit use?') and before set_gui; never guess "
+          "what a form holds.  Changes nothing.",
+          needs="gui",
+          name={"type": "string",
+                "description": "e.g. 'Localize > Spline 3D', 'Render', 'ROI manager', "
+                               "'Localize/Spline 3D'; empty: the list"},
+          fields={"type": "array", "items": {"type": "string"},
+                  "description": "only the fields whose names start with these "
+                                 "(or have them after a '.' or '/'), for a long form"})
+    def read_gui(self, name: str = "", fields: Optional[List[str]] = None
+                 ) -> Dict[str, Any]:
+        if not name.strip():
+            return self.gui.overview()
+        out = self.gui.read(name, fields)
+        result = out.pop("_result", None)
+        if result is not None:
+            # kept once, while it is the same object: an id may be reused once it is gone
+            ident = self._gui_results.get(id(result))
+            if ident is None or not any(k.id == ident and k.result is result
+                                        for k in self.results):
+                ident = self._keep(out.get("plugin", name), True, result).id
+                self._gui_results[id(result)] = ident
+            out["last_run"] = {"result": ident, "text": (result.text or "")[:1500],
+                               "figures": [p.name or "main" for p in result.figures()]}
+        return out
+
+    @tool("Set fields of a panel, tab or window the user has open -- by the "
+          "names read_gui gives (a plugin's: run_plugin's dotted names) -- "
+          "leaving the rest as they are.  Set as typed, so the window answers "
+          "as to an edit: a preset fills the rest, other fields grey out.  A "
+          "plugin's panel, the Render tab and most windows are set in suggest "
+          "mode too: they change a form, run later, or what is shown; the ROI "
+          "manager's and the Regions tab's fields change the ROIs, a proposal "
+          "there.  Buttons are do_action's.  Answers what was set and the "
+          "fields as they read now; say what you changed.",
+          needs="gui",
+          name={"type": "string", "description": "as read_gui names it"},
+          values={"type": "object",
+                  "description": "field name: value, e.g. {\"fit.roisize\": 15} or "
+                                 "{\"display/LUT\": \"green\"}"},
+          reason={"type": "string", "description": "why, for the user (a proposal)"})
+    def set_gui(self, name: str, values: Dict[str, Any], reason: str = "") -> Dict[str, Any]:
+        if not values:
+            raise ToolError("give values: the fields to set, by read_gui's names")
+        entry = self.gui.find(name)
+        kind = self.gui.changes(entry)
+        allowed = {"form": True, "view": self._viewing()}.get(kind, self._changing())
+        if not allowed:
+            return self._propose("set_gui", {"name": entry.name, "values": values}, reason)
+        cls = self.gui.plugin_class(entry.name)
+        if cls is not None:
+            values = self._named(cls, values)       # a preset or a choice named loosely
+        answer = self.gui.write(entry.name, values)
+        now = self.gui.read(entry.name, [str(k) for k in values])
+        now.pop("_result", None)
+        return {**answer, "now": {k: v for k, v in now.items()
+                                  if k not in ("name", "kind", "in_front")}}
+
+    @tool("Bring a panel, tab or window forward and, given fields, unfold, "
+          "scroll to and outline them for a few seconds: to show the user "
+          "where something is set, or to walk them through steps they make "
+          "themselves.  Changes no value; any mode.",
+          needs="gui",
+          name={"type": "string", "description": "as read_gui names it"},
+          fields={"type": "array", "items": {"type": "string"},
+                  "description": "fields' names, as read_gui gives them"})
+    def focus_gui(self, name: str, fields: Optional[List[str]] = None) -> Dict[str, Any]:
+        return self.gui.focus(name, fields or [])
 
     @tool("What SMAPpy's menus and buttons do, by name -- File/Open, File/Add "
           "(the Load plugin's buttons), the Render tab's layer buttons, the "
