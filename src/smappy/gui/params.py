@@ -671,6 +671,14 @@ class ColumnsField(QWidget):
     is ticked and opens it below itself: a list of extras most runs leave
     alone (*Region statistics*' attributes) takes one row of the form, not
     a box of a table's thirty columns.
+
+    With the field's ``groups``, the names are shown under headers -- a
+    group's members the session offers, then *other* for the rest -- whose
+    tick ticks or unticks every member and shows whether all, some or none
+    are.  The headers are no names: `value` never holds one.  A ticked
+    group member the session does not offer is kept in the value but not
+    shown: a group names what tables may have, and a 2D file's list should
+    not end in *z_nm (not there)*.
     """
 
     changed = Signal()
@@ -696,8 +704,11 @@ class ColumnsField(QWidget):
         else:
             self.box, inner = self, layout
         self.list = QListWidget()
-        self.list.setMaximumHeight(240 if self.popup else 140)
-        self.list.itemChanged.connect(lambda _: self._changed())
+        self.list.setMaximumHeight(
+            (360 if getattr(spec.info, "groups", None) else 240) if self.popup else 140)
+        self.list.itemChanged.connect(self._item_changed)
+        self.groups = [(str(g), tuple(m)) for g, m in (getattr(spec.info, "groups", None)
+                                                        or ())]
         inner.addWidget(self.list)
         row = QHBoxLayout()
         for label, on in (("all", True), ("none", False)):
@@ -709,19 +720,54 @@ class ColumnsField(QWidget):
         if spec.info.help:
             self.setToolTip(spec.info.help)
         self._names: List[str] = []
+        self._unseen: List[str] = []
         self._value: List[str] = list(spec.default() if callable(spec.default)
                                       else spec.default or [])
         self.empty_is_all = getattr(spec.info, "empty_is_all", True)
         self._none = False
         self._name_ticked()
 
+    def _items(self, headers: bool = False):
+        """The list's name items (or its group headers)."""
+        items = [self.list.item(i) for i in range(self.list.count())]
+        return [it for it in items if (it.data(Qt.UserRole) is None) == headers]
+
     def _tick_all(self, on: bool) -> None:
         self._none = not on
+        if not on:
+            self._unseen = []
         blocked = self.list.blockSignals(True)
-        for i in range(self.list.count()):
-            self.list.item(i).setCheckState(Qt.Checked if on else Qt.Unchecked)
+        for item in self._items():
+            item.setCheckState(Qt.Checked if on else Qt.Unchecked)
+        self._show_groups()
         self.list.blockSignals(blocked)
         self._changed()
+
+    def _item_changed(self, item) -> None:
+        """A header ticks or unticks its members; a name, its header's state."""
+        blocked = self.list.blockSignals(True)
+        members = item.data(Qt.UserRole + 1)
+        if item.data(Qt.UserRole) is None and members is not None:
+            on = item.checkState() != Qt.Unchecked
+            if not on:
+                # unticked, the group's members this table lacks go too
+                whole = dict(self.groups).get(item.text(), ())
+                self._unseen = [n for n in self._unseen if n not in whole]
+            for other in self._items():
+                if other.data(Qt.UserRole) in members:
+                    other.setCheckState(Qt.Checked if on else Qt.Unchecked)
+        self._show_groups()
+        self.list.blockSignals(blocked)
+        self._changed()
+
+    def _show_groups(self) -> None:
+        """Each header ticked, partly ticked or not, as its members are."""
+        names = {it.data(Qt.UserRole): it for it in self._items()}
+        for header in self._items(headers=True):
+            states = [names[m].checkState() == Qt.Checked
+                      for m in header.data(Qt.UserRole + 1) if m in names]
+            header.setCheckState(Qt.Checked if states and all(states) else
+                                 Qt.PartiallyChecked if any(states) else Qt.Unchecked)
 
     def _changed(self) -> None:
         self._name_ticked()
@@ -744,7 +790,7 @@ class ColumnsField(QWidget):
         if self.empty_is_all and not value and not self._none:
             text, names = "all", []
         else:
-            names = value
+            names = [n for n in value if n not in self._unseen]
             text = (", ".join(names) if len(", ".join(names)) <= 28
                     else f"{len(names)} ticked") if names else "none"
         self.button.setText(text + "  \u25be")
@@ -755,13 +801,37 @@ class ColumnsField(QWidget):
         blocked = self.list.blockSignals(True)
         self.list.clear()
         everything = self.empty_is_all and not ticked and not self._none
-        shown = list(names) + [n for n in ticked if n not in names]
-        for name in shown:
-            item = QListWidgetItem(name if name in names else f"{name} (not there)")
-            item.setData(Qt.UserRole, name)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if everything or name in ticked else Qt.Unchecked)
-            self.list.addItem(item)
+        vocabulary = {n for _, members in self.groups for n in members}
+        self._unseen = [n for n in ticked if n not in names and n in vocabulary]
+        shown = list(names) + [n for n in ticked if n not in names
+                               and n not in self._unseen]
+        sections = [(None, shown)]
+        if self.groups:
+            sections = [(g, [n for n in members if n in shown])
+                        for g, members in self.groups]
+            grouped = {n for _, members in sections for n in members}
+            sections.append(("other", [n for n in shown if n not in grouped]))
+        for group, members in sections:
+            if group is not None:
+                if not members:
+                    continue
+                header = QListWidgetItem(group)
+                font = header.font()
+                font.setBold(True)
+                header.setFont(font)
+                header.setData(Qt.UserRole, None)
+                header.setData(Qt.UserRole + 1, tuple(members))
+                header.setFlags(header.flags() | Qt.ItemIsUserCheckable)
+                self.list.addItem(header)
+            for name in members:
+                item = QListWidgetItem(("    " if group is not None else "")
+                                       + (name if name in names else f"{name} (not there)"))
+                item.setData(Qt.UserRole, name)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked if everything or name in ticked
+                                   else Qt.Unchecked)
+                self.list.addItem(item)
+        self._show_groups()
         self.list.blockSignals(blocked)
         self._name_ticked()
 
@@ -779,15 +849,17 @@ class ColumnsField(QWidget):
 
     def set(self, value) -> None:
         self._none = False
+        # kept for a list not filled yet: the choices come after the value
+        self._value = list(value or [])
         self._fill(self._names, list(value or []))
 
     def value(self) -> List[str]:
-        items = [self.list.item(i) for i in range(self.list.count())]
+        items = self._items()
         if not items:
             return list(self._value)
         ticked = [it.data(Qt.UserRole) for it in items if it.checkState() == Qt.Checked]
         if not self.empty_is_all:
-            return ticked
+            return ticked + [n for n in self._unseen if n not in ticked]
         if ticked:
             self._none = False
         return [] if len(ticked) == len(items) else ticked

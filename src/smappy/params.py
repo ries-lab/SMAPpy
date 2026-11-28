@@ -37,6 +37,10 @@ class ParamInfo:
     # on a click, rather than open in the form -- for a list of extras that
     # most runs leave as it is
     popup: bool = False
+    # for "columns": named groups of names, ``(("position", ("x_nm", ...)),
+    # ...)``, each shown under a header whose tick ticks its members (the
+    # rest under *other*); a shortcut on screen, the value stays the names
+    groups: Optional[Sequence] = None
     # for a part: shown folded until it is opened.  A chain's steps are, so a
     # chain of eight plugins reads as eight lines rather than eight forms
     collapsed: bool = False
