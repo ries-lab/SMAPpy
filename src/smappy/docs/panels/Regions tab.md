@@ -148,7 +148,8 @@ list is a *block*, as in a [chain](plugin:Panels/Glossary) (also called a
 pipeline or workflow: plugins run one after another as one): it can repeat
 over the [regions](plugin:Panels/Glossary) of an id attribute instead (a region
 is a set of localizations measured together -- an ROI, or a cluster that an
-attribute such as `cluster_id` names; *for each*).  *Measure all* measures every ROI; with
+attribute such as `cluster_id` names; *for each*).  *Measure all* measures every ROI
+(or, while several are selected in the ROI manager, those); with
 *measure the selected ROI* ticked, an ROI is also measured as soon as it is
 selected or added in the ROI manager, and its numbers appear under the
 steps.
@@ -237,7 +238,14 @@ Folded when the tab opens; unfold it to choose and run the steps.  At the
 top is what applies to every step: *Measure all*, *Measure this ROI*, and
 the ticks that measure and draw the ROI selected in the ROI manager.
 *Measure all* runs the steps in every ROI (or region) whose result is
-missing or out of date, and carries the rest forward.  While it measures,
+missing or out of date, and carries the rest forward.  While two or more
+ROIs are selected in the ROI manager's list it says *Measure n selected*
+and runs them in those of them with *use* ticked; one selected ROI is only
+the ROI being looked at, and stepping through the ROIs selects each, so it
+does not narrow the run.  For the quick numbers of every ROI at once --
+counts, spreads, medians of attributes -- [Region
+statistics](plugin:Analysis/Measure/Region statistics) with *regions* set
+to *ROIs* takes a second where the steps take an ROI at a time.  While it measures,
 it is Stop: the ROI being measured is finished, the ones measured so far are
 kept, and the rest wait for the next *Measure all*.  The grey line under them says
 how far a run has got -- the share and number of ROIs (or regions)

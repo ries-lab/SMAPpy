@@ -325,8 +325,8 @@ class ROIRegions:
 
     def __init__(self, project):
         self.project = project
-        # in the order they were made, as the list shows them
-        self.ids = [i for i, roi in project.rois.items() if roi.use]
+        # the included ROIs, or the selected ones of them (`measured`)
+        self.ids = project.measured()
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -364,6 +364,9 @@ class ROIRegions:
                  tag: bool = False, reuse: bool = True, chain: str = ""
                  ) -> Tuple[Dict[str, RegionTable], int]:
         if not self.ids:
+            if len(self.project.selected) > 1:
+                raise ValueError("none of the selected ROIs is used: tick use, "
+                                 "or select none to measure every ROI")
             raise ValueError("there are no ROIs to measure: find or draw some first")
         project = self.project
         run = project.evaluate(steps=steps, roi_ids=self.ids, reuse=reuse, chain=chain,

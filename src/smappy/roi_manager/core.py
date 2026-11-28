@@ -934,6 +934,20 @@ class ROIProject:
         picked = [i for i in self.selected if i in self.rois]
         return picked or list(self.rois)
 
+    def measured(self) -> List[str]:
+        """The ROIs a measurement over the ROIs takes (*Measure all*, a block
+        over the ROIs): the included ones, or, while two or more are selected
+        in the list, those of them that are included -- the selection, as
+        for an action on the ROIs (`chosen`), but not a selection of one,
+        which is the ROI being looked at, and stepping through the ROIs
+        selects each in turn.  In a chain or batch nothing is selected.  In
+        the order they were made."""
+        included = [i for i, roi in self.rois.items() if roi.use]
+        picked = {i for i in self.selected if i in self.rois}
+        if len(picked) < 2:
+            return included
+        return [i for i in included if i in picked]
+
     def set_range_columns(self, names) -> None:
         """The attributes the ROI manager offers ranges of, in order, each
         once; none at all is the default two."""

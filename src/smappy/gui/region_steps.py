@@ -49,6 +49,17 @@ PATH = "Analysis/Regions/Per-region steps"
 BLOCK_FIELDS = ("regions", "write_back", "write_values", "merge")
 RUN_TIP = ("run the steps in every ROI (or region) whose result is missing or "
            "out of date; the current ones are kept")
+SELECTED_TIP = ("run the steps in the ROIs selected in the ROI manager whose result "
+                "is missing or out of date; select one ROI or none to measure all")
+
+
+def run_text(project) -> str:
+    """What *Measure all* says: how many ROIs it takes while two or more
+    are selected in the ROI manager (`ROIProject.measured`)."""
+    if project.block.regions != BLOCK_ROIS:
+        return "Measure all"
+    picked = [i for i in project.selected if i in project.rois]
+    return f"Measure {len(picked)} selected" if len(picked) > 1 else "Measure all"
 
 
 class RegionSteps(QWidget):
@@ -170,6 +181,18 @@ class RegionSteps(QWidget):
             print(f"following Run: {error}")
             self._run_timer.stop()
 
+    def show_selection(self) -> None:
+        """*Measure all* or *Measure n selected*, as the ROI manager's
+        list is selected now; left alone while a run goes (it says Stop)."""
+        inner = self.panel.panel
+        if inner.run_button.text() != inner.run_text:
+            return
+        inner.run_text = run_text(self.session.rois)
+        inner.run_tip = RUN_TIP if inner.run_text == "Measure all" else SELECTED_TIP
+        inner.run_button.setText(inner.run_text)
+        inner.run_button.setToolTip(inner.run_tip)
+        self._sync_run()
+
     def follow_project(self) -> None:
         """The session's ROI project, if it is a new one -- another file
         opened.  The panel kept the last project's steps, and the new
@@ -235,11 +258,11 @@ class RegionSteps(QWidget):
         # presses it and shows what it says (Stop while a run goes).  Moving
         # the panel's own button up here, across the panels an edit rebuilds,
         # crashed a test worker now and then.
-        inner.run_text = "Measure all"
-        inner.run_tip = RUN_TIP
+        inner.run_text = run_text(self.session.rois)
+        inner.run_tip = RUN_TIP if inner.run_text == "Measure all" else SELECTED_TIP
         if inner.run_button.text() == "Run":
             inner.run_button.setText(inner.run_text)
-            inner.run_button.setToolTip(RUN_TIP)
+            inner.run_button.setToolTip(inner.run_tip)
         inner.run_button.hide()
         self._sync_run()
         # the block's section is not shown: its steps stand as the list, and

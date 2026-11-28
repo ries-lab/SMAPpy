@@ -356,6 +356,7 @@ class ROIHeader(QWidget):
         roi = project.rois.get(active) if active else None
         self.measure_now.setEnabled(roi is not None)
         self.apply_all.setEnabled(bool(self.proposing_steps()))
+        self.steps.show_selection()
         # each step's title says how its result stands for this ROI
         self.steps.show_states(project.latest(roi.id)[1] if roi is not None else None)
         self.results.setRowCount(0)

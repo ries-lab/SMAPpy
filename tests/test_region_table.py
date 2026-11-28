@@ -103,3 +103,17 @@ def test_a_saved_table_with_old_value_names_reads_with_the_new_and_old_names_sti
     assert test({"n_locs": 7, "photons_median": 300.0})
     assert sort_ids({"a": {"n_locs": 2}, "b": {"n_locs": 9}}, [("n_localizations", True)]) == ["b", "a"]
 
+
+def test_a_measurement_over_the_rois_takes_several_selected_ones_and_never_a_single_one():
+    from test_region_statistics import _session_with_rois
+    from smappy.region_runs import ROIRegions
+    from smappy.gui.region_steps import run_text
+    session, project, rois, _ = _session_with_rois()
+    every = [r.id for r in rois]
+    project.selected = [rois[0].id]                 # the ROI being looked at
+    assert ROIRegions(project).ids == every and run_text(project) == "Measure all"
+    project.selected = [rois[0].id, rois[2].id]
+    assert ROIRegions(project).ids == [rois[0].id, rois[2].id]
+    assert run_text(project) == "Measure 2 selected"
+    rois[2].use = False                             # use still decides
+    assert ROIRegions(project).ids == [rois[0].id]
