@@ -197,7 +197,11 @@ def config(tmp_path, monkeypatch):
 
 def test_the_plugin_measures_a_written_stack_and_enters_the_pixel_for_its_state(config, tmp_path):
     from smappy.plugins import Context
-    from smappy.plugins.pixel_size import (PixelSizeCalibration, PixelSizeSettings, last_entry)
+    from smappy.plugins.pixel_size import (
+        PixelSizeCalibration,
+        PixelSizeSettings,
+        last_entry,
+    )
     microscope_db.save_microscope(scope(pixel_nm={"device": "3DA", "values": {
         "on": [127, 116], "off": [127, 127]}}))
     scan = simulate_stage_scan(images=True, density_per_um2=0.1, pixel_nm=(126.0, 115.0),
@@ -215,7 +219,7 @@ def test_the_plugin_measures_a_written_stack_and_enters_the_pixel_for_its_state(
     assert "-0.8 %" in result.text                   # against the database's 127
     notice = plugin.describe(None, settings).notice
     assert notice.window == "pixel size entry" and "scope with 3DA on" in notice.text
-    entry, words = last_entry(settings)
+    entry, _ = last_entry(settings)
     assert entry.parameters["pixel_nm"]["values"]["on"] == pytest.approx([126.0, 115.0], abs=0.2)
     assert microscope_db.database().get("scope").parameters["pixel_nm"]["values"]["on"] == \
         [127, 116]                                   # shown, not saved
@@ -227,6 +231,7 @@ def test_the_plugin_measures_a_written_stack_and_enters_the_pixel_for_its_state(
 def test_the_notices_window_shows_the_measured_pixel_in_the_manager_unsaved(config, tmp_path):
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
+
     from smappy.gui.app import ControlWindow, RenderWindow
     from smappy.plugins import Context
     from smappy.plugins.pixel_size import PixelSizeCalibration, PixelSizeSettings

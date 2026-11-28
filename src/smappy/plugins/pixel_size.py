@@ -110,7 +110,7 @@ class PixelSizeCalibration(Plugin):
             return FormState()
         try:
             seen = _seen(settings.path)
-        except Exception as error:                   # an unreadable file says so at Run
+        except Exception as error:  # noqa: BLE001 -- any unreadable file: the form says why
             return FormState(notice=Notice(f"{Path(settings.path).name}: {error}",
                                            kind="warning"))
         last = _LAST.get(str(settings.path))

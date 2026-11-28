@@ -129,7 +129,7 @@ def chance_votes(n_a: int, n_b: int, area_px: float, tolerance_px: float,
 
 def _first_beyond(k: np.ndarray, lam: float, discs: np.ndarray, p: float) -> int:
     """The first ``k`` whose Poisson tail P(X >= k) at ``lam``, times ``discs``, is at most ``p``."""
-    from scipy.special import pdtrc            # P(X > k - 1): a ufunc, where scipy.stats is not
+    from scipy.special import pdtrc  # P(X > k - 1): a ufunc, where scipy.stats is not
     ok = pdtrc(k - 1, lam) * np.maximum(discs, 1.0) <= p
     return int(k[np.argmax(ok)]) if ok.any() else int(k[-1])
 
@@ -714,13 +714,13 @@ class PixelSizeResult:
         v = self.values
         n_frames = len(self.offsets_px)
         lines = [
-            f"pixel: {v['pixel_x_nm']:.2f} ± {v['pixel_x_nm_err']:.2f} nm along camera x, "
-            f"{v['pixel_y_nm']:.2f} ± {v['pixel_y_nm_err']:.2f} nm along y",
+            (f"pixel: {v['pixel_x_nm']:.2f} ± {v['pixel_x_nm_err']:.2f} nm along camera x, "
+             f"{v['pixel_y_nm']:.2f} ± {v['pixel_y_nm_err']:.2f} nm along y"),
             f"camera x at {v['angle_deg']:.2f} ± {v['angle_deg_err']:.2f}° to the stage's x, "
             + ("mirrored" if v["mirrored"] else "not mirrored")
             + f"; axes {v['skew_deg']:+.2f} ± {v['skew_deg_err']:.2f}° from square",
-            f"{int(v['n_frames'])} of {n_frames} frames, {int(v['n_beads'])} beads; residual "
-            f"{v['residual_nm']:.1f} nm rms",
+            (f"{int(v['n_frames'])} of {n_frames} frames, {int(v['n_beads'])} beads; residual "
+             f"{v['residual_nm']:.1f} nm rms"),
         ]
         lags = [f"{v[f'backlash_{a}_nm']:.0f} ± {v[f'backlash_{a}_nm_err']:.0f} nm in {a}"
                 for k, a in enumerate("xy") if self.fit.backlash[:, k].any()]
