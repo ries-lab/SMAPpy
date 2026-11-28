@@ -10,7 +10,7 @@ results pass a condition, and drops the rest from every layer, view and
 plugin: the nuclear pores with six corners or more, the MINFLUX
 [traces](plugin:Panels/Glossary) whose spread is under 10 nm, the clusters
 of more than 20 localizations.  The results are those the regions were
-measured with -- by the per-region steps, *Id statistics*, a block of a
+measured with -- by the per-region steps, *Region statistics*, a block of a
 chain -- and stay in their [region table](plugin:Panels/Glossary); what
 reaches the localizations is one attribute, `region_filter` (1 in, 0 out),
 and a bound on it in every layer.
@@ -27,7 +27,7 @@ regions the filter keeps, as the views show them.
 ## How it works
 
 **1. A condition** is one value of one evaluation and a range -- `n_locs`
-of *Id statistics* per `cluster_id`, from 20 up -- or, for a keyword or a
+of *Region statistics* per `cluster_id`, from 20 up -- or, for a keyword or a
 flag, the texts it accepts (an ROI's *use*, `true`).  A missing value (not
 measured, NaN) fails.
 

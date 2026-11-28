@@ -26,7 +26,7 @@ from typing import Optional
 import numpy as np
 
 from . import Context, FormState, Plot, Plugin, Result, param, register
-from .id_statistics import _id_choices, id_column
+from .region_statistics import _id_choices, id_column
 
 QUALITY = ("efo", "cfr", "photons", "fbg")
 #: the marks *Trace statistics* writes (*write the tail*), drawn as shaded

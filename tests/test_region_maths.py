@@ -14,7 +14,7 @@ from smappy.session import Session
 from test_region_filter import clusters, overlapping_rois
 
 MATH = "Analysis/Process/Math Parser"
-IDSTATS = "Analysis/Measure/Id statistics"
+IDSTATS = "Analysis/Measure/Region statistics"
 EV = Evaluation("cluster_id", "maths")
 
 
@@ -29,23 +29,23 @@ def values_of(session, name):
 
 def test_an_evaluation_is_named_by_its_label_made_a_word():
     assert alias("NPC Corners") == "npc_corners"
-    assert alias("Id statistics") == "id_statistics"
+    assert alias("Region statistics") == "region_statistics"
     assert alias("3D fit") == "e_3d_fit"
 
 
 def test_an_expression_over_the_clusters_reads_their_values_by_alias_or_bare():
     session, _ = clusters()                        # 60, 40 and 25 localizations
-    assert aliases(session, "cluster_id") == {"id_statistics": "Id statistics"}
-    ids, got = evaluate(session, "cluster_id", "id_statistics.n_locs / median(n_locs)")
+    assert aliases(session, "cluster_id") == {"region_statistics": "Region statistics"}
+    ids, got = evaluate(session, "cluster_id", "region_statistics.n_locs / median(n_locs)")
     assert ids == ["1", "2", "3"] and np.allclose(got, [1.5, 1.0, 0.625])
-    with pytest.raises(ExpressionError, match="no value id_statistics.nope"):
-        evaluate(session, "cluster_id", "id_statistics.nope + 1")
+    with pytest.raises(ExpressionError, match="no value region_statistics.nope"):
+        evaluate(session, "cluster_id", "region_statistics.nope + 1")
 
 
 def test_the_result_is_a_current_region_table_and_a_later_recipe_reads_it():
     session, truth = clusters()
     run(session, source="cluster_id", field="rel",
-        expression="id_statistics.n_locs / median(n_locs)")
+        expression="region_statistics.n_locs / median(n_locs)")
     assert is_current(session.context(), EV)
     assert values_of(session, "rel") == {"1": 1.5, "2": 1.0, "3": 0.625}
     run(session, source="cluster_id", field="big", expression="maths.rel > 1",
@@ -60,15 +60,15 @@ def test_the_result_is_a_current_region_table_and_a_later_recipe_reads_it():
 
 def test_a_recipe_follows_its_inputs_measured_again():
     session, truth = clusters()
-    run(session, source="cluster_id", field="half", expression="id_statistics.n_locs / 2")
+    run(session, source="cluster_id", field="half", expression="region_statistics.n_locs / 2")
     session.layers[0].set_bound("photons", 1000, None)
     assert not is_current(session.context(), EV)               # its inputs moved
     cls = plugins.get(IDSTATS)
-    session.run(cls(), cls.Settings(id_column="cluster_id"))   # measured again
+    session.run(cls(), cls.Settings(regions="cluster_id"))   # measured again
     assert is_current(session.context(), EV)
     n = values_of(session, "half")
     counted = {r["roi_id"]: r["n_locs"] for r in
-               rows(session.context(), Evaluation("cluster_id", "Id statistics"))}
+               rows(session.context(), Evaluation("cluster_id", "Region statistics"))}
     assert n == {k: v / 2 for k, v in counted.items()}
 
 
@@ -76,7 +76,7 @@ def test_the_region_filter_reads_a_maths_value():
     from smappy.region_filter import Condition
     session, truth = clusters()
     run(session, source="cluster_id", field="rel",
-        expression="id_statistics.n_locs / median(n_locs)")
+        expression="region_statistics.n_locs / median(n_locs)")
     session.set_region_filter([Condition("cluster_id", "maths", "rel", lo=1.0)])
     assert np.array_equal(np.asarray(session.selection(0).mask, bool),
                           np.isin(truth, [1, 2]))

@@ -39,7 +39,7 @@ chosen, its histogram alone.  In place of layers it overlays **groups** of
 regions (*group by*): per file, per ROI keyword, per value of a results
 column or of a condition of the localizations.  It needs results: measure
 the regions first (*per-region steps* in the Regions tab, or a plugin such
-as [Id statistics](plugin:Analysis/Measure/Id statistics)).
+as [Region statistics](plugin:Analysis/Measure/Region statistics)).
 
 ## How it works
 
@@ -167,7 +167,7 @@ same name, the table keeps both with the step's name in front
 ### evaluation
 *auto* for everything on the ROIs.  Pick one set of results to see only its
 columns -- one of two settings of the same plugin, say, or an id
-attribute's table such as *per tid: Id statistics*.
+attribute's table such as *per tid: Region statistics*.
 
 ### group_by
 *File* compares acquisitions; an ROI keyword list compares what was

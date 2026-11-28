@@ -1,5 +1,6 @@
-"""Statistics per id (`smappy.id_statistics`, *Id statistics*): every trace,
-track or cluster at once, kept as a region table that reads as a block's."""
+"""Statistics per region (`smappy.id_statistics`, *Region statistics*):
+every ROI, trace, track or cluster at once, kept as a region table that
+reads as a block's."""
 import time
 
 import h5py
@@ -7,15 +8,15 @@ import numpy as np
 import pytest
 
 from smappy import plugins
-from smappy.id_statistics import dense_codes, id_statistics, stat_name
+from smappy.id_statistics import dense_codes, id_statistics, member_statistics, stat_name
 from smappy.locs import Localizations
 from smappy.region_results import Evaluation, available, is_current, rows
 from smappy.region_runs import split_ids
 from smappy.region_table import RegionTable
 from smappy.session import Session
 
-PLUGIN = "Analysis/Measure/Id statistics"
-EV = Evaluation("tid", "Id statistics")
+PLUGIN = "Analysis/Measure/Region statistics"
+EV = Evaluation("tid", "Region statistics")
 
 
 def traces(n_traces=400, sigma=(4.0, 6.0, 9.0), seed=0):
@@ -115,7 +116,7 @@ def test_the_plugin_keeps_a_table_that_reads_as_a_blocks_and_goes_stale_with_the
     got = {int(r["roi_id"]): r for r in rows(ctx, EV)}
     assert len(got) == len(n) and got[1]["n_locs"] == n[0]
     assert "cfr_median" in got[1] and "std_xy_nm" in got[1]
-    assert session.id_regions["tid"]["Id statistics"].groups["cfr"]["median"] == "cfr_median"
+    assert session.id_regions["tid"]["Region statistics"].groups["cfr"]["median"] == "cfr_median"
     assert "regions of tid" in result.text
     # a bound on a layer changes what the regions hold: the table no longer
     # describes them, as a block's would not
@@ -142,7 +143,7 @@ def test_the_table_survives_a_save_and_is_current_after_loading(tmp_path):
     ctx = again.context()
     assert is_current(ctx, EV)
     assert len(rows(ctx, EV)) == 50
-    assert again.id_regions["tid"]["Id statistics"].groups["cfr"]["mean"] == "cfr_mean"
+    assert again.id_regions["tid"]["Region statistics"].groups["cfr"]["mean"] == "cfr_mean"
 
 
 def test_a_table_of_a_million_regions_is_small_and_quick_to_write_and_read(tmp_path):
@@ -150,7 +151,7 @@ def test_a_table_of_a_million_regions_is_small_and_quick_to_write_and_read(tmp_p
     values = {k: np.random.default_rng(0).random(n)
               for k in ("n_locs", "std_x_nm", "std_y_nm", "duration_s")}
     start = time.perf_counter()
-    table = RegionTable.from_columns("Id statistics", np.arange(1, n + 1), values,
+    table = RegionTable.from_columns("Region statistics", np.arange(1, n + 1), values,
                                      {"plugin": PLUGIN}, "a" * 64, "b" * 64)
     with h5py.File(tmp_path / "t.h5", "w") as f:
         table.to_hdf5(f.create_group("g"))
@@ -245,8 +246,94 @@ def test_shape_off_adds_no_columns_and_the_plugin_adds_them_when_ticked():
     cls = plugins.get(PLUGIN)
     assert cls.Settings().shape is False
     session.run(cls(), cls.Settings())
-    assert "area_nm2" not in session.id_regions["tid"]["Id statistics"].columns()
+    assert "area_nm2" not in session.id_regions["tid"]["Region statistics"].columns()
     result = session.run(cls(), cls.Settings(shape=True))
-    columns = session.id_regions["tid"]["Id statistics"].columns()
+    columns = session.id_regions["tid"]["Region statistics"].columns()
     assert set(SHAPE_2D + SHAPE_3D) <= set(columns)
     assert "shape:" in result.text
+
+
+# ------------------------------------------------------------- the ROIs
+
+def test_rois_given_as_rows_give_the_numbers_of_an_id_column_holding_them():
+    rng = np.random.default_rng(4)
+    ids = rng.integers(0, 60, 5000)
+    x, y = rng.normal(size=5000) * 10 + ids * 200, rng.normal(size=5000) * 5
+    p = rng.uniform(100, 900, 5000)
+    keep = rng.random(5000) > 0.1
+    options = dict(columns={"photons": p}, stats=("mean", "median", "std", "min", "max"),
+                   shape=True, frame=np.arange(5000), keep=keep)
+    by_id = id_statistics(ids, {"x": x, "y": y}, **options)
+    members = [(f"r{i}", np.flatnonzero(ids == i)) for i in range(60)]
+    by_rows = member_statistics(members, {"x": x, "y": y}, **options)
+    assert list(by_rows.ids) == [f"r{i}" for i in by_id.ids]
+    for name, value in by_id.values.items():
+        assert np.allclose(by_rows.values[name], value, equal_nan=True), name
+
+
+def test_a_localization_in_two_overlapping_rois_counts_in_both_and_an_empty_roi_is_left_out():
+    x = np.arange(10.0)
+    members = [("a", np.arange(0, 6)), ("b", np.arange(4, 10)), ("empty", np.arange(0))]
+    found = member_statistics(members, {"x": x, "y": x * 0})
+    assert list(found.ids) == ["a", "b"]
+    assert found.values["n_locs"].tolist() == [6, 6]
+    assert found.values["centre_x_nm"].tolist() == [2.5, 6.5]
+
+
+def _session_with_rois():
+    from test_clusters import blobs, table
+    xy, truth = blobs()
+    session = Session(table(xy, cluster_id=truth))
+    session.show_grouped(0, False)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    rois = [project.add_roi(file_id, list(xy[truth == k].mean(0))) for k in (1, 2, 3)]
+    return session, project, rois, truth
+
+
+def test_the_rois_are_measured_at_once_and_kept_as_current_roi_results():
+    from test_clusters import SIZES
+    session, project, rois, truth = _session_with_rois()
+    cls = plugins.get(PLUGIN)
+    session.run(cls(), cls.Settings(regions="rois"))
+    got = {str(r["roi_id"]): r for r in rows(session.context(), Evaluation("rois", "Region statistics"))}
+    assert sorted(int(r["n_locs"]) for r in got.values()) == sorted(SIZES)
+    # each row current with its own ROI, as a per-region step's would be
+    assert all("Region statistics" in project.evaluations(r.id) for r in rois)
+    project.move_roi(rois[0].id, np.asarray(rois[0].center) + 5000.0)
+    assert "Region statistics" not in project.evaluations(rois[0].id)
+    assert "Region statistics" in project.evaluations(rois[1].id)
+
+
+def test_auto_takes_an_id_column_before_the_rois_and_the_rois_without_one():
+    from smappy.plugins.region_statistics import ROIS, regions_source
+    session, project, rois, truth = _session_with_rois()
+    assert regions_source(session.context(), "") == "cluster_id"
+    assert regions_source(session.context(), ROIS) == ROIS
+    session.locs.columns.pop("cluster_id")
+    assert regions_source(session.context(), "") == ROIS
+
+
+def test_id_statistics_saved_settings_read_as_region_statistics():
+    path, values = plugins.moved("Analysis/Measure/Id statistics",
+                                 {"id_column": "tid", "columns": "cfr, efo", "shape": True})
+    assert path == PLUGIN
+    assert values == {"regions": "tid", "columns": ["cfr", "efo"], "common": False,
+                      "shape": True}
+    assert plugins.moved("Analysis/Measure/Id statistics", {"columns": ""})[1] == \
+        {"columns": [], "common": True}
+    assert plugins.get("Analysis/Measure/Id statistics").path == PLUGIN
+
+
+def test_the_common_attributes_and_the_ticked_ones_are_summarised_each_once():
+    from smappy.plugins.region_statistics import offered_columns, summarised_columns
+    locs, _, _ = traces(50)
+    assert summarised_columns(locs, [], True) == ["cfr", "photons"]
+    assert summarised_columns(locs, ["z_nm", "cfr"], True) == ["cfr", "photons", "z_nm"]
+    assert summarised_columns(locs, ["cfr"], False) == ["cfr"]
+    assert summarised_columns(locs, "cfr, photons", False) == ["cfr", "photons"]
+    with pytest.raises(ValueError, match="no attribute efo"):
+        summarised_columns(locs, ["efo"], True)
+    offered = offered_columns(locs)
+    assert "cfr" in offered and "photons" in offered
+    assert not {"x_nm", "frame", "time_s", "tid"} & set(offered)

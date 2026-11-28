@@ -58,7 +58,7 @@ def test_the_default_workspace_is_the_shipped_gui_file():
     pinned = [i.plugin for i in regions.instances]
     assert pinned == [SEGMENT, "Analysis/Regions/Find clusters",
                       "Analysis/Regions/Filter ROIs", "Analysis/Regions/Sort ROIs",
-                      "Analysis/Measure/Id statistics",
+                      "Analysis/Measure/Region statistics",
                       "Analysis/Regions/Summarize/Export table"]
     # every instance has an id of its own, given as it is read
     ids = [i.id for t in ws.tabs for i in t.instances]

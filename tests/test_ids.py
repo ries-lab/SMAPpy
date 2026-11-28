@@ -27,9 +27,9 @@ def test_minus_one_is_none_and_zero_is_an_id():
 def test_the_first_minflux_trace_is_a_region_of_id_statistics():
     session = Session(trace_table([0, 0, 0, 1, 1, 1]))
     session.show_grouped(0, False)
-    cls = plugins.get("Analysis/Measure/Id statistics")
+    cls = plugins.get("Analysis/Measure/Region statistics")
     session.run(cls(), cls.Settings())
-    got = {str(r["roi_id"]): r for r in rows(session.context(), Evaluation("tid", "Id statistics"))}
+    got = {str(r["roi_id"]): r for r in rows(session.context(), Evaluation("tid", "Region statistics"))}
     assert set(got) == {"0", "1"} and got["0"]["n_locs"] == 3
 
 

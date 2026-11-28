@@ -40,7 +40,7 @@ events: they render, filter and measure like localizations, so
 imaging rounds) run on them.  Or, with *output* set to the localizations,
 each localization gets its molecule's number, `molecule_id`, so
 [Binding kinetics](plugin:Analysis/DNA-PAINT/Binding kinetics) or
-[Id statistics](plugin:Analysis/Measure/Id statistics) can measure each
+[Region statistics](plugin:Analysis/Measure/Region statistics) can measure each
 molecule.
 
 It reads the localizations, not merged blinks, whatever the layer shows,

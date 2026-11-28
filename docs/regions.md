@@ -181,7 +181,7 @@ Two stores, and both stay, because what differs is ownership:
   a new table, a new clustering -- so a table is current or not as a whole:
   one signature per step and table (`region_runs.column_inputs`), which is why
   checking 10^5 clusters costs one digest.  A plugin that measures every
-  region at once (*Id statistics*) hands its table back whole
+  region at once (*Region statistics*) hands its table back whole
   (`Result.id_regions`), made by `region_runs.column_table`, which signs
   it as a block's run would -- so it is current, and goes out of date, on
   the same terms.

@@ -17,7 +17,7 @@ from smappy.session import Session
 from test_clusters import SIZES, blobs, table
 
 STATS = "Analysis/Measure/Localization Statistics"
-IDSTATS = "Analysis/Measure/Id statistics"
+IDSTATS = "Analysis/Measure/Region statistics"
 PER_CLUSTER = "per cluster_id: Localization Statistics"
 
 
@@ -28,7 +28,7 @@ def clusters():
     session = Session(table(xy, cluster_id=truth))
     session.show_grouped(0, False)
     cls = plugins.get(IDSTATS)
-    session.run(cls(), cls.Settings(id_column="cluster_id"))
+    session.run(cls(), cls.Settings(regions="cluster_id"))
     return session, truth
 
 
@@ -37,7 +37,7 @@ def shown(session, layer=0) -> np.ndarray:
 
 
 def by_size(n):
-    return Condition("cluster_id", "Id statistics", "n_locs", lo=n)
+    return Condition("cluster_id", "Region statistics", "n_locs", lo=n)
 
 
 def test_the_flag_keeps_the_localizations_of_the_clusters_that_pass_and_no_noise():
@@ -73,7 +73,7 @@ def test_clearing_the_conditions_takes_the_flag_and_its_bound_away():
 
 def test_the_summaries_count_the_regions_the_filter_keeps():
     session, _ = clusters()
-    ev = Evaluation("cluster_id", "Id statistics")
+    ev = Evaluation("cluster_id", "Region statistics")
     assert len(rows(session.context(), ev)) == 3
     session.set_region_filter([by_size(30)])
     assert sorted(r["n_locs"] for r in rows(session.context(), ev)) == [40, 60]
@@ -195,7 +195,7 @@ def test_a_saved_file_opens_filtered(tmp_path):
 def test_the_plugin_adds_replaces_and_clears_and_a_chain_hands_the_filter_back():
     session, truth = clusters()
     cls = plugins.get("Analysis/Regions/Filter regions")
-    ev = "per cluster_id: Id statistics"
+    ev = "per cluster_id: Region statistics"
     form = cls().describe(session.context(), cls.Settings(evaluation=ev, value="n_locs",
                                                           low=30))
     assert form.notice.text == "keeps 2 of 3 regions"           # before running
@@ -224,8 +224,8 @@ def test_the_plugin_adds_replaces_and_clears_and_a_chain_hands_the_filter_back()
 
 
 def test_a_condition_says_what_it_keeps():
-    c = Condition("cluster_id", "Id statistics", "n_locs", lo=20)
-    assert c.text() == "per cluster_id › Id statistics › n_locs  20 … ∞"
+    c = Condition("cluster_id", "Region statistics", "n_locs", lo=20)
+    assert c.text() == "per cluster_id › Region statistics › n_locs  20 … ∞"
     assert c.passes(25) and not c.passes(10) and not c.passes(None)
     assert not c.passes(float("nan"))
     k = Condition("rois", ANNOTATIONS, "quality", accept=["good"])

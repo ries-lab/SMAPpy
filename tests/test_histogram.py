@@ -150,10 +150,10 @@ def test_group_by_file_gives_one_histogram_per_file():
     session.add_file(traces(9.0, seed=1), FileInfo("wide", "/wide", "test"), append=True)
     session.show_grouped(0, False)
     session.layers[0].set_files(None)
-    ids = plugins.get("Analysis/Measure/Id statistics")
+    ids = plugins.get("Analysis/Measure/Region statistics")
     session.run(ids(), ids.Settings())
     cls = plugins.get(PLUGIN)
-    settings = cls.Settings(source="regions", evaluation="per tid: Id statistics",
+    settings = cls.Settings(source="regions", evaluation="per tid: Region statistics",
                             column="std_xy_nm", group_by="file")
     offered = cls().describe(session.context(), settings).choices["group_by"]
     assert ("file", "file") in offered
@@ -183,9 +183,9 @@ def test_the_old_region_histograms_path_maps_through_moved():
     from smappy.plugins import moved, settings_from
     old = "Analysis/Regions/Summarize/Histograms"
     path, values = moved(old, {"bins": 30, "fields": "radius_nm",
-                               "evaluation": "per tid: Id statistics"})
+                               "evaluation": "per tid: Region statistics"})
     assert path == PLUGIN and values == {"source": "regions", "column": "radius_nm",
-                                         "evaluation": "per tid: Id statistics"}
+                                         "evaluation": "per tid: Region statistics"}
     assert plugins.get(old) is plugins.get(PLUGIN)
     step = Step.from_dict({"plugin": old, "values": {"fields": "radius_nm"}})
     settings = settings_from(plugins.get(PLUGIN).Settings, step.values)

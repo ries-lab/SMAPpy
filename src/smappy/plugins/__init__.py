@@ -1336,6 +1336,12 @@ def _image_tags_values(values: Dict[str, Any]) -> Dict[str, Any]:
     return image_tags_values(values)
 
 
+def _region_statistics_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    """*Id statistics*' settings as Region statistics' (`moved_settings`)."""
+    from .region_statistics import moved_settings
+    return moved_settings(values)
+
+
 #: Plugins merged into another, by their old path: the new path, where its
 #: settings the old ones are now -- the name of a part, a map from each old
 #: name to its new one (an old setting it leaves out is dropped), or a
@@ -1356,6 +1362,9 @@ MOVED: Dict[str, Tuple[str, Any, Dict[str, Any]]] = {
     "Analysis/Regions/Summarize/Histograms": (
         "Analysis/Measure/Histogram", {"fields": "column", "evaluation": "evaluation"},
         {"source": "regions"}),
+    # *Id statistics*, which measures the ROIs too since 2026-11
+    "Analysis/Measure/Id statistics": (
+        "Analysis/Measure/Region statistics", _region_statistics_values, {}),
 }
 
 

@@ -59,7 +59,7 @@ hull and is not passed to qhull.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -313,12 +313,58 @@ def id_statistics(ids, positions: Dict[str, np.ndarray], *, keep=None,
     region with none kept is left out; ``time_s`` or ``frame`` give the time;
     ``columns`` the other quantities, each summarised by ``stats``;
     ``shape`` adds `region_shapes`' values (3D ones where ``"z"`` is given)."""
+    _check(stats)
+    found, codes = dense_codes(ids, keep)
+    return _measure(IdStatistics(found), codes, positions, time_s, frame,
+                    columns, stats, shape)
+
+
+def member_statistics(members: Sequence[Tuple[Any, np.ndarray]],
+                      positions: Dict[str, np.ndarray], *, keep=None,
+                      time_s=None, frame=None,
+                      columns: Optional[Dict[str, np.ndarray]] = None,
+                      stats: Sequence[str] = ("mean", "median", "max"),
+                      shape: bool = False) -> IdStatistics:
+    """`id_statistics` of regions given as their rows, ``[(id, rows), ...]``:
+    the ROIs of the ROI manager, which may overlap, so no id column can name
+    them.  The row lists are joined and every array is read through them --
+    a localization in two ROIs is counted in both -- and then measured by the
+    same pass as an id column's regions, so the numbers are the same as for
+    an id column holding the same partition.  A region with no row ``keep``
+    keeps is left out, as an id with none is."""
+    _check(stats)
+    keep = None if keep is None else np.asarray(keep, dtype=bool)
+    ids, parts = [], []
+    for region_id, rows in members:
+        rows = np.asarray(rows, dtype=np.int64)
+        if keep is not None:
+            rows = rows[keep[rows]]
+        if len(rows):
+            ids.append(region_id)
+            parts.append(rows)
+    index = np.concatenate(parts) if parts else np.zeros(0, np.int64)
+    codes = np.repeat(np.arange(len(parts), dtype=np.int64),
+                      [len(r) for r in parts])
+
+    def take(v):
+        return None if v is None else np.asarray(v)[index]
+    return _measure(IdStatistics(np.array(ids, dtype=object)), codes,
+                    {a: take(v) for a, v in positions.items()},
+                    take(time_s), take(frame),
+                    {n: take(v) for n, v in (columns or {}).items()}, stats, shape)
+
+
+def _check(stats: Sequence[str]) -> None:
     unknown = [s for s in stats if s not in STATISTICS]
     if unknown:
         raise ValueError(f"unknown statistics {unknown}: choose among {STATISTICS}")
-    found, codes = dense_codes(ids, keep)
-    n = len(found)
-    out = IdStatistics(found)
+
+
+def _measure(out: IdStatistics, codes: np.ndarray, positions, time_s, frame,
+             columns, stats, shape) -> IdStatistics:
+    """Every value of the regions ``codes`` names (0 .. len(out) - 1 per row,
+    -1 for none, each region with a row), into ``out``."""
+    n = len(out)
     regions = _Regions(codes, n)
     out.values["n_locs"] = regions.counts.astype(np.int64)
     std = {}

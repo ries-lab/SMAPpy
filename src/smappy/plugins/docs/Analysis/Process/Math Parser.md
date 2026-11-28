@@ -110,10 +110,10 @@ for ax in (left, right):
 **On regions.**  With *on* set to the ROIs or to an id attribute such as
 `cluster_id` or `tid`, the expression is over what was measured per
 [region](plugin:Panels/Glossary), one row per region instead of one per
-localization: `rel = id_statistics.n_locs / median(n_locs)` gives each
+localization: `rel = region_statistics.n_locs / median(n_locs)` gives each
 cluster's size over the median cluster's.  Each evaluation of those regions
 is named by its label made one word -- *NPC Corners* is `npc_corners`, *Id
-statistics* `id_statistics` -- and a value as `npc_corners.n_corners`; the
+statistics* `region_statistics` -- and a value as `npc_corners.n_corners`; the
 form lists the names there are.  A value only one evaluation has may be
 written bare.  The result goes into the regions' `maths`
 [region table](plugin:Panels/Glossary), where the summaries, the
@@ -252,7 +252,7 @@ Picking an entry also restores the *merged blinks* rule it was used with.
 
 ### source
 Every source that has been measured is offered: the ROIs once an
-evaluation has run on them, an id attribute once a block or *Id statistics*
+evaluation has run on them, an id attribute once a block or *Region statistics*
 has.  On regions, *apply to* and *merged blinks* do not apply.
 
 ### to_locs

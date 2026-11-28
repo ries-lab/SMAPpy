@@ -34,7 +34,7 @@ takes them from the one with the most localizations.  Nothing changes on
 the ROI until the proposals are applied (*Apply proposals* in the Regions
 tab); the range is on `time_s` where the table has it, else on `frame`.
 
-Use *Id statistics* for a quick count, centre, spread and the statistics of
+Use *Region statistics* for a quick count, centre, spread and the statistics of
 other attributes per trace; use this for the trace's path.  It reads the
 localizations, not merged blinks, and those the layer's filter keeps.
 

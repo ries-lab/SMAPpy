@@ -51,6 +51,6 @@ tabs:
   - plugin: Analysis/Regions/Filter ROIs
     line_above: true
   - plugin: Analysis/Regions/Sort ROIs
-  - plugin: Analysis/Measure/Id statistics
+  - plugin: Analysis/Measure/Region statistics
     line_above: true
   - plugin: Analysis/Regions/Summarize/Export table

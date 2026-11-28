@@ -19,7 +19,7 @@ from typing import Optional
 import numpy as np
 
 from . import Context, FormState, Plot, Plugin, Result, param, register, settings_values
-from .id_statistics import _id_choices, id_column
+from .region_statistics import _id_choices, id_column
 
 LABEL = "Trace statistics"
 RULES = (("none", "none"), ("still", "still molecule"), ("moving", "moving molecule"))
@@ -89,7 +89,7 @@ class TraceStatistics(Plugin):
         state.active["tail.without_tail"] = rule != "none"
         if ctx is not None and ctx.session is not None and len(ctx.locs):
             from ..tracking.columns import integer_columns
-            from .id_statistics import AUTO_IDS
+            from .region_statistics import AUTO_IDS
             found = next((c for c in AUTO_IDS if c in ctx.locs), "")
             state.choices["id_column"] = ([("", f"auto ({found})" if found else "auto")]
                                           + [(c, c) for c in integer_columns(ctx.locs)])

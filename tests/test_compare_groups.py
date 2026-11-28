@@ -27,10 +27,10 @@ def test_two_files_spread_differently_and_the_medians_say_so():
     session.add_file(traces(9.0, seed=1), FileInfo("wide", "/wide", "test"), append=True)
     session.show_grouped(0, False)
     session.layers[0].set_files(None)
-    ids = plugins.get("Analysis/Measure/Id statistics")
+    ids = plugins.get("Analysis/Measure/Region statistics")
     session.run(ids(), ids.Settings())
     cls = plugins.get("Analysis/Regions/Summarize/Compare groups")
-    result = session.run(cls(), cls.Settings(evaluation="per tid: Id statistics",
+    result = session.run(cls(), cls.Settings(evaluation="per tid: Region statistics",
                                              fields="std_xy_nm"))
     table = result.data["table"]
     assert set(result.data["groups"]) == {"tight", "wide"}
@@ -53,10 +53,10 @@ def test_file_conditions_from_the_names_group_the_traces():
     cond = plugins.get("Analysis/Process/File conditions")
     session.run(cond(), cond.Settings(pattern=r"(?P<power>\d+)uW",
                                       assign="cell1: buffer=MEA\ncell2: buffer=GLOX"))
-    ids = plugins.get("Analysis/Measure/Id statistics")
+    ids = plugins.get("Analysis/Measure/Region statistics")
     session.run(ids(), ids.Settings())
     cls = plugins.get("Analysis/Regions/Summarize/Compare groups")
-    result = session.run(cls(), cls.Settings(evaluation="per tid: Id statistics",
+    result = session.run(cls(), cls.Settings(evaluation="per tid: Region statistics",
                                              group_by="attribute:buffer",
                                              fields="std_xy_nm"))
     assert set(result.data["groups"]) == {"MEA", "GLOX"}

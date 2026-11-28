@@ -1,12 +1,13 @@
 ---
-version: "2"
-covers: [smappy.id_statistics.id_statistics, smappy.id_statistics.region_shapes, smappy.id_statistics.covariance_axes, smappy.id_statistics.hull_measure, smappy.id_statistics.dense_codes, smappy.id_statistics.stat_name, smappy.plugins.id_statistics.IdStatistics.run, smappy.plugins.id_statistics.summarised_columns, smappy.region_runs.column_table]
+version: "3"
+covers: [smappy.id_statistics.id_statistics, smappy.id_statistics.member_statistics, smappy.id_statistics.region_shapes, smappy.id_statistics.covariance_axes, smappy.id_statistics.hull_measure, smappy.id_statistics.dense_codes, smappy.id_statistics.stat_name, smappy.plugins.region_statistics.RegionStatistics.run, smappy.plugins.region_statistics.regions_source, smappy.plugins.region_statistics.summarised_columns, smappy.plugins.region_statistics.roi_table, smappy.region_runs.column_table]
 ---
 
 ## What it does
 
-Gives a few numbers for every [trace](plugin:Panels/Glossary), track or
-[cluster](plugin:Panels/Glossary) at once: how many localizations it has,
+Gives a few numbers for every region at once -- every ROI of the
+[ROI manager](plugin:Panels/ROI manager), or every
+[trace](plugin:Panels/Glossary), track or [cluster](plugin:Panels/Glossary): how many localizations it has,
 where its centre is, how far its localizations spread around it, how long
 it lasted, and the mean, median or maximum of any attribute -- a MINFLUX
 trace's `cfr` or `efo`, the photons, the precision.
@@ -20,8 +21,15 @@ trace of two or three localizations is often background.  The same holds
 for any [id attribute](plugin:Panels/Glossary) -- a linked track's
 `track_id`, a cluster's `cluster_id`, a blink's `group_id`.
 
+For ROIs, choose *ROIs* under *regions*: the count, spread and attribute
+statistics of every ROI, the quick summary before or instead of measuring
+the ROIs one at a time.
+
 The numbers are kept as a [region table](plugin:Panels/Glossary), a row per
-trace, named "per tid: Id statistics", not as attributes of the localizations.
+region, not as attributes of the localizations: for an id attribute named
+"per tid: Region statistics", for the ROIs kept with them as the per-region
+steps' results are, under "Region statistics", where *Filter ROIs* and
+*Sort ROIs* read them too.
 [Histogram](plugin:Analysis/Measure/Histogram) on region results then shows how they are distributed over the traces,
 and *Write results* (to the localizations) writes one onto the localizations where it is wanted
 there, to colour by it or to filter on it.
@@ -34,7 +42,13 @@ draws it; this gives every cluster's numbers at once.
 
 It measures every region in one pass.  The same numbers from
 *Localization statistics* run per region in a block take minutes for 10^5
-traces; here they take a second.  It reads the localizations, not merged
+traces; here they take a second.  That is the line between the two: this
+plugin gives cheap numbers -- counts, means, spreads -- for many regions at
+once; the [per-region steps](plugin:Panels/Regions tab) run any
+measurement in each region with that region's own context (its shape, its
+frame, a fit, a figure), one region at a time.  *Localization statistics*
+there fits the photon and precision distributions of each region, which
+this does not.  It reads the localizations, not merged
 blinks, and only those the layer's filter keeps; a drawn ROI does not
 narrow it, as it does not narrow a block's regions.  So on a MINFLUX file a
 filter on `trace_index` (each localization's number in its trace, from 1)
@@ -67,8 +81,11 @@ two = enough & (v["emitter_min"] != v["emitter_max"])
 ratio = v["std_xy_nm"] / np.sqrt(v["err2_mean"])
 ```
 
-**1. The regions.**  Every distinct value of the id attribute, 0 included, is
-one region; a localization with -1 (DBSCAN's noise, say) is in none.  Only the
+**1. The regions.**  For an id attribute, every distinct value, 0
+included, is one region; a localization with -1 (DBSCAN's noise, say) is in
+none.  For the ROIs, each ROI with *use* ticked is one region, holding the
+localizations its shape (and its ids and ranges) takes in; ROIs may
+overlap, and a localization in two of them counts in both.  Only the
 localizations the layer's filter keeps count, and a region with none kept
 is left out.
 
@@ -156,7 +173,11 @@ region closer than $2^{-52}$ times the number of regions times the
 attribute's whole range can swap, which moves a median by no more than that.
 Every other statistic needs no sort: the rows are put in region order once
 (not at all for a MINFLUX file, whose traces follow each other), and the
-regions are found by a lookup table on the ids, not by sorting them.
+regions are found by a lookup table on the ids, not by sorting them.  The
+ROIs' localizations are found through the spatial index, ROI by ROI, as the
+ROI manager finds them; their row lists are then joined -- a localization in
+two ROIs listed twice -- and measured by the same pass, so an id attribute
+and ROIs holding the same localizations give the same numbers.
 2 × 10^7 localizations in 10^6 traces take about 12 s with three medians,
 10^5 traces about a second.
 
@@ -196,20 +217,27 @@ one column are listed together in the table, so a reader can show
 `cfr › median` as a level of its own.
 
 The table is signed as a block's run would sign it: by the table, the id
-attribute and every layer's filter.  Once any of those changes it is out of
-date, as a block's would be, and *Summarize* no longer offers it until it
-is run again.
+attribute and every layer's filter; for the ROIs, each row by its ROI's own
+inputs, as a per-region step's is, so moving one ROI makes its row alone
+out of date.  Once any of those changes it is out of date, as a block's
+would be, and *Summarize* no longer offers it until it is run again.
 
 ## Parameters
 
-### id_column
-*auto* takes MINFLUX's `tid`, else a linked `track_id`, else `cluster_id`;
-choose `group_id` for blinks, or any other id attribute.
+### regions
+*auto* takes MINFLUX's `tid`, else a linked `track_id`, else `cluster_id`,
+and the ROIs only when the table has none of them: on a MINFLUX file the
+traces are what one measures, whatever ROIs were drawn.  Choose `group_id`
+for blinks, or any other id attribute.
+
+### common
+On a MINFLUX file these are all five; on a camera fit usually `photons` and
+`xy_err_nm`.  Untick it to summarise only what is ticked under *attributes*.
 
 ### columns
-Names the table does not have are refused with the list of those it has.
-On a MINFLUX file *auto* gives `cfr`, `efo`, `dcr`, `photons` and
-`xy_err_nm`.
+Positions, frame, time and id attributes are not offered: the centre,
+spread and time span are measured anyway.  An attribute ticked in a saved
+setting that this table lacks is refused with the list of those it has.
 
 ### use_z
 Untick it for a 2D measurement whose `z_nm` is only noise (a MINFLUX 2D

@@ -57,9 +57,9 @@ def test_two_files_in_one_layer_give_one_region_per_trace_of_each():
     assert list(np.unique(session.locs["tid_file"][second])) == [1, 2, 3]
     session.show_grouped(0, False)
     session.layers[0].set_files(None)
-    cls = plugins.get("Analysis/Measure/Id statistics")
+    cls = plugins.get("Analysis/Measure/Region statistics")
     session.run(cls(), cls.Settings())
-    got = list(rows(session.context(), Evaluation("tid", "Id statistics")))
+    got = list(rows(session.context(), Evaluation("tid", "Region statistics")))
     # eight traces of 10, none of the first file's merged with the second's
     assert len(got) == 8 and all(r["n_locs"] == 10 for r in got)
     assert max(r["std_xy_nm"] for r in got) < 10

@@ -190,7 +190,7 @@ the result is made, where a misspelt key of `data` used to do nothing:
 | `rois` | the ROIs the run added to the ROI manager's project (`[]` when it found none; None when it adds none): the manager redraws and a preview is dropped |
 | `roi_preview` | a segmenter's proposals, drawn grey and not added (`Session.show_preview`) |
 | `roi_project` | the whole ROI project as a chain left it, loaded into the session's |
-| `id_regions` | what was measured per region of an id column, `{column: {name: RegionTable}}`, added to `Session.id_regions`; a plugin that measures every region at once makes its table with `region_runs.column_table`, signed as a block's run would be, so it reads as current (`plugins/id_statistics.py`) |
+| `id_regions` | what was measured per region of an id column, `{column: {name: RegionTable}}`, added to `Session.id_regions`; a plugin that measures every region at once makes its table with `region_runs.column_table`, signed as a block's run would be, so it reads as current (`plugins/region_statistics.py`; the ROIs' whole table goes under `"rois"`) |
 | `region_tables` | a block's tables per region, kept by a block around it as its region's children |
 | `region_filter` | the region filter's conditions after the run, as dicts (`region_filter.Condition.to_dict`), set by `Session.set_region_filter`; None leaves them (`plugins/region_filter.py`) |
 | `evaluations` | `(name, plugin path)` of the evaluations the run left, so a later step of a chain reads them without asking |

@@ -17,7 +17,7 @@ closer to each other than to the rest).  After
 in every cluster, a row of numbers each: the size distribution of
 the clusters, whether they are round or stretched, whether the big ones are
 also the dense ones.  For every cluster at once, without a block,
-[Id statistics](plugin:Analysis/Measure/Id statistics) with *shape* ticked
+[Region statistics](plugin:Analysis/Measure/Region statistics) with *shape* ticked
 gives the same numbers under the same names -- the same function computes
 both -- in a fraction of the time; this plugin is for looking at one
 cluster or ROI, with its figure.  It runs the same way in every
