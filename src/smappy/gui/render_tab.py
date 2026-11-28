@@ -1426,7 +1426,8 @@ class RenderTab(QWidget):
         self.contrast.setToolTip("saturate 10^-p of the pixels: 2 is bright, 4 dark")
         # its size hint is the range's, "6": squeezed to it beside the scale's
         # choice, a value such as 3.25 was cut off
-        self.contrast.setMinimumWidth(
+        # -- and no wider: the exponent needs no more room than "0.00"
+        self.contrast.setFixedWidth(
             self.contrast.fontMetrics().horizontalAdvance("0.00") + 36)
         # SMAP's toggle: the quantile, or a set maximum -- here a density, so
         # that the picture keeps its brightness as one zooms (`absolute_imax`)
@@ -1444,8 +1445,9 @@ class RenderTab(QWidget):
         contrast_row = QHBoxLayout()
         contrast_row.setContentsMargins(0, 0, 0, 0)
         contrast_row.addWidget(self.scale)
-        contrast_row.addWidget(self.contrast, 1)
+        contrast_row.addWidget(self.contrast)
         contrast_row.addWidget(self.maximum, 1)
+        contrast_row.addStretch(0)
         self.grouped = QCheckBox("merge blinks")
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
                                 "merges the table on first use")

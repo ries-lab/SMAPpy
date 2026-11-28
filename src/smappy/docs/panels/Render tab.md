@@ -575,14 +575,16 @@ blue, which is dark on black.
 or tracks in the order they were found, so neighbouring ids are often
 neighbouring structures, and on a ramp they get nearly the same colour.  The
 *ids* table, offered only when the layer is coloured by such an attribute,
-gives each value a colour of its own instead.  Id $k$ takes the entry
-$\lfloor \mathrm{frac}(k \varphi + o) \cdot 255 \rfloor$ of a table of 255
-colours, where $\varphi = 0.618...$ is the golden ratio's fractional part and
-$o$ an offset between 0 and 1.  One id to the next moves 0.38 of the way
-round the table, so neighbouring ids land far apart.  The table's colours run
-round the hue circle, its entries in turn the full colour, a paler one and a
-darker one, so two ids whose hues do land close still differ in lightness
-(the darker ones read a little sparser, the price of telling them apart).  The
+gives each value a colour of its own instead: a hash of the id -- a
+scrambling of its bits, the same for the same id and seed, unrelated for any
+other -- picks one of 255 colours, and the offset, between 0 and 1, is the
+seed.  So two neighbouring structures get unrelated colours whatever their
+numbers; now and then two land close by chance (a few in a hundred), never in
+a pattern.  The table's colours run round the hue circle, its entries in turn
+the full colour and a paler one, so most ids whose hues land close still
+differ in lightness.  Every colour is at full brightness, so a structure looks
+as dense as it is whatever its id, and blue and its neighbours, dark on black,
+are lifted towards white until they are as bright as pure red.  The
 colour of an id depends on the id and the offset alone: not on the range,
 not on which other ids are there, so a cluster keeps its colour when the
 filter or the view changes.  Localizations in no id (-1) and values that

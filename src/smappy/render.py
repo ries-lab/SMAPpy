@@ -664,7 +664,7 @@ class DisplaySettings:
     # once, with `white_background=False` per layer -- but it is kept here so
     # that a single-layer render (an export, a script) needs nothing else.
     white_background: bool = False
-    # the ids table's turn (`lut.id_index`): a new one on choosing the table
+    # the ids table's seed (`lut.id_index`): a new one on choosing the table
     # again, kept so that the same picture comes back from a saved session
     ids_offset: float = 0.0
 

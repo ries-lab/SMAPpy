@@ -233,34 +233,56 @@ LUT = Union[str, np.ndarray]
 # An id column -- clusters, tracks, files -- numbers things that lie side by
 # side in the order they were found, so on a ramp neighbouring ids, which are
 # often neighbouring structures, get nearly the same colour.  The ids table
-# maps each value to a colour of its own instead, whatever the range: the
-# value times the golden ratio, its fractional part the place in the table
-# (Weyl's sequence: consecutive ids land about 0.38 of the circle apart, and
-# no two of the first hundreds closer than a few hundredths).  The table runs
-# round the hue circle, its entries in turn the full colour, a paler one and a
-# darker one (`IDS_STEPS`), so two ids whose hues do land close still differ
-# in lightness.  Paler alone was not enough: near yellow every colour at full
-# value is light, and neighbours there differed by 1 in L* of 100; with the
-# darker step every three neighbours span at least 33.
-# An offset, kept with the layer's display (`render.DisplaySettings.
-# ids_offset`), turns every id's place by the same amount: a new one is a new
-# set of colours, the same one the same picture.
+# maps each value to a colour of its own instead, whatever the range: a hash
+# of the id (splitmix64's finaliser), seeded by the offset, its top bits the
+# place in the table.  Until 2026-11 the place was the id times the golden
+# ratio (Weyl's sequence), which spreads consecutive ids best but repeats
+# itself at the Fibonacci numbers: ids 8 apart landed 0.06 of the circle
+# apart, so simulated nuclear pores, eight corners each numbered in turn, came
+# out pore after pore in nearly the same colours -- and the offset, a turn of
+# every place, could not undo it.  A hash has no such structure; the price is
+# that two neighbours land close by chance now and then (a few in a hundred).
+# The table runs round the hue circle, its entries in turn the full colour
+# and a paler one (`IDS_STEPS`), so two ids whose hues land close mostly
+# still differ.  Every entry is at full value, so a structure is as bright as
+# its density whatever its id: a third, darker step (value 0.62) made a third
+# of the ids look sparser, and with blue, the darkest hue, nearly invisible on
+# black.  Hues too dark at full value -- blue and its neighbours -- are lifted
+# towards white until their luminance reaches `IDS_MIN_LUMINANCE`.
+# The offset, kept with the layer's display (`render.DisplaySettings.
+# ids_offset`), seeds the hash: a new one is a new set of colours, the same
+# one the same picture.
 #
 # It was a plugin until 2026-11, *Shuffle ids*, which wrote a permuted copy of
 # the column to colour by; a table needs no new column and no run.
 
 IDS_LUT = "ids"
-#: the golden ratio's fractional part, the step from one id to the next
-GOLDEN = 0.6180339887498949
-#: ``(saturation, value)`` the entries cycle through: full, paler, darker
-IDS_STEPS = ((1.0, 1.0), (0.45, 1.0), (1.0, 0.62))
+#: ``(saturation, value)`` the entries cycle through: full, paler
+IDS_STEPS = ((1.0, 1.0), (0.45, 1.0))
+#: the least relative luminance of an entry (sRGB, linear): pure blue's 0.07
+#: lifted to this is (0.48, 0.48, 1), as bright on black as pure red
+IDS_MIN_LUMINANCE = 0.2126
 #: columns that are ids although `ids.is_id` does not say so by their name
 IDS_ALSO = ("filenumber", "channel")
 
 
+def _lift(colours: np.ndarray, floor: float) -> np.ndarray:
+    """Each colour blended with white, in linear light, just enough that its
+    luminance reaches ``floor``; colours already above it unchanged."""
+    weights = np.array([0.2126, 0.7152, 0.0722])
+    linear = np.where(colours <= 0.04045, colours / 12.92,
+                      ((colours + 0.055) / 1.055) ** 2.4)
+    y = linear @ weights
+    t = np.clip((floor - y) / (1.0 - y), 0.0, 1.0)[:, None]
+    linear = linear + t * (1.0 - linear)
+    return np.where(linear <= 0.0031308, linear * 12.92,
+                    1.055 * linear ** (1 / 2.4) - 0.055)
+
+
 def _ids_table() -> np.ndarray:
     """``N`` entries: the colour of no id (`NO_VALUE`) first, then ``N - 1``
-    colours round the hue circle, saturation and value cycling (`IDS_STEPS`)."""
+    colours round the hue circle, saturation and value cycling (`IDS_STEPS`),
+    the dark hues lifted (`IDS_MIN_LUMINANCE`)."""
     n = N - 1
     h = np.arange(n) / n * 6.0
     i, f = np.floor(h).astype(int) % 6, h - np.floor(h)
@@ -270,7 +292,7 @@ def _ids_table() -> np.ndarray:
                     np.choose(i, [up, one, one, down, zero, zero]),
                     np.choose(i, [zero, zero, up, one, one, down])], axis=1)
     steps = np.asarray(IDS_STEPS)[np.arange(n) % len(IDS_STEPS)]
-    colours = (1.0 - steps[:, :1] * (1.0 - hue)) * steps[:, 1:]
+    colours = _lift((1.0 - steps[:, :1] * (1.0 - hue)) * steps[:, 1:], IDS_MIN_LUMINANCE)
     return np.concatenate([np.asarray([NO_VALUE]), colours]).astype(np.float32)
 
 
@@ -288,14 +310,25 @@ def offers_ids(column) -> bool:
     return bool(column) and (is_id(column) or column in IDS_ALSO)
 
 
+def _mix(x: np.ndarray) -> np.ndarray:
+    """splitmix64's finaliser: every bit of ``x`` stirred into every other."""
+    with np.errstate(over="ignore"):
+        x = (x ^ (x >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        x = (x ^ (x >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+        return x ^ (x >> np.uint64(31))
+
+
 def id_index(values: np.ndarray, offset: float = 0.0) -> np.ndarray:
-    """Each value's entry of the ids table: ``1 + floor(frac(v GOLDEN +
-    offset) (N - 1))``, and 0 (`NO_VALUE`) for none -- -1 (`ids.NONE`),
-    any negative value, NaN.  A value's entry depends on it and the offset
-    alone, not on which other ids are there or on a range."""
+    """Each value's entry of the ids table: ``1 + `` the top bits of a hash
+    of the id seeded by the offset, scaled to ``N - 1`` entries, and 0
+    (`NO_VALUE`) for none -- -1 (`ids.NONE`), any negative value, NaN.  A
+    value's entry depends on it and the offset alone, not on which other ids
+    are there or on a range."""
     values = np.asarray(values, dtype=np.float64)
     missing = ~np.isfinite(values) | (values < 0)
-    place = np.mod(np.where(missing, 0.0, values) * GOLDEN + offset, 1.0)
+    ids = np.where(missing, 0.0, np.floor(values)).astype(np.uint64)
+    seed = _mix(np.uint64(int(float(offset) % 1.0 * 2.0 ** 53)) + np.uint64(1))
+    place = (_mix(ids ^ seed) >> np.uint64(11)).astype(np.float64) / 2.0 ** 53
     index = 1 + np.minimum((place * (N - 1)).astype(np.int32), N - 2)
     index[missing] = 0
     return index

@@ -115,21 +115,37 @@ def test_a_diverging_ramp_through_black_goes_through_white_on_white_paper():
 # ---------------------------------------------------------------- the ids table
 
 def test_neighbouring_ids_get_colours_far_apart_where_a_ramp_gives_them_alike():
-    ids = np.arange(1, 1001)
+    ids = np.arange(1, 2001)
     step = lambda c: np.linalg.norm(np.diff(c, axis=0), axis=1)
-    by_ids = step(luts.colors(ids, luts.IDS_LUT, 1, 1000))
-    by_rainbow = step(luts.colors(ids, "rainbow", 1, 1000))
+    by_ids = step(luts.colors(ids, luts.IDS_LUT, 1, 2000))
+    by_rainbow = step(luts.colors(ids, "rainbow", 1, 2000))
     assert by_ids.mean() > 0.7 and by_ids.mean() > 100 * by_rainbow.mean()
-    # and not only on average: no two neighbours share a colour
-    assert by_ids.min() > 0.05
+    # a hash, so a few neighbours land close by chance -- but only a few
+    assert (by_ids < 0.1).mean() < 0.06
 
 
-def test_ids_whose_hues_land_close_differ_in_lightness():
+def test_ids_a_fibonacci_number_apart_are_no_more_alike_than_neighbours():
+    """The golden-ratio map repeated itself at 8, 13, 21...: eight corners per
+    nuclear pore, numbered in turn, gave every pore nearly the same colours."""
+    colours = luts.colors(np.arange(1, 4001), luts.IDS_LUT, 0, 1, offset=0.4)
+    apart = lambda k: np.linalg.norm(colours[k:] - colours[:-k], axis=1).mean()
+    for k in (8, 13, 21, 34, 55):
+        assert apart(k) > 0.9 * apart(1), k
+
+
+def test_every_ids_colour_is_at_full_value_and_none_is_dark():
     table = luts.get(luts.IDS_LUT)[1:]                   # entry 0 is "no id"
+    # as bright as its density, whatever the id: no darker step
+    assert np.allclose(table.max(axis=1), 1.0, atol=1e-6)
+    # pure blue, L* 32 on black, is lifted to the lightness of pure red
+    assert lightness(table).min() > lightness([[1.0, 0.0, 0.0]])[0] - 0.5
+
+
+def test_ids_whose_hues_land_close_mostly_differ_in_lightness():
+    table = luts.get(luts.IDS_LUT)[1:]
     light = lightness(table)
-    # every three entries next to each other in hue span a third of L*
-    window = np.lib.stride_tricks.sliding_window_view(light, 3)
-    assert (window.max(axis=1) - window.min(axis=1)).min() > 30
+    pairs = np.abs(np.diff(light))
+    assert np.median(pairs) > 10
 
 
 def test_minus_one_and_nan_are_grey_in_the_ids_table():
@@ -145,6 +161,15 @@ def test_an_ids_colour_depends_on_the_id_and_the_offset_alone():
                         invert=True, offset=0.3)[:3]
     assert np.array_equal(alone, among)
     assert not np.array_equal(alone, luts.colors(some, luts.IDS_LUT, 0, 1, offset=0.55))
+
+
+def test_a_new_offset_draws_new_colours_not_the_old_ones_turned():
+    """A turn kept which ids looked alike; a new seed does not."""
+    ids = np.arange(1, 3001)
+    index = lambda o: luts.id_index(ids, o).astype(int)
+    shift = (index(0.55) - index(0.3)) % (luts.N - 1)
+    # under a turn every id moves by about the same number of entries
+    assert np.bincount(shift).max() < 0.02 * len(ids)
 
 
 def test_the_ids_table_on_a_range_draws_what_its_colours_are():
