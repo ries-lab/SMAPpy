@@ -537,7 +537,10 @@ plugin that belongs in the shipped GUI gets a line there.  The tabs of one
 technique (MINFLUX, DNA-PAINT, Tracking, 4Pi) are GUI files of their own in
 `src/smappy/data/workspaces/`, added beside a workspace's tabs by *View >
 Workspace > Tabs* or a tab's right click (`MainWindow.fill_tabs_menu`,
-`workspace.tab_sets`, `Workspace.add_tabs`), where unticking a tab hides it
+`workspace.tab_sets`, `Workspace.add_tabs`) -- and so are the user's own
+tabs, saved by a tab's *Save tab to Tabs list...* into the config
+directory's `tabs/` (`workspace.save_tab_set`, `user_tab_sets`, a saved
+tab of a shipped set's name replacing it there) -- where unticking a tab hides it
 (`Tab.hidden`, kept with its plugins) and *Detach* floats it
 (`Tab.detached`, `app.TabWindow`); a tab's page is `MainWindow.tab_page`
 and `show_tab` brings it forward wherever it is, never

@@ -292,8 +292,9 @@ def actions_of(window) -> Dict[str, Action]:
         Action("View/Workspace/Reset", "The shipped workspace, now and at the "
                "next start.", window.load_default_gui),
         Action("View/Workspace/Tabs", "A tab shown or hidden (a hidden tab "
-               "keeps its plugins and values), or a shipped tab set -- the "
-               "plugins of one technique -- added beside the tabs there are.",
+               "keeps its plugins and values), or a tab set -- a shipped one, the "
+               "plugins of one technique, or a tab the user saved -- added "
+               "beside the tabs there are.",
                lambda name, shown=True: _show_tab(window, name, shown),
                {"name": {"type": "string", "description": "a tab's name, or one of "
                          "the tab sets: " + ", ".join(tab_sets())},
@@ -321,6 +322,15 @@ def actions_of(window) -> Dict[str, Action]:
                    _tab_index(window, after) + 1 if after else len(window.workspace.tabs),
                    name),
                {"name": {"type": "string"}, "after": {"type": "string"}}, ("name",)),
+        Action("View/Workspace/Save tab to Tabs list", "A tab, with its plugins "
+               "and their values, saved to the user's own Tabs list, offered "
+               "under Tabs in any workspace; a saved tab of its name replaced.",
+               lambda tab: str(window.save_tab_to_list(_tab_index(window, tab), ask=False)),
+               {"tab": {"type": "string"}}, ("tab",)),
+        Action("View/Workspace/Delete saved tab", "A tab the user saved "
+               "taken off the Tabs list; a tab of its name in the workspace stays.",
+               lambda name: window.delete_saved_tab(name, ask=False),
+               {"name": {"type": "string"}}, ("name",)),
         Action("View/Workspace/From data file", "The workspace a localization "
                "file was saved with.", workspace_from, {"path": PATH}, ("path",)),
         Action("Plugins/Microscope manager", "The microscope entries' window.",

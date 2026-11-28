@@ -361,9 +361,14 @@ def make(d) -> None:
            "detach it into a window of its own.",
            spot=[d.rect(menu)], point=_tab_button(d, "Analysis"),
            zoom=d.around(menu, 700))
+    d.shot("Save tab to Tabs list keeps a tab you built, with its settings, "
+           "for any workspace.",
+           spot=[d.rect(menu)], point=_menu_item(d, menu, "Save tab to Tabs list..."),
+           zoom=d.around(menu, 700))
     tabs_menu = _submenu(d, menu, "Tabs")
     d.shot("Under Tabs, a tick shows or hides each tab. Below the line are "
-           "ready-made tabs for one technique, such as MINFLUX or DNA-PAINT.",
+           "ready-made tabs for one technique, such as MINFLUX or DNA-PAINT, "
+           "and tabs you saved from their right-click.",
            spot=[d.rect(tabs_menu)], point=_menu_item(d, tabs_menu, "DNA-PAINT"),
            click=True, zoom=d.around(tabs_menu, 760))
     tabs_menu.close()

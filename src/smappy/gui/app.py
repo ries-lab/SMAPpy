@@ -942,6 +942,9 @@ class ControlWindow(QMainWindow):
             len(self._in_strip()) > 1)
         menu.addSeparator()
         menu.addAction("New tab...", lambda: self.new_tab(index + 1))
+        save = menu.addAction("Save tab to Tabs list...", lambda: self.save_tab_to_list(index))
+        save.setEnabled(self.workspace.tabs[index].kind == "plugins")
+        save.setToolTip("kept in your own settings: Tabs offers it in any workspace")
         tabs = menu.addMenu("Tabs")
         tabs.setToolTipsVisible(True)
         self.fill_tabs_menu(tabs)
@@ -949,9 +952,10 @@ class ControlWindow(QMainWindow):
 
     def fill_tabs_menu(self, menu: QMenu) -> None:
         """A tick per tab, which shows or hides it, then the shipped tab sets
-        not added yet (`workspace.tab_sets`), unticked: ticking one adds it.
-        A hidden tab keeps its plugins and values; the last tab in the strip
-        cannot be hidden."""
+        not added yet (`workspace.tab_sets`), unticked: ticking one adds it,
+        then likewise the tabs the user saved (`workspace.user_tab_sets`),
+        and *Delete saved tab*.  A hidden tab keeps its plugins and values;
+        the last tab in the strip cannot be hidden."""
         menu.clear()
         strip = self._in_strip()
         for i, tab in enumerate(self.workspace.tabs):
@@ -963,14 +967,51 @@ class ControlWindow(QMainWindow):
             action.setEnabled(tab.hidden or strip != [i])
             action.toggled.connect(lambda on, n=tab.name: self.show_tab_named(n, on))
         have = {tab.name for tab in self.workspace.tabs}
-        sets = [n for n in workspace_module.tab_sets() if n not in have]
-        if sets:
+        saved = workspace_module.user_tab_sets()
+        shipped = [n for n in workspace_module.shipped_tab_sets()
+                   if n not in have and n not in saved]
+        mine = [n for n in saved if n not in have]
+        for names, tip in ((shipped, "a tab of the {} plugins beside these tabs"),
+                           (mine, "your saved tab {}, beside these tabs")):
+            if names:
+                menu.addSeparator()
+            for name in names:
+                action = menu.addAction(name)
+                action.setCheckable(True)
+                action.setToolTip(tip.format(name))
+                action.toggled.connect(lambda on, n=name: on and self.add_tab_set(n))
+        if saved:
             menu.addSeparator()
-        for name in sets:
-            action = menu.addAction(name)
-            action.setCheckable(True)
-            action.setToolTip(f"a tab of the {name} plugins beside these tabs")
-            action.toggled.connect(lambda on, n=name: on and self.add_tab_set(n))
+            delete = menu.addMenu("Delete saved tab")
+            for name in saved:
+                delete.addAction(f"{name}...", lambda n=name: self.delete_saved_tab(n))
+
+    def save_tab_to_list(self, index: int, ask: bool = True) -> Optional[Path]:
+        """Tab ``index`` -- its plugins, labels and values as they are now --
+        saved to the user's Tabs list (`workspace.save_tab_set`), after a
+        question when a saved tab of its name would be replaced.  The file."""
+        self.collect_workspace()
+        tab = self.workspace.tabs[index]
+        if ask and tab.name in workspace_module.user_tab_sets():
+            question = (f"Replace your saved tab {tab.name} with this one?")
+            if QMessageBox.question(self, "Save tab", question) != QMessageBox.Yes:
+                return None
+        path = workspace_module.save_tab_set(tab)
+        self.statusBar().showMessage(
+            f"Saved the {tab.name} tab: Tabs offers it in any workspace "
+            "where no tab has its name.", 8000)
+        return path
+
+    def delete_saved_tab(self, name: str, ask: bool = True) -> bool:
+        """The saved tab ``name`` off the Tabs list, after a question; a tab
+        of that name in the workspace stays."""
+        if ask:
+            question = (f"Delete your saved tab {name}?\n\nIt is no longer offered "
+                        "under Tabs.  A tab of that name in this workspace stays.")
+            if QMessageBox.question(self, "Delete saved tab", question) != QMessageBox.Yes:
+                return False
+        workspace_module.delete_tab_set(name)
+        return True
 
     def _in_strip(self) -> List[int]:
         """The places of the tabs shown in the strip: not hidden, not detached."""

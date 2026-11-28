@@ -53,12 +53,79 @@ DEFAULT_GUI = Path(__file__).resolve().parent / "data" / "default.gui.yaml"
 TAB_SETS = Path(__file__).resolve().parent / "data" / "workspaces"
 
 
-def tab_sets() -> Dict[str, Path]:
+def shipped_tab_sets() -> Dict[str, Path]:
     """``{name: file}`` of the shipped tab sets, by the file's name."""
     if not TAB_SETS.is_dir():
         return {}
     return {display_name(path): path
             for path in sorted(TAB_SETS.glob(f"*{GUI_SUFFIX}"))}
+
+
+def user_tabs_dir() -> Path:
+    """Where *Save tab to Tabs list* writes: the user's own configuration,
+    so that a tab one person keeps does not become the lab's (the module
+    docstring's rule), and a file there is a tab set like the shipped ones --
+    copied into ``data/workspaces`` it ships."""
+    return config.config_dir() / "tabs"
+
+
+def user_tab_sets() -> Dict[str, Path]:
+    """``{name: file}`` of the tabs the user saved, by the tab's own name --
+    which a file name cannot always hold (a ``/``) -- read from the file."""
+    folder = user_tabs_dir()
+    if not folder.is_dir():
+        return {}
+    out = {}
+    for path in sorted(folder.glob(f"*{GUI_SUFFIX}")):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            name = str(data["tabs"][0]["name"])
+        except Exception:                       # noqa: BLE001 -- a broken file is listed by its name
+            name = display_name(path)
+        out.setdefault(name, path)
+    return out
+
+
+def tab_sets() -> Dict[str, Path]:
+    """``{name: file}`` of every tab set: the shipped ones, then the user's
+    (`user_tab_sets`); a saved tab of a shipped set's name replaces it --
+    the user saved it as they want it."""
+    sets = shipped_tab_sets()
+    user = user_tab_sets()
+    sets = {n: p for n, p in sets.items() if n not in user}
+    sets.update(user)
+    return sets
+
+
+def _file_name(name: str) -> str:
+    """A tab's name made a file name: the characters a file system refuses
+    replaced, so ``A/B`` is ``A_B.gui.yaml`` (the name itself is in the file)."""
+    safe = "".join("_" if c in '/\\:*?"<>|' or ord(c) < 32 else c for c in name).strip(" .")
+    return (safe or "tab") + GUI_SUFFIX
+
+
+def save_tab_set(tab: "Tab") -> Path:
+    """``tab`` written to the user's Tabs list (`user_tabs_dir`), with its
+    plugins, labels and values, as a tab set of one tab; a saved tab of the
+    same name is replaced.  Not hidden or detached: those are how a
+    workspace shows it, not what the tab is."""
+    if tab.kind != "plugins":
+        raise ValueError(f"the {tab.name} tab is a window of the program, not a list of plugins")
+    saved = Tab(name=tab.name, kind=tab.kind, header=tab.header,
+                instances=[i.copy() for i in tab.instances])
+    path = user_tab_sets().get(tab.name) or user_tabs_dir() / _file_name(tab.name)
+    return Workspace(tabs=[saved]).save(path)
+
+
+def delete_tab_set(name: str) -> Path:
+    """The saved tab ``name`` taken off the user's Tabs list: its file
+    removed.  The shipped sets cannot be; the file's path."""
+    path = user_tab_sets().get(name)
+    if path is None:
+        raise ValueError(f"no saved tab {name!r}: the saved tabs are "
+                         + (", ".join(user_tab_sets()) or "none"))
+    path.unlink()
+    return path
 
 
 @dataclass

@@ -668,7 +668,7 @@ def test_a_chain_only_plugin_is_offered_where_chain_steps_are_picked_and_nowhere
 def test_every_shipped_tab_set_names_installed_plugins_and_settings_they_take():
     """A renamed plugin or setting fails here, not in a user's Add tabs menu."""
     from smappy import workspace
-    sets = workspace.tab_sets()
+    sets = workspace.shipped_tab_sets()
     assert set(sets) >= {"MINFLUX", "DNA-PAINT", "Tracking", "4Pi"}
     refs = plugins.refs()
     for name, path in sets.items():
@@ -780,6 +780,80 @@ def test_unticking_a_tab_under_tabs_hides_it_and_ticking_brings_it_back_as_left(
     assert window._in_strip() == [0]
     assert not _tabs_menu(window)[window.workspace.tabs[0].name].isEnabled()
     assert not window.show_tab_named(window.workspace.tabs[0].name, False)
+
+
+def test_a_saved_tab_is_written_to_the_users_folder_and_listed_as_a_tab_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path))
+    from smappy import workspace
+    from smappy.workspace import Instance, Tab
+    tab = Tab(name="My/drift", header="analysis", hidden=True, detached=True, instances=[
+        Instance(plugin="Analysis/Drift/RCC", label="RCC (fast)", values={"x": 1}),
+        Instance(plugin="Analysis/Drift/COMET", line_above=True)])
+    path = workspace.save_tab_set(tab)
+    assert path.parent == tmp_path / "tabs" and path.name == "My_drift.gui.yaml"
+    # listed by the tab's own name, which the file name could not hold
+    assert workspace.user_tab_sets() == {"My/drift": path}
+    assert workspace.tab_sets()["My/drift"] == path
+    back = workspace.load(path).tabs
+    assert [t.name for t in back] == ["My/drift"]
+    assert not back[0].hidden and not back[0].detached and back[0].header == "analysis"
+    assert [(i.plugin, i.label, i.values, i.line_above) for i in back[0].instances] == [
+        ("Analysis/Drift/RCC", "RCC (fast)", {"x": 1}, False),
+        ("Analysis/Drift/COMET", "", {}, True)]
+    # saved again: the same file, replaced
+    tab.instances.pop()
+    assert workspace.save_tab_set(tab) == path and len(workspace.load(path).tabs[0].instances) == 1
+    # a saved tab of a shipped set's name is the one offered
+    mine = workspace.save_tab_set(Tab(name="Tracking"))
+    assert workspace.tab_sets()["Tracking"] == mine
+    assert workspace.shipped_tab_sets()["Tracking"] != mine
+
+    workspace.delete_tab_set("My/drift")
+    assert not path.exists() and "My/drift" not in workspace.tab_sets()
+    workspace.delete_tab_set("Tracking")
+    assert workspace.tab_sets()["Tracking"] == workspace.shipped_tab_sets()["Tracking"]
+    with pytest.raises(ValueError, match="no saved tab"):
+        workspace.delete_tab_set("Tracking")          # the shipped one stays
+    with pytest.raises(ValueError, match="window of the program"):
+        workspace.save_tab_set(Tab(name="Render", kind="render"))
+
+
+def test_a_tab_saved_from_its_right_click_comes_back_from_tabs_in_another_workspace(window):
+    from smappy import workspace
+    names = [t.name for t in window.workspace.tabs]
+    index = names.index("Analysis")
+    assert "Save tab to Tabs list..." in [a.text() for a in window.tab_menu(index).actions()]
+    window.tab_page(index).tab.instances[0].label = "renamed"     # what is there now is saved
+    kept = [(i.plugin, i.label) for i in window.collect_workspace().tabs[index].instances]
+    assert window.rename_tab(index, "Mine")
+    window.save_tab_to_list(index, ask=False)
+    assert "Mine" in workspace.user_tab_sets()
+    # offered only where no tab has its name: here "Mine" is the tab's own tick
+    ticks = [a.text() for a in next(a.menu() for a in window.tab_menu(0).actions()
+                                    if a.text() == "Tabs").actions()]
+    assert ticks.count("Mine") == 1 and "Delete saved tab" in ticks
+    assert window.remove_tab(index, ask=False)
+    ticks = _tabs_menu(window)
+    assert "Mine" in ticks and not ticks["Mine"].isChecked()
+    delete = ticks["Delete saved tab"].menu()
+    assert [a.text() for a in delete.actions()] == ["Mine..."]
+
+    ticks["Mine"].setChecked(True)                   # ticking it adds it
+    assert window.workspace.tabs[-1].name == "Mine"
+    assert [(i.plugin, i.label) for i in window.workspace.tabs[-1].instances] == kept
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "Mine"
+
+    assert window.delete_saved_tab("Mine", ask=False)
+    assert "Mine" not in workspace.user_tab_sets()
+    assert window.workspace.tabs[-1].name == "Mine"   # the tab in the workspace stays
+    assert "Delete saved tab" not in _tabs_menu(window)
+
+
+def test_the_render_tab_cannot_be_saved_to_the_tabs_list(window):
+    index = next(i for i, t in enumerate(window.workspace.tabs) if t.kind != "plugins")
+    save = next(a for a in window.tab_menu(index).actions()
+                if a.text() == "Save tab to Tabs list...")
+    assert not save.isEnabled()
 
 
 def test_a_detached_tab_is_in_a_window_of_its_own_and_closing_it_puts_it_back(window):
