@@ -37,17 +37,34 @@ or a study whose result Jonas has not seen.
    sides' content; a conflict in code that is not mechanical stops the landing:
    say which files and what each side did, and ask.  If `csrc/` moved, build
    again: `python setup.py build_ext --inplace`.
-4. **Tests.**  The fast tier always: `python -m pytest tests -q -n auto` in
-   this worktree (`tests/conftest.py` makes it test this tree).  The slow tier
-   (`--slow`) when CLAUDE.md asks for it -- a new plugin, a GUI change, a
-   tutorial, a page, what an algorithm computes -- or when Jonas says
-   `/land slow`.  A failure the change caused is fixed and step 3 repeated; a
-   failure it did not cause (run it alone; compare with `origin/main`) is
-   named in the report, not hidden.  Lint what changed (`ruff check`, and
-   `src/decode_smlm`'s and uipsf's own configurations for theirs).
+4. **Tests -- only what has not passed already.**  The tier the change asks
+   for: the fast tier always, the slow tier (`--slow`) when CLAUDE.md asks
+   for it -- a new plugin, a GUI change, a tutorial, a page, what an
+   algorithm computes -- or when Jonas says `/land slow`.  Then ask
+   `python scripts/tested.py check --tier <fast|slow>` what it still needs:
+   - **none** -- this exact tree (every file, committed or not) passed that
+     tier already, usually the session's own run before it proposed landing:
+     run nothing, and say so in the report with the stamp's date.
+   - **fast** -- the branch's own change passed that tier on an older main,
+     and main has since moved only in other files, through tested landings,
+     with `csrc/`, `setup.py`, `pyproject.toml` and `tests/conftest.py`
+     unchanged: run the fast tier only, never the slow one again.
+   - **slow** / **fast** as asked -- anything else: run it.
+
+   A whole passing run of `tests` (no path below it, `-k`, `-m`) stamps its
+   tree by itself (`tests/conftest.py`, the stamps in the shared git
+   directory, `scripts/tested.py list`), so a run is never repeated on the
+   same files, in this worktree or another.  Run them in this worktree
+   (`tests/conftest.py` makes it test this tree).  A failure the change
+   caused is fixed and step 3 repeated; a failure it did not cause (run it
+   alone; compare with `origin/main`) is named in the report, not hidden.
+   Lint what changed (`ruff check`, and `src/decode_smlm`'s and uipsf's own
+   configurations for theirs).
 5. **Land.**
    - `/land`: `git push origin HEAD:main`.  Rejected because main moved: back
-     to step 3.  Never `--force`.
+     to step 3, and step 4's `check` usually says *fast* -- another session's
+     landing, in other files -- so the retry costs a minute, not the slow tier
+     again.  Never `--force`.
    - `/land pr`: `git push -u origin HEAD`, then `gh pr create --base main`
      with a title, a body that says what and why, the test line ("`-n auto`:
      4644 passed, 1 skipped" or "`--slow -n auto`: ..."), and the attribution

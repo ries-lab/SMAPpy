@@ -93,7 +93,10 @@ rebase that moved `csrc/`, build again.  The shared files outside the tree
 
 **Land the work from the worktree**, never through a local `main`, when
 Jonas says **`/land`** (the `land` skill, `.claude/skills/land/SKILL.md`):
-commit by name, `git fetch origin && git rebase origin/main`, the tests,
+commit by name, `git fetch origin && git rebase origin/main`, the tests --
+only those this tree has not passed yet: a whole passing run stamps the
+tree, and `scripts/tested.py check` says what is left (nothing, the fast
+tier after a rebase onto others' files, or the tier asked) --
 `git push origin HEAD:main` -- or `/land pr` for a pull request.  His `/land`
 is the permission to push to main, for that landing.  After the push, his
 checkout follows: a fast-forward of `/Users/ries/git/SMAPpy` to the new main

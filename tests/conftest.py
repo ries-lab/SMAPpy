@@ -292,10 +292,57 @@ def pytest_terminal_summary(terminalreporter, config):
 _exitstatus = 0
 
 
+def _tested_module():
+    spec = importlib.util.spec_from_file_location(
+        "_smappy_tested", os.path.join(_TREE, "scripts", "tested.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _stamp_tier(config):
+    """The tier this run proves, if it is a whole run of the suite: `scripts/tested.py` stamps
+    the tree with it so `/land` need not run it again.  None for a part of the suite (a path
+    below `tests`, -k, -m, --deselect, --lf, another --since) or an xdist worker."""
+    if hasattr(config, "workerinput"):
+        return None
+    tests = os.path.join(_TREE, "tests")
+    if not config.args or any(os.path.abspath(a) != tests for a in config.args):
+        return None
+    if (config.getoption("keyword") or config.getoption("markexpr")
+            or config.getoption("deselect", None) or config.getoption("lf", False)
+            or config.getoption("--since") != "origin/main"):
+        return None
+    for tier in ("long", "release", "slow"):
+        if config.getoption(f"--{tier}"):
+            return tier
+    return "fast"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_sessionstart(session):
+    """The tree as the run starts, to stamp at the end if it passed and nothing changed meanwhile."""
+    if _stamp_tier(session.config):
+        try:
+            session.config._smappy_tree = _tested_module().worktree_tree(_TREE)
+        except Exception:  # noqa: BLE001 -- no git, no stamp; the run itself is unaffected
+            session.config._smappy_tree = None
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
     global _exitstatus
     _exitstatus = int(exitstatus)
+    tree = getattr(session.config, "_smappy_tree", None)
+    tier = _stamp_tier(session.config)
+    if tree and tier and _exitstatus == 0 and session.testscollected:
+        try:
+            tested = _tested_module()
+            if tested.worktree_tree(_TREE) == tree:   # edited during the run: not what passed
+                tested.record(_TREE, tier, passed=session.testscollected - session.testsfailed,
+                              tree=tree)
+        except Exception:  # noqa: BLE001, S110 -- a stamp is a convenience; never fail a run over it
+            pass
 
 
 @pytest.hookimpl(trylast=True)
