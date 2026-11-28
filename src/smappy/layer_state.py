@@ -773,11 +773,12 @@ class ViewState:
         if not self.use_grouped:
             return self.tables.ungrouped
         tables = self.tables
+        if not len(tables.locs):
+            # nothing to link and no columns to link by: no file open yet
+            # (*merge blinks* ticked first raised a KeyError), or a live fit
+            # before its first block, a grouped layer kept through its start
+            return tables.ungrouped
         if tables.growing:
-            if not len(tables.locs):
-                # before the first block: no columns to link (a grouped
-                # layer kept through the start of a live fit)
-                return tables.ungrouped
             # a live fit's: as linked last, linked here the first time
             return tables.peek_grouped() or tables.grouped()
         if tables.deferred():

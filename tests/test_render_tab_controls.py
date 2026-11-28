@@ -371,3 +371,14 @@ def test_colouring_by_an_attribute_that_is_no_id_goes_back_to_the_table_before(a
     assert session.layers[0].get_display().lut == "blue-yellow"
     assert luts.IDS_LUT not in _listed(tab.lut)
     assert tab.color_range_row.isEnabled() and tab.invert.isEnabled()
+
+
+def test_merge_blinks_ticked_before_any_file_is_opened_shows_an_empty_table(app):
+    """Ticked first, it grouped a table with no columns and raised a KeyError in the slot."""
+    from smappy.gui.render_tab import RenderTab
+    session = Session()
+    tab = RenderTab(session)
+    tab.grouped.setChecked(True)
+    assert session.layers[0].grouped and len(session.layers[0].locs) == 0
+    session.add_file(table(), FileInfo("a.hdf5", "/a.hdf5", "smappy"))  # a file after it: its blinks merged
+    assert 0 < len(session.layers[0].locs) <= 4000
