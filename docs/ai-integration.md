@@ -294,6 +294,64 @@ One switch, `mode`:
 
 Headless, the default is *act*: there is nobody to propose to.
 
+### Guided suggestions (planned)
+
+Decided in 2026-11, not built; it builds on the assistant's read and write
+access to the open GUI, which is being built first.  A proposal today is one
+change, accepted or not.  A larger task -- "analyse this DNA-PAINT
+measurement" -- is several plugins and GUI actions in a row, each with
+settings, and is better learnt by doing it in the GUI than by accepting a
+result.
+
+**The assistant writes the plan; SMAPpy runs it, without the assistant.**
+The plan is a *guided chain*: the chain format (`docs/batch.md`) with, per
+step, a few more keys -- the plugin or a GUI action (show a tab, set a
+filter, draw an ROI: what `do_action` and the GUI tools do), its suggested
+values, a sentence or two of why, what to look at afterwards and, where it
+can be, a check.  A step is a unit of meaning ("correct the drift with
+RCC"), not one per field.  Nothing in it waits for the model: MCP answers
+calls and cannot be woken by a click, and a plan that runs in the GUI needs
+no waking.
+
+**In the GUI** it is a list beside the panels, the chain panel shown as a
+guide: each step with its explanation, a tick when done and *Do next*,
+which brings its tab or window forward, opens its panel filled in with the
+values the step explains highlighted, and leaves the run to the user, who
+may change any value first.  After the run the step's checks show, and the
+list moves on.  A finished guide saves as an ordinary chain, which runs
+again in the GUI and in a batch without guidance.
+
+**Checks**, three kinds side by side:
+
+* *text*, always: what a good result looks like, for the user to judge;
+* *the plugin's own warnings* -- `ctx.warn`, its notice, a `preflight`
+  question -- shown on the step, with nothing written for them;
+* *a condition on the result's numbers* (`drift_max_nm < 50`, in Filter
+  ROIs' syntax), only where the assistant has run the step on a copy and
+  knows the result's names and typical values: a condition on a name the
+  result lacks would only confuse.
+
+And one before a step, which SMAPpy works out itself from what a plugin
+needs: "this step needs `cluster_id`, which step 3 makes".  A failed check
+shows its text and *Ask the assistant*, which sends the step, the user's
+values and the result to the assistant's window: troubleshooting is the
+assistant's, there.
+
+**Dependencies between steps are left out of SMAPpy.**  Most settings are
+local.  Where one step's result should set another's -- a cluster radius
+from the measured precision, *merge blinks*' dark time from the blinking
+statistics, the drift's time windows from how many localizations there are,
+filter bounds from a histogram -- the plugin's *auto* usually does it from
+the data at run time (`describe` says what it resolves to), so the
+assistant leaves such settings on *auto* and fixes a value only with a
+reason, and a value follows the data, the user's changes in earlier steps
+included.  The few without an *auto* are said in the step's text ("about
+twice the precision step 2 measured: 9 nm, so 18 nm").  When an earlier
+change makes a later step clash, the user asks the assistant, which reads
+the guide's state -- the steps run, their values, what differs from its
+suggestion -- through the GUI tools and explains it.  References between
+steps (`step2.precision_nm * 2`) come only if such links prove common.
+
 ## The plugin index
 
 Two things, both generated from the plugins and their pages, so neither can
@@ -471,6 +529,11 @@ the repository.
 5. **Typing in SMAPpy's pane**: Claude Code's *channels* can push a message
    from an MCP server into a running session (a research preview); the other
    route is running the user's own agent CLI per message.  Later.
+6. **Read and write the open GUI**: every panel, window and control as it
+   stands, read in any mode, set where only a form changes (being built,
+   2026-11).
+7. **Guided suggestions**: the assistant's plan as a guided chain the GUI
+   runs step by step ("Guided suggestions (planned)" above), after 6.
 
 ## Using it now
 
