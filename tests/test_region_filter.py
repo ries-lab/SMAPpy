@@ -90,15 +90,15 @@ def test_a_filter_on_a_result_neither_dates_nor_narrows_the_next_measurement():
                                                steps=[Step(plugin=STATS)])]))
     session.run(block(), block.Settings())
     session.run(RegionsToColumn(), RegionsToColumn.Settings(
-        source=PER_CLUSTER, values="n_localizations", prefix="cluster_"))
-    session.layers[0].set_bound("cluster_n_localizations", 30, None)
+        source=PER_CLUSTER, values="n_locs", prefix="cluster_"))
+    session.layers[0].set_bound("cluster_n_locs", 30, None)
     session.set_region_filter([
-        Condition("cluster_id", "Localization Statistics", "n_localizations", lo=30)])
+        Condition("cluster_id", "Localization Statistics", "n_locs", lo=30)])
     ctx = session.context()
     ev = Evaluation.parse(PER_CLUSTER)
     assert is_current(ctx, ev)
     session.run(block(), block.Settings())                 # measured again
-    measured = sorted(r["n_localizations"] for r in
+    measured = sorted(r["n_locs"] for r in
                       rows(session.context(), ev))          # the filter keeps two
     assert measured == [40, 60]
     table_ = session.id_regions["cluster_id"]["Localization Statistics"]

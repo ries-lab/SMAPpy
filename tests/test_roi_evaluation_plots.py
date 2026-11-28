@@ -146,7 +146,7 @@ def test_the_pipeline_on_the_project_is_what_runs_by_default():
     project.block = pipeline_module.default_block()
     record, results, _ = project.evaluate_one(rois[0].id)
     assert "Localization Statistics" in results
-    assert record["steps"]["Localization Statistics"]["values"]["n_localizations"] == 10
+    assert record["steps"]["Localization Statistics"]["values"]["n_locs"] == 10
 
 
 # ------------------------------------------------------------------ the window

@@ -79,7 +79,7 @@ for site in sites:
     if site["use"]:
         near = tree.query_ball_point(site["center"], 150)
         v = count_corners(xy[near, 0], xy[near, 1], site["center"], cs, sigma[near])
-        k.append(v["n_corners"]); n.append(v["n_localizations"]); radii.append(v["ring_radius_nm"])
+        k.append(v["n_corners"]); n.append(v["n_locs"]); radii.append(v["ring_radius_nm"])
 fitted = joint_efficiency(k, n, sigma, cs, float(np.nanmedian(radii)))
 labelled = labeling_efficiency(list(true_corners(raw).values()),
                                LabelingEfficiencySettings(fit_min=0, bootstrap=0))["efficiency"]

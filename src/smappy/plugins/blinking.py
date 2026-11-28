@@ -175,7 +175,7 @@ def region_blinking(frame, blink=None, dark_time: float = 100,
     mean_dark = float(within.mean()) if len(within) else float("nan")
     seconds = (frame_time_ms / 1000.0 if frame_time_ms and frame_time_ms > 0
                else float("nan"))
-    return {"n_localizations": int(len(np.asarray(frame))),
+    return {"n_locs": int(len(np.asarray(frame))),
             "n_blinks": int(len(found)),
             "n_bursts": int(burst[-1] + 1) if len(burst) else 0,
             "mean_on_frames": mean_on, "mean_on_s": mean_on * seconds,
@@ -234,7 +234,7 @@ def view_values(found: Sequence[MoleculeBlinking], n_localizations: int,
     seconds = (frame_time_ms / 1000.0 if frame_time_ms and frame_time_ms > 0
                else float("nan"))
     on, dark = mean("on_frames"), mean("dark_frames")
-    return {"n_localizations": int(n_localizations),
+    return {"n_locs": int(n_localizations),
             "n_blinks": int(sum(len(f.on_frames) for f in found)),
             "n_bursts": int(sum(len(f.blinks_per_molecule) for f in found)),
             "mean_on_frames": on, "mean_on_s": on * seconds,
@@ -329,7 +329,7 @@ class Blinking(Plugin):
     name = "Blinking statistics"
     changes_locs = False
     per_region = True
-    version = "1"
+    version = "2"
 
     def run(self, ctx: Context, settings: BlinkingSettings) -> Result:
         from ..metadata import file_frame_time, table_frame_time
@@ -341,7 +341,7 @@ class Blinking(Plugin):
         if ctx.per_region:
             values = region_blinking(frame, blink, settings.dark_time,
                                      settings.frame_time_ms or table_frame_time(locs))
-            text = (f"{values['n_localizations']} localizations, "
+            text = (f"{values['n_locs']} localizations, "
                     f"{values['n_blinks']} blinks, {values['n_bursts']} bursts at "
                     f"a dark time of {settings.dark_time} frames; mean on-time "
                     f"{values['mean_on_frames']:.2f} frames, mean dark time "

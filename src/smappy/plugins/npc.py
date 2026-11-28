@@ -131,7 +131,7 @@ def count_corners(x, y, center, settings: NPCCornersSettings, precision=None
     The centre is fitted with the radius fixed on the localizations better
     than *corner precision* (all of them, without a precision), then twice
     more on those within ``R + 2 dR``.  ``n_corners``: the corners seen with
-    those precise localizations in the band ``R +- dR``.  ``n_localizations``:
+    those precise localizations in the band ``R +- dR``.  ``n_locs``:
     the localizations better than *count precision* within *count window*.
     ``n_corners_smap``: SMAP's count, every localization in 50 +- 20 nm better
     than 0.4 of the arc between corners, around the same centre.
@@ -163,7 +163,7 @@ def count_corners(x, y, center, settings: NPCCornersSettings, precision=None
     seen_smap, _, _ = segments(theta[smap], weight[smap], n, settings.min_locs)
     radius = (fit_circle(x[band], y[band], c, scale=dR)[2] if band.sum() >= 3
               else float("nan"))
-    return {"n_corners": seen, "n_localizations": int(counted.sum()),
+    return {"n_corners": seen, "n_locs": int(counted.sum()),
             "n_corners_smap": seen_smap, "n_ring_locs": int(band.sum()),
             "radius_nm": float(radius),
             "ring_radius_nm": float(np.median(rho[band])) if band.any() else float("nan"),
@@ -203,7 +203,7 @@ def draw_corners(ax, x, y, values: Dict[str, Any], settings: NPCCornersSettings,
     ax.set_xlabel("x (nm)")
     ax.set_ylabel("y (nm)")
     ax.set_title(f"{values['n_corners']} of {n} corners, "
-                 f"{values['n_localizations']} localizations")
+                 f"{values['n_locs']} localizations")
 
 
 @register("Analysis/Measure/NPC Corners")
@@ -213,7 +213,7 @@ class NPCCorners(Plugin):
     Settings = NPCCornersSettings
     changes_locs = False
     per_region = True
-    version = "2"
+    version = "3"
 
     def run(self, ctx: Context, settings: NPCCornersSettings) -> Result:
         table, selection = ctx.table()
@@ -229,7 +229,7 @@ class NPCCorners(Plugin):
         values = count_corners(x, y, center, settings, precision)
         data = {k: v for k, v in values.items() if k != "per_corner"}
         return Result(text=f"{values['n_corners']} corners, "
-                           f"{values['n_localizations']} localizations",
+                           f"{values['n_locs']} localizations",
                       data=data, values=data,
                       arrays={"per_corner": np.asarray(values["per_corner"])},
                       plot=lambda ax: draw_corners(ax, x, y, values, settings, precision),
@@ -442,7 +442,7 @@ CORNERS = "Analysis/Measure/NPC Corners"
 def column(rows, name: str, label: Optional[str] = None) -> Optional[str]:
     """`name` as the site table spells it: plain while one evaluation writes
     it, ``"<label>.<name>"`` when two do -- NPC Corners and Statistics both
-    write `n_localizations`, two NPC Corners under two names write all."""
+    write `n_locs`, two NPC Corners under two names write all."""
     keys = set().union(*(r.keys() for r in rows)) if rows else set()
     if label and f"{label}.{name}" in keys:
         return f"{label}.{name}"
@@ -635,9 +635,9 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
         return result
 
     def _joint(self, project, rows, k, settings, truth, count, label=None) -> Result:
-        n_name = column(rows, "n_localizations", label)
+        n_name = column(rows, "n_locs", label)
         if n_name is None:
-            raise ValueError("the region results have no n_localizations: measure again "
+            raise ValueError("the region results have no n_locs: measure again "
                              "with this version of NPC Corners")
         n = np.array([r.get(n_name, np.nan) for r in rows], dtype=float)
         ok = np.isfinite(k) & np.isfinite(n)

@@ -124,7 +124,7 @@ def draw_trace(figure, first, last, n, span, seconds: float = 1.0,
 
 def summary_line(values: Dict[str, float]) -> str:
     """One line of what a region measured, for the text and the title."""
-    parts = [f"{values['n_events']} events, {values['n_localizations']} localizations"]
+    parts = [f"{values['n_events']} events, {values['n_locs']} localizations"]
     if np.isfinite(values.get("tau_bright_frames", np.nan)):
         parts.append(f"bright {values['tau_bright_frames']:.3g} frames")
     if np.isfinite(values.get("tau_dark_frames", np.nan)):
@@ -179,7 +179,7 @@ class BindingKinetics(Plugin):
     changes_locs = False
     per_region = True
     follow_roi = True
-    version = "1"
+    version = "2"
 
     def describe(self, ctx, settings: BindingKineticsSettings) -> FormState:
         state = FormState()

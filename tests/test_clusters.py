@@ -233,7 +233,7 @@ def test_a_block_repeats_over_the_clusters_dbscan_wrote():
             Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
     stats = session.id_regions["cluster_id"]["Localization Statistics"]
-    assert stats.columns()["n_localizations"].tolist() == list(SIZES)
+    assert stats.columns()["n_locs"].tolist() == list(SIZES)
 
 
 def test_hull_needs_three_points_off_a_line():
@@ -293,7 +293,7 @@ def test_histograms_summarise_the_clusters_too():
     assert (name, name) in offered
     result = histograms()(ctx=session.context(), source="regions", evaluation=name)
     assert result.text.startswith("3 regions")
-    assert sorted(result.data["histograms"]["n_localizations"]["values"]) == sorted(SIZES)
+    assert sorted(result.data["histograms"]["n_locs"]["values"]) == sorted(SIZES)
 
 
 def clustered_session():
@@ -314,40 +314,40 @@ def test_a_cluster_statistic_goes_onto_its_localizations_and_filters_them():
                                          RegionsToColumn.Settings()).choices
     assert (name, name) in offered["source"]
     session.run(RegionsToColumn(), RegionsToColumn.Settings(
-        source=name, values="n_localizations", prefix="cluster_"))
-    column = np.asarray(session.locs["cluster_n_localizations"])
+        source=name, values="n_locs", prefix="cluster_"))
+    column = np.asarray(session.locs["cluster_n_locs"])
     for k, n in enumerate(SIZES, start=1):
         assert (column[truth == k] == n).all()
     assert np.isnan(column[truth == 0]).all()
     assert {r["field"]: r["grouped"] for r in recipes(session.locs)}[
-        "cluster_n_localizations"] == "mean"
+        "cluster_n_locs"] == "mean"
 
 
 def test_a_value_is_never_written_over_a_column_of_the_localizations_own():
     from smappy.chain import Block, ChainSpec, Step, chain_class
     session, truth = clustered_session()
-    session.locs.columns["n_localizations"] = np.zeros(len(session.locs))
+    session.locs.columns["n_locs"] = np.zeros(len(session.locs))
     cls = chain_class(ChainSpec(steps=[Block(regions="cluster_id", steps=[
         Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
     with pytest.raises(ValueError, match="not written from regions"):
         RegionsToColumn()(ctx=session.context(),
                           source="per cluster_id: Localization Statistics",
-                          values="n_localizations")
+                          values="n_locs")
 
 
 def test_a_block_writes_the_values_it_measured_and_again_over_them():
     from smappy.chain import Block, ChainSpec, Step, chain_class
     session, truth = clustered_session()
     cls = chain_class(ChainSpec(steps=[Block(
-        regions="cluster_id", write_values=["n_localizations"],
+        regions="cluster_id", write_values=["n_locs"],
         steps=[Step(plugin="Analysis/Measure/Localization Statistics")])]))
     for _ in range(2):                      # the second run writes over the first
         session.run(cls(), cls.Settings())
-    column = np.asarray(session.locs["n_localizations"])
+    column = np.asarray(session.locs["n_locs"])
     assert (column[truth == 2] == SIZES[1]).all() and np.isnan(column[truth == 0]).all()
     block = cls.spec.steps[0]
-    assert Block.from_dict(block.to_dict()).write_values == ["n_localizations"]
+    assert Block.from_dict(block.to_dict()).write_values == ["n_locs"]
 
 
 def test_a_block_refuses_to_write_a_value_no_step_measured():
@@ -374,11 +374,11 @@ def test_an_roi_evaluation_goes_onto_the_localizations_in_each_roi():
         Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
     settings = RegionsToColumn.Settings(source="Localization Statistics",
-                                        values="n_localizations, roi_id")
+                                        values="n_locs, roi_id")
     assert ("Localization Statistics",) * 2 in RegionsToColumn().describe(
         session.context(), settings).choices["source"]
     session.run(RegionsToColumn(), settings)
-    column = np.asarray(session.locs["n_localizations"])
+    column = np.asarray(session.locs["n_locs"])
     assert (column[truth == 1] == SIZES[0]).all() and (column[truth == 2] == SIZES[1]).all()
     assert np.isnan(column[truth == 3]).all()
     assert set(np.asarray(session.locs["roi_id"])[truth == 2]) == {2}

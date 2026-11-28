@@ -128,6 +128,12 @@ def evaluate(session, source: str, expression: str, extra: Optional[Dict] = None
     ids, names, _ = region_names(session, source, skip)
     names.update(extra or {})
     text = _plain(expression)
+    # a name a recipe was written with before its value was renamed
+    from .region_table import current_name
+    for name in names_in(text) - set(names):
+        now = current_name(name.replace(_SEP, ".")).replace(".", _SEP)
+        if now in names:
+            names[name] = names[now]
     missing = sorted(names_in(text) - set(names))
     if missing:
         offered = sorted(_dotted(n) for n in names)

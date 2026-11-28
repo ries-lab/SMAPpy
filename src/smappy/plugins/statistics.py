@@ -620,13 +620,15 @@ def statistics_values(locs: Localizations, found: Sequence[Distribution]
     the photons' mean, median and ``N0``; the precision's mean, median and
     ``sigma_c`` (NaN when the model was not fitted), in the column's unit;
     the on-time's ``tau``, in frames and in seconds (NaN without a frame
-    time), and the blinks it was counted over.
+    time), and the blinks it was counted over.  A statistic is named as
+    *Region statistics* names one (``photons_median``, ``precision_mean_nm``)
+    and the count is ``n_locs``, so the two read alike side by side.
     """
-    out: Dict[str, float] = {"n_localizations": len(locs)}
+    out: Dict[str, float] = {"n_locs": len(locs)}
     by_key = {d.key: d for d in found}
     if "photons" in by_key:
         stats = by_key["photons"].stats
-        out.update(mean_photons=stats["mean"], median_photons=stats["median"],
+        out.update(photons_mean=stats["mean"], photons_median=stats["median"],
                    photons_n0=stats["n0"])
     for key, column_names, suffix in (("precision", PRECISION_FIELDS, ""),
                                       ("precision_z", PRECISION_Z_FIELDS, "z_")):
@@ -637,9 +639,9 @@ def statistics_values(locs: Localizations, found: Sequence[Distribution]
         values = np.asarray(locs[column], dtype=float)
         values = values[np.isfinite(values)]
         stats = by_key[key].stats
-        out[f"mean_{suffix}precision_{unit}"] = (float(values.mean()) if len(values)
+        out[f"{suffix}precision_mean_{unit}"] = (float(values.mean()) if len(values)
                                                  else float("nan"))
-        out[f"median_{suffix}precision_{unit}"] = stats["median"]
+        out[f"{suffix}precision_median_{unit}"] = stats["median"]
         out[f"sigma_c_{suffix}{unit}"] = stats["sigma_c"]
     if "on_time" in by_key:
         stats = by_key["on_time"].stats
@@ -982,7 +984,7 @@ class LocalizationStatistics(Plugin):
     # took an exposure typed in; and on_time_s in a region's row
     # 6: every visible layer described, as steps on shared bins with their
     # own fits, where it was the current layer's alone
-    version = "6"
+    version = "7"
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
         groups = self._groups(ctx, settings)

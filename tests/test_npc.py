@@ -171,7 +171,7 @@ def test_the_corners_with_a_localization_are_counted_at_any_rotation(which):
     values = count_corners(xy[:, 0], xy[:, 1], (510, 190), NPCCornersSettings(),
                            precision=np.full(len(xy), 5.0))
     assert values["n_corners"] == len(list(which))
-    assert values["n_localizations"] == len(xy)
+    assert values["n_locs"] == len(xy)
     if len(list(which)) >= 3:       # one or two corners do not fix a centre
         assert abs(values["x_nm"] - 500) < 8 and abs(values["y_nm"] - 200) < 8
 
@@ -184,7 +184,7 @@ def test_an_imprecise_localization_counts_for_the_pore_but_opens_no_corner():
     precision = np.r_[np.full(len(xy) - 1, 5.0), 25.0]
     values = count_corners(xy[:, 0], xy[:, 1], (0, 0), NPCCornersSettings(), precision)
     assert values["n_corners"] == 2 and values["n_corners_smap"] == 2
-    assert values["n_localizations"] == len(xy)      # 25 nm is better than 30
+    assert values["n_locs"] == len(xy)      # 25 nm is better than 30
 
 
 def test_a_localization_near_the_centre_opens_no_corner():
@@ -297,7 +297,7 @@ def test_segment_evaluate_and_analyse_through_the_session():
     project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners")])
     rows = project.results()
     assert len(rows) == len(project.rois)
-    assert {"n_corners", "n_localizations", "n_corners_smap"} <= set(rows[0])
+    assert {"n_corners", "n_locs", "n_corners_smap"} <= set(rows[0])
 
     analyze = plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")
     result = analyze()(ctx=session.context())
@@ -318,7 +318,7 @@ def test_the_analysis_asks_for_the_corner_counter_when_it_is_missing():
     from smappy.plugins import Context
     with pytest.raises(ValueError, match="NPC Corners"):
         plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")().run(
-            Context(site_table=[{"roi_id": "a", "n_localizations": 3}]),
+            Context(site_table=[{"roi_id": "a", "n_locs": 3}]),
             LabelingEfficiencySettings())
 
 

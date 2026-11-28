@@ -485,6 +485,10 @@ What a plugin gets wrong without it:
   it, and name the columns the table *does* have when one is missing.
 * A column that needs a rule for grouping is a recipe (`metadata["derived"]`),
   not plain data: `math_parser.py`.
+* A region's count of localizations is `n_locs`, and a statistic is named
+  `<quantity>_<statistic>[_<unit>]` (`photons_median`, `xy_err_mean_nm`,
+  `id_statistics.stat_name`); names renamed since are read as the new by
+  `region_table.RENAMED` / `current_name`, where an old name is added.
 * **An id column's "none" is -1, and 0 is an id** (`smappy/ids.py`: `NONE`,
   `assigned`, `is_id`): DBSCAN's noise, a point in no track, a row left out
   of merging are -1; MINFLUX's `tid` and Picasso's picks count from 0.  Ask

@@ -80,8 +80,8 @@ def test_statistics_measures_one_site_through_the_context():
     roi = project.add_roi(source.id, [0.0, 0.0])
     result = LocalizationStatistics().run(project.region_context(roi),
                                           StatisticsSettings(precision_fit="none"))
-    assert result.values["n_localizations"] == 30       # this site's, not the file's
-    assert result.values["mean_precision_nm"] == 11.0
+    assert result.values["n_locs"] == 30       # this site's, not the file's
+    assert result.values["precision_mean_nm"] == 11.0
     assert np.isnan(result.values["sigma_c_nm"])        # the fit was switched off
 
 
@@ -111,7 +111,7 @@ def test_a_step_of_the_projects_block_is_a_chains_step():
     instance = ChainStep(plugin="Analysis/Measure/Localization Statistics",
                          values={"bins": 40})
     step, = pipeline_module.block_steps(Block(steps=[instance]))
-    assert step.label == "Localization Statistics" and step.version == "6"
+    assert step.label == "Localization Statistics" and step.version == "7"
     assert step.settings.bins == 40
     assert step.as_record()["plugin"] == "Analysis/Measure/Localization Statistics"
 
@@ -154,8 +154,8 @@ def test_running_a_two_step_pipeline_over_a_project():
     rows = project.results()
     assert len(rows) == 2
     # both steps produce every column, so every one is qualified
-    assert rows[0]["Localization Statistics.mean_precision_nm"] == 11.0
-    assert rows[0]["Localization Statistics 2.mean_precision_nm"] == 11.0
+    assert rows[0]["Localization Statistics.precision_mean_nm"] == 11.0
+    assert rows[0]["Localization Statistics 2.precision_mean_nm"] == 11.0
 
 
 def test_the_block_travels_with_the_project():
@@ -166,11 +166,11 @@ def test_the_block_travels_with_the_project():
     project.add_roi(next(iter(project.sources)), [0, 0])
     project.block = pipeline_module.default_block()
     project.block.steps[0].label = "my statistics"
-    project.block.write_values = ["n_localizations"]
+    project.block.write_values = ["n_locs"]
     project.evaluate()
     project.from_dict(project.to_dict())
     assert [s.label for s in project.block.steps] == ["my statistics"]
-    assert project.block.write_values == ["n_localizations"]
+    assert project.block.write_values == ["n_locs"]
     assert project.runs[0]["pipeline"][0]["label"] == "my statistics"
 
 
@@ -424,7 +424,7 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     assert entry["steps"][0]["plugin"] == "Chain/Block"
     assert entry["steps"][0]["values"]["localization_statistics.precision_fit"] == "histogram"
     rows = project.results()
-    assert len(rows) == 4 and rows[0]["n_localizations"] == 100
+    assert len(rows) == 4 and rows[0]["n_locs"] == 100
 
     analysis = plugins.get("Analysis/Measure/Histogram")()(ctx=session.context(),
                                                            source="regions")

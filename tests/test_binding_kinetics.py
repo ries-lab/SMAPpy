@@ -60,7 +60,7 @@ def test_values_of_a_region_by_hand():
     frame = np.array([10, 11, 12, 50, 90, 91])
     values, arrays, events = bk.region_kinetics(frame, link_gap=0, spans={0: (0, 99)},
                                                 frame_time_ms=100.0)
-    assert values["n_events"] == 3 and values["n_localizations"] == 6
+    assert values["n_events"] == 3 and values["n_locs"] == 6
     assert values["first_frame"] == 10 and values["last_frame"] == 91
     assert values["longest_dark_frames"] == 39 and values["longest_bright_frames"] == 3
     assert values["mean_bright_frames"] == pytest.approx(2.0)

@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.plugins.npc.count_corners, smappy.plugins.npc.segments, smappy.segmentation.fit_circle]
 ---
 
@@ -75,7 +75,7 @@ corner.  A segment with a counted localization is a corner seen:
 `n_corners`.
 
 **5. Localizations.**  The localizations better than *count precision*
-(30 nm) within *count window* (100 nm) of the centre: `n_localizations`.
+(30 nm) within *count window* (100 nm) of the centre: `n_locs`.
 
 ```figure Six simulated pores at 30 % labelling: the localizations counted for the corners (blue) and the others (grey), the ring band (dotted), the segment borders, and the corners seen (filled red).  The truly labelled corners of each pore are given in the title beside the count.
 fig.set_size_inches(7.5, 5)
@@ -156,7 +156,7 @@ About the ring's radius plus three of the count's precisions.
 One row per ROI in the results table:
 
 * `n_corners`, the corners seen with the precise localizations;
-* `n_localizations`, the localizations better than *count precision*;
+* `n_locs`, the localizations better than *count precision*;
 * `n_corners_smap`, SMAP's count;
 * `n_ring_locs`, the localizations the corners were counted with;
 * `radius_nm`, the radius fitted free to them, and `ring_radius_nm`, their

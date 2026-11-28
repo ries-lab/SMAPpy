@@ -296,7 +296,7 @@ def region_kinetics(frame, blink=None, file=None, link_gap: int = LINK_GAP,
     first = int(frame.min()) if len(frame) else 0
     last = int(frame.max()) if len(frame) else -1
     values = {
-        "n_localizations": int(len(frame)),
+        "n_locs": int(len(frame)),
         "n_events": int(len(events)),
         "locs_per_event": float(events.n.mean()) if len(events) else nan,
         "first_frame": first if len(frame) else nan,

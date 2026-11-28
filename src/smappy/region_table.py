@@ -38,6 +38,40 @@ KINDS = ("float", "int", "bool", "str")
 # the attribute prefix of a text column that is the same in every row
 _UNIFORM = "all_"
 
+#: values renamed since they were first written, old name -> new: in 2026-11
+#: every plugin's count of localizations became ``n_locs`` (half of them had
+#: written ``n_localizations``) and *Localization statistics*' statistics
+#: took *Region statistics*' form, ``<quantity>_<statistic>_<unit>``.  A
+#: saved table is read with the new names (`renamed_values`), and a
+#: condition, a sort key or an expression naming an old one reads the new
+#: (`current_name`), so a saved file, chain or filter keeps working.
+RENAMED = {"n_localizations": "n_locs",
+           "mean_photons": "photons_mean", "median_photons": "photons_median",
+           "mean_precision_nm": "precision_mean_nm",
+           "median_precision_nm": "precision_median_nm",
+           "mean_z_precision_nm": "z_precision_mean_nm",
+           "median_z_precision_nm": "z_precision_median_nm"}
+
+
+def current_name(name: str) -> str:
+    """``name`` as values are called now (`RENAMED`); a name qualified with
+    its evaluation, ``Blinking.n_localizations``, keeps its qualifier."""
+    head, dot, last = str(name).rpartition(".")
+    new = RENAMED.get(last)
+    return name if new is None else f"{head}{dot}{new}"
+
+
+def renamed_values(table: "RegionTable") -> "RegionTable":
+    """``table`` with its old value names (`RENAMED`) read as the new, where
+    it does not hold both; its groups follow."""
+    for old, new in RENAMED.items():
+        if old in table.values and new not in table.values:
+            table.values[new] = table.values.pop(old)
+    for members in table.groups.values():
+        for k, name in list(members.items()):
+            members[k] = current_name(name)
+    return table
+
 
 def _kind(values: Iterable[Any]) -> str:
     seen = [v for v in values if v is not None]
@@ -297,7 +331,7 @@ class RegionTable:
                         if len(c) == n}
         table.arrays = {k: [None if a is None else np.asarray(a) for a in c]
                         for k, c in (doc.get("arrays") or {}).items() if len(c) == n}
-        return table
+        return renamed_values(table)
 
     # ------------------------------------------------------------- as HDF5
     def to_hdf5(self, group) -> None:
@@ -410,7 +444,7 @@ class RegionTable:
             present = sub["present"][()]
             table.arrays[name] = [values[offsets[i]:offsets[i + 1]].copy() if present[i]
                                   else None for i in range(n)]
-        return table
+        return renamed_values(table)
 
 
 def _belongs(region_id: str, wanted) -> bool:

@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.average_rois.AverageROIs.run, smappy.plugins.average_rois.superimpose, smappy.plugins.average_rois.placement, smappy.plugins.average_rois.line_point, smappy.plugins.average_rois.average, smappy.plugins.average_rois.draw_average]
 ---
 

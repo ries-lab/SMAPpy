@@ -42,7 +42,7 @@ def measured_project():
     table = next(iter(project.tables.values()))
     for roi_id, n in zip(ids, (5, 9, 7, 9)):
         entry = dict(table.entry(roi_id))
-        entry["values"] = {**entry["values"], "n_localizations": n}
+        entry["values"] = {**entry["values"], "n_locs": n}
         table.set(roi_id, entry, table.step(roi_id))
     project.annotate(ids[3], "quality", "bad")
     project.annotate(ids[1], "quality", "good")
@@ -54,14 +54,14 @@ def test_sorting_orders_the_list_and_the_results_and_keeps_the_numbers():
     numbers = {i: project.rois[i].number for i in ids}
     from smappy.plugins.roi_order import SortROIs, SortROIsSettings
     result = SortROIs().run(Context(locs=session.locs, session=session),
-                            SortROIsSettings(by="n_localizations", descending=True,
+                            SortROIsSettings(by="n_locs", descending=True,
                                              then_by="quality", then_descending=False))
     # 9 (good), 9 (bad), 7, 5
     assert project.ordered_ids() == [ids[1], ids[3], ids[2], ids[0]]
     assert [r["roi_id"] for r in project.results()] == [numbers[i] for i in
                                                         (ids[1], ids[3], ids[2], ids[0])]
     assert {i: project.rois[i].number for i in ids} == numbers
-    assert "sorted by n_localizations" in result.text
+    assert "sorted by n_locs" in result.text
     again = project.to_dict()
     project.from_dict(again)
     assert project.ordered_ids() == [ids[1], ids[3], ids[2], ids[0]]
@@ -73,7 +73,7 @@ def test_filtering_sets_use_by_text_and_is_undone():
     session, project, ids = measured_project()
     from smappy.plugins.roi_order import FilterROIs, FilterROIsSettings
     ctx = Context(locs=session.locs, session=session)
-    settings = FilterROIsSettings(condition='n_localizations >= 7 and quality != "bad"')
+    settings = FilterROIsSettings(condition='n_locs >= 7 and quality != "bad"')
     assert "would use 1 of 4" in FilterROIs().describe(ctx, settings).notice.text
     FilterROIs().run(ctx, settings)
     assert [project.rois[i].use for i in ids] == [False, True, False, False]
@@ -114,7 +114,7 @@ def test_a_column_chosen_from_insert_goes_onto_the_condition():
     session, project, ids = measured_project()
     found = plugin.describe(Context(locs=session.locs, session=session),
                             FilterROIsSettings()).choices["insert"]
-    assert ("n_localizations", "n_localizations") in found
+    assert ("n_locs", "n_locs") in found
     assert ("quality", "quality (keywords)") in found
 
 

@@ -29,7 +29,7 @@ def test_a_row_per_included_roi_with_its_place_annotation_and_numbers(tmp_path):
     export(session, tmp_path / "t.csv")
     rows = read(tmp_path / "t.csv")
     assert [int(r["roi_id"]) for r in rows] == [project.rois[i].number for i in ids[1:]]
-    assert [int(r["n_localizations"]) for r in rows] == [9, 7, 9]
+    assert [int(r["n_locs"]) for r in rows] == [9, 7, 9]
     assert [r["quality"] for r in rows] == ["good", "", "bad"]
     third = rows[1]
     roi = project.rois[ids[2]]
@@ -50,9 +50,9 @@ def test_rows_come_in_the_rois_order(tmp_path):
 
 def test_only_the_ticked_columns_are_written_and_tabs_for_a_tsv(tmp_path):
     session, project, ids = measured_project()
-    export(session, tmp_path / "t.tsv", columns=["roi_id", "n_localizations"])
+    export(session, tmp_path / "t.tsv", columns=["roi_id", "n_locs"])
     header = (tmp_path / "t.tsv").read_text().splitlines()[0]
-    assert header == "roi_id\tn_localizations"
+    assert header == "roi_id\tn_locs"
     with pytest.raises(ValueError, match="none of the chosen columns"):
         export(session, tmp_path / "u.csv", columns=["nope"])
 
@@ -63,7 +63,7 @@ def test_the_list_offers_the_tables_columns():
     state = plugin().describe(Context(locs=session.locs, session=session),
                               plugin.Settings())
     offered = state.choices["columns"]
-    assert {"roi_id", "x_nm", "comment", "n_localizations", "quality"} <= set(offered)
+    assert {"roi_id", "x_nm", "comment", "n_locs", "quality"} <= set(offered)
 
 
 def test_per_cluster_results_are_written_without_positions(tmp_path):

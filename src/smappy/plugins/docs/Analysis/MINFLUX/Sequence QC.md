@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.minflux_qc.outcome, smappy.minflux_qc.final_iteration, smappy.minflux_qc.iteration_events, smappy.minflux_qc.per_iteration, smappy.minflux_qc.time_per_iteration, smappy.minflux_qc.catching_offsets, smappy.minflux_qc.traces, smappy.minflux_qc.exponential_mean, smappy.minflux_qc.summary, smappy.plugins.sequence_qc.SequenceQC.run, smappy.plugins.sequence_qc.shown_files, smappy.plugins.sequence_qc.index_profile, smappy.simulate.minflux.simulate_attempts]
 ---
 
@@ -153,7 +153,7 @@ maximum-likelihood estimate of a geometric distribution's mean.
 
 **Per trace** it also keeps a [region table](plugin:Panels/Glossary) of
 `tid`, "per tid: Sequence QC": each trace's rows (`n_rows`), localizations
-(`n_localizations`), photon budget, duration and its last status
+(`n_locs`), photon budget, duration and its last status
 (`end_sta`), for the region filter and the summaries.
 
 ## Parameters

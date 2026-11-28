@@ -907,13 +907,17 @@ def table_values(table: RegionTable, names: Sequence[str] = ()) -> Dict[str, Dic
     numeric = {k: v for k, v in table.values.items()
                if all(x is None or (isinstance(x, (int, float, np.number))
                                     and not isinstance(x, str)) for x in v)}
+    from .region_table import current_name
     wanted = list(names) or list(numeric)
-    missing = [k for k in wanted if k not in numeric]
+    # a name a chain was saved with before the value was renamed reads the
+    # value as it is called now, and is handed back under the name asked for
+    source = {k: k if k in numeric else current_name(k) for k in wanted}
+    missing = [k for k in wanted if source[k] not in numeric]
     if missing:
         raise ValueError(f"{table.label or 'the measurement'} has no numeric "
                          f"{', '.join(missing)}: it has {', '.join(sorted(numeric))}")
-    return {k: {r: numeric[k][i] for i, r in enumerate(table.ids)
-                if not table.errors[i] and numeric[k][i] is not None}
+    return {k: {r: numeric[source[k]][i] for i, r in enumerate(table.ids)
+                if not table.errors[i] and numeric[source[k]][i] is not None}
             for k in wanted}
 
 

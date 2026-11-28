@@ -53,7 +53,7 @@ def test_a_key_after_one_left_empty_sorts_nothing():
     from test_roi_order import measured_project
     session, project, ids = measured_project()
     SortROIs().run(Context(locs=session.locs, session=session),
-                   SortROIsSettings(by="", then_by="n_localizations"))
+                   SortROIsSettings(by="", then_by="n_locs"))
     assert project.ordered_ids() == ids              # by number, as with none
 
 

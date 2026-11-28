@@ -87,3 +87,19 @@ def test_a_hundred_thousand_rows_cost_what_their_numbers_do(tmp_path):
         t.to_hdf5(f.create_group("clusters"))
     size = (tmp_path / "big.h5").stat().st_size
     assert size < 5_000_000                             # not the 130 MB of JSON records
+
+
+def test_a_saved_table_with_old_value_names_reads_with_the_new_and_old_names_still_find_them():
+    from smappy.region_table import current_name
+    from smappy.roi_manager.order import condition, sort_ids
+    old = RegionTable("Localization Statistics")
+    old.set("1", {"values": {"n_localizations": 7, "median_photons": 300.0}})
+    back = RegionTable.from_dict(old.to_dict())
+    assert set(back.values) == {"n_locs", "photons_median"}
+    assert current_name("Blinking.n_localizations") == "Blinking.n_locs"
+    assert current_name("cfr_median") == "cfr_median"
+    test, names = condition("n_localizations > 5 and median_photons < 400")
+    assert names == ["n_locs", "photons_median"]
+    assert test({"n_locs": 7, "photons_median": 300.0})
+    assert sort_ids({"a": {"n_locs": 2}, "b": {"n_locs": 9}}, [("n_localizations", True)]) == ["b", "a"]
+

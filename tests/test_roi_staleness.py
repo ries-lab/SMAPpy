@@ -108,7 +108,7 @@ def test_re_evaluating_runs_the_stale_step_and_copies_the_rest_forward():
     after = run["records"][ids[0]]["steps"]
     assert after["Localization Statistics"] == before           # copied, not run again
     assert after["photons"]["signature"] != photons["signature"]  # run again
-    assert after["photons"]["values"]["mean_precision_nm"] == 11.0
+    assert after["photons"]["values"]["precision_mean_nm"] == 11.0
     assert not project.needs_evaluation()
     assert len(project.results()) == 2
 
@@ -119,12 +119,12 @@ def test_one_site_reuses_what_is_current_and_says_what_it_ran():
     project.evaluate()
     record, results, _ = project.evaluate_one(ids[0], reuse=True)
     assert results["Localization Statistics"] is None           # kept, so nothing to draw
-    assert record["steps"]["Localization Statistics"]["values"]["n_localizations"] == 4
+    assert record["steps"]["Localization Statistics"]["values"]["n_locs"] == 4
 
     project.block.steps[0].values = {"bins": 50}
     record, results, _ = project.evaluate_one(ids[0], reuse=True)
     assert results["Localization Statistics"] is not None       # stale, so it ran
-    assert record["steps"]["Localization Statistics"]["values"]["mean_precision_nm"] == 11.0
+    assert record["steps"]["Localization Statistics"]["values"]["precision_mean_nm"] == 11.0
 
 
 def test_a_figure_can_be_asked_for_even_when_the_numbers_are_current():

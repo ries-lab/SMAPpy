@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.binding_kinetics.binding_events, smappy.binding_kinetics.dark_times, smappy.binding_kinetics.dark_ml, smappy.binding_kinetics.fit_cumulative, smappy.binding_kinetics.pooled_index, smappy.binding_kinetics.trace, smappy.binding_kinetics.frame_spread, smappy.binding_kinetics.uniform_p, smappy.binding_kinetics.region_kinetics, smappy.plugins.binding_kinetics.acquisition, smappy.plugins.binding_kinetics.draw_trace, smappy.plugins.binding_kinetics.BindingKinetics.run, smappy.simulate.binding.simulate_binding_sites]
 ---
 
@@ -183,7 +183,7 @@ frame (a filter on frames, a merged file).
 
 A row of the region table per region (and the values of a run on the view):
 
-* `n_localizations`, `n_events`, `locs_per_event` -- the localizations, the
+* `n_locs`, `n_events`, `locs_per_event` -- the localizations, the
   binding events and the localizations in each.
 * `first_frame`, `last_frame`, `span_frames` -- of the localizations.
 * `longest_dark_frames`, `longest_bright_frames` -- the longest gap between

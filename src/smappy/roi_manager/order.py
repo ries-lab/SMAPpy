@@ -30,6 +30,8 @@ import operator
 import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from ..region_table import current_name
+
 MISSING = None
 
 
@@ -61,7 +63,7 @@ def sort_ids(rows: Dict[str, Dict[str, Any]], keys: Sequence[Tuple[str, bool]],
     for column, descending in reversed(list(keys)):
         if not column:
             continue
-        ranked = {i: rank(column, rows[i].get(column)) for i in ids}
+        ranked = {i: rank(column, _get(rows[i], column)) for i in ids}
         have = [i for i in ids if ranked[i] is not None]
         lack = [i for i in ids if ranked[i] is None]
         have.sort(key=lambda i: ranked[i], reverse=descending)
@@ -105,7 +107,7 @@ def condition(text: str) -> Tuple[Callable[[Dict[str, Any]], bool], List[str]]:
             raise ValueError(f"the condition cannot contain {type(node).__name__}: "
                              "compare columns with numbers or quoted keywords")
         if isinstance(node, (ast.Name, ast.Attribute)):
-            names.append(quoted.get(_name(node), _name(node)))
+            names.append(current_name(quoted.get(_name(node), _name(node))))
             return
         for child in ast.iter_child_nodes(node):
             check(child)
@@ -116,7 +118,7 @@ def condition(text: str) -> Tuple[Callable[[Dict[str, Any]], bool], List[str]]:
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, (ast.Name, ast.Attribute)):
-            found = row.get(quoted.get(_name(node), _name(node)))
+            found = _get(row, quoted.get(_name(node), _name(node)))
             if isinstance(found, float) and math.isnan(found):
                 return MISSING
             return found
@@ -164,6 +166,15 @@ def condition(text: str) -> Tuple[Callable[[Dict[str, Any]], bool], List[str]]:
         return bool(found) if found is not MISSING else False
 
     return (lambda row: truth(tree.body, row)), names
+
+
+def _get(row: Dict[str, Any], name: str):
+    """``row``'s value of ``name``, or of what it is called now (`current_name`):
+    a condition or sort key saved before a value was renamed, or a row kept
+    from before, reads either."""
+    if name in row:
+        return row[name]
+    return row.get(current_name(name))
 
 
 def _name(node) -> str:

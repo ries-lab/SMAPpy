@@ -44,7 +44,7 @@ class SequenceQC(Plugin):
     Settings = SequenceQCSettings
     changes_locs = False
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: SequenceQCSettings) -> FormState:
         state = FormState()
@@ -128,7 +128,7 @@ class SequenceQC(Plugin):
         if not len(traces.ids):
             return {}
         values = {"n_rows": traces.rows.astype(float),
-                  "n_localizations": traces.localizations.astype(float),
+                  "n_locs": traces.localizations.astype(float),
                   "photon_budget": traces.photons,
                   "duration_s": traces.end_s - traces.start_s,
                   "end_sta": traces.sta.astype(float)}

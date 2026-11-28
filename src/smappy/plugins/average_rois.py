@@ -181,7 +181,7 @@ class AverageROIs(Plugin):
     changes_locs = True
     # the localizations of each ROI, whatever the layer shows: a new table
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
 
     def describe(self, ctx, settings) -> FormState:
         c, o = settings.centre, settings.orientation
@@ -235,7 +235,7 @@ class AverageROIs(Plugin):
         x, y = np.asarray(out["x_nm"]), np.asarray(out["y_nm"])
         reach = float(np.percentile(np.hypot(x, y), 99)) if len(x) else 1.0
         values = {"n_rois": len(parts), "n_skipped": int(sum(skipped.values())),
-                  "n_localizations": len(out)}
+                  "n_locs": len(out)}
         result = Result(text=text, settings=settings, values=values,
                         data={"rois": [p[3] for p in parts]},
                         plot=Plot(lambda fig: draw_average(fig.subplots(1, 2), x, y, reach),

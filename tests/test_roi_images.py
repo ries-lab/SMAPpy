@@ -105,9 +105,9 @@ def test_the_titles_carry_what_was_measured(tmp_path):
     from smappy.chain import Step
     session.rois.evaluate([Step(plugin="Analysis/Measure/Localization Statistics")])
     settings = RoiImagesSettings(path=str(tmp_path / "rois.pdf"), pixelsize_nm=5.0,
-                                 title_columns=["n_localizations"])
+                                 title_columns=["n_locs"])
     pictures = session.run(RoiImages(), settings).data["pictures"]
-    assert all(p.title.startswith(f"ROI {p.number}, n_localizations ") for p in pictures)
+    assert all(p.title.startswith(f"ROI {p.number}, n_locs ") for p in pictures)
 
 
 def test_the_form_counts_the_pictures_and_offers_the_lines(tmp_path):
@@ -148,12 +148,12 @@ def test_the_title_is_the_number_alone_until_values_are_ticked(app_qt):
     from smappy.gui.params import ColumnsField
     from smappy.plugins import param_specs
     field = ColumnsField(param_specs(RoiImagesSettings)["title_columns"])
-    field.set_choices(["n_localizations", "radius_nm"])
+    field.set_choices(["n_locs", "radius_nm"])
     assert field.value() == []                       # none by default
     field._tick_all(True)
-    assert field.value() == ["n_localizations", "radius_nm"]
+    assert field.value() == ["n_locs", "radius_nm"]
     field._tick_all(False)
-    field.set_choices(["n_localizations", "radius_nm"])     # a refresh
+    field.set_choices(["n_locs", "radius_nm"])     # a refresh
     assert field.value() == []
 
 

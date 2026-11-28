@@ -71,13 +71,17 @@ def rows_values(rows: List[Dict[str, Any]], names: List[str]) -> Dict[str, Dict[
     has is an error naming the ones there are."""
     numeric = sorted({k for r in rows for k, v in r.items()
                       if k not in ("roi_id", "file_id") and isinstance(v, (int, float))})
+    from ..region_table import current_name
     wanted = names or numeric
-    missing = [k for k in wanted if k not in numeric]
+    # a value asked for by the name it had before it was renamed is written
+    # under that name, from the value as it is called now
+    source = {k: k if k in numeric else current_name(k) for k in wanted}
+    missing = [k for k in wanted if source[k] not in numeric]
     if missing:
         raise ValueError(f"no region has a number called {', '.join(missing)}; "
                          f"there is {', '.join(numeric) or 'none'}")
-    return {k: {str(r["roi_id"]): r[k] for r in rows
-                if isinstance(r.get(k), (int, float))} for k in wanted}
+    return {k: {str(r["roi_id"]): r[source[k]] for r in rows
+                if isinstance(r.get(source[k]), (int, float))} for k in wanted}
 
 
 KEYWORD = "_keyword"     # a keyword list's column: ``<list>_keyword``

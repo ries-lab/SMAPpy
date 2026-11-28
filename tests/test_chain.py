@@ -316,7 +316,7 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     project = session.rois
     assert len(project.rois) == 5 and drawn.id in project.rois
     rows = project.results()
-    assert len(rows) == 4 and {r["n_localizations"] for r in rows} == {100}
+    assert len(rows) == 4 and {r["n_locs"] for r in rows} == {100}
     assert project.block.steps == [] and project.runs[-1]["chain"] == "block sites"
     assert project.labels() == ["stats"]
     # and the log says so, step by step
@@ -356,8 +356,8 @@ def test_one_evaluator_under_two_names_gives_two_sets_of_columns():
     session.run(cls(), cls.Settings())
     assert set(session.rois.labels()) == {"a", "b"}
     rows = session.rois.results()
-    assert len(rows) == 4 and "a.n_localizations" in rows[0] \
-        and "b.n_localizations" in rows[0]
+    assert len(rows) == 4 and "a.n_locs" in rows[0] \
+        and "b.n_locs" in rows[0]
 
 
 def test_a_steps_grouping_in_a_block_is_each_layers_own_and_cannot_be_chosen():
@@ -372,7 +372,7 @@ def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois
     settings = cls.Settings()
     assert cls().describe(None, settings).active.get("stats.use_grouping") is not False
     result = session.run(cls(), settings)
-    assert result.data["results"]["stats"].values["n_localizations"] == \
+    assert result.data["results"]["stats"].values["n_locs"] == \
         len(session.selection(0))                       # the whole view, once
     assert session.rois.runs == []                     # measured the view, not the ROIs
 
@@ -389,7 +389,7 @@ def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
     project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics")])
     assert set(project.labels()) == {"chain stats", "Localization Statistics"}
     row = project.results()[0]
-    assert row["chain stats.n_localizations"] == row["Localization Statistics.n_localizations"] == 100
+    assert row["chain stats.n_locs"] == row["Localization Statistics.n_locs"] == 100
 
 
 def test_histograms_of_every_evaluation_need_no_choice():
@@ -408,7 +408,7 @@ def test_histograms_of_every_evaluation_need_no_choice():
     # every evaluation is drawn unless one is named: nothing to ask
     assert cls().preflight(session.context(), cls.Settings()) is None
     result = session.run(cls(), cls.Settings())
-    assert {"a.n_localizations", "b.n_localizations"} <= set(
+    assert {"a.n_locs", "b.n_locs"} <= set(
         result.data["results"]["h"].data["histograms"])
 
 

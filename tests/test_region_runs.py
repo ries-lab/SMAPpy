@@ -159,7 +159,7 @@ def test_the_statistics_run_per_cluster_and_an_empty_one_is_a_zero():
     session.layers[0].set_bound("photons", 1e9, None)     # nothing passes
     steps = pipeline_module.block_steps(pipeline_module.default_block())
     table = session.evaluate_regions("cluster_id", steps)["Localization Statistics"]
-    assert table.columns()["n_localizations"].tolist() == [0, 0, 0]
+    assert table.columns()["n_locs"].tolist() == [0, 0, 0]
 
 
 def test_per_cluster_results_survive_a_save_and_can_be_left_out(tmp_path):

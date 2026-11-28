@@ -593,7 +593,7 @@ def test_roi_results_are_columns_beside_the_table_and_can_be_left_out(tmp_path):
     with h5py.File(out, "r") as f:
         attribute = json.loads(f.attrs["metadata"])["roi_project"]
         assert "tables" not in attribute and attribute["rois"]
-        assert "regions/0/values/n_localizations" in f
+        assert "regions/0/values/n_locs" in f
     back = Session()
     back.load(out)
     back.show_grouped(0, False)
@@ -607,7 +607,7 @@ def test_roi_results_are_columns_beside_the_table_and_can_be_left_out(tmp_path):
     back.show_grouped(0, False)
     # what the segmenter measured goes with the ROIs; the evaluations do not
     assert len(back.rois.rois) == len(project.rois)
-    assert not any("n_localizations" in row for row in back.rois.results())
+    assert not any("photons_mean" in row for row in back.rois.results())
 
 
 def _drag(window, path):

@@ -54,10 +54,10 @@ def test_statistics_use_and_stale_results():
     roi.use = True
     run = p.evaluate()
     values = merged_values(run['records'][roi.id])
-    assert values['n_localizations'] == 3
+    assert values['n_locs'] == 3
     assert [step['label'] for step in run['pipeline']] == ['Localization Statistics']
-    assert values['mean_precision_nm'] == 11
-    assert values['mean_photons'] == 200
+    assert values['precision_mean_nm'] == 11
+    assert values['photons_mean'] == 200
     assert len(p.results()) == 1
     roi.comment = 'Good pore'
     assert not p.stale_steps(roi.id)
@@ -68,11 +68,11 @@ def test_statistics_use_and_stale_results():
     assert p.stale_steps(roi.id)
     assert not p.results()
     p.evaluate()
-    assert p.results()[0]['n_localizations'] == 2
+    assert p.results()[0]['n_locs'] == 2
     set_bounds(p, {'photons': (200, None)})
     assert p.stale_steps(roi.id)
     p.evaluate()
-    assert p.results()[0]['n_localizations'] == 1
+    assert p.results()[0]['n_locs'] == 1
     roi.use = False
     assert not p.results()
     assert not p.evaluate()['records']
@@ -100,13 +100,13 @@ def test_empty_and_nonfinite_measurements():
     p.add_roi(s.id, [1000, 1000])
     p.evaluate()
     rows = p.results()
-    assert rows[0]['mean_photons'] == 200
-    assert rows[1]['n_localizations'] == 0
-    assert np.isnan(rows[1]['mean_photons'])
+    assert rows[0]['photons_mean'] == 200
+    assert rows[1]['n_locs'] == 0
+    assert np.isnan(rows[1]['photons_mean'])
     hist = histograms(rows)
-    assert counted(hist['n_localizations']) == 2
-    assert counted(hist['mean_photons']) == 1
-    assert hist['mean_photons']['missing'] == 1
+    assert counted(hist['n_locs']) == 2
+    assert counted(hist['photons_mean']) == 1
+    assert hist['photons_mean']['missing'] == 1
 
 
 def test_grouped_render_and_analysis_share_filters_after_regrouping():
@@ -163,13 +163,13 @@ def test_find_rings_and_blobs_review_evaluate_histogram():
         assert np.min(np.linalg.norm(centers - roi.center, axis=1)) < 15
     assert not p.find(s.id)  # repeat finding does not duplicate existing ROIs
     p.evaluate()
-    assert [row['n_localizations'] for row in p.results()] == [30] * 4
+    assert [row['n_locs'] for row in p.results()] == [30] * 4
     hist = histograms(p.results())
-    assert counted(hist['n_localizations']) == 4
+    assert counted(hist['n_locs']) == 4
     set_bounds(p, {'photons': (2000, None)})
     assert not p.find(s.id)
     # the statistics are out of date; what the segmenter measured stays
-    assert not any('n_localizations' in row for row in p.results())
+    assert not any('photons_mean' in row for row in p.results())
 
 
 def test_a_failing_step_costs_its_columns_and_not_the_run():
@@ -241,8 +241,8 @@ def test_the_default_histograms_draw_every_number_the_statistics_gave():
     drawn = histograms(p.results())
     # and what Segment regions measured on each candidate
     from smappy.segmentation import VALUES
-    assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
-                          'photons_n0', 'mean_precision_nm', 'median_precision_nm',
+    assert set(drawn) == {'n_locs', 'segment.n_locs', 'photons_mean', 'photons_median',
+                          'photons_n0', 'precision_mean_nm', 'precision_median_nm',
                           'sigma_c_nm', 'on_time_frames', 'on_time_s', 'n_blinks',
                           *VALUES['disc']}
 
@@ -256,7 +256,7 @@ def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():
     assert 'records' not in p.runs[-1] and p.runs[-1]['regions'] == 2
     kept = p.tables['Localization Statistics']
     assert kept.ids == [a.id, b.id]
-    assert kept.columns()['n_localizations'].tolist() == [2, 1]
+    assert kept.columns()['n_locs'].tolist() == [2, 1]
     assert kept.step(a.id)['plugin'] == 'Analysis/Measure/Localization Statistics'
 
 

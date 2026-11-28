@@ -57,7 +57,7 @@ def test_bursts_split_at_a_dark_time_longer_than_t():
     assert bursts(found, 43).tolist() == [0, 0, 0]
     assert bursts(found, 42).tolist() == [0, 0, 1]
     values = region_blinking([0, 1, 2, 5, 6, 50], dark_time=10, frame_time_ms=20.0)
-    assert values["n_localizations"] == 6 and values["n_blinks"] == 3
+    assert values["n_locs"] == 6 and values["n_blinks"] == 3
     assert values["n_bursts"] == 2
     assert values["mean_on_frames"] == 2.0 and values["mean_dark_frames"] == 2.0
     assert values["mean_on_s"] == pytest.approx(0.04)
@@ -149,7 +149,7 @@ def test_a_layer_that_merges_blinks_is_measured_by_its_blinks():
     merged = Blinking().run(session.context(0), settings)
     session.show_grouped(0, False)
     runs = Blinking().run(session.context(0), settings)
-    assert merged.values["n_localizations"] == runs.values["n_localizations"] == len(frame)
+    assert merged.values["n_locs"] == runs.values["n_locs"] == len(frame)
     # merging bridges one dark frame, so it finds fewer and longer blinks
     assert merged.values["n_blinks"] < runs.values["n_blinks"]
     assert merged.values["n_bursts"] == runs.values["n_bursts"] == len(np.unique(owner))
@@ -163,7 +163,7 @@ def test_in_an_roi_it_counts_the_blinks_and_bursts_of_what_is_inside():
     roi = project.add_roi(source.id, [3000.0, 2000.0])         # fluorophore 23
     result = Blinking().run(project.region_context(roi), Blinking.Settings())
     mine = frame[owner == 23]
-    assert result.values["n_localizations"] == len(mine)
+    assert result.values["n_locs"] == len(mine)
     assert result.values["n_bursts"] == 1
     # the blinks as the layer merged them
     ids = np.asarray(project.session.locs["group_id"])[owner == 23]

@@ -147,7 +147,7 @@ def test_rois_without_what_the_settings_ask_for_are_left_out_and_said(tmp_path):
     settings = AverageROIs.Settings()
     settings.orientation.by = "line"
     result = session.run(AverageROIs(), settings)
-    assert result.values == {"n_rois": 1, "n_skipped": 1, "n_localizations": 50}
+    assert result.values == {"n_rois": 1, "n_skipped": 1, "n_locs": 50}
     assert "1 with no line called line" in result.text
     x, y, _ = averaged(session)
     assert abs(np.median(y)) < 5 and abs(np.median(x)) < 5

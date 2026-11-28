@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.blinking.blinks_of, smappy.plugins.blinking.dark_frames, smappy.plugins.blinking.bursts, smappy.plugins.blinking.molecules, smappy.plugins.blinking.region_blinking, smappy.plugins.blinking.molecule_blinking, smappy.plugins.blinking.view_values, smappy.plugins.blinking.draw_histograms, smappy.plugins.blinking.Blinking.run, smappy.metadata.frame_time_ms, smappy.metadata.file_frame_time, smappy.metadata.table_frame_time]
 ---
 
@@ -184,7 +184,7 @@ whatever it is set to, and the view's numbers mean little.
 
 **Per region**, a row of the region table:
 
-* `n_localizations` -- the localizations of the selected blinks in the
+* `n_locs` -- the localizations of the selected blinks in the
   region.
 * `n_blinks` -- the blinks, as the layer merges them.
 * `n_bursts` -- the bursts at the *dark time*: the molecules, if $T$ is

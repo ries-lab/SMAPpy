@@ -55,14 +55,14 @@ def test_both_stores_are_read_the_same_way():
     ctx = session.context()
     ev = Evaluation("cluster_id", "Localization Statistics")
     assert available(ctx, STATS) == [ev] and is_current(ctx, ev)
-    assert sorted(r["n_localizations"] for r in rows(ctx, ev)) == sorted(SIZES)
+    assert sorted(r["n_locs"] for r in rows(ctx, ev)) == sorted(SIZES)
     assert [s["plugin"] for s in steps(ctx, ev)] == [STATS]
 
     session, _ = measured_rois()
     ctx = session.context()
     ev = Evaluation("rois", "Localization Statistics")
     assert available(ctx, STATS) == [ev] and is_current(ctx, ev)
-    assert sorted(r["n_localizations"] for r in rows(ctx, ev)) == sorted(SIZES)
+    assert sorted(r["n_locs"] for r in rows(ctx, ev)) == sorted(SIZES)
     assert [s["plugin"] for s in steps(ctx, ev)] == [STATS]
 
 
@@ -99,14 +99,14 @@ def test_a_value_written_onto_the_table_leaves_its_results_current():
     """Writing a region's number onto its localizations changes nothing it was
     measured on: a second value can be written from the same results."""
     session, _ = measured_clusters()
-    for value in ("n_localizations", "median_photons"):
+    for value in ("n_locs", "photons_median"):
         session.run(RegionsToColumn(), RegionsToColumn.Settings(
             source=PER_CLUSTER, values=value, prefix="cluster_"))
-    assert {"cluster_n_localizations", "cluster_median_photons"} <= set(session.locs.keys())
+    assert {"cluster_n_locs", "cluster_photons_median"} <= set(session.locs.keys())
     assert is_current(session.context(), Evaluation.parse(PER_CLUSTER))
 
     session, _ = measured_rois()
-    for value in ("n_localizations", "median_photons"):
+    for value in ("n_locs", "photons_median"):
         session.run(RegionsToColumn(), RegionsToColumn.Settings(
             source="Localization Statistics", values=value, prefix="roi_"))
     assert session.rois.labels() == ["Localization Statistics"]
@@ -119,7 +119,7 @@ def test_regions_to_column_says_when_the_cluster_results_are_out_of_date():
                                    dict(session.locs.metadata)))
     with pytest.raises(ValueError, match="out of date"):
         RegionsToColumn()(ctx=session.context(), source=PER_CLUSTER,
-                          values="n_localizations")
+                          values="n_locs")
 
 
 def counted_pores():

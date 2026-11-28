@@ -1,5 +1,5 @@
 ---
-version: "6"
+version: "7"
 covers: [smappy.metadata.table_frame_time, smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay, smappy.plugins.statistics.frame_decay, smappy.plugins.statistics.frame_counts, smappy.plugins.statistics.shared_highs, smappy.plugins.statistics.draw_layers]
 ---
 
@@ -291,11 +291,11 @@ meaningful fit anyway.
   localizations are in, and the count per frame at the start and the end.
   If the on-time could not be shown, the reason.  With several layers, a
   block of these lines per layer.
-* **Per ROI**, the row each ROI gets: `n_localizations`; `mean_photons`,
-  `median_photons` and `photons_n0`; `mean_precision_nm`,
-  `median_precision_nm` and `sigma_c_nm` (`sigma_c` NaN when the model was
-  not fitted); for 3D data the same with
-  `z_` (`median_z_precision_nm`, ...); and where the ROI's table carries
+* **Per ROI**, the row each ROI gets: `n_locs`; `photons_mean`,
+  `photons_median` and `photons_n0`; `precision_mean_nm`,
+  `precision_median_nm` and `sigma_c_nm` (`sigma_c` NaN when the model was
+  not fitted); for 3D data the same for z
+  (`z_precision_mean_nm`, `z_precision_median_nm`, `sigma_c_z_nm`); and where the ROI's table carries
   `n_in_group`, `on_time_frames` ($\tau$), `on_time_s` ($\tau$ in
   seconds; NaN without a frame time, or when the ROI's files have different
   ones) and `n_blinks`.  The on-time of an

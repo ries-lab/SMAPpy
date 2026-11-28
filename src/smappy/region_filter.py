@@ -106,7 +106,8 @@ class Condition:
     @classmethod
     def from_dict(cls, doc: Dict[str, Any]) -> "Condition":
         accept = doc.get("accept")
-        return cls(str(doc["source"]), str(doc["label"]), str(doc["value"]),
+        from .region_table import current_name
+        return cls(str(doc["source"]), str(doc["label"]), current_name(str(doc["value"])),
                    None if doc.get("lo") is None else float(doc["lo"]),
                    None if doc.get("hi") is None else float(doc["hi"]),
                    None if accept is None else [str(a) for a in accept])
