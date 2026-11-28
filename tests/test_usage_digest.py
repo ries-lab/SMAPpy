@@ -4,7 +4,7 @@ import importlib.util
 import json
 import re
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -216,3 +216,35 @@ def test_the_password_is_found_by_the_service_when_stored_under_another_account(
     monkeypatch.setattr(digest.subprocess, "run", run)
     assert digest.keychain_password("ada@example.org") == "pw"
     assert asked[0][3:5] == ["-a", "ada@example.org"] and "-a" not in asked[1]
+
+
+def test_the_logs_runs_with_spaces_uncaught_errors_console_lines_and_crashes_are_read(home, digest):
+    logs = config.config_dir() / "logs"
+    logs.mkdir(parents=True)
+    now = f"{datetime.now():%Y-%m-%d %H:%M:%S}"
+    (logs / "smappy.log").write_text(
+        f"{now},000 INFO    [Thread-2 (reader)] run Localize/Spline 3D (v11) on 0 localizations: -\n"
+        f"{now},000 ERROR   [Dummy-3] run Localize/Spline 3D failed after 0.05 s\n"
+        "Traceback (most recent call last):\nValueError: a focus on auto needs the frames\n"
+        f"{now},000 CRITICAL [MainThread] uncaught exception\n"
+        f"{now},000 WARNING [MainThread] (err) Traceback (most recent call last):\n"
+        f"{now},000 WARNING [MainThread] (err) ValueError: math domain error\n"
+        f"{now},000 WARNING [MainThread] (err) <TiffTag.fromfile> raised TiffFileError('@463515 offset 0')\n"
+        f"{now},000 WARNING [Dummy-1] (err) <TiffTag.fromfile> raised TiffFileError('@463532 offset 0')\n")
+    (logs / "crash.log").write_text(
+        "\n=== smappy started 2020-01-01 10:00:00, pid 1 ===\nFatal Python error: old\n"
+        f"\n=== smappy started {now}, pid 2 ===\n"
+        f"\n=== smappy started {now}, pid 3 ===\nFatal Python error: Segmentation fault\n")
+    bundles = home / "drop"
+    bundles.mkdir()
+    made = usage_log.bundle(bundles / usage_log.bundle_name(),
+                            datetime.now() - timedelta(hours=1))
+    assert made["parts"]["crashes"] == 1          # the new crash; neither the old nor a quiet start
+    out = home / "digest"
+    digest.main([str(bundles), str(out)])
+    overview = (out / "overview.md").read_text()
+    assert "**Localize/Spline 3D**: ValueError: a focus on auto" in overview
+    assert "| 1 | Localize/Spline 3D |" in overview
+    assert "| 1 | ValueError: math domain error |" in overview
+    assert "| 2 | <TiffTag.fromfile> raised TiffFileError('@# offset #') |" in overview
+    assert "Segmentation fault" in overview and "old" not in overview.split("### Crashes")[1][:300]

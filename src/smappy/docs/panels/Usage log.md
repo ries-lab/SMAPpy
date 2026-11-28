@@ -33,7 +33,10 @@ last send:
 
 - those events;
 - the plugin runs from SMAPpy's own log (the one *Help > Show the log
-  folder* opens), with their settings and any error;
+  folder* opens), with their settings and any error, and what else that log
+  holds: the program's console output, its warnings and its uncaught
+  errors; and the crash reports of the same folder (`crash.log`), where
+  SMAPpy closed without a word;
 - the assistant's notes of what it did with its own code, the copies of
   its scripts, and the tools it said it was missing;
 - the assistant's conversations, as its program keeps them: Claude Code's

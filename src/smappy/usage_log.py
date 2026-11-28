@@ -16,7 +16,9 @@ the computer unless they also give a link to send it to.  When on:
   long it took and the start of its answer; and each help page opened.
   Appended as JSON lines to ``<config dir>/usage-log/events-YYYY-MM.jsonl``.
 * gathered when a bundle is made, not recorded twice: the plugin runs of
-  ``smappy.log`` (`diagnostics`), the assistant's notes of its own code and
+  ``smappy.log`` (`diagnostics`) with the program's console output and its
+  uncaught errors, which that log copies, the native crashes of
+  ``crash.log``, the assistant's notes of its own code and
   of the tools it missed (`assistant.knowledge`, with the copied scripts),
   and the assistant client's own transcripts of the conversations held in
   its folder -- Claude Code's under ``~/.claude/projects``, Codex's under
@@ -202,6 +204,31 @@ def _log_since(path: Path, since: Optional[datetime]) -> str:
     return "\n".join(out) + ("\n" if out else "")
 
 
+_CRASH_HEAD = re.compile(r"^=== .* started (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")
+
+
+def _crashes_since(path: Path, since: Optional[datetime]) -> str:
+    """The sections of `diagnostics`' ``crash.log`` -- one per start, headed
+    by when it started -- that hold a crash and may be new: those started
+    after ``since``, and the last, which a process still running or killed
+    since may have written into.  A start that never crashed is its header
+    alone, and is left out."""
+    sections: List[List[str]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if _CRASH_HEAD.match(line) or not sections:
+            sections.append([])
+        sections[-1].append(line)
+    out = []
+    for i, section in enumerate(sections):
+        match = _CRASH_HEAD.match(section[0])
+        started = _stamp(match.group(1).replace(" ", "T")) if match else None
+        recent = since is None or started is None or started > since \
+            or (i == len(sections) - 1 and _newer(path, since))
+        if recent and any(line.strip() for line in section[1:]):
+            out += section
+    return "\n".join(out) + ("\n" if out else "")
+
+
 def _newer(path: Path, since: Optional[datetime]) -> bool:
     try:
         return since is None or datetime.fromtimestamp(path.stat().st_mtime) > since
@@ -382,6 +409,12 @@ def bundle(path: Path, since: Optional[datetime] = None) -> Dict[str, Any]:
             if text:
                 z.writestr(f"logs/{log.name}", text)
                 parts["logs"] = parts.get("logs", 0) + 1
+        crash = logs / diagnostics.CRASH_NAME
+        if crash.is_file() and _newer(crash, since):
+            text = _crashes_since(crash, since)
+            if text:
+                z.writestr(f"logs/{crash.name}", text)
+                parts["crashes"] = text.count("\n=== ") + text.startswith("=== ")
         assistant = config_dir() / "assistant"
         for name in ("missing-tools.md", "own-code.md"):
             if (assistant / name).is_file() and _newer(assistant / name, since):

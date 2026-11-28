@@ -19,6 +19,8 @@ deleted or moved.
 * ``overview.md`` -- per sender, then pooled: the tools the assistant called
   and which failed, every `find_plugins` query with what it found, the
   source it read, the help pages opened, the plugin runs and their failures,
+  the uncaught errors, the console's exceptions and warnings and the
+  crashes (``crash.log``),
   the assistant's own-code and missing-tools notes, and the conversations
   ranked by how much friction they show;
 * ``sessions/<sender>/<session>.md`` -- each conversation as a timeline: what
@@ -245,8 +247,13 @@ def read_jsonl(text: str) -> list:
     return out
 
 
-RUN = re.compile(r"^(\S+ \S+) \w+\s+\[[^\]]*\] (\w+) (\S+) \(v([^)]*)\)")
-FAILED = re.compile(r"^(\S+ \S+) \w+\s+\[[^\]]*\] (\w+) (\S+) failed after")
+# a plugin's path has spaces ("Localize/Spline 3D"): it runs to " (v" or " failed"
+RUN = re.compile(r"^(\S+ \S+) \w+\s+\[.*?\] (\w+) (.+?) \(v([^)]*)\)")
+FAILED = re.compile(r"^(\S+ \S+) \w+\s+\[.*?\] (\w+) (.+?) failed after")
+STAMPED = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d+ (\w+)\s+\[.*?\] (.*)$")
+# the console's lines, which the log copies as "WARNING [thread] (err) ..."
+CONSOLE = re.compile(r"^(?:\x1b\[[0-9;]*m)?(\w+(?:Error|Exception|Warning)\b.*)$")
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def plugin_runs(log: str):
@@ -258,6 +265,41 @@ def plugin_runs(log: str):
         elif FAILED.match(line):
             tail = next((l for l in lines[i + 1:i + 60] if re.match(r"^\w+(Error|Exception)\b", l)), "")
             yield FAILED.match(line).group(3), True, tail
+
+
+def _general(text: str) -> str:
+    """A message without what differs between its repeats -- numbers,
+    addresses, paths -- so the same problem is counted as one."""
+    text = ANSI.sub("", text)
+    text = re.sub(r"[A-Za-z]:\\[^'\"\s]+|/[\w./-]{8,}", "<path>", text)
+    return re.sub(r"\b0x[0-9a-f]+|\d+(\.\d+)?", "#", text)[:200]
+
+
+def log_problems(log: str):
+    """``(kind, message)`` for what went wrong in a log other than a plugin
+    run: an uncaught error (its exception's line), and each exception or
+    warning the console printed, generalised so repeats count as one."""
+    lines = log.splitlines()
+    for i, line in enumerate(lines):
+        match = STAMPED.match(line)
+        if not match:
+            continue
+        level, message = match.groups()
+        if level == "CRITICAL" and message.startswith("uncaught exception"):
+            # the traceback follows, unstamped, or copied as "(err)" lines
+            tail = ""
+            for later in lines[i + 1:i + 80]:
+                body = STAMPED.match(later)
+                text = body.group(2) if body else later
+                text = ANSI.sub("", text.removeprefix("(err) ").strip())
+                if re.match(r"^\w+(Error|Exception)\b", text):
+                    tail = text
+                    break
+            yield "uncaught", _general(tail or message)
+        elif message.startswith("(err) "):
+            text = ANSI.sub("", message[6:]).strip()
+            if CONSOLE.match(text) or text.startswith("<"):    # "<tifffile...> failed"
+                yield "console", _general(text)
 
 
 def notes(markdown: str) -> dict:
@@ -287,6 +329,9 @@ class Sender:
         self.help = collections.Counter()
         self.runs = collections.Counter()
         self.failed_runs = []
+        self.uncaught = collections.Counter()
+        self.console = collections.Counter()
+        self.crashes = []
         self.own_code, self.missing = {}, {}
         self.sessions = {}            # key -> (size, timeline)
 
@@ -323,9 +368,16 @@ def read_bundle(path: Path, senders: dict) -> None:
                             s.sources[str(args.get("name", "")) if isinstance(args, dict) else str(args)] += 1
                         elif tool == "read_doc":
                             s.docs[str(args.get("path", "")) if isinstance(args, dict) else str(args)] += 1
+            elif name.startswith("logs/crash"):
+                for section in re.split(r"\n(?==== )", data.strip()):
+                    head, _, body = section.partition("\n")
+                    if body.strip():
+                        s.crashes.append((head.strip("= "), one_line(body, ERROR_LIMIT)))
             elif name.startswith("logs/"):
+                for kind, message in log_problems(data):
+                    (s.uncaught if kind == "uncaught" else s.console)[message] += 1
                 for plugin, failed, error in plugin_runs(data):
-                    s.runs[plugin] += 1
+                    s.runs[plugin] += not failed        # a failure's start line counted it
                     if failed:
                         s.failed_runs.append((plugin, error))
             elif name == "assistant/own-code.md":
@@ -389,6 +441,15 @@ def overview(senders: dict, out: Path) -> str:
         if s.failed_runs:
             md += ["### Plugin runs that failed", ""]
             md += [f"- **{p}**: {e}" for p, e in s.failed_runs[-40:]] + [""]
+        if s.crashes:
+            md += ["### Crashes (crash.log: SMAPpy closed without a word)", ""]
+            md += [f"- {head}: {body}" for head, body in s.crashes[-20:]] + [""]
+        if s.uncaught:
+            md += ["### Uncaught errors", "", "| n | error |", "| --- | --- |",
+                   *table(s.uncaught, 20), ""]
+        if s.console:
+            md += ["### Console: exceptions and warnings printed", "", "| n | line |",
+                   "| --- | --- |", *table(s.console, 20), ""]
         for title, notes_ in (("Own code (the assistant's record)", s.own_code),
                               ("Missing tools (the assistant's record)", s.missing)):
             if notes_:
