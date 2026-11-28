@@ -151,6 +151,15 @@ def _key(widget) -> int:
     return shiboken6.getCppPointer(widget)[0]
 
 
+def _form_word(form) -> str:
+    """An untitled form's name: its settings class in words ("PupilModelSettings" -> "pupil
+    model"), not "settings #3" -- the PSF calibration window has five untitled forms."""
+    name = getattr(getattr(form, "settings_cls", None), "__name__", "") or ""
+    name = name.removesuffix("Settings")
+    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", name).lower()
+    return words.strip() or "settings"
+
+
 def _kind_word(widget: QWidget) -> str:
     """What an unlabelled control is, for its name when nothing else names it."""
     for kind, word in ((QComboBox, "choice"), (QAbstractSpinBox, "number"),
@@ -212,7 +221,7 @@ class _Walker:
             r.panels[name] = panel_summary(widget, self.session)
             return
         if isinstance(widget, SettingsForm):
-            name = r.name(path, label or "settings")
+            name = r.name(path, label or _form_word(widget))
             r.forms[name] = form_values(widget)
             r.form_widgets[name] = widget
             return

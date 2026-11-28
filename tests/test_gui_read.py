@@ -88,6 +88,30 @@ def test_a_window_reads_each_field_by_its_label_under_its_section(app):
     assert "nm" not in reading.notes and "range" not in reading.notes
 
 
+def test_an_untitled_form_is_named_by_its_settings_in_words(app):
+    """Not "settings", "settings #2": the PSF calibration window has five untitled forms."""
+    from dataclasses import dataclass
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+    from smappy.gui.gui_read import read_widget
+    from smappy.gui.params import SettingsForm
+    from smappy.plugins import param
+
+    @dataclass
+    class PupilModelSettings:
+        zernike_order: int = param(6, label="Zernike order")
+
+    @dataclass
+    class BeadSettings:
+        roi_size: int = param(27, label="ROI size")
+
+    window = QWidget()
+    column = QVBoxLayout(window)
+    column.addWidget(SettingsForm(PupilModelSettings))
+    column.addWidget(SettingsForm(BeadSettings))
+    assert read_widget(window).forms == {"pupil model": {"zernike_order": 6},
+                                         "bead": {"roi_size": 27}}
+
+
 def test_a_field_that_opens_a_dialog_is_set_and_the_dialog_closed_unanswered(app):
     """Every call runs on the GUI thread: a modal dialog would hold the assistant's queue."""
     from PySide6.QtWidgets import QComboBox, QMessageBox
