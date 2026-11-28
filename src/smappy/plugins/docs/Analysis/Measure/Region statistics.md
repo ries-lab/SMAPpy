@@ -235,7 +235,8 @@ On a MINFLUX file these are all five; on a camera fit usually `photons` and
 `xy_err_nm`.  Untick it to summarise only what is ticked under *attributes*.
 
 ### columns
-Positions, frame, time and id attributes are not offered: the centre,
+The list opens from the button, which names what is ticked.  Positions,
+frame, time and id attributes are not offered: the centre,
 spread and time span are measured anyway.  An attribute ticked in a saved
 setting that this table lacks is refused with the list of those it has.
 

@@ -33,6 +33,10 @@ class ParamInfo:
     # all of them for a table that has more -- or, False, none ticked: a
     # list of extras, such as the values in a title
     empty_is_all: bool = True
+    # for "columns": the list behind a button naming what is ticked, opened
+    # on a click, rather than open in the form -- for a list of extras that
+    # most runs leave as it is
+    popup: bool = False
     # for a part: shown folded until it is opened.  A chain's steps are, so a
     # chain of eight plugins reads as eight lines rather than eight forms
     collapsed: bool = False

@@ -337,3 +337,31 @@ def test_the_common_attributes_and_the_ticked_ones_are_summarised_each_once():
     offered = offered_columns(locs)
     assert "cfr" in offered and "photons" in offered
     assert not {"x_nm", "frame", "time_s", "tid"} & set(offered)
+
+
+def test_the_attributes_are_behind_a_button_that_names_what_is_ticked(app_qt):
+    from PySide6.QtCore import Qt
+    from smappy.gui.params import ColumnsField
+    from smappy.plugins import param_specs
+    from smappy.plugins.region_statistics import RegionStatisticsSettings
+    field = ColumnsField(param_specs(RegionStatisticsSettings)["columns"])
+    assert field.popup and not field.box.isVisible()
+    field.set_choices(["cfr", "efo", "photons"])
+    assert field.value() == [] and field.button.text().startswith("none")
+    field.list.item(0).setCheckState(Qt.Checked)
+    assert field.value() == ["cfr"] and field.button.text().startswith("cfr")
+    field._tick_all(True)
+    assert field.button.text().startswith("cfr, efo, photons")
+    field._tick_all(False)
+    field.set_choices([f"column_{i}" for i in range(9)])
+    field._tick_all(True)
+    assert field.button.text().startswith("9 ticked")
+    field._open()
+    assert field.box.isVisible()
+
+
+@pytest.fixture(scope="module")
+def app_qt():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication([])

@@ -666,27 +666,46 @@ class ColumnsField(QWidget):
     leaves every name unticked on screen (``_none``) until one is ticked,
     rather than the next refresh ticking them all again, which is what made
     it look like a second *all*.
+
+    With the field's ``popup``, the list is behind a button that names what
+    is ticked and opens it below itself: a list of extras most runs leave
+    alone (*Region statistics*' attributes) takes one row of the form, not
+    a box of a table's thirty columns.
     """
 
     changed = Signal()
 
     def __init__(self, spec: ParamSpec):
         super().__init__()
-        from PySide6.QtWidgets import QListWidget, QPushButton
+        from PySide6.QtWidgets import QFrame, QListWidget, QPushButton
         self.spec = spec
+        self.popup = bool(getattr(spec.info, "popup", False))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 0, 6, 0)
+        if self.popup:
+            # a Qt.Popup frame closes on a click outside it, as a menu does,
+            # and stays open while names are ticked, as a menu does not
+            self.box = QFrame(self, Qt.Popup)
+            self.box.setFrameShape(QFrame.StyledPanel)
+            inner = QVBoxLayout(self.box)
+            inner.setContentsMargins(4, 4, 4, 4)
+            self.button = QPushButton("none")
+            self.button.setStyleSheet("text-align: left; padding: 2px 6px;")
+            self.button.clicked.connect(self._open)
+            layout.addWidget(self.button)
+        else:
+            self.box, inner = self, layout
         self.list = QListWidget()
-        self.list.setMaximumHeight(140)
-        self.list.itemChanged.connect(lambda _: self.changed.emit())
-        layout.addWidget(self.list)
+        self.list.setMaximumHeight(240 if self.popup else 140)
+        self.list.itemChanged.connect(lambda _: self._changed())
+        inner.addWidget(self.list)
         row = QHBoxLayout()
         for label, on in (("all", True), ("none", False)):
             button = QPushButton(label)
             button.clicked.connect(lambda _=False, on=on: self._tick_all(on))
             row.addWidget(button)
         row.addStretch(1)
-        layout.addLayout(row)
+        inner.addLayout(row)
         if spec.info.help:
             self.setToolTip(spec.info.help)
         self._names: List[str] = []
@@ -694,6 +713,7 @@ class ColumnsField(QWidget):
                                       else spec.default or [])
         self.empty_is_all = getattr(spec.info, "empty_is_all", True)
         self._none = False
+        self._name_ticked()
 
     def _tick_all(self, on: bool) -> None:
         self._none = not on
@@ -701,7 +721,34 @@ class ColumnsField(QWidget):
         for i in range(self.list.count()):
             self.list.item(i).setCheckState(Qt.Checked if on else Qt.Unchecked)
         self.list.blockSignals(blocked)
+        self._changed()
+
+    def _changed(self) -> None:
+        self._name_ticked()
         self.changed.emit()
+
+    def _open(self) -> None:
+        """The list below the button, at least as wide as it."""
+        self.box.setMinimumWidth(max(self.button.width(), 180))
+        self.box.adjustSize()
+        self.box.move(self.button.mapToGlobal(self.button.rect().bottomLeft()))
+        self.box.show()
+        self.list.setFocus()
+
+    def _name_ticked(self) -> None:
+        """The button says what is ticked: the names while they are few,
+        else how many; the tooltip names them all."""
+        if not self.popup:
+            return
+        value = self.value()
+        if self.empty_is_all and not value and not self._none:
+            text, names = "all", []
+        else:
+            names = value
+            text = (", ".join(names) if len(", ".join(names)) <= 28
+                    else f"{len(names)} ticked") if names else "none"
+        self.button.setText(text + "  \u25be")
+        self.button.setToolTip(", ".join(names) or self.spec.info.help or "")
 
     def _fill(self, names: List[str], ticked: List[str]) -> None:
         from PySide6.QtWidgets import QListWidgetItem
@@ -716,6 +763,7 @@ class ColumnsField(QWidget):
             item.setCheckState(Qt.Checked if everything or name in ticked else Qt.Unchecked)
             self.list.addItem(item)
         self.list.blockSignals(blocked)
+        self._name_ticked()
 
     # the interface a form expects of a field
     def set_choices(self, choices) -> None:

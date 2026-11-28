@@ -163,7 +163,7 @@ class RegionStatisticsSettings:
                          help="summarise cfr, efo, dcr, photons and xy_err_nm "
                               "where the table has them")
     columns: list = param(default_factory=list, label="attributes", kind="columns",
-                          empty_is_all=False,
+                          empty_is_all=False, popup=True,
                           help="more attributes to summarise")
     use_z: bool = param(True, label="use z", help="z_nm's centre and spread too")
     shape: bool = param(False, label="shape",
