@@ -334,9 +334,12 @@ def test_choosing_the_ids_table_greys_the_range_and_invert(app):
     tab.color_field.setCurrentText("cluster_id")
     assert tab.color_range_row.isEnabled() and tab.invert.isEnabled()
     tab.lut.setCurrentText(luts.IDS_LUT)
-    assert not tab.color_range_row.isEnabled() and not tab.invert.isEnabled()
+    assert not tab.color_lo.isEnabled() and not tab.color_auto.isEnabled()
+    assert not tab.invert.isEnabled()
+    # what the table draws grey, NaN and no id, can still be left out
+    assert tab.hide_missing.isEnabled()
     tab.lut.setCurrentText("rainbow")
-    assert tab.color_range_row.isEnabled() and tab.invert.isEnabled()
+    assert tab.color_lo.isEnabled() and tab.color_auto.isEnabled() and tab.invert.isEnabled()
 
 
 def test_choosing_the_ids_table_again_draws_new_colours(app):

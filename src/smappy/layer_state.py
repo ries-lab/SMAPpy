@@ -892,7 +892,7 @@ class ViewState:
                 locs.columns[field] = values
             if (self.settings.hide_missing and values is not None
                     and len(values) == len(mask)):
-                mask, known = mask & np.isfinite(values), None
+                mask, known = mask & _has_value(values, self.display.lut), None
         return LayerSnapshot(
             name=name, visible=visible, locs=locs, mask=mask,
             known_indices=known,
@@ -1138,3 +1138,15 @@ def render_panels(layers: Sequence[LayerSnapshot], fov: FieldOfView,
     images["overlay"] = luts.on_white(total) if white_any else total
     return [images[spec] if spec in images else np.zeros((fov.ny, fov.nx, 3), np.float32)
             for spec in panels], weight
+
+
+def _has_value(values, lut) -> np.ndarray:
+    """What *hide no value* keeps: what the colour draws in colour, not
+    grey -- a finite value, and with the ids table an id, 0 or above
+    (`lut.id_index`, which draws -1 and every negative value grey)."""
+    from .lut import is_ids
+    values = np.asarray(values)
+    keep = np.isfinite(values) if values.dtype.kind == "f" else np.ones(len(values), bool)
+    if is_ids(lut):
+        keep &= values >= 0
+    return keep

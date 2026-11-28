@@ -605,8 +605,8 @@ are lifted towards white until they are as bright as pure red.  The
 colour of an id depends on the id and the offset alone: not on the range,
 not on which other ids are there, so a cluster keeps its colour when the
 filter or the view changes.  Localizations in no id (-1) and values that
-are not numbers are grey.  The range and *invert* mean nothing for it and are
-greyed.  Choosing *ids* in the list again -- even when it is already chosen --
+are not numbers are grey, or left out with *hide no value*.  The range and
+*invert* mean nothing for it and are greyed.  Choosing *ids* in the list again -- even when it is already chosen --
 draws a new random offset, and so new colours; the offset is kept with the
 layer, so a saved session comes back with the same colours.  Tracks drawn as
 lines take the colour of a segment's first localization, not the mean of two
@@ -998,7 +998,8 @@ percentiles over all the layer's localizations.
 ### hide no value
 Leaves out the localizations the colour has no value for, instead of drawing
 them grey: for a region value, those outside every region (DBSCAN's noise,
-the background between ROIs); for an attribute, its NaNs.  The localizations
+the background between ROIs); for an attribute, its NaNs; with the *ids*
+table, also the localizations in no id (-1).  The localizations
 stay in the table, the filter and every plugin -- only this layer's picture
 leaves them out.  Off by default, so that the regions are seen against what
 surrounds them.

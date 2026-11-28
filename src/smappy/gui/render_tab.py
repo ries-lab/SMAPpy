@@ -1413,11 +1413,13 @@ class RenderTab(QWidget):
                                    "picture shows: filtered, in the ROI, in view")
         self.hide_missing = QCheckBox("hide no value")
         self.hide_missing.setToolTip("leave out the localizations the colour has no "
-                                     "value for -- outside every region, for a region "
-                                     "value -- instead of drawing them grey")
+                                     "value for -- NaN; outside every region, for a "
+                                     "region value; no id (-1), with the ids table -- "
+                                     "instead of drawing them grey")
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
-        for w in (self.color_lo, QLabel("to"), self.color_hi, self.color_auto,
+        self.color_to = QLabel("to")
+        for w in (self.color_lo, self.color_to, self.color_hi, self.color_auto,
                   self.hide_missing):
             range_row.addWidget(w)
         range_row.addStretch(1)
@@ -2067,12 +2069,16 @@ class RenderTab(QWidget):
     def _grey_for_ids(self) -> None:
         """The range and *invert* greyed while the ids table is chosen: it
         gives each value its own colour, whatever the range, and has no
-        direction to turn round."""
+        direction to turn round.  *hide no value* stays: it hides what the
+        table draws grey, NaN and no id (-1)."""
         ids = luts.is_ids(self.lut.currentText())
         self.invert.setEnabled(not ids)
         layer = self.layer
         field = None if layer.is_image else layer.state.settings.color_field
-        self.color_range_row.setEnabled(field is not None and not ids)
+        self.color_range_row.setEnabled(field is not None)
+        # the range alone: *hide no value* means as much for ids (no id, -1)
+        for w in (self.color_lo, self.color_to, self.color_hi, self.color_auto):
+            w.setEnabled(not ids)
 
     def _take_lut(self) -> None:
         """The list's table onto the layer when the list changed it with its

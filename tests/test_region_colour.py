@@ -192,3 +192,18 @@ def test_the_regions_tab_opens_the_table_and_its_filter_on_a_value(qapp):
     assert header.region_filter.chosen == ("cluster_id", "Region statistics", "n_locs")
     assert window.colour_by is not None
     window.close()
+
+
+def test_with_the_ids_table_hide_no_value_leaves_out_no_id_and_stays_offered(qapp):
+    from smappy.gui.render_tab import RenderTab
+    from smappy.lut import IDS_LUT
+    session, truth = clusters()
+    state = colour_by(session, "cluster_id", hide_missing=True)
+    state.display = dataclasses.replace(state.display, lut=IDS_LUT)
+    assert np.array_equal(np.asarray(state.snapshot().mask, bool), truth >= 0)
+    state.display = dataclasses.replace(state.display, lut="jet")
+    assert np.asarray(state.snapshot().mask, bool).all()   # -1 is a value on a ramp
+    tab = RenderTab(session)
+    tab.lut.setCurrentText(IDS_LUT)
+    tab._grey_for_ids()
+    assert tab.hide_missing.isEnabled() and not tab.color_lo.isEnabled()
