@@ -285,9 +285,12 @@ One switch, `mode`:
   `set_layer`, `show`, an action that only shows --
   are made at once: the user sees them, and a proposal to look somewhere
   would be a click to make a click.  Headless they stay proposals.
-* **act** -- changes are made.  A file is written only under the allowed
-  folder (`--output`, the session's folder by default); elsewhere the call is
-  refused and says where it may write.
+* **act** -- changes are made.  A file is written under the output folder
+  (`--output`, the session's folder by default), or as a new file beside the
+  data the call reads or the session has open -- a calibration beside its
+  beads, where the plugin puts it anyway when no path is given.  An
+  existing file there is never overwritten unless the assistant wrote it;
+  elsewhere the call is refused and says why (`tools._allowed`).
 
 Headless, the default is *act*: there is nobody to propose to.
 

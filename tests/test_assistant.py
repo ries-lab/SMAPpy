@@ -78,23 +78,49 @@ def test_a_setting_the_plugin_does_not_have_is_refused_with_the_ones_it_has(tmp_
 
 def test_files_are_written_under_the_output_folder_and_nowhere_else(tmp_path):
     a = simulated(tmp_path)
-    with pytest.raises(ToolError, match="outside the output folder"):
+    with pytest.raises(ToolError, match="neither under the output folder"):
         a.call("run_plugin", {"path": "File/Export/Image",
                               "settings": {"path": str(tmp_path / "elsewhere.png")}})
     with pytest.raises(ToolError, match="writes a file"):
         a.call("run_plugin", {"path": "File/Export/Image"})
     a.call("run_plugin", {"path": "File/Export/Image", "settings": {"path": "view.png"}})
     assert (tmp_path / "out" / "view.png").is_file()
-    with pytest.raises(ToolError, match="outside"):
+    with pytest.raises(ToolError, match="neither under"):
         a.call("save", {"path": "../escaped.h5"})
     exporting = ("steps:\n  - plugin: File/Export/Image\n    values: {path: %s}\n")
-    with pytest.raises(ToolError, match="outside"):
+    with pytest.raises(ToolError, match="neither under"):
         a.call("run_chain", {"chain": exporting % (tmp_path / "chain.png")})
     with pytest.raises(ToolError, match="absolute"):
         a.call("run_chain", {"chain": exporting % "chain.png"})
     a.call("run_chain", {"chain": exporting % (tmp_path / "out" / "chain.png")})
     assert (tmp_path / "out" / "chain.png").is_file()
     assert Path(a.call("save", {"path": "table.h5"})["saved"]).is_file()
+
+
+def test_a_new_file_is_written_beside_the_data_but_the_data_is_never_overwritten(tmp_path):
+    """A calibration saved beside its beads had been refused (2026-11)."""
+    import shutil
+    a = simulated(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    shutil.copy(a.call("save", {"path": "table.h5"})["saved"], data / "measured.h5")
+    a.call("load", {"path": str(data / "measured.h5")})
+    a.call("save", {"path": str(data / "measured_drift.h5")})          # beside it: new
+    assert (data / "measured_drift.h5").is_file()
+    a.call("save", {"path": str(data / "measured_drift.h5")})          # its own, again
+    with pytest.raises(ToolError, match="not written by the assistant"):
+        a.call("save", {"path": str(data / "measured.h5")})            # the data itself
+    with pytest.raises(ToolError, match="neither under"):
+        a.call("save", {"path": str(tmp_path / "elsewhere" / "x.h5")})
+    # a setting that names the data puts its folder, and a named folder's
+    # own folder, within reach: a calibration beside its folder of beads
+    from smappy import plugins
+    beads = tmp_path / "beads" / "stack1"
+    beads.mkdir(parents=True)
+    cls = plugins.get("Localize/PSF calibration")
+    settings = a._settings(cls, {"stacks": str(beads),
+                                 "save_as": str(beads.parent / "stack1_3Dcal.h5")})
+    assert a._writes(cls, settings) == [beads.parent / "stack1_3Dcal.h5"]
 
 
 def test_a_plugins_question_comes_back_before_it_runs_and_confirm_runs_it(tmp_path,

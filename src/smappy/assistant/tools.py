@@ -22,12 +22,15 @@ in *suggest* mode too: the user sees
 them at once, and a proposal to look somewhere would be a click to make a
 click.  Headless there is nobody looking, and they stay proposals.
 
-**Files are written only under the output folder.**  A setting that names a
-file to write (``kind="save_file"``) must name one under it, in either mode
-and on a copy too, since a plugin run on a copy still writes its file; an
-export (``File/Export/...``) must name its file.  A plugin given an empty
-path elsewhere writes where it always does -- a fit beside its images --
-which is what a user who started it would expect.
+**Files are written under the output folder, or beside the data.**  A
+setting that names a file to write (``kind="save_file"``) must name one
+under the output folder or a new one beside the data the call reads or the
+session has open -- never an existing file there the assistant did not write
+(`_allowed`) -- in either mode and on a copy too, since a plugin run on a
+copy still writes its file; an export (``File/Export/...``) must name its
+file.  A plugin given an empty path writes where it always does -- a fit
+beside its images, a calibration beside its beads -- which is what a user
+who started it would expect; the same place named was refused until 2026-11.
 """
 from __future__ import annotations
 
@@ -449,6 +452,9 @@ class Assistant:
         self.session = session
         self.mode = mode
         self.output = Path(output or Path.cwd()).expanduser()
+        # the files written outside the output folder, which may be written
+        # again (`_allowed`): resolved paths
+        self._wrote: set = set()
         self.knowledge = Path(knowledge_folder or knowledge.default_folder()).expanduser()
         self.viewer = viewer
         self.panels = panels
@@ -644,15 +650,52 @@ class Assistant:
                 out[name] = str(self.output / value)
         return out
 
+    def _beside(self, values: Dict[str, Any], specs) -> List[Path]:
+        """The folders a call may write in besides the output folder: where
+        the data it reads lies -- the folder of each file a setting names (a
+        named folder, itself and the folder it is in) and of each file the
+        session has open.  A calibration is saved beside its beads, where
+        the PSF calibration puts it when *save as* is left empty; asked to
+        put it there by name, the assistant was refused (2026-11)."""
+        out: List[Path] = []
+        named = [values.get(name) for name, spec in specs.items()
+                 if spec.info.kind in ("open_file", "dir")]
+        named += [f.path for f in getattr(self.session, "files", [])]
+        for value in named:
+            if not isinstance(value, str) or not value.strip():
+                continue
+            path = Path(value).expanduser()
+            if not path.is_absolute():
+                continue
+            if path.is_dir():
+                out.append(path)
+            out.append(path.parent)
+        return out
+
+    def _allowed(self, path: Path, beside: Sequence[Path]) -> Optional[str]:
+        """Why ``path`` may not be written, or None.  Under the output folder
+        anything; beside the data only a new file, or one this assistant
+        wrote -- never the data itself, nor a file someone else made."""
+        if _within(path, self.output):
+            return None
+        if not any(path.parent.resolve() == folder.resolve() for folder in beside):
+            return (f"{path} is neither under the output folder, {self.output}, nor "
+                    "beside a file the call reads or the session has open")
+        if path.exists() and path.resolve() not in self._wrote:
+            return (f"{path} exists and was not written by the assistant: beside "
+                    "the data only new files are written")
+        return None
+
     def _writes(self, cls, settings, relative: bool = True) -> List[Path]:
-        """The files ``settings`` will write, refused outside the output
-        folder or, for an export, left empty.  ``relative=False`` refuses a
+        """The files ``settings`` will write, refused where `_allowed` says
+        or, for an export, left empty.  ``relative=False`` refuses a
         relative path too: a chain's steps are read as written, and a
         relative path there is relative to wherever the server started."""
         from ..plugins import settings_values
         from ..batch import _flat_specs
         specs = _flat_specs(cls.specs())
         values = settings_values(settings)
+        beside = self._beside(values, specs)
         out: List[Path] = []
         for name, spec in specs.items():
             if spec.info.kind != "save_file":
@@ -669,11 +712,18 @@ class Assistant:
                     raise ToolError(f"{name}: give the file as an absolute path "
                                     f"under {self.output}")
                 path = self.output / path
-            if not _within(path, self.output):
-                raise ToolError(f"{name}: {path} is outside the output folder, "
-                                f"{self.output}; files are written only under it")
+            why = self._allowed(path, beside)
+            if why:
+                raise ToolError(f"{name}: {why}")
             out.append(path)
         return out
+
+    def _will_write(self, paths: Sequence[Path]) -> None:
+        """The files a run is about to write: their folders made, and they
+        kept as the assistant's, so that a second run may write them again."""
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._wrote.add(path.resolve())
 
     def _keep(self, path: str, applied: bool, result) -> Kept:
         """Keep ``result`` for `figure`, letting the oldest go past
@@ -1263,8 +1313,7 @@ class Assistant:
         if (apply or writes or path.startswith("File/Export/")) and not self._changing():
             return self._propose("run_plugin", {"path": path, "settings": settings or {},
                                                 "layer": layer, "apply": apply}, reason)
-        for written in writes:
-            written.parent.mkdir(parents=True, exist_ok=True)
+        self._will_write(writes)
         plugin = cls()
         target = self.session if apply else self.session.scratch()
         if not confirm:
@@ -1383,8 +1432,7 @@ class Assistant:
         writes = self._writes(cls, cls.Settings(), relative=False)
         if (apply or writes) and not self._changing():
             return self._propose("run_chain", {"chain": chain, "apply": apply}, reason)
-        for written in writes:
-            written.parent.mkdir(parents=True, exist_ok=True)
+        self._will_write(writes)
         def with_steps(answer, result):
             steps = (result.data or {}).get("results", {})
             answer["steps"] = {key: {"text": r.text or "", "data": _plain(r.data or {})}
@@ -1747,18 +1795,21 @@ class Assistant:
         self.session.undo(steps)
         return {"undo": self.session.undo_labels()[-5:]}
 
-    @tool("Save the session's localizations (HDF5) under the output folder.",
-          path={"type": "string", "description": "relative to the output folder"},
+    @tool("Save the session's localizations (HDF5) under the output folder, or "
+          "as a new file beside the files the session has open.",
+          path={"type": "string", "description": "relative to the output folder, "
+                                                 "or absolute"},
           reason={"type": "string", "description": "why, for the user (a proposal)"})
     def save(self, path: str, reason: str = "") -> Dict[str, Any]:
         target = Path(path).expanduser()
         if not target.is_absolute():
             target = self.output / target
-        if not _within(target, self.output):
-            raise ToolError(f"{target} is outside the output folder, {self.output}")
+        why = self._allowed(target, self._beside({}, {}))
+        if why:
+            raise ToolError(why)
         if not self._changing():
             return self._propose("save", {"path": path}, reason)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        self._will_write([target])
         written = self.session.save(target)
         return {"saved": str(written or target)}
 
