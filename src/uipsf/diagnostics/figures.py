@@ -544,8 +544,69 @@ def figures(cal, reference=None, halves=None) -> dict:
         tag = "" if cal.model.n_channels == 1 else f" {c + 1}"
         out[f"Pupil and Zernikes{tag}"] = lambda fig, c=c, units=None: draw_pupil_and_zernikes(
             fig, cal, c, reference, units=units, halves=halves)
+    for c in range(cal.model.n_channels):
+        if getattr(cal.model.channels[c], "field", None) is not None:
+            tag = "" if cal.model.n_channels == 1 else f" {c + 1}"
+            out[f"Aberration map{tag}"] = lambda fig, c=c, units=None, show=None: draw_field_maps(
+                fig, cal, c, show=show, units=units)
     if cal.atlas is not None:
         out["Residual atlas"] = lambda fig: draw_atlas(fig, cal.atlas)
     if any(r.field_xy is not None for r in cal.beads.rows):
         out["Beads"] = lambda fig: draw_beads(fig, cal)
     return out
+
+
+def draw_field_maps(fig, source, channel: int = 0, show: str | None = None, units: str | None = None,
+                    maps=None) -> None:
+    """A field-dependent model's aberrations across the field (`diagnostics.field.field_maps`): the total RMS
+    wavefront first, then the families ``show`` picks (`field.show_choices`; the ones varying most by
+    default) -- astigmatism as its axis and coma as an arrow over a map of its magnitude, any other mode a
+    map of its own.  In ``units`` (`PHASE_UNITS`).  ``maps`` a `FieldMaps` already made, else made here."""
+    from .field import chosen_items, field_maps, pair_vector
+    maps = maps if maps is not None else field_maps(source, channel)
+    if maps is None:
+        ax = fig.subplots()
+        ax.axis("off")
+        ax.text(0.5, 0.5, "no field dependence learnt, or no emitter positions", ha="center", va="center")
+        return
+    factor, label = phase_factor(maps.wavelength_nm, units)
+    items = chosen_items(maps, show)
+    n = 1 + len(items)
+    cols = min(n, 3)
+    rows = -(-n // cols)
+    axes = np.atleast_1d(fig.subplots(rows, cols, squeeze=False)).ravel()
+    dx = maps.x_px[1] - maps.x_px[0] if len(maps.x_px) > 1 else 1.0
+    dy = maps.y_px[1] - maps.y_px[0] if len(maps.y_px) > 1 else 1.0
+    extent = (maps.x_px[0] - dx / 2, maps.x_px[-1] + dx / 2, maps.y_px[-1] + dy / 2, maps.y_px[0] - dy / 2)
+
+    def picture(ax, values, cmap, title):
+        im = ax.imshow(values * factor, extent=extent, origin="upper", cmap=cmap, aspect="equal",
+                       interpolation="bilinear")
+        fig.colorbar(im, ax=ax, shrink=0.8, label=label)
+        ax.plot(maps.points[:, 0], maps.points[:, 1], ".", color="w", ms=3, mec="k", mew=0.3)
+        ax.set_title(title, fontsize="small")
+        ax.set_xlabel("x (px)", fontsize="small")
+        ax.set_ylabel("y (px)", fontsize="small")
+        ax.tick_params(labelsize="x-small")
+
+    rms = maps.rms * factor
+    picture(axes[0], maps.rms, "magma",
+            f"total RMS wavefront, {np.min(rms):.3g} to {np.max(rms):.3g} {label}")
+    for ax, item in zip(axes[1:], items, strict=False):
+        if item.m:
+            magnitude, angle = pair_vector(maps, item)
+            picture(ax, magnitude, "viridis", f"{item.label}: size and {'axis' if item.m == 2 else 'direction'}")
+            # a coarser grid of arrows, ~8 along the longer side; their length the size, the longest a cell
+            k = max(1, int(round(max(len(maps.x_px), len(maps.y_px)) / 8)))
+            sx, sy = slice(k // 2, None, k), slice(k // 2, None, k)
+            X, Y = np.meshgrid(maps.x_px[sx], maps.y_px[sy])
+            a, t = magnitude[sy, sx], angle[sy, sx]
+            length = 0.9 * k * max(dx, dy) * a / max(float(np.max(magnitude)), 1e-12)
+            # an axis is no direction: astigmatism a bar about its point, coma an arrow along its tail
+            heads = {} if item.m == 1 else dict(headwidth=0, headlength=0, headaxislength=0)
+            ax.quiver(X, Y, length * np.cos(t), length * np.sin(t), angles="xy", scale_units="xy", scale=1,
+                      pivot="middle", color="w", edgecolor="k", linewidth=0.3, width=0.012, **heads)
+        else:
+            picture(ax, maps.of(item.modes[0]), "RdBu_r", item.label)
+    for ax in axes[n:]:
+        ax.axis("off")

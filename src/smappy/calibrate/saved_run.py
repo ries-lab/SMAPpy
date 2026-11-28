@@ -19,6 +19,8 @@ its pages show of a run (the user's, November 2026):
 * **the fit quality**, the refit of every bead;
 * for the pupil model, **its bead table** (uipsf's `BeadRow`s, for the *Beads* page) and **the model it
   started from**, as a uipsf model group of its own (`START`), for the Zernike pages' comparison;
+* **the focal lines**: where the spline is narrowest in x and in y and their distance (`focal_planes`), the
+  number that tells whether a cylindrical lens or the camera moved between calibrations;
 * **provenance**: the camera as resolved, the versions, the date, the run's summary and warning.
 
 `load` reads it back as a `Run` whose result is a `SavedRun`, and `ENTRY` is the method entry the window
@@ -183,6 +185,14 @@ def record_of(method, run, paths=None) -> dict:
         "detected": run.extra.get("detected") or "",
         "views": _views(run.extra.get("views")), "quality": run.extra.get("quality"),
     }
+    spline = getattr(run.result, "calibration", None)
+    if spline is not None:
+        # where the PSF is narrowest in x and in y, kept as numbers: the summary says it in words
+        from . import focal_planes
+        try:
+            record["focal_planes"] = focal_planes.record(focal_planes.of_calibration(spline))
+        except Exception:                # a number kept, never a reason not to keep the run
+            pass
     cal = getattr(run.result, "cal", None)
     if cal is not None:
         import uipsf
@@ -395,8 +405,11 @@ class Loaded:
 
     def summary(self, run) -> str:
         record = run.result.record
-        return (f"opened {run.result.path.name} ({record.get('date', '?')}): "
-                f"{record.get('summary', '')}")
+        text = record.get("summary", "")
+        if "focal separation" not in text:           # kept before the summary said it
+            from .psf_methods import focal_text
+            text += focal_text(run.result.calibration)
+        return f"opened {run.result.path.name} ({record.get('date', '?')}): {text}"
 
     def stacks(self, run):
         cal = run.result.calibration
@@ -426,6 +439,12 @@ class Loaded:
                                   lambda f, s, e, chosen, c=c: draw_pupil_and_zernikes(
                                       f, learned, c, start, units=chosen["units"], halves=learned.halves),
                                   follows_selection=False, controls={"units": units}))
+            from .psf_methods import aberration_map_page
+            for c in range(n):
+                # a field-dependent model's maps, drawn again from its model file: the field and the used
+                # beads' places are both kept there
+                if getattr(learned.model.channels[c], "field", None) is not None:
+                    pages.append(aberration_map_page(learned, c, f"Aberration map{'' if n == 1 else f' {c + 1}'}"))
             atlas = _atlas(learned.diagnostics.get("atlas"))
             if atlas is not None:
                 pages.append(Page("Residual atlas", lambda f, s, e: draw_atlas(f, atlas), follows_selection=False))

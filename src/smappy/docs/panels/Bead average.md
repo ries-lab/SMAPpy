@@ -694,6 +694,15 @@ with its share of them, and the axis is scaled to the solid lines.  Where
 one half's bound climbs and the other's does not, that half carries the
 measurement there.
 
+The title, the status line and the run's summary also give the **focal
+separation**: where the spline's PSF is narrowest in x and where in y, and
+how far apart (per half in dual colour).  For an astigmatic PSF these are the
+cylindrical lens's two focal lines, a property of the instrument: compare it
+between calibrations, and a change of more than a few tens of nm says the lens
+or the camera moved.  The PSF calibration's page says how it is measured
+([PSF calibration](plugin:Panels/PSF calibration), *In detail*); the file
+keeps it.
+
 ## Differences from SMAP
 
 Based on SMAP's bead calibrator, `calibrate3D_GUI_g` in `fit3Dcspline`

@@ -2319,7 +2319,9 @@ the beads' ring damping for molecules.  Now there is one of each:
   ``sigma_nm`` and ``pixel_blur``, and the optics.  The beads' h is left out: nothing downstream holds it.
   `held_from` makes what a model holds of it (`Held`: phase above the order, and γ or the symmetric magnitude
   modes; `MinimalPupil(held_gamma=, held_ring_h=)` holds γ and h as `ZernikePupil` holds modes), `start_from`
-  its start.  *Add to microscope...* keeps the description (`objective_pupil`); `microscope_db.pupil_for`
+  its start.  A bead model holds γ by its spec, *pupil magnitude* "held" with ``held_gamma`` / ``held_na``
+  (`build.spec_held`), filled by SMAPpy from the start model or the microscope (`calibrate.pupil.hold_gamma`) and
+  kept in the model's options, so halves and a model read back hold the same.  *Add to microscope...* keeps the description (`objective_pupil`); `microscope_db.pupil_for`
   finds only described pupils -- the older dicts are no longer used, and are kept again from a new bead model.
   In situ (`insitu_run.held_pupil`) holds γ and the phase above the order and learns σ, the focus and the phase
   up to it; *hold* every aberration holds γ and every phase mode, which is what Spline 3D's *focus in situ*
@@ -3014,6 +3016,11 @@ The study and the choices: `docs/uipsf/field-dependence.md`.  What is built:
 - **The report**, `diagnostics.field_report`: per mode the largest change across the used beads with its
   CRLB, and a Wald test of the 14 coefficients against zero, ½ c·C⁻¹·c in nats against ½ χ²(10⁻⁶): no
   refit.  The PSF calibration window's summary prints it when *field dependence* is ticked.
+- **The maps**, `diagnostics.field_maps` (November 2026): every phase mode and the pupil's total RMS wavefront
+  on a grid over the used emitters' span, never beyond it; a sine and cosine pair of |m| = 1 or 2 as one
+  aberration of size √(c² + s²) and angle atan2(s, c)/m (`map_items`, `pair_vector`), drawn by
+  `figures.draw_field_maps` as bars (astigmatism) and arrows (coma) over the size.  The window's *Aberration map*
+  page, from the fit or from a model file alike (its bead table keeps the places).
 - **The model file**, version 4 for a field (the channel's ``field`` entry); `sample_psf(…, field_xy=)`
   draws the PSF at a chip position, the field's centre by default.
 - **SMAPpy's splines**: `calibrate.pupil.field_splines` samples the model on the smallest grid of

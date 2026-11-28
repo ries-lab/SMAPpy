@@ -89,6 +89,10 @@ def test_a_saved_bead_average_shows_its_pages_table_and_settings_from_its_file_a
     rows = saved_run.ENTRY.rows(run, {})
     assert rows and len(rows[0][0]) == len(record["columns"]) and "beads used" in saved_run.ENTRY.summary(run)
     assert saved_run.settings_of(record)["detection"].roi_size == 21
+    # the simulated cylindrical lens focuses x and y 300 nm either side of focus (`simulate.camera.ASTIGMATISM`)
+    focal = record["focal_planes"]["psf"]
+    assert focal["separation_nm"] == pytest.approx(600, abs=30) and focal["x_nm"] * focal["y_nm"] < 0
+    assert "focal separation" in saved_run.ENTRY.summary(run)
     assert saved_run.find_sources(record, path) == [str((folder / "beads" / f"beads_{i}.tif").resolve())
                                                     for i in range(2)]
 

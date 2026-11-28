@@ -357,6 +357,9 @@ class PSFCalibrationWindow(QMainWindow):
         # 4Pi beads: where the channels are, the scan's z step and mirror steps, the model's order
         from .fourpi_beads import FourPiBeadSettings
         self.fourpi_form = SettingsForm(FourPiBeadSettings)
+        # *γ held* is the beads' and the molecules' (`pupil.hold_gamma`); 4Pi learns its own γ
+        from .pupil import MAGNITUDES
+        self.fourpi_form.set_choices({"psf.magnitude": [c for c in MAGNITUDES if c[0] != "held"]})
         self.fourpi_form.changed.connect(self._show_fourpi)
         # 4Pi in situ: the bead model it starts from, the movie's fit with it, which molecules and how
         from .fourpi_insitu import FourPiInSituSettings

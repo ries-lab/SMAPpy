@@ -62,8 +62,12 @@ DESIGN_COVERSLIP_UM = 170.0
 #: the order a calibration learns up to unless told: n_max 6, with 8 the held-out check (plan §10)
 AUTO_ORDER = 6
 
-MAGNITUDES = (("minimal", "minimal (cos θ^γ)"), ("free", "Zernike"), ("symmetric", "symmetric Zernike"),
-              ("fixed", "fixed (apodisation)"))
+#: "held": the minimal magnitude with γ not learnt but held, as in situ holds it -- from *start from*, the
+#: microscope's kept pupil or its entry's gamma (`hold_gamma`).  A choice of the magnitude rather than a tick of
+#: its own (the user's, November 2026: hold γ only if the form does not grow); NA stays *learn NA*'s, learnt
+#: against a held γ, never together with a learnt one unless asked (γ and the aperture trade)
+MAGNITUDES = (("minimal", "minimal (cos θ^γ)"), ("held", "minimal, γ held"), ("free", "Zernike"),
+              ("symmetric", "symmetric Zernike"), ("fixed", "fixed (apodisation)"))
 BLURS = (("free", "free"), ("round", "round"), ("fixed", "fixed"))
 #: the stage's drift through a stack (`uipsf.model.geometry`): none, a lateral one growing linearly through
 #: each stack, or a free one per slice
@@ -83,6 +87,7 @@ class PSFModelSettings:
     magnitude: str = param(
         "minimal", label="pupil magnitude", choices=MAGNITUDES,
         help="minimal: cos θ^γ, the ring beyond the critical angle and the NA, a few physical numbers; "
+             "γ held: the same with γ held from start from or the microscope; "
              "Zernike: every mode up to the order; symmetric: the rotationally symmetric ones; "
              "fixed: uniform, the apodisation only")
     # round by default everywhere, in situ too (the user's, November 2026): free took up astigmatism the pupil
@@ -120,6 +125,11 @@ class PSFModelSettings:
     learn_n_med: bool = param(False, label="learn sample index", advanced=True,
                               help="learn the sample's refractive index from the microscope's *sample index*, "
                                    "a diagnostic; off: as typed")
+    # what *γ held* holds, filled at Run (`hold_gamma`) and kept with the model's options, so that a run on
+    # halves of the beads or a model read back holds the same; never typed
+    held_gamma: Optional[float] = param(None, label="held γ", hidden=True, help="the γ held, found at Run")
+    held_na: Optional[float] = param(None, label="held NA", hidden=True, help="the NA learnt with the held γ")
+    held_source: str = param("", label="held from", hidden=True, help="where the held γ came from")
 
     def __post_init__(self):
         if self.magnitude not in dict(MAGNITUDES):
@@ -214,12 +224,13 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     no drift (each molecule is one frame) and no tilt (a point at the glass sees none through oil), and
     nothing held out; their field dependence adds the focal surface's curvature (`molecule_stack_run`)."""
     if method == "molecules":
-        return {"psf.magnitude": True, "psf.saf_damping": False, "psf.learn_na": magnitude == "minimal",
+        return {"psf.magnitude": True, "psf.saf_damping": False, "psf.learn_na": magnitude in ("minimal", "held"),
                 "psf.learn_n_med": True, "bead_diameter_nm": False, "drift": False, "field_dependence": True,
                 "fit_tilt": False, "heldout": False, "max_dz_nm": False, "z_range_nm": False}
     beads = method != "insitu"
-    return {"psf.magnitude": beads, "psf.saf_damping": beads and magnitude == "minimal" and ring,
-            "psf.learn_na": magnitude == "minimal", "psf.learn_n_med": True,
+    minimal = magnitude in ("minimal", "held")
+    return {"psf.magnitude": beads, "psf.saf_damping": beads and minimal and ring,
+            "psf.learn_na": minimal, "psf.learn_n_med": True,
             "bead_diameter_nm": beads, "drift": beads, "field_dependence": True,
             "fit_tilt": not beads or layered, "heldout": True, "max_dz_nm": beads, "z_range_nm": beads}
 
@@ -995,9 +1006,45 @@ def learns_tilt(model: BeadSettings, optics) -> BeadSettings:
     return model
 
 
+def hold_gamma(model: BeadSettings, start=None, camera=None, wavelength_nm: Optional[float] = None) -> BeadSettings:
+    """``model`` with what *pupil magnitude* "minimal, γ held" holds filled in (`PSFModelSettings.held_gamma`,
+    ``held_na``, ``held_source``); unchanged for any other magnitude, or where they are filled already (a
+    model's own options read back).
+
+    Where from, in in situ's order (`insitu_run.start_description`): *start from* (``start``, a `LearnedPSF`)
+    where it is a minimal model, with the NA it learnt; else the pupil kept with the beads' microscope; else the
+    microscope's ``gamma`` (`microscope_db.gamma_of`).  A ValueError with none: a γ the user chose to hold is
+    never learnt or guessed instead -- in situ's nominal γ is for molecules, where learning it is worse; beads
+    can learn it (*minimal*).  ``camera`` the beads' (its ``microscope``), ``wavelength_nm`` their emission."""
+    from dataclasses import replace
+    spec = model.psf
+    if spec.magnitude != "held" or spec.held_gamma is not None:
+        return model
+    from ..microscope_db import gamma_of, pupil_of
+    from .insitu_run import start_description
+    scope = getattr(camera, "microscope", None)
+    description, source = start_description(start, None if start is not None else pupil_of(scope))
+    gamma = na = None
+    if description and description.get("kind") == "minimal" and description.get("gamma") is not None:
+        gamma, na = float(description["gamma"]), description.get("na")
+    else:
+        gamma, na, source = gamma_of(scope, wavelength_nm)
+    if gamma is None:
+        raise ValueError("pupil magnitude 'minimal, γ held' needs a γ to hold: give a minimal model in start from, "
+                         "or the microscope's gamma (its entry, or a pupil kept with it); or choose 'minimal' to "
+                         "learn γ")
+    return replace(model, psf=replace(spec, held_gamma=float(gamma), held_na=None if na is None else float(na),
+                                      held_source=source))
+
+
 def _learnt_model(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings):
     """The model a run on ``rois`` learns (`calibrate_beads`' `bead_model`), for the estimates before it."""
+    from dataclasses import replace
+
     from uipsf.workflows.calibrate import bead_model, learning_batch
+    if model.psf.magnitude == "held" and model.psf.held_gamma is None:
+        # an estimate of time and memory: a held γ costs what a learnt one does, and is found at Run
+        model = replace(model, psf=replace(model.psf, magnitude="minimal"))
     batch = learning_batch(rois.batch, model)          # its z reach sizes the pupil grid, as in a run
     channels = batch.data.shape[1]
     found = optics.optics(rois.camera, channels, main_half(rois))
@@ -1077,6 +1124,7 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
         decisions = {i: "exclude" for i in doubles(rois.records)} or None
     channels = 2 if dual else 1
     found = optics.optics(rois.camera, channels, main_half(rois))
+    model = hold_gamma(model, start, rois.camera, found[0].wavelength_nm)
     cal = calibrate_beads(rois.batch, found, learns_tilt(model, found),
                           transforms=[None, rois.transform] if dual else None, geometry=rois.geometry,
                           start=start, noise=rois.noise, decisions=decisions, warm_start=warm,

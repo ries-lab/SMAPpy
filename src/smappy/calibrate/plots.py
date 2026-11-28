@@ -515,14 +515,20 @@ def draw_crlb(figure, result, dual=False, pixel_nm="auto", calibration=None):
     _sizes(ax)
     size = (f"pixel size unknown: {pixel_nm:g} nm assumed for x and y" if assumed
             else f"pixel size {pixel_nm:g} nm")
+    # the focal lines' distance: what tells whether the cylindrical lens or the camera moved (`focal_planes`)
+    from .focal_planes import of_calibration, summary_text
+    try:
+        focal = summary_text(of_calibration(cal), short=True)
+    except Exception:                    # a number beside the plot, never a reason not to draw it
+        focal = ""
     ax.set_title(f"Cramér-Rao lower bound: {crlb.PHOTONS:g} photons, {crlb.BACKGROUND:g} background "
-                 f"photons per pixel, {crlb.ROISIZE} px fit box\n{size}", fontsize=9,
-                 **({"color": "#c06000"} if assumed else {}))
+                 f"photons per pixel, {crlb.ROISIZE} px fit box\n{size}" + (f"; {focal}" if focal else ""),
+                 fontsize=9, **({"color": "#c06000"} if assumed else {}))
     best = curves[0][2]
     at = int(np.nanargmin(np.abs(z)))
     return (f"CRLB at focus: x {best['x_px'][at] * pixel_nm:.3g} nm, y {best['y_px'][at] * pixel_nm:.3g} nm, "
             f"z {best['z_nm'][at]:.3g} nm ({crlb.PHOTONS:g} photons, {crlb.BACKGROUND:g} background"
-            + (f"; {pixel_nm:g} nm pixels ASSUMED" if assumed else "") + ")")
+            + (f"; {pixel_nm:g} nm pixels ASSUMED" if assumed else "") + ")" + (f"; {focal}" if focal else ""))
 
 
 # --------------------------------------------------------------- the pupil model's fit quality

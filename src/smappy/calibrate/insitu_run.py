@@ -425,7 +425,7 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
             top = max([noll_to_nm(j)[0] for j in held.phase] + [2])
             held.phase = {j: held.phase.get(j, 0.0) for j in sorted(set(zernike_modes(top)) | set(held.phase))}
             spec = replace(spec, zernike_order=top)
-        if not held.source and spec.magnitude == "minimal":
+        if not held.source and spec.magnitude in ("minimal", "held"):
             # γ is the microscope's (its objective's apodisation), not the sample's: from its entry, and only
             # as a last resort a nominal value, which can move the learnt astigmatism by tenths of a radian
             from ..microscope_db import gamma_of

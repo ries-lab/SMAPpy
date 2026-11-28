@@ -2,7 +2,7 @@
 title: PSF calibration
 summary: Makes the PSF calibration the Spline 3D fitters read, from beads in a z stack, from single molecules on the coverslip in a z stack, or in situ from the blinking molecules of a measurement -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 -- or, as a fourth, the curves of an elliptical Gaussian's widths in z that Astigmatic z reads, or, in the 4Pi mode, a 4Pi model for Spline 4Pi from 4Pi bead scans or in situ from a 4Pi movie, and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.torch_install.cpu_build_on_nvidia, uipsf.device.describe, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.saved_run.write, smappy.calibrate.saved_run.load, smappy.calibrate.saved_run.find_sources, smappy.calibrate.pupil.bead_size_warning, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.microscope_db.gamma_of, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin, smappy.calibrate.psf_methods.FourPiPupil, smappy.calibrate.psf_methods.FourPiAverage, smappy.calibrate.psf_methods.FourPiInSitu, smappy.calibrate.fourpi_insitu.run_insitu, smappy.calibrate.fourpi_insitu.choose, smappy.calibrate.fourpi_insitu.cut, uipsf.workflows.fourpi_insitu.learn_insitu, uipsf.workflows.fourpi_insitu.localise, uipsf.workflows.fourpi_insitu.outliers, smappy.calibrate.psf_methods.for_mode, smappy.calibrate.fourpi_beads.average_model, smappy.fourpi.iab_from_beads, smappy.calibrate.fourpi_beads.scan_beads, smappy.calibrate.fourpi_beads.read_scan, smappy.calibrate.fourpi_beads.scan_layout, smappy.calibrate.fourpi_beads.scan_step_nm, smappy.calibrate.fourpi_beads.bead_fits, smappy.calibrate.fourpi_beads.FourPiBeadSettings, smappy.calibrate.psf_methods.MoleculeStack, smappy.calibrate.psf_methods.MoleculeElliptical, smappy.calibrate.psf_methods.methods_of, smappy.calibrate.molecule_stack.molecule_rois, smappy.calibrate.molecule_stack.read_file, smappy.calibrate.molecule_stack.stage_z_um, smappy.calibrate.molecule_stack.split_sweeps, smappy.calibrate.molecule_stack.width_curve, smappy.calibrate.molecule_stack.focus_of, smappy.calibrate.molecule_stack.detect, smappy.calibrate.molecule_stack.select, smappy.calibrate.molecule_stack.draw, smappy.calibrate.molecule_stack.illumination_radius, smappy.calibrate.molecule_stack.molecule_widths, smappy.calibrate.molecule_stack.MoleculeStackSettings, smappy.calibrate.molecule_dual.dual_molecule_rois, smappy.calibrate.molecule_dual.registration_from_molecules, smappy.calibrate.molecule_stack_run.run_molecule_stack, smappy.calibrate.molecule_stack_run.spline_range, smappy.calibrate.molecule_stack_run.estimate_seconds, smappy.calibrate.molecule_views.draw_selection, smappy.calibrate.molecule_views.draw_z_check, smappy.calibrate.molecule_views.draw_foci, smappy.calibrate.molecule_views.model_vs_data, uipsf.workflows.molecule_stack.learn_molecule_stack, uipsf.workflows.molecule_stack.z_check, uipsf.workflows.molecule_stack.molecule_chunk, uipsf.model.geometry.CoverslipStackGeometry]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.torch_install.cpu_build_on_nvidia, uipsf.device.describe, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.saved_run.write, smappy.calibrate.saved_run.load, smappy.calibrate.saved_run.find_sources, smappy.calibrate.pupil.bead_size_warning, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.microscope_db.gamma_of, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin, smappy.calibrate.psf_methods.FourPiPupil, smappy.calibrate.psf_methods.FourPiAverage, smappy.calibrate.psf_methods.FourPiInSitu, smappy.calibrate.fourpi_insitu.run_insitu, smappy.calibrate.fourpi_insitu.choose, smappy.calibrate.fourpi_insitu.cut, uipsf.workflows.fourpi_insitu.learn_insitu, uipsf.workflows.fourpi_insitu.localise, uipsf.workflows.fourpi_insitu.outliers, smappy.calibrate.psf_methods.for_mode, smappy.calibrate.fourpi_beads.average_model, smappy.fourpi.iab_from_beads, smappy.calibrate.fourpi_beads.scan_beads, smappy.calibrate.fourpi_beads.read_scan, smappy.calibrate.fourpi_beads.scan_layout, smappy.calibrate.fourpi_beads.scan_step_nm, smappy.calibrate.fourpi_beads.bead_fits, smappy.calibrate.fourpi_beads.FourPiBeadSettings, smappy.calibrate.psf_methods.MoleculeStack, smappy.calibrate.psf_methods.MoleculeElliptical, smappy.calibrate.psf_methods.methods_of, smappy.calibrate.molecule_stack.molecule_rois, smappy.calibrate.molecule_stack.read_file, smappy.calibrate.molecule_stack.stage_z_um, smappy.calibrate.molecule_stack.split_sweeps, smappy.calibrate.molecule_stack.width_curve, smappy.calibrate.molecule_stack.focus_of, smappy.calibrate.molecule_stack.detect, smappy.calibrate.molecule_stack.select, smappy.calibrate.molecule_stack.draw, smappy.calibrate.molecule_stack.illumination_radius, smappy.calibrate.molecule_stack.molecule_widths, smappy.calibrate.molecule_stack.MoleculeStackSettings, smappy.calibrate.molecule_dual.dual_molecule_rois, smappy.calibrate.molecule_dual.registration_from_molecules, smappy.calibrate.molecule_stack_run.run_molecule_stack, smappy.calibrate.molecule_stack_run.spline_range, smappy.calibrate.molecule_stack_run.estimate_seconds, smappy.calibrate.molecule_views.draw_selection, smappy.calibrate.molecule_views.draw_z_check, smappy.calibrate.molecule_views.draw_foci, smappy.calibrate.molecule_views.model_vs_data, smappy.calibrate.focal_planes.focal_planes, smappy.calibrate.focal_planes.widths_px, uipsf.diagnostics.field.field_maps, uipsf.diagnostics.field.map_items, uipsf.diagnostics.field.pair_vector, uipsf.diagnostics.figures.draw_field_maps, smappy.calibrate.pupil.hold_gamma, uipsf.model.build.spec_held, uipsf.workflows.molecule_stack.learn_molecule_stack, uipsf.workflows.molecule_stack.z_check, uipsf.workflows.molecule_stack.molecule_chunk, uipsf.model.geometry.CoverslipStackGeometry]
 ---
 
 ## What it does
@@ -209,8 +209,10 @@ so that *Open calibration...* can show it again when its beads are long gone:
 the settings of every section the method read, where each bead stack was
 (its path, its path from the calibration's folder, its size), the bead table
 and where each bead was, the averaged data and model of *Model vs data*, the
-fit quality, and, for the pupil model, its bead map and the *start from*
-model it began with.  A few hundred kB, written after every save, *Save
+fit quality, where the spline is narrowest in x and in y (*CRLB*), and, for
+the pupil model, its bead map and the *start from* model it began with; a
+field-dependent model's *Aberration map* is drawn again from the model and
+the bead positions the file holds anyway.  A few hundred kB, written after every save, *Save
 as...* and *Uncertainty from halves...*.  A single bead's own volume is not
 kept: it is the stacks', and comes back with them.
 
@@ -289,6 +291,19 @@ magnitude is left out: learnt freely it gains likelihood on every set, but
 held at what the other sets learnt it costs as much as it gained -- it
 follows the acquisition, not the objective.
 
+*minimal, γ held* is the same pupil with γ not learnt but held, as in situ
+holds it: from *start from* when that is a minimal model (with the NA it
+learnt, if it learnt one), else from the pupil kept with the beads'
+microscope, else from the microscope's entry (its *gamma*).  With none of
+these the run stops and says so: a γ chosen to be held is never guessed, and
+*minimal* learns it.  It is for beads that do not determine γ well -- few or
+dim beads, a short stack -- or to compare calibrations of one objective at one
+γ; γ is the objective's, the same over days and colours (on M5's beads
+0.32–0.41).  The ring's h is still learnt; *learn NA* still learns the NA,
+now against the held γ, which a held NA with a learnt γ never does
+(γ and the aperture trade).  The molecules on the coverslip offer it too; 4Pi
+does not.
+
 The magnitude can instead be 1 plus Zernike modes: all of them up to the
 order (*Zernike*), only the rotationally symmetric ones (*symmetric Zernike*:
 Noll 4, 11, 22, ...), or none, so that only the apodisation of the objective
@@ -327,6 +342,24 @@ that each channel's share of the light is the learnt one.  The pixels are not
 integrated again: the model's blur already holds them, and integrating once more
 widened the spline's PSF, which pulled Spline 3D's z in by 1 % and bent it by
 up to 7 nm against the model's own localisation of the same beads.
+
+**The focal separation** is read from the saved spline, at its planes (all
+but the outermost), as the fitter evaluates it in its 13 px box: the PSF
+summed onto x and onto y, a Gaussian with an offset fitted to each profile
+(the offset takes the defocused rings and wings a second moment would count
+as width), the plane of the least σ refined by a parabola through it and its
+neighbours on a fifth of the plane spacing.  A minimum at an end of the range
+is none.  On simulated beads with the focal lines 600 nm apart it found 612 nm.
+
+**The aberration map** evaluates the field's polynomial on a grid of up to
+25 points along the longer side of the used beads' span, adds it to the
+centre's coefficients and draws each place's pupil phase, held modes
+included; the RMS is the phase's spread over the aperture.  A pair of modes
+of one radial order n and azimuthal order m (cos mφ, sin mφ, coefficients
+c and s) is one aberration of size A = √(c² + s²) turned to θ = atan2(s, c)/m:
+for astigmatism (m = 2) the axis along which the wavefront is advanced, for
+coma (m = 1) its direction.  A family's variation is its largest departure
+over the grid from its mean.
 
 In *Model vs data* the beads' images come from the learning itself: the used
 beads' fitted positions, photons and backgrounds, and the other beads
@@ -987,8 +1020,9 @@ aberrations and cost more time and more beads.
 
 ### pupil magnitude
 *minimal* (cos θ^γ, the ring beyond the critical angle and the aperture),
-*Zernike*, *symmetric Zernike* or *fixed* (the apodisation only); *In detail*
-says what each is.  Not shown for *in situ*, which decides it by its *learn*.
+*minimal, γ held* (the same, γ held from *start from* or the microscope, the
+summary saying where from), *Zernike*, *symmetric Zernike* or *fixed* (the
+apodisation only); *In detail* says what each is.  Not shown for *in situ*, which decides it by its *learn*.
 With two channels each learns its own γ: two colours pass the objective's
 edge differently.  Should the two come out alike on real pairs, one shared γ
 would be fewer numbers to learn; that is to be revisited.
@@ -1025,7 +1059,7 @@ the physics of their own depth, and in situ never learns it.  Shown only for
 the *minimal* magnitude over a sample whose index is below the NA.
 
 ### learn NA
-Off by default, for *minimal* only, in every method: the aperture then cuts
+Off by default, for *minimal* (and *γ held*) only, in every method: the aperture then cuts
 at the NA under *microscope*.  On, the NA is learnt -- an effective NA,
 started at the typed one and kept between 0.8 of it and 5 % above it -- and
 saved with the model; an in situ model that holds the beads' γ holds their
@@ -1475,7 +1509,7 @@ Saves the calibration under another name, or one made with *save model* off.
 ### Open calibration...
 Shows a saved calibration again, as it was shown when it was made: its pages
 -- *Model vs data*, *Fit quality*, *CRLB* and, for the pupil model, the
-pupil, the Zernikes, the residual atlas and the bead map -- and its bead
+pupil, the Zernikes, the aberration map, the residual atlas and the bead map -- and its bead
 table, all from the file; its sample, method, mode and settings set in the
 window.  Its bead stacks go back into the file list where they are found:
 where they were, or at the same place beside the calibration when the folder
@@ -1641,7 +1675,28 @@ diagnostics*, *CRLB*), explained on its page.  The pupil model's:
   page ([Bead average](plugin:Panels/Bead average), *CRLB*).  The
   pupil model's, in situ's and the molecules' too: before the calibration is
   saved, the spline is sampled for the page as saving would, with the
-  default *spline* settings.
+  default *spline* settings.  Its title, the line under it and the run's
+  summary give the **focal separation**: the z at which the spline's PSF is
+  narrowest in x and the z at which it is narrowest in y, and their distance
+  -- for an astigmatic PSF the two focal lines of the cylindrical lens, for
+  dual colour per channel.  It belongs to the instrument, not the beads, so
+  compare it between calibrations of one microscope: a change of more than a
+  few tens of nm says the cylindrical lens or the camera moved.  The file
+  keeps it.  *beyond the spline* where a width has no minimum inside the
+  calibrated range.
+- **Aberration map**, with *field dependence* (per channel in dual colour):
+  how the aberrations change across the field, over the used beads' span
+  (white dots) and no further -- the field is a polynomial, which beyond the
+  beads says nothing.  First the total RMS wavefront error at each place, the
+  pupil's whole phase (piston, tilt and defocus are never in it); then, by
+  *show*, the families that vary most (the default: up to three, each
+  varying at least a quarter as much as the most), all that vary, or one.
+  Astigmatism is drawn as a bar along its axis, coma as an arrow along its
+  tail, each over a map of its size, rather than one map per Zernike: a pair
+  of modes is one aberration turned, and its size and angle are what an
+  optician reads.  Bars and arrows are in the pupil page's orientation, x to
+  the right and y down as the chip.  The *units* as the pupil's.  The line
+  under the page gives the RMS range in nm.
 - **Residual atlas**: where the model and the data disagree, grouped by
   slice, defocus, distance from the spot's centre and position on the field.
   Each group's mean deviance is about 1 where the model is right; a group
@@ -1656,7 +1711,7 @@ diagnostics*, *CRLB*), explained on its page.  The pupil model's:
 - **Beads**: where the beads were on the chip, coloured by whether they were
   used, rejected or excluded, the selected ones ringed; a click selects one.
 
-*Pupil and Zernikes*, *Zernike table* and *Residual atlas* describe all beads
+*Pupil and Zernikes*, *Zernike table*, *Aberration map* and *Residual atlas* describe all beads
 together (one pupil per channel), so they do not follow the table's
 selection.
 

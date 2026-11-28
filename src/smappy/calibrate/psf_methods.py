@@ -249,6 +249,46 @@ def _detected_rows(columns, records, marks, brightness) -> list:
     return out
 
 
+def figure_pages(source, figures: dict) -> list:
+    """Pages of uipsf's figures (`uipsf.diagnostics.figures`, or a dict of the same draws) of ``source``, a
+    `Calibration` or a `LearnedPSF`: the pupil's in a choice of *units* (`PHASE_UNIT` first, the one shown),
+    the aberration maps of a field-dependent model with *show* too (`aberration_map_page`); the bead plot
+    left out, the window's own *Beads* page shows it."""
+    from uipsf.diagnostics.figures import unit_choices
+    pages = []
+    for title, draw in figures.items():
+        if title == "Beads":
+            continue
+        if title.startswith("Pupil and Zernikes"):
+            pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
+                              follows_selection=False, controls={"units": unit_choices()}))
+        elif title.startswith("Aberration map"):
+            tag = title.removeprefix("Aberration map").strip()
+            pages.append(aberration_map_page(source, int(tag) - 1 if tag else 0, title))
+        else:
+            pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
+    return pages
+
+
+def aberration_map_page(source, channel: int = 0, title: str = "Aberration map") -> Page:
+    """*Aberration map* of a field-dependent model (`uipsf.diagnostics.field.field_maps`): the total RMS
+    wavefront and the modes across the field; *show* picks the families (those varying most first), *units*
+    the phase's.  The maps are made once, when the page is made: the choices are their families."""
+    from uipsf.diagnostics.field import field_maps, show_choices
+    from uipsf.diagnostics.figures import draw_field_maps, unit_choices
+    maps = field_maps(source, channel)
+
+    def draw(figure, selected, excluded, chosen):
+        draw_field_maps(figure, source, channel, show=chosen["show"], units=chosen["units"], maps=maps)
+        if maps is None:
+            return None
+        rms = maps.rms * maps.wavelength_nm / (2 * np.pi)
+        return (f"total RMS wavefront {rms.min():.0f} to {rms.max():.0f} nm over the {len(maps.points)} "
+                f"used emitters' field (the maps reach only as far as they do)")
+    return Page(title, draw, follows_selection=False,
+                controls={"show": show_choices(maps), "units": unit_choices()})
+
+
 def _model_page(run: Run) -> Page:
     """*Model vs data*: `model_views.draw_model_vs_data` of the run's views, a selected bead alone."""
     from .model_views import draw_model_vs_data
@@ -437,7 +477,8 @@ class BeadAverage:
 
     def summary(self, run: Run) -> str:
         result = run.result
-        return f"{int(np.sum(result.accepted))} of {len(result.beads.records)} beads used"
+        return (f"{int(np.sum(result.accepted))} of {len(result.beads.records)} beads used"
+                + focal_text(getattr(result, "calibration", None)))
 
 
 def _field_text(cal, spline) -> str:
@@ -454,6 +495,19 @@ def _field_text(cal, spline) -> str:
                                                                                   spline.secondary]
     limits = {(getattr(s, "parameters", None) or {}).get("field_warning") for s in channels} - {None}
     return text + "".join(f"; {w}" for w in sorted(limits))
+
+
+def focal_text(spline) -> str:
+    """"; focal separation ..." of a run's spline (`focal_planes`), where its PSF is narrowest in x and in y:
+    whether the cylindrical lens or the camera moved since the last calibration; "" without a spline yet
+    (a pupil model's is sampled for the CRLB page, or on saving) or where it cannot be told."""
+    if spline is None:
+        return ""
+    from .focal_planes import of_calibration, summary_text
+    try:
+        return "; " + summary_text(of_calibration(spline))
+    except Exception:                    # a number in the summary, never a reason to lose the summary
+        return ""
 
 
 class PupilModel:
@@ -571,19 +625,9 @@ class PupilModel:
 
         from . import plots
         cal = run.result.cal
-        from uipsf.diagnostics.figures import unit_choices
         pages = []
         halves = getattr(cal, "halves", None)            # after *Uncertainty from halves*
-        for title, draw in figures(cal, reference=run.result.start, halves=halves).items():
-            if title == "Beads":
-                continue
-            if title.startswith("Pupil and Zernikes"):
-                # the phase in nm, waves or rad: a choice above the page, `PHASE_UNIT` first (the one shown)
-                units = unit_choices()
-                pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
-                                  follows_selection=False, controls={"units": units}))
-            else:
-                pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
+        pages += figure_pages(cal, figures(cal, reference=run.result.start, halves=halves))
         pages.append(Page("Zernike table", None, follows_selection=False,
                           table=lambda: zernike_table(cal, reference=run.result.start, halves=halves)))
         from .pupil import calibration_of
@@ -650,7 +694,8 @@ class PupilModel:
         numbers = model_text(cal)
         spill = spill_text(run.extra.get("spilled", 0))
         return (f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used" + (f"; {numbers}" if numbers else "")
-                + _field_text(cal, getattr(run.result, "calibration", None)) + (f"; {spill}" if spill else ""))
+                + _field_text(cal, getattr(run.result, "calibration", None)) + (f"; {spill}" if spill else "")
+                + focal_text(getattr(run.result, "calibration", None) or run.extra.get("crlb spline")))
 
 
 class InSitu:
@@ -719,22 +764,14 @@ class InSitu:
 
     def pages(self, run: Run) -> list:
         from uipsf.diagnostics import figures
-        from uipsf.diagnostics.figures import unit_choices, zernike_table
+        from uipsf.diagnostics.figures import zernike_table
 
         from .insitu_views import draw_model_vs_data, draw_rounds, draw_z_bins
         result = run.result
         cal = result.cal
         pages = [Page("z bins", lambda f, s, e: draw_z_bins(f, result.rois, result.run), follows_selection=False),
                  Page("Rounds and edge", lambda f, s, e: draw_rounds(f, result.run), follows_selection=False)]
-        for title, draw in figures(cal, reference=result.start).items():
-            if title == "Beads":
-                continue
-            if title.startswith("Pupil and Zernikes"):
-                units = unit_choices()
-                pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
-                                  follows_selection=False, controls={"units": units}))
-            else:
-                pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
+        pages += figure_pages(cal, figures(cal, reference=result.start))
         pages.append(Page("Zernike table", None, follows_selection=False,
                           table=lambda: zernike_table(cal, reference=result.start)))
         from .insitu_run import calibration_of
@@ -1290,7 +1327,7 @@ class MoleculeStack:
 
     def pages(self, run: Run) -> list:
         from uipsf.diagnostics import figures
-        from uipsf.diagnostics.figures import unit_choices, zernike_table
+        from uipsf.diagnostics.figures import zernike_table
 
         from .insitu_views import draw_model_vs_data
         from .molecule_views import draw_foci, draw_selection, draw_z_check
@@ -1299,15 +1336,7 @@ class MoleculeStack:
         pages = [Page("Selection", lambda f, s, e: draw_selection(f, result.rois, result), follows_selection=False),
                  Page("z check", lambda f, s, e: draw_z_check(f, result), follows_selection=False),
                  Page("Foci and plane", lambda f, s, e: draw_foci(f, result), follows_selection=False)]
-        for title, draw in figures(cal, reference=result.start).items():
-            if title == "Beads":
-                continue
-            if title.startswith("Pupil and Zernikes"):
-                units = unit_choices()
-                pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
-                                  follows_selection=False, controls={"units": units}))
-            else:
-                pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
+        pages += figure_pages(cal, figures(cal, reference=result.start))
         pages.append(Page("Zernike table", None, follows_selection=False,
                           table=lambda: zernike_table(cal, reference=result.start)))
         from .molecule_stack_run import calibration_of
@@ -1351,7 +1380,8 @@ class MoleculeStack:
                 + (f", {numbers}" if numbers else ""))
         text += "".join(f"; {m}" for m in result.messages if not m.startswith("warning: "))
         # with *field dependence*, as the beads' (`PupilModel.summary`)
-        return text + _field_text(result.cal, getattr(result, "calibration", None))
+        return (text + _field_text(result.cal, getattr(result, "calibration", None))
+                + focal_text(getattr(result, "calibration", None) or run.extra.get("crlb spline")))
 
     def states(self, run: Run) -> dict:
         return {i: s.split(":")[0] for i, s in enumerate(self._state(run))}

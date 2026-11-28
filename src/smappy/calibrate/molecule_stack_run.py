@@ -59,13 +59,21 @@ class MoleculeStackResult:
         return float(self.cal.shared()["geometry.height"])
 
 
-def model_for(rois: MoleculeStackROIs, optics, model, stack: MoleculeStackSettings, device=None, dtype=None):
-    """The forward model learnt from ``rois``: ``optics`` an `OpticsSettings`, ``model`` a `BeadSettings`."""
+def model_for(rois: MoleculeStackROIs, optics, model, stack: MoleculeStackSettings, device=None, dtype=None,
+              start=None, estimate: bool = False):
+    """The forward model learnt from ``rois``: ``optics`` an `OpticsSettings`, ``model`` a `BeadSettings`;
+    ``start`` the model it starts from, whose γ a *γ held* magnitude holds (`pupil.hold_gamma`), found only at
+    a run: an ``estimate`` learns it, which costs the same."""
     import torch
 
     from uipsf.workflows.calibrate import molecule_stack_model
+    from .pupil import hold_gamma
     C = rois.n_channels
     o = optics.optics(rois.camera, C, _main_half(rois))
+    if estimate and model.psf.magnitude == "held" and model.psf.held_gamma is None:
+        from dataclasses import replace
+        model = replace(model, psf=replace(model.psf, magnitude="minimal"))
+    model = hold_gamma(model, start, rois.camera, o[0].wavelength_nm)
     roi = int(rois.units.regions.shape[-1])
     span = float(np.nanmax(np.abs(rois.defocus_nm))) if len(rois.defocus_nm) else 1000.0
     transforms = None if C == 1 else [None, _unit(rois.transform.transformation)]
@@ -110,8 +118,12 @@ def run_molecule_stack(paths, optics, model, stack: MoleculeStackSettings | None
     used = rois.ids("used")
     if not len(used):
         raise ValueError("no molecules chosen: review the detection's settings")
-    learnt = model_for(rois, optics, model, stack, device)
     previous = load_start(run.start_from) if run.start_from else None
+    # *γ held* found here, not only inside `model_for`: the options kept with the model must hold it too
+    from .pupil import hold_gamma
+    model = hold_gamma(model, previous, rois.camera,
+                       optics.optics(rois.camera, rois.n_channels, _main_half(rois))[0].wavelength_nm)
+    learnt = model_for(rois, optics, model, stack, device, start=previous)
     start = start_values(learnt, previous) if previous is not None else None
     if start is not None:                  # a previous model's foci are another sample's sweeps
         start = {k: v for k, v in start.items() if not k.startswith("geometry.")}
@@ -213,7 +225,7 @@ def estimate_seconds(rois: MoleculeStackROIs, optics, model, stack: MoleculeStac
     used = rois.ids("used")
     if not len(used):
         return 0.0
-    learnt = model_for(rois, optics, model, stack)
+    learnt = model_for(rois, optics, model, stack, estimate=True)
     batch, _ = rois.batch(ids=used[:TIMED_MOLECULES])
     batch = on_model_device(batch, learnt)
     start = Params(learnt.specs(batch), batch.n_emitters, dtype=batch.data.dtype, device=batch.data.device)

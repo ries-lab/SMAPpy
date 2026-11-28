@@ -389,9 +389,29 @@ def psf_calibration_actions(control) -> List[Action]:
             raise ToolError(str(error)) from None
         return _started(w, lambda: w.halves(int(splits)), f"learning {2 * int(splits)} halves")
 
-    def page(page):
+    def page(page, choices=None):
         w = win()
-        return {"page": _show_page(w.tabs, page)}
+        title = _show_page(w.tabs, page)
+        boxes = next((b for (_, _, p), b in zip(w.pages, w.choices) if p.title == title), {})
+        if choices:
+            from PySide6.QtWidgets import QCheckBox
+            for label, value in dict(choices).items():
+                box = boxes.get(label)
+                if box is None:
+                    raise ToolError(f"the page {title!r} has no choice {label!r}; it has "
+                                    f"{', '.join(boxes) or 'none'}")
+                if isinstance(box, QCheckBox):
+                    box.setChecked(bool(value))
+                    continue
+                options = [box.itemText(i) for i in range(box.count())]
+                if str(value) not in options:
+                    raise ToolError(f"{label} {value!r} is not offered; one of {', '.join(options)}")
+                box.setCurrentText(str(value))
+        from PySide6.QtWidgets import QCheckBox
+        return {"page": title, "choices": {
+            label: (box.isChecked() if isinstance(box, QCheckBox) else
+                    {"chosen": box.currentText(), "offered": [box.itemText(i) for i in range(box.count())]})
+            for label, box in boxes.items()}}
 
     def save_as(path=None):
         from ..calibrate.pupil import default_save_path
@@ -484,7 +504,10 @@ def psf_calibration_actions(control) -> List[Action]:
                "calibration when it was saved.  Returns at once.", halves,
                {"splits": {"type": "integer", "description": "2 to 10, default 3"}}),
         Action(f"{name}/Show page", "Bring a page to the front: Stacks or one of the run's pages, "
-               "as State lists them.", page, {"page": {"type": "string"}}, ("page",), shows=True),
+               "as State lists them; ``choices`` sets the choices above it by their label -- units, "
+               "section, average, the Aberration map's show -- and the answer lists each page "
+               "choice with what it offers.", page,
+               {"page": {"type": "string"}, "choices": {"type": "object"}}, ("page",), shows=True),
         Action(f"{name}/Save as", "Save the calibration elsewhere, or when save model was off -- "
                "by default where it was saved or beside the stacks; a path given is under the "
                "output folder or the stacks' folder -- and put it into its fitter.", save_as,

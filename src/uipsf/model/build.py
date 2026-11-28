@@ -7,10 +7,13 @@ Those copies drifted (in situ handed a minimal model's pupil on as a flat magnit
 dropped the pixel's blur).  Here they are made once:
 
 - **the spec** is SMAPpy's `PSFModelSettings` (`smappy.calibrate.pupil`, torch-free, the form's section) or
-  anything with its attributes: ``order``, ``magnitude`` (minimal, free, symmetric, fixed), ``saf_damping``,
+  anything with its attributes: ``order``, ``magnitude`` (minimal, held, free, symmetric, fixed), ``saf_damping``,
   ``blur`` (free, round, fixed), ``blur_nm``, ``pixel_blur`` and ``learn_n_med`` (the sample's index learnt),
   and optionally ``phase_mask``, a `MaskSpec` (`model.mask`; none without it) and ``zernike_ring`` (a Zernike
   magnitude with the beads' ring too, when ``saf_damping``; off without it, not in the form);
+- **held** is the minimal magnitude with γ held at the spec's ``held_gamma`` (and its aperture at ``held_na``
+  where that was learnt with it), resolved by SMAPpy from the start model or the microscope before the model
+  is built (`smappy.calibrate.pupil.hold_gamma`): the beads' own γ held, as in situ holds it;
 - `pupil_grid` owns the grid (and its margin), `make_pupil` the pupil, `make_psf` the PSF;
 - **the hand-over** between models is the description a learnt PSF gives of itself
   (`VectorPSF.describe`, plain data, kept with a microscope by SMAPpy): ``kind``, the phase in nm, γ (a
@@ -78,8 +81,27 @@ def pupil_grid(optics, spec, z_max_nm: float = 0.0, *, size: int | None = None, 
     """The pupil grid for ``spec``: a minimal pupil's reaches `GRID_MARGIN` beyond the objective's NA
     (`minimal_grid_optics`), a Zernike pupil's ends at it.  ``size`` samples, or as many as keep defocus up
     to ``z_max_nm`` from aliasing (`choose_pupil_size`, never below 64)."""
-    g = minimal_grid_optics(optics) if spec.magnitude == "minimal" else optics
+    g = minimal_grid_optics(optics) if is_minimal(spec) else optics
     return PupilGrid.build(g, size or choose_pupil_size(g, z_max_nm), device=device, dtype=dtype)
+
+
+def is_minimal(spec) -> bool:
+    """Whether ``spec`` draws a minimal pupil: its γ learnt (*minimal*) or held (*held*)."""
+    return spec.magnitude in ("minimal", "held")
+
+
+def spec_held(spec, held: Held) -> Held:
+    """``held`` with the γ (and NA) a *held* magnitude names (module docstring); an error where it names
+    none, rather than learning γ the user chose to hold."""
+    if spec.magnitude != "held" or held.gamma is not None:
+        return held
+    gamma = getattr(spec, "held_gamma", None)
+    if gamma is None:
+        raise ValueError("pupil magnitude 'minimal, γ held' needs a γ to hold: a minimal model to start from, "
+                         "or the microscope's γ (its entry's gamma, or a pupil kept with it)")
+    na = getattr(spec, "held_na", None)
+    return Held(dict(held.phase), gamma=float(gamma), na=None if na is None else float(na),
+                source=getattr(spec, "held_source", "") or held.source)
 
 
 def make_pupil(optics, spec, held: Held | None = None, *, grid: PupilGrid | None = None,
@@ -90,11 +112,11 @@ def make_pupil(optics, spec, held: Held | None = None, *, grid: PupilGrid | None
     whose magnitude cannot hold them is refused, rather than the held part silently dropped.
     ``magnitude_override`` replaces a Zernike magnitude's modes (4Pi's typed ones).  The spec's ``phase_mask``,
     if it has one, is placed on the pupil in units of the objective's NA (`model.mask`)."""
-    held = held or Held()
+    held = spec_held(spec, held or Held())
     grid = grid if grid is not None else pupil_grid(optics, spec, z_max_nm, device=device, dtype=dtype)
     n_max = int(spec.order)
     mask = make_mask(getattr(spec, "phase_mask", None), grid, aperture_na=optics.NA)
-    if spec.magnitude == "minimal":
+    if is_minimal(spec):
         if held.magnitude:
             raise ValueError("a minimal pupil cannot hold Zernike magnitude modes: hold a minimal model's γ")
         return MinimalPupil(grid, n_max=n_max, na=optics.NA if held.na is None else held.na,
