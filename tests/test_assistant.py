@@ -411,9 +411,67 @@ def test_a_word_the_query_negates_counts_for_nothing():
     assert "Analysis/Drift/COMET" in top and "Analysis/Drift/RCC" in top
 
 
+def test_the_function_index_finds_what_code_of_ones_own_would_rewrite():
+    """An agent wrote in numpy which beads to trust and a table collapsed
+    per id; the functions that do it are found by the question's words."""
+    a = Assistant()
+    found = a.call("find_functions", {"queries": [
+        "which beads are bad", "combine localizations of a group into one row",
+        "link localizations into tracks"]})
+    assert [f["query"] for f in found] == ["which beads are bad",
+                                           "combine localizations of a group into one row",
+                                           "link localizations into tracks"]
+    names = [[e["name"] for e in f["found"][:5]] for f in found]
+    assert "smappy.beads.select_beads" in names[0]
+    assert "smappy.group.combine" in names[1]
+    assert "smappy.tracking.link.link_tracks" in names[2]
+    beads = next(e for e in found[0]["found"] if e["name"] == "smappy.beads.select_beads")
+    assert beads["signature"].startswith("(t, positions, bead, names=None, *, knot=10.0")
+    assert beads["doc"] == "Choose the beads and fit the drift they agree on."
+    # a name it gives is one read_source takes
+    assert "def select_beads" in a.call("read_source", {"name": beads["name"]})["text"]
+
+
+def test_the_function_index_leaves_out_the_private_the_gui_and_the_plugin_classes():
+    from smappy.assistant import functions
+    names = [e.name for e in functions.entries()]
+    assert not [n for n in names if any(p.startswith("_") for p in n.split("."))]
+    assert not [n for n in names if n.startswith(("smappy.gui.", "smappy.assistant."))]
+    clusters = [e for e in functions.entries() if e.name.startswith("smappy.plugins.clusters.")]
+    assert clusters and all(e.kind == "function" for e in clusters)
+    assert "smappy.plugins.clusters.dbscan" in {e.name for e in clusters}
+
+
+def test_a_docstrings_first_sentence_is_not_its_first_line_nor_cut_at_an_abbreviation():
+    from smappy.assistant.functions import first_sentence
+    assert first_sentence("Each bead's offset\nand one spline.  Then more.") == \
+        "Each bead's offset and one spline."
+    assert first_sentence("Voronoi (Levet et al. 2015), e.g. this.  Next") == \
+        "Voronoi (Levet et al. 2015), e.g. this."
+    assert first_sentence("A label per point, 1, 2, ...; -1 none.\n\nMore.") == \
+        "A label per point, 1, 2, ...; -1 none."
+
+
+def test_the_function_index_imports_nothing_it_lists():
+    """Parsed, never imported: torch and the GUI stay unloaded."""
+    import subprocess
+
+    import smappy
+    code = ("import sys; from smappy.assistant import functions; "
+            "assert functions.search('which beads are bad'); "
+            "print(sorted(m for m in sys.modules if m.split('.')[0] in "
+            "('smappy', 'numpy', 'scipy', 'torch', 'PySide6')))")
+    env = {**os.environ, "PYTHONPATH": str(Path(smappy.__file__).parents[1])}
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
+                         text=True, check=True).stdout
+    assert eval(out) == ["smappy", "smappy.assistant", "smappy.assistant.functions",
+                         "smappy.assistant.index"]
+
+
 def test_the_instructions_put_the_plugins_first_and_name_tools_that_exist():
     assert "Plugins first" in INSTRUCTIONS
-    for name in ("find_plugins", "record_own_code", "run_plugin", "validate_chain"):
+    for name in ("find_plugins", "find_functions", "record_own_code", "run_plugin",
+                 "validate_chain"):
         assert name in INSTRUCTIONS and name in Assistant.specs()
 
 

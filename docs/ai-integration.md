@@ -158,7 +158,8 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
 * **reading** -- `session_state`, `list_plugins`, `find_plugins` (the
   generated index), `describe_plugin` (fields, grouping, what the form says
   about them now), `read_doc` (a plugin's or a panel's page), `read_source`
-  (a plugin's module or any `smappy` module), `figure` (a result's figure as
+  (a plugin's module or any `smappy` module), `find_functions` (the
+  function index, below), `figure` (a result's figure as
   PNG), `picture` (the view as PNG).  The results `figure` draws are kept
   whole, so they are held to `MAX_RESULT_BYTES` (2 GB) of arrays as well as
   `MAX_RESULTS` of them, the newest always kept -- a PSF calibration's holds
@@ -324,6 +325,9 @@ things lean it towards the plugins and make the rest visible:
   word-overlap ranking cannot know that drift without beads is COMET's;
 * the path from a question to a run is shorter: `find_plugins` carries the
   settings, `run_plugin` answers with the result's `data` and `values`;
+* code of its own builds on SMAPpy's functions: `find_functions` (below)
+  finds the module-level functions behind the plugins, which it called
+  rarely because only reading the code found them;
 * `record_own_code` puts each step of its own into the history beside the
   plugins' runs and into `own-code.md`, whose recurring entries are the
   plugins to write next.  A script worth keeping is offered as a plugin of
@@ -332,6 +336,28 @@ things lean it towards the plugins and make the rest visible:
 What is not in the code -- a lab's preferences, typical values, failure modes
 people have learnt to recognise -- is written down only once test tasks show
 an assistant needs it, and then where possible in the plugins' pages.
+
+### The function index
+
+Every shipped plugin is a thin wrapper over module-level functions that
+take arrays, and an agent writing code of its own rewrote them in numpy
+(which beads to trust, a table collapsed per id) because nothing pointed
+it at them.  `find_functions` searches an index of them
+(`assistant/functions.py`): every public function and class at the top of a
+`smappy` module -- not `gui`, `assistant`, `tutorial`, `docs`, `cli`, a
+private module, nor the plugins' classes, which `find_plugins` finds --
+with its dotted name (what `read_source` takes), its signature without the
+parameters' annotations and its docstring's first sentence.  Built by
+parsing the source with `ast`, never importing it, so torch and Qt stay
+unloaded; about 2700 entries, two or three seconds once per process.  A
+word counts by where it was found: the name, the module's name and first
+sentence, the first sentence of the docstring, the rest of it, and the
+paragraphs of the module's docstring that name the function in backticks --
+in this code base the module's docstring often explains a function better
+than its own (`beads`: "which ones to trust").  One call takes several
+queries and answers each with its list.  The tool's description,
+`INSTRUCTIONS` and the assistant folder's AGENTS.md say to ask it before
+writing code of one's own.
 
 ## The knowledge base
 

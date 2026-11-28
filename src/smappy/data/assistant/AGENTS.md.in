@@ -17,6 +17,9 @@ found again whichever dataset is open.  The data is not here.
   the history and run again in the GUI and in a batch.  Its list is
   candidates ranked by shared words: choose among them yourself, from
   their pages, and judge whether one is usable on this data at all.
+  Before writing code of your own, ask `find_functions`: the plugins'
+  module-level functions (`beads.select_beads`, `group.combine`) take
+  arrays and are tested -- call them rather than rewrite them.
 * **This folder** is for your scripts, figures and scratch work, kept out of
   the raw data.  Name a script for what it does, so that it is found again.
   Exploring here is welcome.  When a script's result goes into what you

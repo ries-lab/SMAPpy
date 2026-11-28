@@ -1017,6 +1017,25 @@ class Assistant:
             out["next_offset"] = offset + MAX_SOURCE
         return out
 
+    @tool("SMAPpy's public Python functions and classes that match a question "
+          "in words, best first: dotted name, signature and the first sentence "
+          "of its docstring.  Ask it before writing code of your own -- the "
+          "plugins are thin wrappers over functions like these, which take "
+          "arrays and are tested (beads.select_beads: which beads to trust; "
+          "group.combine: one row per id) -- and call them rather than "
+          "rewriting them in numpy; read_source shows one.  Several queries "
+          "in one call, a list each.  Generated from the code without importing it; "
+          "candidates by shared words, as find_plugins'.",
+          queries={"type": "array", "items": {"type": "string"},
+                   "description": "e.g. ['which beads are bad', 'link into tracks']"},
+          limit={"type": "integer", "description": "how many per query, default 8"})
+    def find_functions(self, queries: Sequence[str], limit: int = 8
+                       ) -> List[Dict[str, Any]]:
+        from . import functions
+        if isinstance(queries, str):
+            queries = [queries]
+        return [{"query": q, "found": functions.search(q, limit)} for q in queries]
+
     @tool("A figure of a result, as a picture.",
           result={"type": "string", "description": "the result's id, e.g. 'r3'"},
           index={"type": "integer", "description": "which figure, 0 the main one"})
@@ -1939,7 +1958,8 @@ How to work:
   in the GUI and in a batch.  Code of your own is welcome on top of that --
   to explore, to combine plugins' results (run_plugin answers with their
   numbers: data, values), for a figure, or for what no plugin does -- but
-  build on the plugins rather than redo what one computes.
+  build on the plugins (and find_functions) rather than redo what one
+  computes.
 * Say what you did in two parts: what SMAPpy did -- the plugins and their
   settings, as a chain where it can be one (validate_chain, run_chain: it
   runs again in the GUI and over many files with smappy-batch) -- and what
