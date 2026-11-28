@@ -161,6 +161,12 @@ def prepare_folder(folder: Path) -> None:
                 .replace("@@VERSION@@", str(__version__))
                 .replace("@@PACKAGE@@", str(source_folder()))
                 .replace("@@PLUGINS@@", str(config.user_plugin_dir())))
+        if "@@CATALOG@@" in text:
+            # the plugins' list, read whole by the client at its start: the
+            # server's instructions are cut at 4096 characters, and a tool's
+            # description is seen only once the tool is loaded
+            from .index import catalog
+            text = text.replace("@@CATALOG@@", catalog())
         if text != current:
             path.write_text(text, encoding="utf-8")
 

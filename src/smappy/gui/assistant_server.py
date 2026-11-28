@@ -56,7 +56,8 @@ When the user starts the assistant in another window you are moved there,
 and the next tool answer begins with a note saying so: from then on the
 files, layers and results are that window's.  open_plugin opens a plugin's window filled in, for
 the user to run; open_window one of SMAPpy's other windows (the ROI manager,
-the 3D view, ...); filters, grouping and show() change what is shown; all are
+the 3D view, ...); what a menu item or button does is list_actions and
+do_action; filters, grouping and show() change what is shown; all are
 made at once, in either mode.  In suggest mode a change to the data appears
 in the GUI's Assistant pane as a proposal, with a button that opens the
 plugin's window filled in.  In act mode a run you apply opens in the

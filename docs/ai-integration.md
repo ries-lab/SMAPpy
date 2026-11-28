@@ -155,11 +155,12 @@ tests, when it is installed, to check that a real client talks to it.
 Plain functions on an `Assistant` over a `Session` (`assistant/tools.py`),
 Qt-free, returning JSON; the protocol layer only lists and calls them.
 
-* **reading** -- `session_state`, `list_plugins`, `find_plugins` (the
-  generated index), `describe_plugin` (fields, grouping, what the form says
-  about them now), `read_doc` (a plugin's or a panel's page), `read_source`
-  (a plugin's module or any `smappy` module), `find_functions` (the
-  function index, below), `figure` (a result's figure as
+* **reading** -- `session_state`, `list_plugins` (the catalog),
+  `find_plugins` (the search, both under "The plugin index"),
+  `describe_plugin` (fields, grouping, what the form says about them now),
+  `read_doc` (a plugin's or a panel's page), `read_source` (a plugin's
+  module or any `smappy` module), `find_functions` (the function index,
+  below), `figure` (a result's figure as
   PNG), `picture` (the view as PNG).  The results `figure` draws are kept
   whole, so they are held to `MAX_RESULT_BYTES` (2 GB) of arrays as well as
   `MAX_RESULTS` of them, the newest always kept -- a PSF calibration's holds
@@ -292,18 +293,60 @@ Headless, the default is *act*: there is nobody to propose to.
 
 ## The plugin index
 
-`find_plugins` searches a generated index: each plugin's path, name, summary
-and the first paragraph of its page's *What it does* -- where the page says
-what the plugin is for and when not to use it.  Generated, not written, so
-it cannot go stale; the pages and the code stay the authority, and the index
-only says which page to read.
+Two things, both generated from the plugins and their pages, so neither can
+go stale; the pages and the code stay the authority, and the index only
+says which page to read (`assistant/index.py`).
+
+**The catalog** -- every plugin and chain on a line: its path as
+`run_plugin` takes it, the name the GUI shows where it differs, its summary
+and, where it holds several methods, its choice of them (*Segment regions*'
+*method: circle template · beads · ... · like examples*; `index.catalog`).
+About 17,000 characters for 88 plugins.  It is the overview a question is
+matched against, by the model, which knows that "is my sample moving" may
+be drift or vibration where no word is shared.  It is written into the
+assistant folder's AGENTS.md (`launch.prepare_folder`), which a client
+started from SMAPpy reads whole, and `list_plugins` returns it for every
+other client.
+
+**The search** -- `find_plugins` ranks every section of every plugin's and
+panel's page, and every setting's label, help and choices, by BM25: a
+plugin by its best section and a share of its next two, its name, path and
+summary counting more.  The first index held only each page's opening, and a
+plugin's modes are further down: "undrift from picked", Picasso's name for
+Fiducials' *markers*, found nothing (2026-11).  Word endings are stripped
+(`index.stem`), a Glossary entry's other names are searched at half weight
+(`index.synonyms`), and words a query negates ("drift correction without
+beads") count for none (`index.wanted_words`): they had put the bead
+plugins above COMET.  It takes several phrasings at once -- the user's
+words, the field's terms, the question's parts -- and says how many found
+each plugin (`found_by`), with the sentences that matched, by section: the
+model sees why a plugin was found without reading its page, and a word
+those sentences use (*markers*, *picked*) is its next query.  Building it
+takes about three seconds, once per process, most of it importing the
+plugins for their settings.
+
+Embeddings, which would find meaning where no word is shared, were left
+out: a model of a hundred megabytes to ship and keep, against the model at
+the other end of the call, which rephrases for nothing.  Whether the search
+is good enough is measured, not argued: `tests/test_plugin_search.py` holds
+questions -- from the usage logs and written to cover other programs' names,
+modes inside plugins and vague questions -- each with the plugin that
+answers it, which must be among the first five.  Questions the logs bring
+are added there.
 
 Every plugin a search finds comes with its main settings and defaults
 (`tools._sketch`), enough for a first `run_plugin` without
 `describe_plugin` -- see the next section; every one, because a plugin
-cheaper to try than its neighbours in the list is the one tried.  Words a
-query negates ("drift correction without beads") count for none
-(`index.wanted_words`): they had put the bead plugins above COMET.
+cheaper to try than its neighbours in the list is the one tried.
+
+### The instructions' length
+
+Claude Code keeps only the first 4096 characters of a server's
+instructions (`INSTRUCTIONS_LIMIT`).  `INSTRUCTIONS` with `source_note` and
+the GUI's `GUI_NOTE` had grown to 5900, and the end -- where SMAPpy's code
+is, and all the GUI's note -- never reached the model (2026-11).  So the
+instructions say only how to work across the tools; what one tool needs is
+in its description, and a test keeps the three under the limit.
 
 ### Plugins first
 
@@ -318,11 +361,11 @@ things lean it towards the plugins and make the rest visible:
   say to ask `find_plugins` first and to build on the plugins' numbers, and
   to tell the user in two parts what SMAPpy's plugins did and what its own
   code did;
-* `find_plugins` is a list of candidates, and the instructions say so: the
+* `find_plugins` is a list of candidates, and its description says so: the
   model chooses among them from their pages, judges whether one is usable
   on this data at all (its needs against `session_state`), says why it
   chose it over a close alternative, and says so when none fits -- a
-  word-overlap ranking cannot know that drift without beads is COMET's;
+  ranking of words cannot know that drift without beads is COMET's;
 * the path from a question to a run is shorter: `find_plugins` carries the
   settings, `run_plugin` answers with the result's `data` and `values`;
 * code of its own builds on SMAPpy's functions: `find_functions` (below)

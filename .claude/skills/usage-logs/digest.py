@@ -296,7 +296,11 @@ def read_bundle(path: Path, senders: dict) -> None:
                             s.failed_tools.append((e.get("t", ""), tool, one_line(args, 200),
                                                    one_line(e.get("error", ""), ERROR_LIMIT)))
                         if tool == "find_plugins":
-                            s.searches.append((args.get("query", "") if isinstance(args, dict) else args,
+                            # one phrasing (`query`) or, since 2026-11, several (`queries`)
+                            asked = (" | ".join(list(args.get("queries") or [])
+                                                + [args.get("query") or ""]).strip(" |")
+                                     if isinstance(args, dict) else args)
+                            s.searches.append((asked,
                                                one_line(e.get("answer", ""), 300)))
                         elif tool == "read_source":
                             s.sources[str(args.get("name", "")) if isinstance(args, dict) else str(args)] += 1

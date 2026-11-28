@@ -899,29 +899,44 @@ class Assistant:
             **({"window": self.window()} if self.window is not None else {}),
         }
 
-    @tool("Every plugin and saved chain by path, with its one-line summary.  "
-          "A prefix narrows it: 'Analysis/Drift', 'File'.",
+    @tool("Every plugin and saved chain, a line each: its path (as run_plugin "
+          "takes it), the name the GUI shows in brackets where it differs, what "
+          "it does and, where it has several methods, its choice of them.  Read "
+          "it once at the start: it is the overview a question is matched "
+          "against, and find_plugins then finds what the lines do not say.  A "
+          "prefix narrows it: 'Analysis/Drift', 'File'.",
           prefix={"type": "string", "description": "the start of a path"})
-    def list_plugins(self, prefix: str = "") -> List[Dict[str, str]]:
-        from .. import plugins
-        return [{"path": path, "name": ref.name, "summary": ref.description,
-                 "kind": ref.kind, "per_region": ref.per_region}
-                for path, ref in plugins.refs(prefix).items()]
+    def list_plugins(self, prefix: str = "") -> str:
+        return index.catalog(prefix) or f"no plugin's path starts with {prefix!r}"
 
-    @tool("The plugins and help pages that match a question in words, best "
-          "first, each with what its page says it is for; each plugin with its "
-          "main settings and defaults, enough for a first run_plugin.  Words "
-          "after 'without', 'no' or 'not' count for none.  Candidates, not an "
-          "answer: the ranking is word overlap, so judge them yourself -- "
-          "what each is for and needs (read_doc) against the question and the "
-          "data -- and take none that does not fit.  Ask it before computing something with code of your "
-          "own: a plugin is tested, recorded and runs again in the GUI.  A "
-          "map, not the reference: read the candidates' pages (read_doc) "
-          "before relying on one.",
-          query={"type": "string", "description": "e.g. 'drift without beads'"},
+    @tool("Search every plugin's and panel's help page, section by section, "
+          "and every setting's label, help and choices -- where a plugin's "
+          "methods and modes are named.  Give several phrasings of the question "
+          "at once (queries): the user's own words, the field's terms "
+          "(fiducial, registration, drift, segmentation), and the parts of the "
+          "question on their own; the names a Glossary entry gives are searched "
+          "too.  Each hit comes with the sentences that matched, by section, "
+          "found_by (how many phrasings found it) and its main settings, enough "
+          "for a first run_plugin.  When the sentences name a word you did not "
+          "use (markers, picked, regions), search again with it.  Words after "
+          "'without', 'no' or 'not' count for none.  Candidates, not an answer: "
+          "read_doc every plausible one and judge what it is for and needs "
+          "against the question and the data; take none that does not fit, and "
+          "say why you chose one over a close alternative.  Ask it before "
+          "computing something with code of your own: a plugin is tested, "
+          "recorded and runs again in the GUI.",
+          queries={"type": "array", "items": {"type": "string"},
+                   "description": "two to five phrasings, e.g. ['drift from selected "
+                                  "origamis', 'drift correction fiducial markers', "
+                                  "'undrift from picked']"},
+          query={"type": "string", "description": "one phrasing, if only one"},
           limit={"type": "integer", "description": "how many, default 8"})
-    def find_plugins(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
-        found: List[Dict[str, Any]] = index.search(query, limit)
+    def find_plugins(self, queries: Optional[List[str]] = None, query: str = "",
+                     limit: int = 8) -> List[Dict[str, Any]]:
+        asked = [q for q in (list(queries or []) + [query]) if q and q.strip()]
+        if not asked:
+            raise ToolError("give queries: a few phrasings of the question")
+        found: List[Dict[str, Any]] = index.search(asked, limit)
         for entry in found:
             if entry["kind"] == "plugin":
                 settings = _sketch(entry["path"])
@@ -1922,72 +1937,44 @@ def _histograms_png(drawn, what: str) -> bytes:
 
 
 # What a client is told when it connects (MCP's `instructions`): how to work
-# with these tools.  Agent-neutral, short; the pages hold the rest.
+# with these tools.  Agent-neutral and short: Claude Code keeps only the first
+# `INSTRUCTIONS_LIMIT` characters of a server's instructions, and with
+# `source_note` and the GUI's note after this it had lost the end of the last
+# bullet, where the code is and the whole GUI note (2026-11).  What a single
+# tool needs is said in that tool's description; the pages hold the rest.
+INSTRUCTIONS_LIMIT = 4096
 INSTRUCTIONS = """\
 SMAPpy analyses single-molecule localization microscopy data.  These tools
 work on one open session.
 
-How to work:
-* A user often says what they need and not how.  Help as they ask: explain
-  how to do it in SMAPpy (the plugin, its settings, what the numbers mean);
-  suggest it (run_plugin with apply=true, a proposal in suggest mode; show
-  the place you mean); or do it (act mode).  When unclear, explain and offer
-  to suggest.
-* session_state first.  find_plugins gives candidates, not an answer: its
-  ranking is word overlap, so the first is not necessarily the best, and
-  you can search again in other words or look through list_plugins.  Choose
-  yourself: read_doc of the likely ones -- each page says what the method
-  is for, when not to use it, what it needs, how to choose its settings and
-  what a good and a bad result look like -- and judge each against the
-  question and the data (session_state: the columns, the kind of data, what
-  the table holds already).  A plugin whose needs the data does not meet
-  (beads, a MINFLUX file, a calibration) is not usable, however well it
-  ranked.  Say which you chose and why, and why not a close alternative;
-  if none fits, say so rather than bend one to the question.
-  read_source when a page leaves a question open; the code is the
-  authority on what is computed.
-* describe_plugin for the settings' exact names.  Try with run_plugin
-  (apply=false, the default), look at the numbers and the figures (figure),
-  and judge them against the page before applying anything.
-* Check a method on simulated data with a known truth (File/Simulate/Simulate)
-  when you are unsure it suits the data.  scan to see how a result depends on
-  a setting.
-* Plugins first.  Before computing something yourself, see whether a
-  plugin does it, or most of it (find_plugins): a plugin is tested, handles
-  the edge cases its page names, is recorded in the history and runs again
-  in the GUI and in a batch.  Code of your own is welcome on top of that --
-  to explore, to combine plugins' results (run_plugin answers with their
-  numbers: data, values), for a figure, or for what no plugin does -- but
-  build on the plugins (and find_functions) rather than redo what one
-  computes.
-* Say what you did in two parts: what SMAPpy did -- the plugins and their
-  settings, as a chain where it can be one (validate_chain, run_chain: it
-  runs again in the GUI and over many files with smappy-batch) -- and what
-  your own code did, and why no plugin did it.  record_own_code each step
-  of your own code that went into a result, so that the user sees it in
-  the history.  Where your code would be worth keeping as a tool, offer to
-  make it a plugin of the user's (their plugin folder): only on a yes.
-* recall before deciding what the user may have decided already; remember
-  and save_chain only when the user has agreed to keep it.
-* Two kinds of ROI.  The ROI drawn in the 2D view (session_state's 'roi',
-  set_roi) is one shape that every plugin run on a layer is confined to,
-  with the filter: "in the ROI" means it, unless the user names an ROI of
-  the ROI manager (many, numbered, kept with the file, measured one by one
-  by the per-region steps).  Questions about what is in it -- how many
-  clusters, a histogram of the frames -- are read_values (n_unique of
-  cluster_id; plot=true for a picture), after the plugin that makes the
-  column if the table lacks it (run_plugin finds clusters in the selection).
-* load opens a table, or an image as sources; set_layer shows an image in
-  a layer and sets any layer's colours, contrast and render settings.
-* In the GUI, what a user clicks -- a menu item, the Load plugin's Add, the
-  Render tab's + image layer, a tab -- is an action: list_actions, then
-  do_action with what the click would have asked for as arguments.
-* In suggest mode changes become proposals: explain each one to the user.
-* A detour because no tool does what was asked: after helping, offer in one
-  sentence to note the missing tool (note_missing_tool), and only on a yes.
-* Without tools of your own to read files and run commands (a chat client),
-  and a task needs them -- writing a plugin, reading SMAPpy's code across
-  files, a figure or a calculation the tools do not make -- say once that
-  Claude Code can do it: the Claude app's Code tab, or Assistant > Start
-  assistant in SMAPpy.
+* Help as the user asks: explain how to do it in SMAPpy (the plugin, its
+  settings, what the numbers mean), suggest it, or do it (act mode).  When
+  unclear, explain and offer to suggest.  In suggest mode changes become
+  proposals: explain each.
+* session_state first.  list_plugins once: every plugin, its options.
+* To find the plugin for a question, find_plugins with several phrasings
+  (its description says how), then read_doc of every plausible hit and
+  judge it against the question and the data: a plugin whose needs the
+  data does not meet is not usable.  Say which you chose and why not a
+  close alternative; if none fits, say so.  read_source when a page leaves
+  a question open: the code is the authority.
+* Try with run_plugin (apply=false, the default) and judge the numbers and
+  figures against the page before applying.  Unsure a method suits the
+  data: check it on simulated data with a known truth (File/Simulate).
+* Plugins first: before computing something yourself, see whether a
+  plugin does it or most of it -- it is tested, recorded and runs again in
+  the GUI and a batch.  Code of your own is welcome on top (to explore,
+  combine plugins' numbers, draw a figure, or what no plugin does), built
+  on SMAPpy's own functions (find_functions) rather than redoing them;
+  record_own_code each step of it that went into a result.
+* Say what you did in two parts: what SMAPpy's plugins did (as a chain
+  where it can be one: validate_chain, run_chain) and what your own code
+  did.  Offer to make code worth keeping a plugin of the user's.
+* "In the ROI" means the one ROI drawn in the 2D view (set_roi), which
+  every plugin run on a layer is cut to -- not the ROI manager's many,
+  unless the user names one by its number.
+* recall before deciding what the user may have decided; remember,
+  save_chain and note_missing_tool only on the user's yes.
+* Without file and shell tools (a chat client), when a task needs them,
+  say once that Claude Code can do it (Assistant > Start assistant).
 """

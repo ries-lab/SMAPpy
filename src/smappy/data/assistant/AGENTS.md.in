@@ -32,3 +32,15 @@ found again whichever dataset is open.  The data is not here.
   `remember` it once the user agrees, and `recall` before deciding again.
   Standing instructions for this user's assistant go in CLAUDE.md here, when
   the user asks for them.
+
+## SMAPpy's plugins
+
+Every plugin and chain of this version, a line each: its path as
+`run_plugin` takes it, the name the GUI shows in brackets where it differs,
+what it does and, where it has several methods, its choice of them.  Match
+a question against this list first; then `find_plugins` with a few
+phrasings finds what the lines do not say (a mode named only in a page),
+and `read_doc` of each candidate decides.  Plugins added since the folder
+was prepared: `list_plugins`.
+
+@@CATALOG@@

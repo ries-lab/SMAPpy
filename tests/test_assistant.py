@@ -406,7 +406,7 @@ def test_a_word_the_query_negates_counts_for_nothing():
     assert index.search("drift correction without beads") == index.search("drift correction")
     assert index.search("drift correction, no fiducials or beads") == index.search(
         "drift correction")
-    assert index.wanted_words("clusters without noise in the nucleus") == ["cluster", "nucleu"]
+    assert index.wanted_words("clusters without noise in the nucleus") == ["clust", "nucleus"]
     top = [e["path"] for e in index.search("drift correction without beads", 4)]
     assert "Analysis/Drift/COMET" in top and "Analysis/Drift/RCC" in top
 
@@ -473,6 +473,38 @@ def test_the_instructions_put_the_plugins_first_and_name_tools_that_exist():
     for name in ("find_plugins", "find_functions", "record_own_code", "run_plugin",
                  "validate_chain"):
         assert name in INSTRUCTIONS and name in Assistant.specs()
+
+
+def test_the_instructions_fit_where_claude_code_cuts_them_with_the_guis_note():
+    """Claude Code keeps the first 4096 characters of a server's
+    instructions; the GUI's note and where the code is had been cut off."""
+    pytest.importorskip("PySide6")
+    from smappy.assistant.tools import INSTRUCTIONS_LIMIT, source_note
+    from smappy.gui.assistant_server import GUI_NOTE
+    # a Windows user's site-packages is longer than this checkout's path
+    margin = 120
+    assert len(INSTRUCTIONS + source_note() + GUI_NOTE) + margin <= INSTRUCTIONS_LIMIT
+
+
+def test_find_plugins_takes_several_phrasings_and_answers_with_the_sentences(tmp_path):
+    a = Assistant(output=tmp_path)
+    hits = a.call("find_plugins", {"queries": ["drift from selected origamis",
+                                               "undrift from picked"]})
+    top = hits[0]
+    assert top["path"] == "Analysis/Drift/Fiducials" and top["found_by"] == 2
+    assert top["matches"] and "settings" in top
+    assert a.call("find_plugins", {"query": "Ripley's K"})[0]["path"] == \
+        "Analysis/Measure/Spatial statistics"
+    with pytest.raises(ToolError, match="queries"):
+        a.call("find_plugins", {})
+
+
+def test_the_assistants_folder_holds_the_plugin_catalog(tmp_path):
+    from smappy.assistant import launch
+    launch.prepare_folder(tmp_path)
+    text = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "@@" not in text
+    assert "\nAnalysis/Drift/RCC [RCC drift correction]: " in text
 
 
 def test_a_missing_tool_is_noted_for_the_developers_and_goes_with_a_bug_report(tmp_path):
