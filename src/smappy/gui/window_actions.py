@@ -523,6 +523,9 @@ WINDOWS_WITHOUT_ACTIONS = {
     "DECODE training": "not yet: the training is `smappy-decode train FOLDER` without the window",
     "microscope manager": "not yet: its entries are the user's database",
     "camera editor": "not yet: its entries are the user's database",
+    "region results": "its numbers are the region tables, which run_plugin's values "
+                      "and the summaries (Analysis/Regions/Summarize) read; colour "
+                      "by one with set_layer's color_field",
 }
 
 #: The windows that have actions, by the name `open_window` gives them and the prefix of theirs.

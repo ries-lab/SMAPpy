@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QHeaderView, QLabel, QPus
                                QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout,
                                QWidget)
 
+from ..chain import BLOCK_ROIS as ROIS
 from ..session import Session
 from .widgets import CONTROL_WIDTH, CollapsibleSection
 
@@ -59,13 +60,18 @@ QPushButton:pressed { background: rgba(58, 143, 208, 0.55); }
 
 
 class ROIHeader(QWidget):
-    def __init__(self, session: Session, view=None, parent=None):
+    def __init__(self, session: Session, view=None, parent=None,
+                 colour_by=None):
+        """``colour_by(field)`` colours the Render tab's layer by a region
+        value: what the results window's header offers."""
         super().__init__(parent)
         from .help_window import attach_help
         attach_help(self, 'Panels/Regions tab', within=True)
         self.session = session
         self.view = view
         self.manager: Optional[QWidget] = None     # not `window`: that is a QWidget method
+        self.results_window: Optional[QWidget] = None
+        self.colour_by = colour_by
         self._loading = False
 
         # In the tab's own scroll, above the plugins (`PluginTab`): it had a
@@ -81,7 +87,18 @@ class ROIHeader(QWidget):
         # The tab's way in, so it should catch the eye -- but only a little:
         # bold on a light blue tint, which reads on light and dark windows alike.
         self.open_button.setStyleSheet(OPEN_STYLE)
-        layout.addWidget(self.open_button)
+        # every region's numbers in one table, beside the way to the ROIs
+        self.results_button = QPushButton("Results table...")
+        self.results_button.setToolTip(
+            "what was measured per region -- the ROIs, or the clusters or tracks "
+            "of an id column -- as one table: sort it, copy it, colour the "
+            "localizations by a column")
+        self.results_button.clicked.connect(lambda: self.open_results())
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.addWidget(self.open_button, 1)
+        buttons.addWidget(self.results_button)
+        layout.addLayout(buttons)
 
         # which file this acts on is chosen in the manager; here it is only named
         self.file_count = QLabel("")
@@ -179,8 +196,9 @@ class ROIHeader(QWidget):
         # flag every layer honours (`region_filter`)
         from .region_filter_panel import RegionFilterPanel
         self.region_filter = RegionFilterPanel(session)
-        layout.addWidget(CollapsibleSection("region filter", self.region_filter,
-                                            expanded=False, major=True))
+        self.region_filter_section = CollapsibleSection(
+            "region filter", self.region_filter, expanded=False, major=True)
+        layout.addWidget(self.region_filter_section)
 
         session.on_change(self._on_session)
         self.refresh(files_changed=True)
@@ -232,8 +250,34 @@ class ROIHeader(QWidget):
             self.manager.selected.connect(self._on_selected)
             # what *Apply* takes follows the list's selection
             self.manager.selection_changed.connect(self._show_result)
+            # its list's header offers the table of every ROI's numbers
+            self.manager.open_results = lambda: self.open_results(ROIS)
         self.manager.show()
         self.manager.raise_()
+
+    def open_results(self, source: Optional[str] = None) -> QWidget:
+        """The region results window, on ``source``'s regions (ROIS or an id
+        column) where given."""
+        from .region_results_window import RegionResultsWindow
+        if self.results_window is None:
+            self.results_window = RegionResultsWindow(
+                self.session, self.window(), colour_by=self.colour_by,
+                filter_on=self.filter_on, show_roi=self._show_roi,
+                center_on=None if self.view is None else self.view.center_on)
+        if source is not None:
+            self.results_window.show_source(source)
+        self.results_window.show()
+        self.results_window.raise_()
+        return self.results_window
+
+    def filter_on(self, source: str, label: str, value: str) -> None:
+        """The region filter unfolded on one value, ready for its bounds."""
+        self.region_filter_section.set_expanded(True)
+        self.region_filter._show_value((source, label, value))
+
+    def _show_roi(self, roi_id: str) -> None:
+        self.open_manager()
+        self.manager.select(roi_id)
 
     def _notify(self) -> None:
         if self.manager is not None and self.manager.isVisible():

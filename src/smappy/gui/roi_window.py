@@ -2398,6 +2398,10 @@ class ROIManagerWindow(QMainWindow):
         if self.project.annotation_lists:
             menu.addSeparator()
         menu.addAction("Order by number", self.unsort)
+        opener = getattr(self, "open_results", None)     # set by the Regions tab
+        if opener is not None:
+            menu.addSeparator()
+            menu.addAction("Results table...", opener)
         return menu
 
     def _keywords_of(self, roi_id) -> list:

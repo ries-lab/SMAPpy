@@ -693,7 +693,23 @@ class ControlWindow(QMainWindow):
                 "DECODE training": lambda roi_id=None: self.open_decode_training(),
                 "microscope manager": lambda roi_id=None: self.open_microscope_manager(),
                 "camera editor": lambda roi_id=None: self.open_camera_editor(),
-                "help": lambda roi_id=None: self.show_plugin_docs()}
+                "help": lambda roi_id=None: self.show_plugin_docs(),
+                "region results": lambda roi_id=None: self.open_region_results()}
+
+    def open_region_results(self, source: Optional[str] = None):
+        """The table of what was measured per region (`gui.region_results_window`)."""
+        if self.roi_tab is not None:
+            return self.roi_tab.open_results(source)
+        return None
+
+    def colour_by_region(self, field: str) -> None:
+        """The Render tab's layer coloured by a region value, and the tab in
+        front: the results window's *Colour localizations by this*."""
+        for index, page in enumerate(self._tab_pages):
+            if isinstance(page, RenderTab):
+                self.show_tab(index)
+                page.colour_by_region(field)
+                return
 
     def listen_if_asked(self) -> None:
         """*allow connections when SMAPpy starts*, from the settings."""
@@ -753,7 +769,8 @@ class ControlWindow(QMainWindow):
         Which is why ROImanager and Localize need no class of their own.
         """
         if name == "roi":
-            self.roi_tab = ROIHeader(self.session, self.render_window.view)
+            self.roi_tab = ROIHeader(self.session, self.render_window.view,
+                                     colour_by=self.colour_by_region)
             return self.roi_tab
         if name == "analysis":
             # the batch window, where an analysis is looked for: under Plugins

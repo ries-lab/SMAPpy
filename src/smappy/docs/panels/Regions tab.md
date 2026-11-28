@@ -2,7 +2,7 @@
 title: Regions tab
 summary: The shape every analysis ROI shares, and the way into the ROI manager and the steps that measure every ROI.
 widget: smappy.gui.roi_tab.ROIHeader
-covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.ROIProject.evaluations, smappy.regions.inside_polygon, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.pipeline.default_block, smappy.gui.region_filter_panel.RegionFilterPanel]
+covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.ROIProject.evaluations, smappy.regions.inside_polygon, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.pipeline.default_block, smappy.gui.region_filter_panel.RegionFilterPanel, smappy.gui.region_results_window.RegionResultsWindow]
 ---
 
 ## What it does
@@ -232,6 +232,13 @@ The window where ROIs are found, drawn, moved, included or excluded, and
 where each ROI is shown with what the per-region steps measured in it (also
 Ctrl+R).  Under the button, the file chosen there and
 how many of its ROIs there are and are used.
+
+### Results table...
+Opens the [Region results](plugin:Panels/Region results) window: what was
+measured in every region -- the ROIs, or the clusters, tracks or traces of
+an id attribute -- as one table, a row per region and a column per value.
+Sort it, copy it to a spreadsheet, or colour the localizations by a column
+from its header's right click.  The ROI manager's list header offers it too.
 
 ### per-region steps
 Folded when the tab opens; unfold it to choose and run the steps.  At the
