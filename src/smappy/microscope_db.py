@@ -1013,6 +1013,43 @@ def keep_pupil(summary: Dict[str, Any], pupil: Dict[str, Any], path=None) -> tup
     return key, save_microscope(entry, path)
 
 
+def with_pixel(entry: Microscope, states: Dict[str, Any], pixel_nm) -> Tuple[Microscope, str]:
+    """``entry`` with its ``pixel_nm`` set to a measured ``pixel_nm`` (x, y) for the state its
+    devices were in (``states``, {device: state}), and what was set, in words.
+
+    The pixel is a value per state of the device it follows (M2's: the 3D lens, which magnifies x
+    and y differently), so only that state's value is replaced: the other states keep theirs.  A
+    pixel that follows no device follows the 3D lens from now on when the entry has one and its
+    state is known -- the old value kept for the lens's other states -- else it is one value for
+    all.  Rounded to 0.1 nm: a stage calibration is not better than that."""
+    x, y = (round(float(v), 1) for v in pixel_nm)
+    value: Any = x if x == y else [x, y]
+    entry = copy.deepcopy(entry)
+    raw = entry.parameters.get("pixel_nm")
+    follows = isinstance(raw, dict) and "device" in raw
+    device = str(raw["device"]) if follows else entry.lens_device()
+    state = states.get(device) if device else None
+    if device and state is not None:
+        if follows and isinstance(raw.get("values"), dict):
+            values = dict(raw["values"])
+        else:
+            # a fixed pixel becomes the lens's other states' value, which nobody measured anew
+            known = entry.devices[device].states if device in entry.devices else {}
+            values = {name: copy.deepcopy(raw) for name in known} if raw is not None else {}
+        values[str(state)] = value
+        entry.parameters["pixel_nm"] = {"device": device, "values": values}
+        return entry, f"{entry.name}'s pixel with {device} {state}: {pixel_text(value)} nm"
+    entry.parameters["pixel_nm"] = value
+    return entry, f"{entry.name}'s pixel: {pixel_text(value)} nm"
+
+
+def pixel_text(value: Any) -> str:
+    """A pixel as the manager writes it: ``127`` or ``127 x 116``."""
+    if isinstance(value, (list, tuple)):
+        return " x ".join(f"{float(v):g}" for v in value)
+    return f"{float(value):g}"
+
+
 def revision() -> int:
     return _revision
 

@@ -26,7 +26,8 @@ fiducials, diffusing particles.  A single structure is a scene of one.
 Single-particle tracks are a model of their own (`tracks`): Brownian
 particles with diffusive states and blinking, the truth in ``track_id_true``.
 Fiducial beads too (`beads`): bright, still but for the drift, with gaps and
-late arrivals, the truth in ``bead_true``.  A 4Pi fit of a long movie, its
+late arrivals, the truth in ``bead_true``; and a slide of beads the stage moves
+between frames, for the pixel size (`stage_scan`).  A 4Pi fit of a long movie, its
 sample drifting and its cavity wandering, as a table before *4Pi z*
 (`fourpi_drift`).
 
@@ -50,11 +51,12 @@ from .settings import (BlinkingSettings, CameraOutputSettings, ComponentSettings
                        LabellingSettings, LocalizationOutputSettings, MotionSettings,
                        OpticsSettings, PlacementSettings, SceneSettings,
                        SimulationSettings, StructureSettings)
+from .stage_scan import StageScan, simulate_stage_scan
 from .structure import Labels, Structure, load_structure, presets
 from .tracks import TrackSimulationSettings, jump_nm, simulate_tracks, spacing_nm
 
 __all__ = [
-    "simulate_attempts",
+    "simulate_attempts", "StageScan", "simulate_stage_scan",
     "ASTIGMATISM", "ISOLATED_NM", "astigmatic_sigmas", "bead_stacks", "camera_frames",
     "camera_truth", "dual_bead_stacks", "dual_camera_frames", "dual_transformation",
     "render", "scmos_maps", "scmos_frames", "dark_frames", "blink", "emission", "expected_blinks", "label", "off_time_for",

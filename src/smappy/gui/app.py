@@ -508,6 +508,9 @@ class ControlWindow(QMainWindow):
         # what a file opener's found microscope offers (`gui.microscope_view`)
         session.window_openers["microscope manager"] = \
             lambda settings=None: self.open_microscope_manager()
+        # *Pixel size calibration*'s notice after a run: the manager showing the entry with the
+        # pixel measured, for the state the beads were taken in, to be saved by hand
+        session.window_openers["pixel size entry"] = self.show_measured_pixel
         # a written simulation offers this (`Simulate.describe`), with the
         # file's path: into a fitter as a dropped stack goes
         session.window_openers["fit file"] = self.fit_file
@@ -824,6 +827,21 @@ class ControlWindow(QMainWindow):
             self._microscope_manager.saved.connect(lambda name: self._camera_saved(name))
         self._microscope_manager.show()
         self._microscope_manager.raise_()
+
+    def show_measured_pixel(self, settings=None) -> None:
+        """The microscope manager on the entry *Pixel size calibration* measured a pixel for
+        (`plugins.pixel_size.last_entry`), with the pixel in its parameters for the state the
+        beads were taken in -- shown, not saved: the manager's Save keeps it, as for any edit."""
+        from ..plugins.pixel_size import last_entry
+        self.open_microscope_manager()
+        manager = self._microscope_manager
+        try:
+            entry, words = last_entry(settings)
+        except ValueError as error:
+            manager.message.setText(str(error))
+            return
+        manager.show_entry(entry)
+        manager.message.setText(f"measured: {words} -- Save keeps it")
 
     def open_camera_editor(self, settings=None) -> None:
         """The camera editor, on the file a fitter is set to.
