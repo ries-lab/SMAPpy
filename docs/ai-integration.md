@@ -328,7 +328,8 @@ Headless, the default is *act*: there is nobody to propose to.
 ### Guided suggestions (planned)
 
 Decided in 2026-11, not built; it builds on the assistant's read and write
-access to the open GUI, which is being built first.  A proposal today is one
+access to the open GUI (`read_gui`, `set_gui`, and `focus_gui`, which
+outlines the fields a step explains).  A proposal today is one
 change, accepted or not.  A larger task -- "analyse this DNA-PAINT
 measurement" -- is several plugins and GUI actions in a row, each with
 settings, and is better learnt by doing it in the GUI than by accepting a
@@ -557,17 +558,13 @@ the repository.
    get wrong goes into the pages or a short note of lab knowledge.
 4. **Solutions in the knowledge base**: a problem, how it was solved and
    the chain that solves it, found again by `recall`.
-5. **Guided steps**: a suggest mode that proposes a list of steps and walks
-   the user through them one at a time -- `focus_gui` on where each is set,
-   `read_gui` to see that it was, the proposal's run as the step done.
-   The reading, setting and pointing are built (`gui/gui_read.py`); the
-   list and its pane are not.
-6. **Typing in SMAPpy's pane**: Claude Code's *channels* can push a message
+5. **Typing in SMAPpy's pane**: Claude Code's *channels* can push a message
    from an MCP server into a running session (a research preview); the other
    route is running the user's own agent CLI per message.  Later.
-6. **Read and write the open GUI**: every panel, window and control as it
-   stands, read in any mode, set where only a form changes (being built,
-   2026-11).
+6. **Read and write the open GUI** (built, 2026-11): every panel, window and
+   control as it stands, read in any mode, set where only a form changes,
+   a field pointed at -- `read_gui`, `set_gui`, `focus_gui`
+   (`gui/gui_read.py`, "what the windows show" under "The tools").
 7. **Guided suggestions**: the assistant's plan as a guided chain the GUI
    runs step by step ("Guided suggestions (planned)" above), after 6.
 
