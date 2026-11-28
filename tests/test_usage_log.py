@@ -268,3 +268,4 @@ def test_the_preferences_page_keeps_what_is_typed(home):
     page.link.editingFinished.emit()
     assert usage_log.settings()["link"] == "https://c.org/s/T"
     assert UsageLogPage().link.text() == "https://c.org/s/T"
+

@@ -147,3 +147,18 @@ def test_old_logs_of_other_instances_are_cleaned_up(tmp_path, monkeypatch):
     diagnostics.start("test")
     diagnostics.stop()
     assert not old.exists() and recent.exists()
+
+
+def test_tifffiles_complaints_about_micromanager_metadata_never_reach_the_log(caplog):
+    import logging
+    import smappy  # noqa: F401 -- installs the filter
+    log = logging.getLogger("tifffile")
+    with caplog.at_level(logging.WARNING, logger="tifffile"):
+        log.error("<TiffTag.fromfile> raised TiffFileError('<tifffile.TiffTag 50839 @463515> "
+                  "invalid value offset 0')")
+        log.warning("<tifffile.read_micromanager_metadata> failed to read display settings, "
+                    "raised ValueError('invalid display_header=0')")
+        log.warning("<tifffile.TiffTag 270 @463402> coercing invalid ASCII to bytes, due to x")
+        log.warning("<tifffile.TiffFile 'a.ome.tif'> MMStack series is missing files")
+    assert [r.getMessage() for r in caplog.records] == [
+        "<tifffile.TiffFile 'a.ome.tif'> MMStack series is missing files"]

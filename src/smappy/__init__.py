@@ -73,6 +73,41 @@ _EXPORTS = {
 }
 
 
+# ---- tifffile's complaints about Micro-Manager's metadata, kept out of the log
+# Micro-Manager writes OME-TIFFs whose private tags tifffile cannot parse
+# (tag 50839 with a value offset of 0, a display header of 0, ASCII tags in
+# UTF-16), and tifffile logs an error for each one, on every page it reads, in
+# every thread.  The images read correctly.  With no handler of its own, the
+# ``tifffile`` logger printed these lines to the console, which `diagnostics`
+# copies into ``smappy.log``.  In the first usage logs (2026-11) they were
+# more than 600 lines across two bundles, most of each log, burying the errors
+# that mattered.  So they are dropped at the logger, in every process that
+# imports smappy, and only these: anything else tifffile says -- a series
+# missing files, a page it cannot read -- still reaches the log.
+#
+# Here, standard library only, because every process that imports smappy
+# needs it and `import smappy` loads no other module (`test_assistant`).
+import logging as _logging
+import re as _re
+
+#: what tifffile says about metadata it could not parse while the image itself reads fine
+TIFF_NOISE = _re.compile(r"<TiffTag\.fromfile> raised"
+                         r"|coercing invalid ASCII to bytes"
+                         r"|<tifffile\.read_micromanager_metadata> failed to read display settings")
+
+
+class _TiffMetadataNoise(_logging.Filter):
+    def filter(self, record):
+        try:
+            return TIFF_NOISE.search(record.getMessage()) is None
+        except Exception:  # noqa: BLE001 -- a record that cannot be formatted is not ours to drop
+            return True
+
+
+if not any(isinstance(f, _TiffMetadataNoise) for f in _logging.getLogger("tifffile").filters):
+    _logging.getLogger("tifffile").addFilter(_TiffMetadataNoise())
+
+
 def _installed_version() -> str:
     """The installed version, ``smappy-smlm``'s.  Here, not in `pipeline` as it was, so that asking
     for it loads nothing: a training machine with SMAPpy's sources and no fitter asks too
