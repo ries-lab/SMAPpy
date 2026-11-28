@@ -25,9 +25,9 @@ the one that finds ROIs -- [Segment regions](plugin:Analysis/Regions/Segment reg
 template (a ring for nuclear pores, a disc for pits and other compact
 structures), beads, an id [attribute](plugin:Panels/Glossary) (one value
 every localization carries), positions from a file, or like a few ROIs
-put on good examples -- and
-[Export table](plugin:Analysis/Regions/Summarize/Export table), which writes
-what was measured in every ROI to a file.  The summaries, such as
+put on good examples.  What was measured in every ROI is a table in
+the *Results table...* window ([Region results](plugin:Panels/Region results)),
+which also saves it to a file.  The summaries, such as
 [Histogram](plugin:Analysis/Measure/Histogram) with *source* on region results, and
 [NPC Analysis](plugin:Analysis/Regions/Workflow/NPC Analysis), which finds
 the pores, measures them and fits their

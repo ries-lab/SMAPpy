@@ -207,3 +207,40 @@ def test_with_the_ids_table_hide_no_value_leaves_out_no_id_and_stays_offered(qap
     tab.lut.setCurrentText(IDS_LUT)
     tab._grey_for_ids()
     assert tab.hide_missing.isEnabled() and not tab.color_lo.isEnabled()
+
+
+def test_the_results_window_exports_the_ticked_columns_exactly_with_each_rois_place(qapp, tmp_path):
+    from smappy.gui.region_results_window import POSITION, RegionResultsWindow
+    session, project, (a, b, c), xy = overlapping_rois()
+    window = RegionResultsWindow(session)
+    window.show_source("rois")
+    model = window.model
+    # each ROI's own place, file and comment first
+    assert model.columns[:4] == [(POSITION, v) for v in ("x_nm", "y_nm", "file", "comment")]
+    assert sorted(row[0] for row in model.values) == [2850.0, 3150.0, 9000.0]
+    # used ROIs only, by default
+    project.rois[c].use = False
+    window._fill()
+    assert len(model.regions) == 2
+    window.used.setChecked(False)
+    assert len(model.regions) == 3
+    # select: the headers tick, a click unticks, none and all
+    assert not window.select_row.isVisibleTo(window)
+    window.select.setChecked(True)
+    assert window.select_row.isVisibleTo(window) and model.selecting
+    diameter = 1 + model.columns.index(("Made up", "diameter_nm"))
+    window._on_header_click(diameter)
+    header, rows = window.rows_as_text()
+    assert "diameter_nm / Made up" not in header and "corners / Made up" in header
+    window.pick_all(False)
+    window._on_header_click(diameter)
+    header, rows = window.rows_as_text()
+    assert header == ["ROI", "diameter_nm / Made up"]
+    # exact, not the four digits the cells show
+    project.tables["Made up"].set(a, {"values": {"corners": 8, "diameter_nm": 50.123456}})
+    window._fill()
+    window.save_csv(tmp_path / "t.csv")
+    assert "50.123456" in (tmp_path / "t.csv").read_text()
+    window.select.setChecked(False)
+    assert not model.selecting and window.table.isSortingEnabled()
+    window.close()

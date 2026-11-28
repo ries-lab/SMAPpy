@@ -525,7 +525,8 @@ WINDOWS_WITHOUT_ACTIONS = {
     "camera editor": "not yet: its entries are the user's database",
     "region results": "its numbers are the region tables, which run_plugin's values "
                       "and the summaries (Analysis/Regions/Summarize) read; colour "
-                      "by one with set_layer's color_field",
+                      "by one with set_layer's color_field; written to a file by "
+                      "Analysis/Regions/Summarize/Export table",
 }
 
 #: The windows that have actions, by the name `open_window` gives them and the prefix of theirs.

@@ -23,6 +23,13 @@ mean position) and gets nothing added.
 Rows come in the ROIs' order -- as *Sort regions* left it -- and only the
 included ROIs (*use* ticked) whose results still describe them, as
 everywhere a result is read.
+
+**For chains and batches.**  In the GUI the table is saved from the
+*Region results* window (`gui/region_results_window.py`), which shows it,
+writes the columns ticked under *select* and adds the same ROI position;
+a pinned plugin beside it was a second way to one file, so this one is
+`chain_only`: out of the menus, offered as a chain's step and to the
+assistant.
 """
 from __future__ import annotations
 
@@ -115,6 +122,7 @@ class ExportTable(SiteAnalysisPlugin):
 
     Settings = ExportTableSettings
     changes_locs = False
+    chain_only = True      # the GUI's is the Region results window's Save
     logged = True          # where a file went is not visible in the file
     version = "1"
     auto_label = "all on the ROIs"

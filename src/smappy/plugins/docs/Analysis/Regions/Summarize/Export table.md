@@ -19,6 +19,12 @@ columns of it too.  Tick the columns to write in *columns*.
 With *ROI position*, each ROI's row also has its centre, its file and its
 comment: what is needed to find an ROI again from a row of the spreadsheet.
 
+It is a step for [chains and batches](plugin:Panels/Batch window), where
+there is no window to save from; it is not in the Plugins menu.  In the
+GUI, the *Results table...* button of the Regions tab opens the
+[Region results](plugin:Panels/Region results) window, which shows the same
+table and saves it, the columns ticked under its *select*.
+
 ## How it works
 
 **1. The rows.**  The included ROIs (*use* ticked) whose results still

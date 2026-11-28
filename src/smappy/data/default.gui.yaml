@@ -53,4 +53,3 @@ tabs:
   - plugin: Analysis/Regions/Sort ROIs
   - plugin: Analysis/Measure/Region statistics
     line_above: true
-  - plugin: Analysis/Regions/Summarize/Export table

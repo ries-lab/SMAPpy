@@ -57,6 +57,14 @@ QPushButton { font-weight: bold; border-radius: 5px; padding: 5px 8px;
 QPushButton:hover { background: rgba(58, 143, 208, 0.40); }
 QPushButton:pressed { background: rgba(58, 143, 208, 0.55); }
 """
+#: *Results table...*: as large and as bold as *Open ROI manager*, with its
+#: border but no tint, so that the way to the ROIs still leads
+RESULTS_STYLE = """
+QPushButton { font-weight: bold; border-radius: 5px; padding: 5px 8px;
+              border: 1px solid rgba(58, 143, 208, 0.75); background: transparent; }
+QPushButton:hover { background: rgba(58, 143, 208, 0.12); }
+QPushButton:pressed { background: rgba(58, 143, 208, 0.25); }
+"""
 
 
 class ROIHeader(QWidget):
@@ -91,13 +99,14 @@ class ROIHeader(QWidget):
         self.results_button = QPushButton("Results table...")
         self.results_button.setToolTip(
             "what was measured per region -- the ROIs, or the clusters or tracks "
-            "of an id column -- as one table: sort it, copy it, colour the "
-            "localizations by a column")
+            "of an id column -- as one table: sort it, colour the localizations "
+            "by a column, copy it or save it as a CSV (Export table)")
         self.results_button.clicked.connect(lambda: self.open_results())
+        self.results_button.setStyleSheet(RESULTS_STYLE)
         buttons = QHBoxLayout()
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.addWidget(self.open_button, 1)
-        buttons.addWidget(self.results_button)
+        buttons.addWidget(self.results_button, 1)
         layout.addLayout(buttons)
 
         # which file this acts on is chosen in the manager; here it is only named

@@ -13,6 +13,17 @@ manager, a region of an id column centred in the view.  The table is the
 region tables as they stand (`region_filter.region_values`, what the filter
 and the colours read), rebuilt when they change; a value whose result is out
 of date is drawn in the warning colour.
+
+It is also the GUI's export of the table, which *Export table* was (that
+plugin stays for chains and batches, `chain_only`): *Save...* and *Copy*
+write the columns ticked under *select* -- a tick in each header, with
+*all* and *none*, shown only while choosing, so that a table of thirty
+values is narrowed in a few clicks and the choice is out of the way
+otherwise -- in the table's order, the numbers exact (the cells show four
+digits), a stale value left empty.  For the ROIs it adds each ROI's centre,
+file and comment (`POSITION`), what is needed to find an ROI again from a
+row of a spreadsheet, and *used ROIs only* (on) keeps the ROIs whose *use*
+is ticked, the ones every summary reads.
 """
 from __future__ import annotations
 
@@ -23,9 +34,10 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
-from PySide6.QtGui import QColor, QGuiApplication
-from PySide6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
-                               QMenu, QPushButton, QTableView, QVBoxLayout, QWidget)
+from PySide6.QtGui import QColor, QGuiApplication, QPalette
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QHBoxLayout,
+                               QHeaderView, QLabel, QMenu, QPushButton, QTableView,
+                               QVBoxLayout, QWidget)
 
 from ..chain import BLOCK_ROIS as ROIS
 from .widgets import note_style
@@ -34,21 +46,28 @@ from .widgets import note_style
 SORT_ROLE = Qt.UserRole + 1
 #: a value whose result is out of date (`CLAUDE.md`: reads on light and dark)
 STALE = "#c06000"
+#: the label of the columns an ROI has of its own, not measured: its place,
+#: its file and its comment (*Export table*'s *ROI position*)
+POSITION = "ROI"
+POSITION_VALUES = ("x_nm", "y_nm", "file", "comment")
 
 
 # ---------------------------------------------------------- the numbers, Qt-free
 
-def results_table(session, source: str):
+def results_table(session, source: str, used_only: bool = False):
     """``(regions, names, columns, values, stale)`` of one source: each
     region's id and its name in the first column, the ``(label, value)`` of
     every column, the values as rows (None where not measured), and the
-    ``(row, column)`` cells whose result is out of date."""
+    ``(row, column)`` cells whose result is out of date.  For the ROIs the
+    first columns are their own (`POSITION`), and ``used_only`` keeps the
+    ROIs with *use* ticked."""
     from ..region_filter import ANNOTATIONS, region_values, sources
     from ..region_results import Evaluation, is_current
     labels = sources(session).get(source) or {}
     if source == ROIS:
         project = session.rois
-        regions = list(project.ordered_ids())
+        regions = [r for r in project.ordered_ids()
+                   if not used_only or project.rois[r].use]
         numbers = project.numbers()
         names = [str(numbers.get(r, "")) for r in regions]
     else:
@@ -84,7 +103,28 @@ def results_table(session, source: str):
                 values[i].append(v)
                 if v is not None and i in old_rows:
                     stale.add((i, k))
+    if source == ROIS:
+        own = [_own_values(session.rois, r) for r in regions]
+        columns = [(POSITION, v) for v in POSITION_VALUES] + columns
+        values = [o + row for o, row in zip(own, values)]
+        stale = {(i, k + len(POSITION_VALUES)) for i, k in stale}
     return regions, names, columns, values, stale
+
+
+def _own_values(project, roi_id) -> list:
+    """An ROI's centre, its file's name and its comment (`POSITION_VALUES`)."""
+    roi = project.rois[roi_id]
+    source = project.sources.get(roi.file_id)
+    return [float(roi.center[0]), float(roi.center[1]),
+            source.name if source is not None else "", roi.comment or ""]
+
+
+def exact_text(value) -> str:
+    """A value as a file takes it: a number to every digit it has (the
+    table shows four), NaN empty."""
+    if isinstance(value, (float, np.floating)):
+        return "" if math.isnan(value) else repr(float(value))
+    return as_text(value)
 
 
 def _id_key(region):
@@ -134,13 +174,30 @@ class ResultsModel(QAbstractTableModel):
         self.values: list = []
         self.stale: set = set()
         self._stale_brush = QColor(STALE)
+        # *select*: a tick in each header; the columns left out, by
+        # (label, value), so that a column a later step adds is in
+        self.selecting = False
+        self.left_out: set = set()
 
-    def fill(self, session, source: str) -> None:
+    def fill(self, session, source: str, used_only: bool = False) -> None:
         self.beginResetModel()
         self.source = source
         (self.regions, self.names, self.columns, self.values,
-         self.stale) = results_table(session, source)
+         self.stale) = results_table(session, source, used_only)
         self.endResetModel()
+
+    def picked(self, column: int) -> bool:
+        return column == 0 or self.columns[column - 1] not in self.left_out
+
+    def pick(self, columns, on: bool) -> None:
+        for c in columns:
+            if c > 0:
+                key = self.columns[c - 1]
+                (self.left_out.discard if on else self.left_out.add)(key)
+        if self.columns:
+            self.headerDataChanged.emit(Qt.Horizontal, 0, len(self.columns))
+            self.dataChanged.emit(self.index(0, 0),
+                                  self.index(max(0, len(self.regions) - 1), len(self.columns)))
 
     def header_text(self, column: int) -> str:
         if column == 0:
@@ -158,7 +215,16 @@ class ResultsModel(QAbstractTableModel):
         if orientation != Qt.Horizontal:
             return None
         if role == Qt.DisplayRole:
-            return self.header_text(section)
+            text = self.header_text(section)
+            if self.selecting and section > 0:
+                text = ("\u2611 " if self.picked(section) else "\u2610 ") + text
+            return text
+        if role == Qt.ForegroundRole and self.selecting and not self.picked(section):
+            return _left_out_brush()
+        if role == Qt.ToolTipRole and self.selecting and section > 0:
+            return "click: tick or untick this column for Copy and Save"
+        if role == Qt.ToolTipRole and section > 0 and self.columns[section - 1][0] == POSITION:
+            return "the ROI's own, not measured"
         if role == Qt.ToolTipRole and section > 0:
             label, value = self.columns[section - 1]
             return (f"{value}, measured by {label}.  Right-click: colour the "
@@ -180,11 +246,19 @@ class ResultsModel(QAbstractTableModel):
             return as_text(value)
         if role == SORT_ROLE:
             return _sort_key(value)
+        if role == Qt.ForegroundRole and self.selecting and not self.picked(column):
+            return _left_out_brush()
         if role == Qt.ForegroundRole and (row, column - 1) in self.stale:
             return self._stale_brush
         if role == Qt.ToolTipRole and (row, column - 1) in self.stale:
             return "out of date: measured before the region or the step changed"
         return None
+
+
+def _left_out_brush() -> QColor:
+    """A column left out while choosing: the palette's disabled text, which
+    reads on light and dark windows."""
+    return QGuiApplication.palette().color(QPalette.Disabled, QPalette.Text)
 
 
 class _Proxy(QSortFilterProxyModel):
@@ -232,13 +306,36 @@ class RegionResultsWindow(QWidget):
         self.copy.setToolTip("the table to the clipboard, tab-separated, for a "
                              "spreadsheet")
         self.save = QPushButton("Save...")
-        self.save.setToolTip("the table as a CSV file")
+        self.save.setToolTip("the table as a CSV file, the numbers exact -- for "
+                             "statistics and figures made elsewhere")
+        self.used = QCheckBox("used ROIs only")
+        self.used.setChecked(True)
+        self.used.setToolTip("the ROIs whose use is ticked, which every summary "
+                             "reads; off: every ROI")
+        self.select = QPushButton("select")
+        self.select.setCheckable(True)
+        self.select.setToolTip("choose the columns Copy and Save write: a tick in "
+                               "each header, click to tick or untick")
         top = QHBoxLayout()
         top.addWidget(QLabel("regions"))
         top.addWidget(self.source, 1)
         top.addWidget(self.count)
+        top.addWidget(self.used)
+        top.addWidget(self.select)
         top.addWidget(self.copy)
         top.addWidget(self.save)
+        # shown while choosing, gone otherwise
+        self.select_row = QWidget()
+        pick = QHBoxLayout(self.select_row)
+        pick.setContentsMargins(0, 0, 0, 0)
+        for text, on in (("all", True), ("none", False)):
+            button = QPushButton(text)
+            button.clicked.connect(lambda _=False, on=on: self.pick_all(on))
+            pick.addWidget(button)
+        self.select_note = QLabel("")
+        self.select_note.setStyleSheet(note_style())
+        pick.addWidget(self.select_note, 1)
+        self.select_row.hide()
 
         self.model = ResultsModel()
         self.proxy = _Proxy(self)
@@ -256,11 +353,15 @@ class RegionResultsWindow(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addLayout(top)
+        layout.addWidget(self.select_row)
         layout.addWidget(self.table, 1)
         self.resize(720, 480)
 
         self.source.currentIndexChanged.connect(self._on_source)
-        self.copy.clicked.connect(self.copy_table)
+        self.used.toggled.connect(lambda _: self._fill())
+        self.select.toggled.connect(self.set_selecting)
+        self.table.horizontalHeader().sectionClicked.connect(self._on_header_click)
+        self.copy.clicked.connect(lambda: self.copy_table())
         self.save.clicked.connect(self._save)
         session.on_change(self._on_session)
         self.destroyed.connect(lambda *_: session.off_change(self._on_session))
@@ -300,9 +401,11 @@ class RegionResultsWindow(QWidget):
             self.model.endResetModel()
             self.count.setText("nothing measured per region yet")
         else:
-            self.model.fill(self.session, source)
+            self.model.fill(self.session, source, used_only=self.used.isChecked())
             n = len(self.model.regions)
             self.count.setText(f"{n} region{'s' if n != 1 else ''}")
+        self.used.setVisible(source == ROIS)
+        self._say_picked()
         self.table.resizeColumnsToContents()
         if 0 <= order[0] < self.model.columnCount():
             self.table.sortByColumn(*order)
@@ -347,6 +450,9 @@ class RegionResultsWindow(QWidget):
             return None
         label, value = self.model.columns[column - 1]
         menu = QMenu(self)
+        if label == POSITION:              # the ROI's own: nothing to colour by
+            menu.addAction("Copy this column", lambda: self.copy_table([column]))
+            return menu
         if self.colour_by is not None:
             act = menu.addAction("Colour localizations by this",
                                  lambda: self.colour_by(self.field_of(column)))
@@ -356,6 +462,43 @@ class RegionResultsWindow(QWidget):
                            lambda: self.filter_on(self.model.source, label, value))
         menu.addAction("Copy this column", lambda: self.copy_table([column]))
         return menu
+
+    # ------------------------------------------------------------- select
+    def set_selecting(self, on: bool) -> None:
+        """*select*: the headers show ticks and a click ticks or unticks a
+        column instead of sorting by it; *all* and *none* appear."""
+        on = bool(on)
+        if self.select.isChecked() != on:
+            self.select.setChecked(on)          # comes back here
+            return
+        self.model.selecting = on
+        self.select_row.setVisible(on)
+        # a click on a header ticks while choosing; sorting resumes after
+        self.table.setSortingEnabled(not on)
+        self.model.headerDataChanged.emit(Qt.Horizontal, 0, self.model.columnCount() - 1)
+        self.table.viewport().update()
+        self.table.resizeColumnsToContents()
+        self._say_picked()
+
+    def _on_header_click(self, column: int) -> None:
+        if self.model.selecting and column > 0:
+            self.model.pick([column], not self.model.picked(column))
+            self._say_picked()
+
+    def pick_all(self, on: bool) -> None:
+        self.model.pick(range(1, self.model.columnCount()), on)
+        self._say_picked()
+
+    def chosen_columns(self) -> List[int]:
+        """The columns Copy and Save write: the region's, and those ticked."""
+        return [c for c in range(self.model.columnCount()) if self.model.picked(c)]
+
+    def _say_picked(self) -> None:
+        n, of = len(self.chosen_columns()) - 1, self.model.columnCount() - 1
+        self.select_note.setText(f"{max(n, 0)} of {max(of, 0)} columns to copy and save")
+        tip = "" if n == of else f" -- {max(n, 0)} of {of} columns, as ticked under select"
+        self.copy.setToolTip("the table to the clipboard, tab-separated, for a "
+                             "spreadsheet" + tip)
 
     # ---------------------------------------------------------------- rows
     def _on_row(self, index) -> None:
@@ -383,15 +526,20 @@ class RegionResultsWindow(QWidget):
 
     # ---------------------------------------------------------- the table out
     def rows_as_text(self, columns: Optional[Sequence[int]] = None):
-        """``(header, rows)`` as shown: in the table's order, as text."""
-        columns = list(range(self.model.columnCount())) if columns is None \
+        """``(header, rows)`` to write: the ticked columns (`chosen_columns`)
+        or ``columns``, in the table's order, the numbers exact and a stale
+        value empty -- a file cannot show it orange, and a number that no
+        longer describes its region should not be read as one that does."""
+        columns = self.chosen_columns() if columns is None \
             else [0] + [c for c in columns if c != 0]
         header = [self.model.header_text(c).replace("\n", " / ") for c in columns]
         rows = []
         for r in range(self.proxy.rowCount()):
             source_row = self.proxy.mapToSource(self.proxy.index(r, 0)).row()
             rows.append([self.model.names[source_row] if c == 0 else
-                         as_text(self.model.values[source_row][c - 1]) for c in columns])
+                         "" if (source_row, c - 1) in self.model.stale else
+                         exact_text(self.model.values[source_row][c - 1])
+                         for c in columns])
         return header, rows
 
     def copy_table(self, columns: Optional[Sequence[int]] = None) -> None:
