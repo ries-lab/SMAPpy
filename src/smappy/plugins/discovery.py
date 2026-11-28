@@ -46,6 +46,15 @@ class Diagnostic:
         return f"{self.origin}: {self.message}"
 
 
+def summary(doc: str) -> str:
+    """A class docstring's first paragraph, on one line: the plugin's summary.
+
+    Its first *line* had been taken, and a docstring wraps -- "Whether the
+    localizations are clustered, and at what scale: the pair" was the whole
+    summary the menus, the pages and the assistant's catalog showed."""
+    return " ".join(doc.strip().split("\n\n", 1)[0].split())
+
+
 @dataclass(frozen=True)
 class PluginRef:
     """What the scanner knows about a plugin before anything is imported."""
@@ -278,11 +287,10 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
     def make(path: str, cls: _Class, default_name: str) -> PluginRef:
         attrs = cls.attrs
         leaf = path.rsplit("/", 1)[-1]
-        doc = cls.doc.strip().splitlines()
         return PluginRef(
             path=path,
             name=str(attrs.get("name") or leaf or default_name),
-            description=str(attrs.get("description") or (doc[0] if doc else "")),
+            description=str(attrs.get("description") or summary(cls.doc)),
             origin=origin, root=root,
             attr=cls.name,
             per_region=attrs.get("per_region") is True,
